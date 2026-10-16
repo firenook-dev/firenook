@@ -7,7 +7,7 @@
 // it again through the console and opens the new entry, asking first when it
 // is not idempotent.
 
-import { Button, Popover, Text } from '@cloudflare/kumo'
+import { Button, Text } from '@cloudflare/kumo'
 import {
   ArrowClockwiseIcon,
   FileTextIcon,
@@ -21,6 +21,7 @@ import type { AuthActivityDetail } from '@/api/generated/auth/AuthActivityDetail
 import type { AuthActivitySummary } from '@/api/generated/auth/AuthActivitySummary'
 import type { AuthStep } from '@/api/generated/auth/AuthStep'
 import { statusQuery } from '@/api/queries'
+import { ConfirmPopover } from '@/components/console/confirm-popover'
 import { EntityLink } from '@/components/console/entity-link'
 import {
   Inspector,
@@ -52,7 +53,7 @@ import {
 } from '../activity'
 import { AuthEmulatorError, callAuthEmulator } from '../api'
 import { clientLabel } from '../clients'
-import { copyWithToast } from '../clipboard'
+import { copyToClipboard } from '@/lib/copy'
 import { explainAuthError } from '../errors'
 import { messageRef, userRef } from '../links'
 import { callLabel } from '../operations'
@@ -557,7 +558,8 @@ function DetailFooter({
             labels={labels}
             disabled={!detail || !base || bodiesRetained === false}
             onClick={() => {
-              if (detail && base) void copyWithToast(curlCommand(detail, base), 'the call as curl')
+              if (detail && base)
+                void copyToClipboard(curlCommand(detail, base), { what: 'the call as curl' })
             }}
             testId="call-curl"
           />
@@ -660,8 +662,10 @@ function ReplayButton({
     setAsking(false)
     replay.mutate(detail)
   }
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
   const button = (
     <Button
+      ref={setAnchor}
       variant="secondary"
       size="sm"
       icon={<ArrowClockwiseIcon />}
@@ -679,27 +683,19 @@ function ReplayButton({
   )
   if (!detail?.replayEffect) return button
   return (
-    <Popover open={asking} onOpenChange={setAsking}>
-      <Popover.Trigger render={button} />
-      <Popover.Content className="grid w-[300px] gap-3" side="top" align="end">
-        <p className="m-0 text-[13px] text-kumo-default" data-testid="call-replay-effect">
-          {detail.replayEffect}
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setAsking(false)}
-            data-testid="call-replay-cancel"
-          >
-            Cancel
-          </Button>
-          <Button variant="primary" size="sm" onClick={run} data-testid="call-replay-confirm">
-            Replay
-          </Button>
-        </div>
-      </Popover.Content>
-    </Popover>
+    <>
+      {button}
+      <ConfirmPopover
+        open={asking}
+        onOpenChange={setAsking}
+        title="Replay this call?"
+        description={detail.replayEffect}
+        confirm="Replay"
+        anchor={anchor}
+        run={run}
+        testId="call-replay-ask"
+      />
+    </>
   )
 }
 

@@ -37,11 +37,6 @@ export function getQueues(project: string, signal?: AbortSignal): Promise<TasksQ
   return apiGet('/tasks/queues', { project }, signal)
 }
 
-/** One queue, with the official `/queueStats` figures computed now. */
-export function getQueue(queue: string, signal?: AbortSignal): Promise<TasksQueue> {
-  return apiGet('/tasks/queue', { queue }, signal)
-}
-
 /** Stops dispatching (console only): pending tasks stay put, running ones finish. */
 export function pauseQueue(body: TasksQueueRef): Promise<TasksQueue> {
   return apiSend('POST', '/tasks/queue/pause', body)
@@ -175,9 +170,10 @@ export function batchGetHistory(
 
 // ------------------------------------------------------------ list metadata
 
-export type TasksList = 'tasks' | 'history'
-
-/** A list's order and filter fields (`GET /tasks/<list>/meta`). */
-export function getListMeta(list: TasksList, signal?: AbortSignal): Promise<ListMeta> {
-  return apiGet(`/tasks/${list}/meta`, {}, signal)
+/**
+ * The task lists' order and filter fields (`GET /tasks/tasks/meta`):
+ * History filters with the same grammar, so it reads these too.
+ */
+export function getListMeta(signal?: AbortSignal): Promise<ListMeta> {
+  return apiGet('/tasks/tasks/meta', {}, signal)
 }

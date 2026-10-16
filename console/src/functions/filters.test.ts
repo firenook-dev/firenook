@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden'
+import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden.test-support'
 import { codebase, snapshot, summary, trigger } from './fixtures.test-support'
 import cases from './invocation-filter-cases.json'
 import {

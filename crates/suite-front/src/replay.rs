@@ -20,7 +20,6 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
-use serde::Serialize;
 use tokio::sync::broadcast;
 
 use super::lock;
@@ -107,9 +106,8 @@ impl Default for RingLimits {
     }
 }
 
-/// One ring's size, for `GET /status/memory`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+/// One ring's size: what the budget counts of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RingSize {
     pub name: String,
     pub entries: usize,
@@ -182,7 +180,7 @@ impl RingBudget {
         self.inner.used.load(Ordering::Relaxed)
     }
 
-    /// Sizes per ring, for `GET /status/memory`, in registration order.
+    /// Sizes per ring, in registration order: how the budget is shared out.
     #[must_use]
     pub fn report(&self) -> Vec<RingSize> {
         let mut rings = lock(&self.inner.rings);

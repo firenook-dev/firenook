@@ -13,6 +13,7 @@ publish = false
 axum.workspace = true
 base64.workspace = true
 firenook-functions-bridge = { path = "../functions-bridge" }
+firenook-suite-front = { path = "../suite-front" }
 flate2.workspace = true
 indexmap.workspace = true
 reqwest.workspace = true

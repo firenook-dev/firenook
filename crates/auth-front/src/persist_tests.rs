@@ -1,6 +1,7 @@
 //! The state file's writer: bursts coalesce, `flush` makes the file equal
 //! the state, old and new files load, the writer holds the lock only for a
-//! snapshot, and the last handle writes what is left.
+//! snapshot, the last handle writes what is left, and an operation answers
+//! once its change is on disk.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -279,6 +280,61 @@ fn a_change_reaches_the_file_without_a_flush_and_the_last_handle_writes_the_rest
     let expected = in_memory(&runtime);
     drop(runtime);
     assert_eq!(on_disk(&file), expected);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+const CLIENT: &str = "/identitytoolkit.googleapis.com/v1";
+
+async fn sign_up(runtime: &AuthRuntime, email: &str) -> (u16, JsonValue) {
+    crate::tests::call(
+        runtime,
+        axum::http::Method::POST,
+        &format!("{CLIENT}/accounts:signUp?key=fake"),
+        &json!({ "email": email, "password": "password1" }),
+    )
+    .await
+}
+
+/// A sign-up is on disk when it answers, and when the state cannot be
+/// written the sign-up fails instead of being acknowledged and lost; a
+/// sign-in only stamps `lastLoginAt`, which is written behind and never
+/// fails the sign-in.
+#[tokio::test]
+async fn an_operation_answers_once_its_change_is_on_disk() {
+    let root = directory("answered");
+    let state = root.join("state");
+    let file = state.join("auth-state.json");
+    let runtime = persisting(&file);
+    let (status, body) = sign_up(&runtime, "ada@example.test").await;
+    assert_eq!(status, 200, "{body}");
+    let uid = body["localId"].as_str().expect("localId").to_owned();
+    // No flush and no wait: the answer came after the write.
+    assert!(
+        on_disk(&file)["projects"][PROJECT]["users"]
+            .get(&uid)
+            .is_some(),
+        "the account is on disk when the sign-up answers"
+    );
+
+    // The state's directory becomes a file: every write fails from here on.
+    std::fs::remove_dir_all(&state).expect("remove the state directory");
+    std::fs::write(&state, "not a directory").expect("block the state path");
+    let (status, body) = sign_up(&runtime, "grace@example.test").await;
+    assert_eq!(status, 500, "{body}");
+    assert!(body.to_string().contains("Auth state"), "{body}");
+    let (status, body) = crate::tests::call(
+        &runtime,
+        axum::http::Method::POST,
+        &format!("{CLIENT}/accounts:signInWithPassword?key=fake"),
+        &json!({ "email": "ada@example.test", "password": "password1" }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+
+    std::fs::remove_file(&state).expect("unblock the state path");
+    runtime.flush().expect("flush");
+    assert_eq!(on_disk(&file), in_memory(&runtime));
+    drop(runtime);
     let _ = std::fs::remove_dir_all(&root);
 }
 

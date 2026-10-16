@@ -2,7 +2,7 @@
 // reading as a user shows exactly what that user's app would get, including
 // the denial and the rule line that decided it. Firestore's "view as" was
 // the first to need it; Storage's "As" and compute's "Call as" read the same
-// identities, so it lives here and `firestore/view-as.ts` re-exports it.
+// identities, so it lives here.
 //
 // One token path per kind. The owner and the anonymous client need no
 // token; a custom identity (any uid and claims, no Auth record) is an

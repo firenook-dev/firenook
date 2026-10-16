@@ -37,9 +37,9 @@ import {
 } from 'react'
 import type { Total } from '@/api/generated/Total'
 import { MenuCheck } from '@/components/kit'
+import { copyToClipboard } from '@/lib/copy'
 import { formatNumber } from '@/lib/format'
 import { type Shortcut, isTyping, matchesKey, useShortcuts } from '@/lib/shortcuts'
-import { toast } from '@/lib/toasts'
 import { ColumnResizer } from './column-resizer'
 import { COLUMN_MIN, isColumnHidden, useColumnWidths, useHiddenColumns } from './column-widths'
 import { DataTableRow, type PlacedColumn, type RowActions, cellId } from './data-table-row'
@@ -445,12 +445,7 @@ export function DataTable<Row>({
     const column = columns.find((candidate) => candidate.id === columnId)
     const text = column?.copy ? column.copy(row) : rowKey(row)
     const what = column?.copy ? column.header : text
-    try {
-      await navigator.clipboard.writeText(text)
-      toast({ key: 'data-table-copy', title: `Copied ${what}` })
-    } catch {
-      toast({ key: 'data-table-copy', title: 'Could not copy', tone: 'danger' })
-    }
+    await copyToClipboard(text, { what })
   }
 
   const openMenuFor = (key: string, at?: RowMenuAnchor) => {

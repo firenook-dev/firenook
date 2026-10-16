@@ -66,16 +66,6 @@ pub(crate) fn pubsub_error(error: PubsubError) -> ApiError {
     mapped.with_extra("grpcCode", json!(code))
 }
 
-/// What the routes that need Functions answer when the suite has none.
-pub(crate) fn functions_absent() -> ApiError {
-    ApiError::unavailable(
-        "Functions is not running in this engine, so there are no deliveries to functions.",
-    )
-    .with_fix(
-        "Add a Functions codebase to firebase.json, or start the engine with functions in --only.",
-    )
-}
-
 /// A console redelivery's refusal.
 pub(crate) fn redeliver_error(error: &RedeliverError) -> ApiError {
     match error {

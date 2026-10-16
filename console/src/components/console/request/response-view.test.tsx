@@ -5,6 +5,7 @@ import { giveListsALayout } from '@/test/virtual'
 import {
   ResponseView,
   hexLines,
+  isTextual,
   rawResponse,
   responseFigures,
   statusLabel,
@@ -31,6 +32,15 @@ const ok: ResponseRecord = {
 }
 
 describe('the answer to a request', () => {
+  it('knows text from bytes by the content type', () => {
+    expect(isTextual('application/json; charset=utf-8')).toBe(true)
+    expect(isTextual('application/vnd.api+json')).toBe(true)
+    expect(isTextual('text/event-stream')).toBe(true)
+    expect(isTextual('application/x-ndjson')).toBe(true)
+    expect(isTextual('image/png')).toBe(false)
+    expect(isTextual(undefined)).toBe(false)
+  })
+
   it('says how it went in a status line', () => {
     expect(statusTone(ok)).toBe('success')
     expect(statusTone({ ...ok, status: 404 })).toBe('warning')

@@ -28,7 +28,7 @@ export interface FunctionMenuActions {
   url?: string | undefined
   /** Copy as curl, when the Run tab can build one. */
   copyCurl?: (() => void) | undefined
-  /** Open in Logs, when the Logs section is built. */
+  /** Open in Logs, while the engine runs Logs. */
   logs?: (() => void) | undefined
   invocations: () => void
   openCodebase?: (() => void) | undefined

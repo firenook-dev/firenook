@@ -2,8 +2,6 @@ import { createFileRoute, stripSearchParams } from '@tanstack/react-router'
 import { z } from 'zod'
 import { SettingsPage } from '@/auth/components/settings-page'
 import { SectionFrame } from '@/components/console/section-gate'
-import { UnbuiltSection } from '@/components/section-placeholder'
-import { auth } from '@/lib/sections/auth'
 
 // Every view of Settings is a link: the project, the card to bring into
 // view, the tenant whose sign-in behaviour the first card shows, and the
@@ -26,8 +24,6 @@ export const Route = createFileRoute('/auth_/settings')({
 })
 
 function SettingsRoute() {
-  // The section's placeholder until its journeys pass.
-  if (!auth.built) return <UnbuiltSection section={auth} />
   return (
     <SectionFrame section="auth">
       <SettingsPage />

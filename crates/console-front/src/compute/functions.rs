@@ -12,11 +12,10 @@
 //! `firenook_functions_runtime::monitor` and are exported beside them.
 
 use std::collections::{BTreeMap, HashSet};
-use std::time::SystemTime;
 
-use axum::body::{Body, Bytes};
+use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderValue, Method, Request, StatusCode, header};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
@@ -31,21 +30,18 @@ use firenook_functions_runtime::console::{
 use firenook_functions_runtime::monitor::{
     FunctionBodyEncoding, FunctionCodebase, FunctionHeader, FunctionKind, FunctionLogLine,
     FunctionStats, FunctionsPhase, InvocationCause, InvocationDetail, InvocationOrigin,
-    InvocationQuery, InvocationSummary, InvocationTarget, format_timestamp,
+    InvocationQuery, InvocationSummary, InvocationTarget,
 };
-use firenook_pubsub_front::{RunScheduleError, ScheduleControl as _};
-use firenook_tasks_front::{ConsoleTask, EnqueueError};
 use futures_util::stream::{self, Stream, StreamExt as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tower::ServiceExt as _;
 use ts_rs::TS;
 
 use super::extensions::TASK_QUEUE_NOTE;
 use super::filters::invocation_filter;
 use super::live::codebase_entry;
 use super::topics::not_kept;
-use super::{ComputeControl, ComputeState, ComputeSuite, console_error, random_uuid};
+use super::{ComputeControl, ComputeState, ComputeSuite, console_error};
 use crate::api_error::ApiError;
 use crate::entity::EntityRef;
 use crate::http::{attachment, ndjson_response};
@@ -298,7 +294,9 @@ pub(crate) struct FunctionDeclaredOption {
     pub(crate) note: String,
 }
 
-/// A schedule's facts.
+/// A schedule as its definition declares it. What the scheduler makes of
+/// it (the zone it evaluates, the next runs, a pause, the runs kept) is
+/// Pub/Sub's `GET /pubsub/schedules`, live on `pubsub.schedules`.
 #[derive(Clone, Debug, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "compute/")]
@@ -307,22 +305,9 @@ pub(crate) struct FunctionSchedule {
     pub(crate) time_zone: Option<String>,
     /// The synthetic topic's full name, `projects/<p>/topics/firebase-schedule-<name>`.
     pub(crate) topic: String,
-    /// The zone the scheduler evaluates the expression in, as it reports
-    /// it; null until the scheduler says.
-    pub(crate) evaluated_in: Option<String>,
-    /// Runs on the clock; false when Pub/Sub is not running.
-    pub(crate) automatic: bool,
-    pub(crate) manual_reason: Option<String>,
-    /// Paused from the Pub/Sub section's Schedules page.
-    pub(crate) paused: bool,
-    pub(crate) next_run: Option<String>,
-    /// When the function last ran, as the engine recorded it.
-    pub(crate) last_run: Option<String>,
-    /// Pub/Sub is running in this suite (Run now publishes; else it
-    /// dispatches directly).
+    /// Pub/Sub runs in this suite, so its scheduler runs the schedule; else
+    /// it runs only when asked, with the functions shell's envelope.
     pub(crate) pubsub: bool,
-    /// The schedule in Pub/Sub › Schedules, when Pub/Sub runs.
-    pub(crate) schedule_ref: Option<EntityRef>,
     #[ts(type = "unknown")]
     pub(crate) retry: Option<Value>,
 }
@@ -451,60 +436,6 @@ pub(crate) struct FunctionTestEventRequest {
     pub(crate) body: Value,
     #[serde(default)]
     pub(crate) headers: Vec<FunctionHeaderInput>,
-}
-
-/// A message to publish to a Pub/Sub function's topic.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "compute/")]
-pub(crate) struct FunctionPublishRequest {
-    #[serde(default)]
-    pub(crate) data: String,
-    #[serde(default = "empty_encoding")]
-    pub(crate) encoding: FunctionBodyEncoding,
-    #[serde(default)]
-    pub(crate) attributes: BTreeMap<String, String>,
-    #[serde(default)]
-    pub(crate) ordering_key: Option<String>,
-}
-
-/// A task for a task queue function.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "compute/")]
-pub(crate) struct FunctionEnqueueRequest {
-    #[ts(type = "unknown")]
-    pub(crate) payload: Value,
-    /// Accepted only when the queue holds scheduled tasks.
-    #[serde(default)]
-    pub(crate) run_after_seconds: Option<u32>,
-}
-
-/// Which broker took a console request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "compute/")]
-pub(crate) enum FunctionBrokerTransport {
-    Pubsub,
-    Tasks,
-    Direct,
-}
-
-/// What a broker accepted; the invocation arrives on the live topic.
-#[derive(Clone, Debug, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "compute/")]
-pub(crate) struct FunctionBrokerResult {
-    pub(crate) transport: FunctionBrokerTransport,
-    pub(crate) topic: Option<String>,
-    pub(crate) message_id: Option<String>,
-    pub(crate) queue: Option<String>,
-    pub(crate) task: Option<String>,
-    /// The message (`pubsub.message`) or the queue (`tasks.queue`) in its
-    /// own section.
-    pub(crate) target: Option<EntityRef>,
-    /// Set for `direct` (the fallback when Pub/Sub does not run).
-    pub(crate) invocation: Option<InvocationSummary>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, TS)]
@@ -745,9 +676,6 @@ pub(crate) fn router(state: ComputeState) -> Router {
         .route("/functions/{id}", get(detail))
         .route("/functions/{id}/invoke", post(invoke).layer(call))
         .route("/functions/{id}/send-event", post(send_event).layer(call))
-        .route("/functions/{id}/publish", post(publish).layer(limit))
-        .route("/functions/{id}/enqueue", post(enqueue).layer(limit))
-        .route("/functions/{id}/run", post(run).layer(limit))
         .with_state(state)
 }
 
@@ -815,8 +743,7 @@ async fn detail(
     let mut summary = summary_of(&view, counters.clone(), suite, &state.project);
     let queues = extension_task_queues(state.control().ok().as_ref()).await;
     extension_task_queue(&mut summary, &view, &queues);
-    let schedule =
-        (view.kind == FunctionKind::Schedule).then(|| schedule_of(&view, &counters, &state));
+    let schedule = (view.kind == FunctionKind::Schedule).then(|| schedule_of(&view, &state));
     let task_queue = (view.kind == FunctionKind::Tasks).then(|| task_queue_of(&view, &state));
     Ok(Json(FunctionDetail {
         keys: view
@@ -928,213 +855,6 @@ async fn send_event(
         .await
         .map_err(console_error)?;
     Ok(frames_response(&state, stream))
-}
-
-async fn publish(
-    State(state): State<ComputeState>,
-    Path(id): Path<String>,
-    ConsoleJson(request): ConsoleJson<FunctionPublishRequest>,
-) -> Result<Json<FunctionBrokerResult>, ApiError> {
-    let runtime = state.runtime()?;
-    let view = function_view(&runtime, &id).await?;
-    if view.kind != FunctionKind::Pubsub {
-        return Err(ApiError::invalid(format!(
-            "{} does not listen to a Pub/Sub topic.",
-            view.name
-        )));
-    }
-    let topic = trigger_of(&view.definition, &state.project)
-        .topic
-        .ok_or_else(|| ApiError::invalid(format!("{} names no topic.", view.name)))?;
-    let data = decode_body(&request.data, request.encoding)?;
-    if data.is_empty() && request.attributes.is_empty() {
-        return Err(ApiError::invalid(
-            "A Pub/Sub message needs data or at least one attribute.",
-        ));
-    }
-    if !runtime.background_enabled() {
-        return Err(paused(
-            "Background triggers are paused, so Pub/Sub would accept this message and deliver it to no function.",
-        ));
-    }
-    let mut message = json!({ "data": BASE64.encode(&data) });
-    if !request.attributes.is_empty() {
-        message["attributes"] = json!(request.attributes);
-    }
-    if let Some(key) = request.ordering_key.filter(|key| !key.is_empty()) {
-        message["orderingKey"] = Value::String(key);
-    }
-    let message_id = publish_to(&state, &topic, message).await?;
-    Ok(Json(FunctionBrokerResult {
-        transport: FunctionBrokerTransport::Pubsub,
-        target: Some(EntityRef::pubsub_message(&topic, &message_id)),
-        topic: Some(topic),
-        message_id: Some(message_id),
-        queue: None,
-        task: None,
-        invocation: None,
-    }))
-}
-
-async fn enqueue(
-    State(state): State<ComputeState>,
-    Path(id): Path<String>,
-    ConsoleJson(request): ConsoleJson<FunctionEnqueueRequest>,
-) -> Result<Json<FunctionBrokerResult>, ApiError> {
-    let runtime = state.runtime()?;
-    let view = function_view(&runtime, &id).await?;
-    if view.kind != FunctionKind::Tasks {
-        return Err(ApiError::invalid(format!(
-            "{} is not a task queue function.",
-            view.name
-        )));
-    }
-    let Some(tasks) = &state.tasks else {
-        return Err(ApiError::unavailable(
-            "Cloud Tasks is not running in this suite.",
-        ));
-    };
-    let tasks = tasks.get()?;
-    let queue = queue_key(&state.project, &view.region, &view.name);
-    let holds = tasks
-        .runtime
-        .queue_view(&queue)
-        .is_some_and(|held| held.hold_scheduled);
-    if request.run_after_seconds.is_some() && !holds {
-        return Err(ApiError::invalid(
-            "This queue runs a task at once whatever its schedule time, as the official emulator does, so a delay would do nothing.",
-        ));
-    }
-    let data = serde_json::to_string(&request.payload)
-        .map_err(|error| ApiError::invalid(format!("The payload is not JSON: {error}.")))?;
-    // The task the Admin SDK's `TaskQueue.enqueue(payload)` sends, through
-    // the console's one enqueue path (the wire's own preparation and limit).
-    let task = ConsoleTask {
-        data: Some(data),
-        schedule_delay_seconds: request
-            .run_after_seconds
-            .filter(|seconds| *seconds > 0)
-            .map(f64::from),
-        ..ConsoleTask::default()
-    };
-    let enqueued = tasks
-        .enqueue_console(&queue, task)
-        .map_err(|error| enqueue_refused(&error, &view.name))?;
-    Ok(Json(FunctionBrokerResult {
-        transport: FunctionBrokerTransport::Tasks,
-        topic: None,
-        message_id: None,
-        target: Some(EntityRef::tasks_task(
-            &state.project,
-            &view.region,
-            &view.name,
-            &enqueued.id.to_string(),
-        )),
-        queue: Some(queue),
-        task: Some(enqueued.name),
-        invocation: None,
-    }))
-}
-
-/// Cloud Tasks' refusal of a console task, with what to do about it.
-fn enqueue_refused(error: &EnqueueError, queue: &str) -> ApiError {
-    match error {
-        EnqueueError::UnknownQueue => ApiError::not_found(format!(
-            "Cloud Tasks has no queue {queue} registered."
-        ))
-        .with_fix("The queue registers when its codebase loads; reload it, or look in Cloud Tasks for why it was refused."),
-        EnqueueError::NameReserved => ApiError::conflict(
-            "A task with this name was enqueued before in this run.",
-        )
-        .with_fix("The emulator keeps every task name until it stops; enqueue without a name."),
-        EnqueueError::QueueFull { .. } => ApiError::conflict(format!(
-            "{queue} holds as many pending tasks as the emulator keeps."
-        ))
-        .with_fix("Purge the queue in Cloud Tasks or let it drain."),
-        EnqueueError::TooLarge { .. } => ApiError::too_large(error.to_string())
-            .with_fix("Send less data: the Admin SDK would be refused the same task."),
-        EnqueueError::Invalid(reason) => ApiError::invalid(reason.clone()),
-        EnqueueError::UnknownTask => ApiError::not_found(error.to_string()),
-    }
-}
-
-async fn run(
-    State(state): State<ComputeState>,
-    Path(id): Path<String>,
-    ConsoleJson(NoBody {}): ConsoleJson<NoBody>,
-) -> Result<Json<FunctionBrokerResult>, ApiError> {
-    let runtime = state.runtime()?;
-    let view = function_view(&runtime, &id).await?;
-    if view.kind != FunctionKind::Schedule {
-        return Err(ApiError::invalid(format!(
-            "{} is not a scheduled function.",
-            view.name
-        )));
-    }
-    if !runtime.background_enabled() {
-        return Err(paused(
-            "Background triggers are paused, so the tick was not published.",
-        ));
-    }
-    if let Some(pubsub) = &state.pubsub {
-        // The clock's own tick through the scheduler: the same message to
-        // the same topic, delivered to every function listening on it, and
-        // recorded as a run in Pub/Sub › Schedules.
-        let pubsub = pubsub.get()?;
-        let topic = schedule_topic(&state.project, &view.name);
-        let message_id = match pubsub.runtime.run(&id) {
-            Ok(outcome) => outcome.message_id,
-            Err(RunScheduleError::BackgroundPaused) => {
-                return Err(paused(
-                    "Background triggers are paused, so the tick was not published.",
-                ));
-            }
-            Err(RunScheduleError::Publish(message)) => {
-                return Err(ApiError::unavailable(format!(
-                    "Pub/Sub refused the tick: {message}"
-                )));
-            }
-            // A schedule the scheduler does not hold yet (its inventory is
-            // refreshed after a load): the clock's message, published directly.
-            Err(RunScheduleError::NotScheduled) => {
-                publish_to(&state, &topic, json!({ "data": BASE64.encode(b"{}") })).await?
-            }
-        };
-        return Ok(Json(FunctionBrokerResult {
-            transport: FunctionBrokerTransport::Pubsub,
-            target: Some(EntityRef::pubsub_message(&topic, &message_id)),
-            topic: Some(topic),
-            message_id: Some(message_id),
-            queue: None,
-            task: None,
-            invocation: None,
-        }));
-    }
-    // No Pub/Sub, no scheduler: the official functions shell's schedule
-    // envelope, straight to the trigger route.
-    let (body, headers) = schedule_envelope(&view, &state.project);
-    let stream = runtime
-        .dispatch(
-            &id,
-            DispatchInput {
-                target: DispatchTarget::Trigger,
-                headers,
-                body: Bytes::from(serde_json::to_vec(&body).unwrap_or_default()),
-                origin: InvocationOrigin::Console,
-                replay_of: None,
-            },
-        )
-        .await
-        .map_err(console_error)?;
-    Ok(Json(FunctionBrokerResult {
-        transport: FunctionBrokerTransport::Direct,
-        topic: None,
-        message_id: None,
-        queue: None,
-        task: None,
-        target: None,
-        invocation: Some(stream.invocation),
-    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1477,10 +1197,6 @@ fn no_codebase(codebase: &str) -> ApiError {
     ApiError::not_found(format!("There is no codebase {codebase}."))
 }
 
-fn paused(message: &str) -> ApiError {
-    ApiError::conflict(message).with_fix("Resume background triggers.")
-}
-
 async fn function_view(runtime: &ConsoleHandle, id: &str) -> Result<FunctionView, ApiError> {
     runtime
         .function(id)
@@ -1523,131 +1239,6 @@ fn queue_key(project: &str, region: &str, name: &str) -> String {
 /// A schedule's synthetic topic, as the scheduler publishes to it.
 fn schedule_topic(project: &str, name: &str) -> String {
     format!("projects/{project}/topics/firebase-schedule-{name}")
-}
-
-/// The official functions shell's schedule envelope (`scheduleEnvelope` in
-/// the CLI's `functions:invoke`): a legacy event on the schedule's topic
-/// for a first-generation function, a `CloudEvent` with Cloud Scheduler's
-/// headers for a second-generation one.
-fn schedule_envelope(view: &FunctionView, project: &str) -> (Value, Vec<(String, String)>) {
-    let now = time::OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_default();
-    let event_type = view
-        .definition
-        .get("eventTrigger")
-        .and_then(|event| event.get("eventType"))
-        .and_then(Value::as_str)
-        .unwrap_or("pubsub")
-        .to_owned();
-    let id = random_uuid();
-    let headers = vec![("content-type".to_owned(), "application/json".to_owned())];
-    if view.platform != "gcfv2" {
-        return (
-            json!({
-                "eventId": id,
-                "timestamp": now,
-                "eventType": event_type,
-                "resource": schedule_topic(project, &view.name),
-                "auth": { "admin": false },
-                "data": {},
-            }),
-            headers,
-        );
-    }
-    let mut headers = headers;
-    headers.push((
-        "x-cloudscheduler-jobname".to_owned(),
-        format!("firebase-schedule-{}-{}", view.name, view.region),
-    ));
-    headers.push(("x-cloudscheduler-scheduletime".to_owned(), now.clone()));
-    (
-        json!({
-            "specversion": "1.0",
-            "datacontenttype": "application/json",
-            "id": id,
-            "type": event_type,
-            "time": now,
-            "source": "",
-            "data": {},
-        }),
-        headers,
-    )
-}
-
-/// Publishes one message on `topic` through the running Pub/Sub emulator's
-/// own HTTP/JSON surface (so its fanout records it like an app's publish);
-/// answers the message id.
-async fn publish_to(state: &ComputeState, topic: &str, message: Value) -> Result<String, ApiError> {
-    let Some(pubsub) = &state.pubsub else {
-        return Err(
-            ApiError::unavailable("Pub/Sub is not running in this suite.")
-                .with_fix("Use Send to this function only, or start the suite with Pub/Sub."),
-        );
-    };
-    let pubsub = pubsub.get()?;
-    let (status, answer) = call_native(
-        &pubsub.native,
-        Method::POST,
-        &format!("/v1/{topic}:publish"),
-        &json!({ "messages": [message] }),
-    )
-    .await?;
-    if status != StatusCode::OK {
-        let message = native_message(&answer);
-        return Err(match status {
-            StatusCode::NOT_FOUND => {
-                ApiError::not_found(format!("Pub/Sub has no topic {topic}: {message}"))
-            }
-            StatusCode::BAD_REQUEST => ApiError::invalid(message),
-            _ => ApiError::unavailable(format!("Pub/Sub refused the message: {message}")),
-        });
-    }
-    serde_json::from_slice::<Value>(&answer)
-        .ok()
-        .and_then(|value| value["messageIds"][0].as_str().map(str::to_owned))
-        .ok_or_else(|| ApiError::internal("Pub/Sub accepted the message but named no message id."))
-}
-
-/// One JSON request to a service's own application; its status and body.
-async fn call_native(
-    native: &Router,
-    method: Method,
-    path: &str,
-    body: &Value,
-) -> Result<(StatusCode, Bytes), ApiError> {
-    let request = Request::builder()
-        .method(method)
-        .uri(path)
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(body.to_string()))
-        .map_err(|error| ApiError::internal(error.to_string()))?;
-    let response = match native.clone().oneshot(request).await {
-        Ok(response) => response,
-        Err(never) => match never {},
-    };
-    let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
-        .await
-        .map_err(|error| ApiError::unavailable(error.to_string()))?;
-    Ok((status, bytes))
-}
-
-/// The message of a service's error answer: `{"error":{"message"}}`,
-/// `{"error":"…"}` or its text.
-fn native_message(body: &[u8]) -> String {
-    let text = String::from_utf8_lossy(body).trim().to_owned();
-    serde_json::from_str::<Value>(&text)
-        .ok()
-        .and_then(|value| match &value["error"] {
-            Value::String(message) => Some(message.clone()),
-            Value::Object(error) => error
-                .get("message")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-            _ => None,
-        })
-        .unwrap_or(text)
 }
 
 fn match_input(request: FunctionMatchRequest) -> Result<MatchInput, ApiError> {
@@ -2198,65 +1789,19 @@ fn declared_note(name: &str) -> &'static str {
     }
 }
 
-fn schedule_of(
-    view: &FunctionView,
-    counters: &FunctionStats,
-    state: &ComputeState,
-) -> FunctionSchedule {
+fn schedule_of(view: &FunctionView, state: &ComputeState) -> FunctionSchedule {
     let schedule = view
         .definition
         .get("schedule")
         .or_else(|| view.definition.get("scheduleTrigger"));
-    let retry = schedule.and_then(|schedule| schedule.get("retryConfig").cloned());
-    let recorded = counters.last.as_ref().map(|last| last.started_at.clone());
-    // The scheduler's own view when Pub/Sub runs: the zone it evaluates the
-    // expression in, whether the clock runs it, its pause, its next tick.
-    let scheduler = state
-        .pubsub
-        .as_ref()
-        .and_then(|pubsub| pubsub.get().ok())
-        .and_then(|pubsub| pubsub.runtime.schedule(&view.id));
-    if let Some(scheduled) = scheduler {
-        return FunctionSchedule {
-            expression: scheduled.expression,
-            time_zone: scheduled.time_zone,
-            topic: scheduled.topic,
-            evaluated_in: Some(scheduled.evaluated_in),
-            automatic: scheduled.automatic,
-            manual_reason: scheduled.problem,
-            paused: scheduled.paused,
-            next_run: scheduled
-                .next_run_at
-                .map(|at| format_timestamp(SystemTime::from(at))),
-            last_run: scheduled
-                .last_run
-                .map(|run| format_timestamp(SystemTime::from(run.at)))
-                .or(recorded),
-            pubsub: true,
-            schedule_ref: Some(EntityRef::pubsub_schedule(&view.id)),
-            retry,
-        };
-    }
-    let pubsub = state.pubsub.is_some();
     FunctionSchedule {
         expression: schedule
             .and_then(|schedule| string_at(schedule, "schedule"))
             .unwrap_or_default(),
         time_zone: schedule.and_then(|schedule| string_at(schedule, "timeZone")),
         topic: schedule_topic(&state.project, &view.name),
-        evaluated_in: None,
-        automatic: false,
-        manual_reason: Some(if pubsub {
-            "Pub/Sub is still starting.".to_owned()
-        } else {
-            "Pub/Sub is not running in this suite.".to_owned()
-        }),
-        paused: false,
-        next_run: None,
-        last_run: recorded,
-        pubsub,
-        schedule_ref: pubsub.then(|| EntityRef::pubsub_schedule(&view.id)),
-        retry,
+        pubsub: state.pubsub.is_some(),
+        retry: schedule.and_then(|schedule| schedule.get("retryConfig").cloned()),
     }
 }
 

@@ -1,33 +1,24 @@
-// What the Users page adds to ⌘K while it is on screen: the users opened
-// lately (each once — the engine's search would find them too, so they carry
-// their `auth.user` ref), a switch to every tenant, and the page's own
-// actions. The section's actions (Create a user, Import users…) come from
-// the registry; the cursor row's menu from the table.
+// What the Users page adds to ⌘K while it is on screen: a switch to every
+// tenant and the page's own actions. Users themselves come from the
+// engine's search, the section's actions (Create a user, Import users…)
+// from the registry, and the cursor row's menu from the table.
 
-import {
-  ArrowsLeftRightIcon,
-  ClockCounterClockwiseIcon,
-  PushPinIcon,
-  PushPinSlashIcon,
-} from '@phosphor-icons/react'
+import { ArrowsLeftRightIcon, PushPinIcon, PushPinSlashIcon } from '@phosphor-icons/react'
 import { useEffect, useLayoutEffect, useRef } from 'react'
-import type { AuthTenantPage } from '@/api/generated/auth/AuthTenantPage'
+import type { AuthTenantList } from '@/api/generated/auth/AuthTenantList'
 import {
   type PaletteGroup,
   type PaletteItem,
   matchesQuery,
   usePaletteProviders,
 } from '@/lib/palette'
-import type { RecentUser } from './recents'
-import { type TenantScope, userKey } from './tenant-scope'
+import type { TenantScope } from './tenant-scope'
 
 export interface UsersPaletteOptions {
   scope: TenantScope
   /** The picker's first page of tenants (with the project users' count). */
-  tenants: AuthTenantPage | undefined
-  recents: readonly RecentUser[]
+  tenants: AuthTenantList | undefined
   onScope: (scope: TenantScope) => void
-  onOpenRecent: (recent: RecentUser) => void
   /** The User column scrolls with the others (it is pinned by default). */
   unfrozen: boolean
   onFreeze: (frozen: boolean) => void
@@ -38,19 +29,6 @@ export interface UsersPaletteOptions {
 /** The palette's groups for one search, from what the page holds. */
 export function usersPaletteGroups(options: UsersPaletteOptions, query: string): PaletteGroup[] {
   const groups: PaletteGroup[] = []
-  const recents: PaletteItem[] = options.recents.map((recent) => ({
-    id: `auth.recent:${recent.tenant}|${recent.uid}`,
-    title: recent.label,
-    breadcrumbs: [recent.tenant ? `Tenant ${recent.tenant}` : 'Project users'],
-    description: recent.label === recent.uid ? undefined : recent.uid,
-    keywords: `recent user ${recent.uid}`,
-    icon: <ClockCounterClockwiseIcon size={16} />,
-    run: () => options.onOpenRecent(recent),
-    ref: { kind: 'auth.user', key: userKey(recent.tenant, recent.uid) },
-  }))
-  const shownRecents = recents.filter((item) => matchesQuery(item, query))
-  if (shownRecents.length > 0) groups.push({ label: 'Recent users', items: shownRecents })
-
   const scopes: { scope: TenantScope; title: string; detail?: string | undefined }[] = [
     { scope: { kind: 'project' }, title: 'Project users (no tenant)' },
     ...(options.tenants?.items ?? []).map((tenant) => ({

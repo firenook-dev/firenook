@@ -1,14 +1,17 @@
 //! Suite-wide state no section owns: whether background triggers are
 //! delivered, where the data lives, saving an export on the engine's
-//! machine, clearing sections, and the console's buffer memory.
+//! machine, and clearing sections.
 //!
-//! Each is drawn once, by the shell (its banners and engine popover) and the
+//! Each is drawn once, by the shell (its banners and engine badge) and the
 //! Overview; no section keeps a copy. `POST /suite/background` is the only
 //! console route that pauses or resumes background triggers, and it does
 //! exactly what the hub's own switches do. `POST /suite/export` sends the
-//! hub's export command to a destination the engine lists: the browser
-//! names a destination, never a path. `POST /suite/clear` runs each named
-//! section's `Section::clear` in sidebar order, inside one job.
+//! hub's export command to a destination the engine lists, as a
+//! `suite.export` job: the browser names a destination, never a path, and
+//! the registry's one-suite-job rule keeps an export from capturing a
+//! half-done reset (and a reset from starting under an export).
+//! `POST /suite/clear` runs each named section's `Section::clear` in
+//! sidebar order, inside one job.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -20,7 +23,7 @@ use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use firenook_functions_bridge::TriggerRegistry;
-use firenook_suite_front::{BackgroundRequest, ExportCommand, LoggingRuntime, RingBudget};
+use firenook_suite_front::{BackgroundRequest, ExportCommand, LoggingRuntime};
 use futures_util::stream::BoxStream;
 use futures_util::{FutureExt as _, StreamExt as _};
 use serde::{Deserialize, Serialize};
@@ -31,7 +34,7 @@ use ts_rs::TS;
 
 use crate::api_error::ApiError;
 use crate::blocking::blocking;
-use crate::jobs::{JobRegistry, accepted};
+use crate::jobs::{JobHandle, JobRegistry, accepted};
 use crate::json::ConsoleJson;
 use crate::section::{
     ClearOptions, Section, SectionState, section_label, section_order, section_rank,
@@ -112,7 +115,7 @@ pub struct ExportDestination {
     pub refused: Option<String>,
 }
 
-/// A finished export.
+/// A finished export: the `suite.export` job's result.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportResult {
@@ -125,29 +128,6 @@ pub struct ExportResult {
     /// How long the export took.
     #[ts(type = "number")]
     pub took_ms: u64,
-}
-
-/// `GET /status/memory`: the console's buffers against their shared budget.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct MemoryReport {
-    #[ts(type = "number")]
-    pub budget_bytes: u64,
-    #[ts(type = "number")]
-    pub used_bytes: u64,
-    /// Each buffer, in the order it was created.
-    pub rings: Vec<RingSize>,
-}
-
-/// One buffer's size.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-pub struct RingSize {
-    /// `logs`, `firestore.changes`, …
-    pub name: String,
-    #[ts(type = "number")]
-    pub entries: u64,
-    #[ts(type = "number")]
-    pub bytes: u64,
 }
 
 /// What the suite hands the console's suite controls.
@@ -288,15 +268,31 @@ impl SuiteControls {
         futures_util::stream::select_all([flips, background, dropped]).boxed()
     }
 
-    /// `POST /suite/background`, `GET /suite/destinations`,
-    /// `POST /suite/export`.
+    /// `POST /suite/background`, `GET /suite/destinations`.
     pub(crate) fn router(&self) -> Router {
         Router::new()
             .route("/suite/background", post(set_background))
             .route("/suite/destinations", get(destinations))
-            .route("/suite/export", post(export))
             .with_state(self.clone())
     }
+
+    /// `POST /suite/export`, as jobs of `jobs`.
+    pub(crate) fn export_router(&self, jobs: JobRegistry) -> Router {
+        Router::new()
+            .route("/suite/export", post(export))
+            .with_state(Exports {
+                suite: self.clone(),
+                jobs,
+            })
+    }
+}
+
+/// What `POST /suite/export` reaches: the suite's exporter and destinations,
+/// and the jobs it runs as.
+#[derive(Clone)]
+struct Exports {
+    suite: SuiteControls,
+    jobs: JobRegistry,
 }
 
 /// What `POST /suite/clear` reaches.
@@ -441,30 +437,6 @@ async fn clear(
     Ok(accepted(job))
 }
 
-/// `GET /status/memory`.
-pub(crate) fn memory_router(rings: RingBudget) -> Router {
-    Router::new()
-        .route("/status/memory", get(memory))
-        .with_state(rings)
-}
-
-async fn memory(State(rings): State<RingBudget>) -> Json<MemoryReport> {
-    let wide = |value: usize| u64::try_from(value).unwrap_or(u64::MAX);
-    Json(MemoryReport {
-        budget_bytes: wide(rings.limit()),
-        used_bytes: wide(rings.used()),
-        rings: rings
-            .report()
-            .into_iter()
-            .map(|ring| RingSize {
-                name: ring.name,
-                entries: wide(ring.entries),
-                bytes: wide(ring.bytes),
-            })
-            .collect(),
-    })
-}
-
 /// `{ enabled }`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -519,36 +491,36 @@ struct ExportRequest {
     overwrite: bool,
 }
 
-/// `POST /suite/export`: the hub's export, to a listed destination.
-async fn export(
-    State(suite): State<SuiteControls>,
-    ConsoleJson(request): ConsoleJson<ExportRequest>,
-) -> Result<Json<ExportResult>, ApiError> {
-    let Some(exporter) = suite.inner.exporter.clone() else {
-        return Err(ApiError::precondition(
-            "This console is not attached to a running suite, so there is nothing to export.",
-        ));
-    };
-    let known = || {
-        suite
-            .inner
-            .destinations
-            .iter()
-            .map(|destination| destination.id.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    let Some(destination) = suite
-        .inner
-        .destinations
+/// `"The project's export folder"` → `"Save a snapshot to the project's
+/// export folder"`: the job's title.
+fn export_title(label: &str) -> String {
+    let mut characters = label.chars();
+    let lowered = characters.next().map_or_else(String::new, |first| {
+        first.to_lowercase().chain(characters).collect::<String>()
+    });
+    format!("Save a snapshot to {lowered}")
+}
+
+/// The destination and targets `request` names, refused when the engine
+/// does not list the destination, refuses it now, or a target is unknown.
+fn export_target(
+    suite: &SuiteControls,
+    request: &ExportRequest,
+) -> Result<(ExportDestination, BTreeSet<String>), ApiError> {
+    let destinations = &suite.inner.destinations;
+    let Some(destination) = destinations
         .iter()
         .find(|destination| destination.id == request.destination)
         .cloned()
     else {
+        let known = destinations
+            .iter()
+            .map(|destination| destination.id.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
         return Err(ApiError::invalid(format!(
-            "No export destination is named `{}`; this engine lists {}.",
+            "No export destination is named `{}`; this engine lists {known}.",
             request.destination,
-            known()
         ))
         .with_fix(
             "Choose a destination from the list, or export anywhere else with firenook emulators:export <dir>.",
@@ -566,9 +538,73 @@ async fn export(
             "An export covers firestore, auth or storage, not `{unknown}`."
         )));
     }
-    let path = PathBuf::from(&destination.path);
+    Ok((destination, targets))
+}
+
+/// The `suite.export` job's work: one export command to the hub, then the
+/// [`ExportResult`] as the job's result.
+async fn export_work(
+    handle: JobHandle,
+    exporter: mpsc::Sender<ExportCommand>,
+    destination: ExportDestination,
+    targets: BTreeSet<String>,
+) -> Result<(), ApiError> {
+    if handle.cancelled() {
+        return Ok(());
+    }
+    let started = Instant::now();
+    let (completion, finished) = oneshot::channel();
+    exporter
+        .send(ExportCommand {
+            destination: PathBuf::from(&destination.path),
+            targets: targets.clone(),
+            completion,
+        })
+        .await
+        .map_err(|_| ApiError::unavailable("The engine's exporter has stopped."))?;
+    match finished.await {
+        Ok(Ok(())) => {
+            handle.progress(1);
+            handle.set_result(
+                serde_json::to_value(ExportResult {
+                    destination: destination.id,
+                    path: destination.path,
+                    targets: targets.into_iter().collect(),
+                    took_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                })
+                .unwrap_or_default(),
+            );
+            Ok(())
+        }
+        Ok(Err(message)) => Err(ApiError::precondition(format!(
+            "The export failed: {message}"
+        ))),
+        Err(_) => Err(ApiError::unavailable(
+            "The export stopped because the engine is stopping.",
+        )),
+    }
+}
+
+/// `POST /suite/export`: the hub's export to a listed destination, as a
+/// `suite.export` job (`202` with the job; its result is the
+/// [`ExportResult`]). Everything that can be checked is checked before the
+/// job starts: the destination is listed and allowed, the targets are known,
+/// and a folder that holds files is replaced only with `overwrite`. While
+/// another suite job runs (a reset, a snapshot), it is `409 conflict`, and
+/// while it runs, so is every other suite job. Once the hub has the export
+/// command it cannot be stopped; a cancel before then stops it.
+async fn export(
+    State(exports): State<Exports>,
+    ConsoleJson(request): ConsoleJson<ExportRequest>,
+) -> Result<Response, ApiError> {
+    let Some(exporter) = exports.suite.inner.exporter.clone() else {
+        return Err(ApiError::precondition(
+            "This console is not attached to a running suite, so there is nothing to export.",
+        ));
+    };
+    let (destination, targets) = export_target(&exports.suite, &request)?;
     if !request.overwrite {
-        let probe = path.clone();
+        let probe = PathBuf::from(&destination.path);
         let holds_files = blocking("the destination check", move || {
             Ok(std::fs::read_dir(&probe).is_ok_and(|mut entries| entries.next().is_some()))
         })
@@ -581,30 +617,13 @@ async fn export(
             .with_fix("Confirm, and send the export again with overwrite: true."));
         }
     }
-    let started = Instant::now();
-    let (completion, finished) = oneshot::channel();
-    exporter
-        .send(ExportCommand {
-            destination: path,
-            targets: targets.clone(),
-            completion,
-        })
-        .await
-        .map_err(|_| ApiError::unavailable("The engine's exporter has stopped."))?;
-    match finished.await {
-        Ok(Ok(())) => Ok(Json(ExportResult {
-            destination: destination.id,
-            path: destination.path,
-            targets: targets.into_iter().collect(),
-            took_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-        })),
-        Ok(Err(message)) => Err(ApiError::precondition(format!(
-            "The export failed: {message}"
-        ))),
-        Err(_) => Err(ApiError::unavailable(
-            "The export stopped because the engine is stopping.",
-        )),
-    }
+    let title = export_title(&destination.label);
+    let job = exports
+        .jobs
+        .start("suite", "suite.export", title, Some(1), move |handle| {
+            export_work(handle, exporter, destination, targets).boxed()
+        })?;
+    Ok(accepted(job))
 }
 
 #[cfg(test)]
@@ -775,10 +794,27 @@ mod tests {
         assert_eq!(body["error"]["code"], "invalid-argument");
     }
 
+    /// Job `id` once it has stopped running.
+    async fn finished(jobs: &JobRegistry, id: &str) -> crate::jobs::Job {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let job = jobs.get(id).expect("kept");
+            if job.state != crate::jobs::JobState::Running {
+                return job;
+            }
+            assert!(Instant::now() < deadline, "the job never finished");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
     #[tokio::test]
     async fn an_export_names_a_listed_destination_and_never_a_path() {
-        let (suite, (_background, mut exports)) = suite("export");
-        let router = suite.controls.router();
+        let (suite, _receivers) = suite("destinations");
+        let jobs = JobRegistry::new();
+        let router = suite
+            .controls
+            .router()
+            .merge(suite.controls.export_router(jobs.clone()));
         let response = router
             .clone()
             .oneshot(
@@ -816,6 +852,14 @@ mod tests {
             let (_, answer) = post(&router, "/suite/export", body.clone()).await;
             assert_eq!(answer["error"]["code"], code, "{body} → {answer}");
         }
+        assert_eq!(jobs.list(None), Vec::new(), "a refusal starts no job");
+    }
+
+    #[tokio::test]
+    async fn an_export_runs_as_a_suite_job_and_replaces_only_when_asked() {
+        let (suite, (_background, mut exports)) = suite("export");
+        let jobs = JobRegistry::new();
+        let router = suite.controls.export_router(jobs.clone());
         let folder = suite.folder.clone();
         let exporter = tokio::spawn(async move {
             let command = exports.recv().await.expect("an export");
@@ -830,17 +874,26 @@ mod tests {
             let _ = command.completion.send(Ok(()));
             exports
         });
-        let (status, body) = post(
+        let (status, job) = post(
             &router,
             "/suite/export",
             json!({ "destination": "project", "targets": ["firestore"] }),
         )
         .await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(body["destination"], "project");
-        assert_eq!(body["path"], suite.folder.display().to_string());
-        assert_eq!(body["targets"], json!(["firestore"]));
-        assert!(body["tookMs"].is_u64());
+        assert_eq!(status, StatusCode::ACCEPTED, "{job}");
+        assert_eq!(job["kind"], "suite.export");
+        assert_eq!(job["section"], "suite");
+        assert_eq!(
+            job["title"],
+            "Save a snapshot to the project's export folder"
+        );
+        let done = finished(&jobs, job["id"].as_str().expect("id")).await;
+        assert_eq!(done.state, crate::jobs::JobState::Done);
+        let result = done.result.expect("a result");
+        assert_eq!(result["destination"], "project");
+        assert_eq!(result["path"], suite.folder.display().to_string());
+        assert_eq!(result["targets"], json!(["firestore"]));
+        assert!(result["tookMs"].is_u64(), "{result}");
         let mut exports = exporter.await.expect("exported");
         // The folder now holds an export: replacing it needs a yes.
         let (status, body) = post(
@@ -856,18 +909,89 @@ mod tests {
             let _ = command.completion.send(Err("the disk is full".to_owned()));
             exports
         });
-        let (status, body) = post(
+        let (status, job) = post(
             &router,
             "/suite/export",
             json!({ "destination": "project", "overwrite": true }),
         )
         .await;
-        assert_eq!(status, StatusCode::PRECONDITION_FAILED, "{body}");
+        assert_eq!(status, StatusCode::ACCEPTED, "{job}");
+        let failed = finished(&jobs, job["id"].as_str().expect("id")).await;
+        assert_eq!(failed.state, crate::jobs::JobState::Failed);
         assert_eq!(
-            body["error"]["message"],
-            "The export failed: the disk is full"
+            failed.message.as_deref(),
+            Some("The export failed: the disk is full")
         );
         let _exports = exporter.await.expect("answered");
+    }
+
+    #[tokio::test]
+    async fn an_export_and_a_reset_never_run_together() {
+        let (suite, (_background, mut exports)) = suite("together");
+        let jobs = JobRegistry::new();
+        let router = suite.controls.export_router(jobs.clone());
+        // A reset under way: the export waits its turn, and says so.
+        let (release, released) = oneshot::channel::<()>();
+        let reset = jobs
+            .start(
+                "suite",
+                "suite.clear",
+                "Clear Firestore".to_owned(),
+                None,
+                |_| {
+                    async move {
+                        let _ = released.await;
+                        Ok(())
+                    }
+                    .boxed()
+                },
+            )
+            .expect("the reset started");
+        let (status, body) = post(
+            &router,
+            "/suite/export",
+            json!({ "destination": "project" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert_eq!(body["error"]["code"], "conflict");
+        assert_eq!(
+            body["error"]["message"],
+            "Another suite action is still running."
+        );
+        assert_eq!(
+            body["error"]["fix"],
+            "Wait for it to finish, or cancel it, and try again."
+        );
+        let _ = release.send(());
+        assert_eq!(
+            finished(&jobs, &reset.id).await.state,
+            crate::jobs::JobState::Done
+        );
+        // An export under way: a reset is refused until it has finished.
+        let (status, job) = post(
+            &router,
+            "/suite/export",
+            json!({ "destination": "project" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{job}");
+        let command = exports.recv().await.expect("an export");
+        let refused = jobs
+            .start(
+                "suite",
+                "suite.clear",
+                "Clear Firestore".to_owned(),
+                None,
+                |_| async { Ok(()) }.boxed(),
+            )
+            .expect_err("refused while the export runs");
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        let _ = command.completion.send(Ok(()));
+        assert_eq!(
+            finished(&jobs, job["id"].as_str().expect("id")).await.state,
+            crate::jobs::JobState::Done
+        );
     }
 
     #[tokio::test]
@@ -875,7 +999,9 @@ mod tests {
         let controls = SuiteControls::detached();
         assert!(controls.background_triggers().enabled);
         assert_eq!(controls.data().mode, DataMode::Memory);
-        let router = controls.router();
+        let router = controls
+            .router()
+            .merge(controls.export_router(JobRegistry::new()));
         let (status, _) = post(&router, "/suite/background", json!({ "enabled": false })).await;
         assert_eq!(status, StatusCode::PRECONDITION_FAILED);
         let (status, _) = post(
@@ -1137,33 +1263,5 @@ mod tests {
                 ),
             ]
         );
-    }
-
-    #[tokio::test]
-    async fn the_memory_report_lists_each_ring_against_the_budget() {
-        let budget = RingBudget::new(1024 * 1024);
-        let ring: firenook_suite_front::ReplayRing<()> = firenook_suite_front::ReplayRing::new(
-            "logs",
-            firenook_suite_front::RingLimits::DEFAULT,
-            7,
-            &budget,
-        );
-        ring.push((), Arc::from("{\"line\":1}"));
-        let response = memory_router(budget)
-            .oneshot(
-                Request::get("/status/memory")
-                    .body(Body::empty())
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("body");
-        let report: Value = serde_json::from_slice(&bytes).expect("json");
-        assert_eq!(report["budgetBytes"], 1024 * 1024);
-        assert_eq!(report["rings"][0]["name"], "logs");
-        assert_eq!(report["rings"][0]["entries"], 1);
-        assert!(report["usedBytes"].as_u64().expect("used") > 0, "{report}");
     }
 }

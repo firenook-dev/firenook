@@ -8,7 +8,6 @@ import {
   reconfigureInstance,
   reloadInstance,
   revealParam,
-  vendorInstance,
 } from './api'
 import { changedKeys } from './live'
 
@@ -49,15 +48,13 @@ describe('the Extensions routes', () => {
     expect(last()?.url).toBe('/console/api/v1/extensions/instances/greeter/secrets/API_TOKEN')
   })
 
-  it('reload and vendor an instance with a JSON body', async () => {
+  it('reload an instance with a JSON body', async () => {
     await reloadInstance('greeter')
     expect(last()).toMatchObject({
       url: '/console/api/v1/extensions/instances/greeter/reload',
       method: 'POST',
       body: {},
     })
-    await vendorInstance('resize')
-    expect(last()?.url).toBe('/console/api/v1/extensions/instances/resize/vendor')
   })
 
   it('reconfigure writes values and secrets apart, and answers the files and the instance', async () => {

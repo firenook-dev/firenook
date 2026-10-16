@@ -35,7 +35,6 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::io::{AsyncWriteExt as _, BufReader};
 
-mod archive;
 mod bulk;
 mod changes;
 mod console;
@@ -60,7 +59,6 @@ mod thumbnails;
 mod view_cache;
 mod write;
 mod zip_stream;
-pub use archive::{ARCHIVE_ENTRIES, ArchiveEntry, ArchiveListing};
 pub use bulk::{
     BULK_BATCH, BulkPreview, BulkProgress, BulkRequest, BulkSource, BulkVerb, ConflictPolicy,
     Destination, MetadataPatch, QUEUE_LIMIT,
@@ -111,7 +109,6 @@ pub use rules_manager::{
     FolderRules, Impact, ImpactFlip, StorageRulesHandle, StorageRulesMap,
 };
 pub use search::{SearchFound, SearchKind, SearchOutcome};
-pub use sessions::{SESSION_IDLE, SessionCursor, SessionPage, SessionState, SessionView};
 pub use sniff::{SniffFamily, Sniffed};
 pub use staging::InFlight;
 use staging::{StagedFile, StagingGauge, staging_path};
@@ -2311,33 +2308,31 @@ impl StorageState {
     }
 
     /// Dispatches the event of the change committed at `revision` and
-    /// records on its activity record what became of it.
+    /// records on its activity record what became of it, and the ids it was
+    /// sent with.
     fn dispatch_change(&self, revision: u64, event: StorageEvent, object: &StoredObject) {
-        let delivery = self.dispatch(event, object);
-        self.feed.settle(revision, delivery);
+        let (delivery, event_ids) = self.dispatch_with(event, object, None);
+        self.feed.settle(revision, delivery, event_ids);
     }
 
     /// Queues the v1 and v2 trigger requests of one Storage event, and says
-    /// what happened: nothing at all without Functions in the suite (as the
-    /// official emulator), nothing while background triggers are paused.
-    fn dispatch(&self, event: StorageEvent, object: &StoredObject) -> EventDelivery {
-        self.dispatch_with(event, object, None)
-    }
-
-    /// [`Self::dispatch`]; a `nonce` gives the event new ids, so a delivery
-    /// runtime that drops ids it has seen delivers it again.
+    /// what happened, with the event's two ids once it was sent: nothing at
+    /// all without Functions in the suite (as the official emulator),
+    /// nothing while background triggers are paused. A `nonce` gives the
+    /// event new ids, so a delivery runtime that drops ids it has seen
+    /// delivers it again.
     fn dispatch_with(
         &self,
         event: StorageEvent,
         object: &StoredObject,
         nonce: Option<&str>,
-    ) -> EventDelivery {
+    ) -> (EventDelivery, Vec<String>) {
         if !self.options.functions {
-            return EventDelivery::NoFunctions;
+            return (EventDelivery::NoFunctions, Vec::new());
         }
         if !self.background.background_enabled() {
             self.background.note_dropped(DroppedService::Storage);
-            return EventDelivery::Paused;
+            return (EventDelivery::Paused, Vec::new());
         }
         let bodies = events::bodies(self, event, object, nonce);
         let mut failed = false;
@@ -2347,9 +2342,9 @@ impl StorageState {
             }
         }
         if failed {
-            EventDelivery::Failed
+            (EventDelivery::Failed, Vec::new())
         } else {
-            EventDelivery::Sent
+            (EventDelivery::Sent, bodies.ids())
         }
     }
 }

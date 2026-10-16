@@ -5,7 +5,6 @@
 
 import { queryOptions } from '@tanstack/react-query'
 import { apiGet } from '@/api/client'
-import type { MemoryReport } from '@/api/generated/MemoryReport'
 import type { OverviewEngineDetails } from '@/api/generated/observe/OverviewEngineDetails'
 import type { OverviewSnapshotFile } from '@/api/generated/observe/OverviewSnapshotFile'
 import type { OverviewState } from '@/api/generated/observe/OverviewState'
@@ -18,7 +17,6 @@ import type { OverviewState } from '@/api/generated/observe/OverviewState'
 export const overviewKeys = {
   state: (project: string) => ['overview', project] as const,
   engine: (project: string) => ['overview', project, 'engine'] as const,
-  memory: (project: string) => ['overview', project, 'memory'] as const,
   snapshot: (project: string, id: string) => ['overview', project, 'snapshot', id] as const,
 }
 
@@ -38,19 +36,6 @@ export const engineQuery = (project: string) =>
     queryKey: overviewKeys.engine(project),
     queryFn: ({ signal }) => apiGet<OverviewEngineDetails>('/overview/engine', undefined, signal),
     staleTime: Number.POSITIVE_INFINITY,
-  })
-
-/**
- * `GET /status/memory`: the console's buffers against their budget. Read
- * when the engine section is shown (enable the query then) and again on
- * its refresh button (`refetch`); never on a timer. Always stale, so each
- * time the row is shown again it reads afresh.
- */
-export const memoryQuery = (project: string) =>
-  queryOptions({
-    queryKey: overviewKeys.memory(project),
-    queryFn: ({ signal }) => apiGet<MemoryReport>('/status/memory', undefined, signal),
-    staleTime: 0,
   })
 
 /**

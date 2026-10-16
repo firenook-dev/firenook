@@ -8,7 +8,7 @@ import { Button, Checkbox, Input, Radio, Select, Switch } from '@cloudflare/kumo
 import { TrashIcon } from '@phosphor-icons/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { ApiError } from '@/api/client'
+import { errorText } from '@/lib/error-text'
 import type { PubsubSubscription } from '@/api/generated/messaging/PubsubSubscription'
 import type { PubsubUpdateSubscriptionBody } from '@/api/generated/messaging/PubsubUpdateSubscriptionBody'
 import { CopyField } from '@/components/console/copy-button'
@@ -61,11 +61,6 @@ export function endpointProblem(text: string): string | undefined {
   } catch {
     return 'The endpoint is an http or https URL.'
   }
-}
-
-function errorText(error: unknown): string {
-  if (error instanceof ApiError) return error.fix ? `${error.message} ${error.fix}` : error.message
-  return error instanceof Error ? error.message : String(error)
 }
 
 export function SubscriptionSettings({

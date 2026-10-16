@@ -16,7 +16,7 @@ import { ToolbarRow, ToolbarScope } from '@/components/console/toolbar'
 import { PanelToggle } from '@/components/shell/section-panel'
 import { liveChannel } from '@/lib/live/channel'
 import { useRouteSearch } from '@/lib/search-params'
-import { useReloadInstance, useVendorInstance } from '../actions'
+import { useReloadInstance } from '../actions'
 import { instancesQuery } from '../api'
 import { useExtensionsChanges } from '../live'
 import { useExtensionsPalette } from '../palette'
@@ -39,7 +39,6 @@ export function ExtensionsPage() {
   const current = search.instance
   const listed = instances.find((summary) => summary.instanceId === current)
   const reload = useReloadInstance(project)
-  const vendor = useVendorInstance(project)
   // The instance the vendor dialog is about stays set after it closes, so
   // the dialog keeps its words while it animates away.
   const [vendoring, setVendoring] = useState<{ instance: string; open: boolean } | undefined>(
@@ -53,10 +52,7 @@ export function ExtensionsPage() {
       ...viewPatch(view ?? 'overview'),
       ...(view === 'configuration' ? { edit: true } : {}),
     })
-  const startVendor = (instance: string) => {
-    vendor.reset()
-    setVendoring({ instance, open: true })
-  }
+  const startVendor = (instance: string) => setVendoring({ instance, open: true })
 
   useExtensionsPalette(instances, listed, {
     open: (instance) => open(instance),
@@ -154,10 +150,12 @@ export function ExtensionsPage() {
             if (!next) setVendoring((shown) => shown && { ...shown, open: false })
           }}
           summary={vendorTarget}
-          pending={vendor.isPending}
-          result={vendor.data}
-          error={vendor.error}
-          onConfirm={() => vendor.mutate(vendorTarget.instanceId)}
+          reloading={reload.isPending && reload.variables === vendorTarget.instanceId}
+          onReload={() =>
+            reload.mutate(vendorTarget.instanceId, {
+              onSuccess: () => setVendoring((shown) => shown && { ...shown, open: false }),
+            })
+          }
         />
       )}
     </SectionPage>

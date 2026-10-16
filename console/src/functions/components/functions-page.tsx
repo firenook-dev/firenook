@@ -43,7 +43,8 @@ import {
 import { useFunctionsEvents } from '../live'
 import { useFunctionsPalette } from '../palette'
 import type { FunctionsSearch } from '../search'
-import { copyText, functionUrl, useFunctionsAddress, useFunctionsProject } from '../use-functions'
+import { copyToClipboard } from '@/lib/copy'
+import { functionUrl, useFunctionsAddress, useFunctionsProject } from '../use-functions'
 import { CodebaseView } from './codebase-view'
 import { FunctionWorkbench, MissingFunction } from './function-workbench'
 import { FunctionsPanel } from './functions-panel'
@@ -141,7 +142,7 @@ export function FunctionsPage() {
           copyUrl: (() => {
             const summary = snapshot.data?.functions.find((entry) => entry.id === search.function)
             const url = summary ? functionUrl(summary, address) : undefined
-            return url ? () => void copyText(url, 'the URL') : undefined
+            return url ? () => void copyToClipboard(url, { what: 'the URL' }) : undefined
           })(),
         }
       : undefined,
@@ -239,7 +240,11 @@ export function FunctionsPage() {
     const menuFor = (row: OverviewRow): RowMenuItem[] => {
       if (row.kind === 'notLoaded')
         return [
-          { id: 'copy-id', label: 'Copy id', run: () => void copyText(row.entry.id, 'the id') },
+          {
+            id: 'copy-id',
+            label: 'Copy id',
+            run: () => void copyToClipboard(row.entry.id, { what: 'the id' }),
+          },
           { id: 'codebase', label: 'Open codebase', run: () => openCodebase(row.codebase) },
         ]
       const summary = row.summary
@@ -254,7 +259,7 @@ export function FunctionsPage() {
             q: undefined,
             sort: undefined,
           }),
-        copy: (text, what) => void copyText(text, what),
+        copy: (text, what) => void copyToClipboard(text, { what }),
         url: functionUrl(summary, address),
         invocations: () => showInvocations(`function:${summary.id}`),
         openCodebase: () => openCodebase(summary.codebase),

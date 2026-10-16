@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Badge } from '@/api/generated/live/Badge'
-import { auth } from '@/lib/sections/auth'
-import { functions as functionsSection } from '@/lib/sections/functions'
 import { sectionEntry, testStatus } from '@/test/status'
-import { whileUnbuilt } from '@/test/unbuilt'
 import {
   absentGroups,
   absentSections,
@@ -17,6 +14,7 @@ import {
   logsEntryLink,
   logsProblemsLink,
   noticeParts,
+  linkedReset,
   problemLink,
   resetConsequence,
   resettableSections,
@@ -109,7 +107,7 @@ describe('section cards', () => {
     )
     const firestore = cards[0]
     expect(firestore?.problems).toEqual([
-      // Firestore is built: the gauge links to the page that carries it.
+      // The gauge links to the page that carries it.
       {
         id: 'firestore.rules',
         text: '1 rules file does not compile',
@@ -120,19 +118,17 @@ describe('section cards', () => {
     expect(cards[3]?.problems).toEqual([])
   })
 
-  it('never link a problem into a section that is not built', async () => {
-    const cards = await whileUnbuilt(functionsSection, () =>
-      sectionCards(
-        testStatus({ sections: [sectionEntry('functions')] }),
-        badges(
-          gauge('functions.load', 2, {
-            noun: { one: 'codebase failed to load', other: 'codebases failed to load' },
-          }),
-        ),
+  it('link a gauge no page carries to the section itself', () => {
+    const cards = sectionCards(
+      testStatus({ sections: [sectionEntry('functions')] }),
+      badges(
+        gauge('functions.load', 2, {
+          noun: { one: 'codebase failed to load', other: 'codebases failed to load' },
+        }),
       ),
     )
     expect(cards[0]?.problems).toEqual([
-      { id: 'functions.load', text: '2 codebases failed to load', link: null },
+      { id: 'functions.load', text: '2 codebases failed to load', link: { to: '/functions' } },
     ])
     expect(cards[0]?.health.label).toBe('1 problem')
   })
@@ -158,7 +154,7 @@ describe('section cards', () => {
     expect(sectionCards(absent, badges())[0]?.logs).toBeNull()
   })
 
-  it('link a built section’s later pages, and none of an unbuilt one', async () => {
+  it('link a section’s later pages', () => {
     const cards = sectionCards(STATUS, badges())
     expect(cards[0]?.pages).toEqual([
       expect.objectContaining({ to: '/firestore/rules', label: 'Rules' }),
@@ -166,8 +162,6 @@ describe('section cards', () => {
     expect(cards[1]?.pages).toEqual([
       expect.objectContaining({ to: '/functions/invocations', label: 'Invocations' }),
     ])
-    const unbuilt = await whileUnbuilt(functionsSection, () => sectionCards(STATUS, badges()))
-    expect(unbuilt[1]?.pages).toEqual([])
   })
 })
 
@@ -253,7 +247,7 @@ describe('absent sections that one fix turns on', () => {
 })
 
 describe('resets', () => {
-  it('are offered for built, ready sections the console can clear', async () => {
+  it('are offered for ready sections the console can clear', () => {
     const status = testStatus({
       sections: [
         sectionEntry('firestore'),
@@ -267,15 +261,20 @@ describe('resets', () => {
       'firestore',
       'auth',
     ])
-    // A section's reset lands with its pages: an unbuilt one is not offered.
-    expect(
-      await whileUnbuilt(auth, () => resettableSections(status).map((entry) => entry.section.id)),
-    ).toEqual(['firestore'])
     expect(
       resettableSections(
         testStatus({ sections: [sectionEntry('firestore', { state: 'starting' })] }),
       ),
     ).toEqual([])
+  })
+
+  it('open the reset a link names, and never another section’s', () => {
+    const two = [{ section: { id: 'firestore' as const } }, { section: { id: 'auth' as const } }]
+    expect(linkedReset(two, 'auth')).toEqual({ kind: 'section', id: 'auth' })
+    expect(linkedReset(two, 'storage')).toBeUndefined()
+    expect(linkedReset(two, undefined)).toEqual({ kind: 'everything' })
+    expect(linkedReset(two.slice(1), undefined)).toEqual({ kind: 'section', id: 'auth' })
+    expect(linkedReset([], undefined)).toBeUndefined()
   })
 
   it('carry each section’s own consequence line', () => {
@@ -355,7 +354,7 @@ describe('recent problems', () => {
     })
   })
 
-  it('else with the first thing they name that opens in its section, and nothing otherwise', async () => {
+  it('else with the first thing they name that opens in its section, and nothing otherwise', () => {
     const refs = [
       { kind: 'functions.function', key: 'us-central1-fails' },
       { kind: 'firestore.document', key: '(default)|carts/c_1', label: 'carts/c_1' },
@@ -364,15 +363,20 @@ describe('recent problems', () => {
       label: 'us-central1-fails',
       kind: 'functions.function',
     })
-    await whileUnbuilt(functionsSection, () => {
-      expect(problemLink({ refs }, status)).toMatchObject({
-        label: 'carts/c_1',
-        kind: 'firestore.document',
-      })
-      expect(
-        problemLink({ refs: [{ kind: 'functions.function', key: 'us-central1-x' }] }, status),
-      ).toBeUndefined()
+    const noFunctions = testStatus({
+      sections: [
+        sectionEntry('firestore'),
+        sectionEntry('logs'),
+        sectionEntry('functions', { state: 'absent' }),
+      ],
     })
+    expect(problemLink({ refs }, noFunctions)).toMatchObject({
+      label: 'carts/c_1',
+      kind: 'firestore.document',
+    })
+    expect(
+      problemLink({ refs: [{ kind: 'functions.function', key: 'us-central1-x' }] }, noFunctions),
+    ).toBeUndefined()
     expect(problemLink({ refs: [] }, status)).toBeUndefined()
   })
 

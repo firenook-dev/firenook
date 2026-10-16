@@ -63,8 +63,9 @@ describe('recent paths', () => {
   it('keeps the latest twelve per database, newest first, without duplicates', () => {
     const store = useRecents.getState()
     store.load(recentsKey('demo', '(default)'))
-    for (let index = 0; index < 14; index += 1) store.record(`c${index}`, 'collection')
-    store.record('c3', 'document')
+    for (let index = 0; index < 14; index += 1)
+      store.record({ path: `c${index}`, kind: 'collection' })
+    store.record({ path: 'c3', kind: 'document' })
     const items = useRecents.getState().items
     expect(items).toHaveLength(12)
     expect(items[0]).toMatchObject({ path: 'c3', kind: 'document' })

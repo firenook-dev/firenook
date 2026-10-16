@@ -1,18 +1,14 @@
 //! Cloud Tasks' live topics: `tasks.counters` (each queue's figures,
-//! compared by the Tasks revision), `tasks.queue` (the row keys and task ids
-//! to read again, and the finished tasks of one queue) and `tasks.attempts`
-//! (the console's ring of attempts, fed inline by the runtime's attempt
-//! sink).
+//! compared by the Tasks revision) and `tasks.queue` (the row keys and task
+//! ids to read again, and the finished tasks of one queue). A queue's
+//! attempts as they happen are compute's: each is an invocation.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
-use firenook_functions_runtime::Monitor;
-use firenook_suite_front::replay::random_epoch;
-use firenook_suite_front::{ReplayRing, RingBudget, RingLimits};
+use firenook_tasks_front::TaskChange;
 use firenook_tasks_front::inspect::{TasksCursor, TasksScope};
-use firenook_tasks_front::{AttemptRecord, TaskChange, TasksRuntime};
 use futures_util::StreamExt as _;
 use futures_util::stream;
 use serde::Deserialize;
@@ -20,12 +16,9 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 
 use super::convert;
-use super::types::{
-    TasksAttemptEvent, TasksCountersFrame, TasksFinishedBatch, TasksQueuesChanged, TasksStale,
-};
+use super::types::{TasksCountersFrame, TasksFinishedBatch, TasksQueuesChanged, TasksStale};
 use crate::api_error::ApiError;
 use crate::late::Late;
-use crate::live::replay::{ReplayOptions, replay_topic};
 use crate::live::{LiveTopic, ResetReason, TopicEvent, TopicStream, topic_params};
 use crate::messaging::TasksConsole;
 use crate::messaging::shared::KeyWindow;
@@ -43,66 +36,8 @@ const MAX_CHANGED: usize = 200;
 const OPEN_MAX: usize = 1_000;
 /// How long `tasks.queue` collects keys before it sends them.
 const KEY_WINDOW: Duration = Duration::from_millis(100);
-/// The attempts ring: 10,000 attempts, 8 MiB.
-const ATTEMPT_RING: RingLimits = RingLimits {
-    entries: 10_000,
-    bytes: 8 * 1024 * 1024,
-    floor: 256,
-};
 /// Finished ids a `finished` event names at most.
 const MAX_IDS: usize = 100;
-
-// ------------------------------------------------------------ the attempt feed
-
-/// What an attempt entry is filtered by.
-#[derive(Clone, Debug)]
-pub(crate) struct AttemptMeta {
-    queue: Arc<str>,
-    task: u64,
-}
-
-/// The console's attempts, fed inline by the runtime's attempt sink.
-#[derive(Clone, Debug)]
-pub(crate) struct AttemptFeed {
-    ring: ReplayRing<AttemptMeta>,
-}
-
-impl AttemptFeed {
-    pub(crate) fn new() -> Self {
-        Self {
-            ring: ReplayRing::new(
-                "tasks.attempts",
-                ATTEMPT_RING,
-                random_epoch(),
-                &RingBudget::shared(),
-            ),
-        }
-    }
-
-    /// Installs the attempt sink: each attempt is serialized once, inline,
-    /// into the ring, with the invocation it caused when compute keeps it.
-    pub(crate) fn install(&self, runtime: &TasksRuntime, monitor: Option<Monitor>) {
-        let ring = self.ring.clone();
-        runtime.set_attempt_sink(Arc::new(move |record: AttemptRecord| {
-            let event = TasksAttemptEvent {
-                queue: record.queue_key.clone(),
-                task_id: record.task_id.to_string(),
-                task_name: record.task_name.clone(),
-                attempt: convert::attempt(&record, monitor.as_ref()),
-            };
-            ring.push_with(|_| {
-                let json = serde_json::to_string(&event).unwrap_or_else(|_| "null".to_owned());
-                (
-                    AttemptMeta {
-                        queue: Arc::from(record.queue_key.as_str()),
-                        task: record.task_id,
-                    },
-                    Arc::from(json),
-                )
-            });
-        }));
-    }
-}
 
 /// Cloud Tasks' live topics.
 pub(crate) fn topics(
@@ -116,8 +51,7 @@ pub(crate) fn topics(
     };
     vec![
         Arc::new(CountersTopic(shared.clone())),
-        Arc::new(QueueTopic(shared.clone())),
-        Arc::new(AttemptsTopic(shared)),
+        Arc::new(QueueTopic(shared)),
     ]
 }
 
@@ -243,8 +177,7 @@ impl Counters {
 
     /// The state a subscriber without a cursor opens with: the project's
     /// queues read once, then whatever changed between that read and the
-    /// cursor's, so the frame is the state at its revision. The official
-    /// `/queueStats` figures are never streamed.
+    /// cursor's, so the frame is the state at its revision.
     fn open_frame(&mut self) {
         let project = self.scope.project.clone();
         let list = self.console.runtime.queues_view(project.as_deref());
@@ -271,13 +204,7 @@ impl Counters {
         }
         let frame = TasksCountersFrame {
             revision: delta.revision,
-            queues: queues
-                .into_values()
-                .map(|mut counters| {
-                    counters.official = None;
-                    counters
-                })
-                .collect(),
+            queues: queues.into_values().collect(),
         };
         self.outbox.push_back(TopicEvent::json(
             "counters",
@@ -509,55 +436,5 @@ impl QueueWatcher {
                 missed: None,
             }),
         }
-    }
-}
-
-// ------------------------------------------------------------ tasks.attempts
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct AttemptsParams {
-    #[serde(default)]
-    #[allow(dead_code, reason = "a queue key names its project already")]
-    project: Option<String>,
-    queue: String,
-    /// One task's attempts only (its console id).
-    #[serde(default)]
-    task: Option<String>,
-}
-
-struct AttemptsTopic(Shared);
-
-impl LiveTopic for AttemptsTopic {
-    fn name(&self) -> &'static str {
-        "tasks.attempts"
-    }
-
-    fn open(
-        &self,
-        params: &serde_json::Value,
-        after: Option<&str>,
-    ) -> Result<TopicStream, ApiError> {
-        let params: AttemptsParams = topic_params(params)?;
-        let task = params
-            .task
-            .as_deref()
-            .map(|task| {
-                task.trim().parse::<u64>().map_err(|_| {
-                    ApiError::invalid(format!("`{task}` is not a task id; ids are numbers."))
-                })
-            })
-            .transpose()?;
-        let queue: Arc<str> = Arc::from(params.queue);
-        let after = after.map(str::to_owned);
-        Ok(after_start(&self.0, move |console| {
-            let options = ReplayOptions {
-                filter: Some(Arc::new(move |meta: &AttemptMeta| {
-                    meta.queue == queue && task.is_none_or(|task| meta.task == task)
-                })),
-                ..ReplayOptions::default()
-            };
-            replay_topic(&console.feed.ring, after.as_deref(), "attempts", options)
-        }))
     }
 }

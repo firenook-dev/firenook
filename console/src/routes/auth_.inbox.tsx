@@ -2,8 +2,6 @@ import { createFileRoute, stripSearchParams } from '@tanstack/react-router'
 import { z } from 'zod'
 import { InboxPage } from '@/auth/components/inbox-page'
 import { SectionFrame } from '@/components/console/section-gate'
-import { UnbuiltSection } from '@/components/section-placeholder'
-import { auth } from '@/lib/sections/auth'
 import { zFlag } from '@/lib/search-params'
 
 // Every view of the Inbox is a link: the project and tenant it shows, its
@@ -28,8 +26,6 @@ export const Route = createFileRoute('/auth_/inbox')({
 })
 
 function InboxRoute() {
-  // The section's placeholder until its journeys pass.
-  if (!auth.built) return <UnbuiltSection section={auth} />
   return (
     <SectionFrame section="auth">
       <InboxPage />

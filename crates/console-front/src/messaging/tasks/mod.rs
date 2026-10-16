@@ -75,7 +75,6 @@ impl TasksApi {
 pub(crate) fn router(api: TasksApi) -> Router {
     Router::new()
         .route("/tasks/queues", get(queues))
-        .route("/tasks/queue", get(queue))
         .route("/tasks/tasks", get(tasks).post(enqueue))
         .route("/tasks/tasks/meta", get(tasks_meta))
         .route("/tasks/tasks:batchGet", post(tasks_batch))
@@ -90,7 +89,6 @@ pub(crate) fn router(api: TasksApi) -> Router {
         .route("/tasks/queue/purge", post(purge_queue))
         .route("/tasks/queue/hold", post(hold_queue))
         .route("/tasks/history", get(history))
-        .route("/tasks/history/meta", get(history_meta))
         .route("/tasks/history:batchGet", post(history_batch))
         .layer(Extension(BodyLimit(BODY)))
         .with_state(api)
@@ -230,11 +228,6 @@ async fn queues(
         refused: list.refused.iter().map(convert::refused).collect(),
         revision: list.revision,
     }))
-}
-
-async fn queue(State(api): State<TasksApi>, Query(query): Query<QueueQuery>) -> Answer<TasksQueue> {
-    let console = api.console()?;
-    Ok(Json(queue_of(&console, &query.queue)?))
 }
 
 async fn pause_queue(
@@ -536,14 +529,6 @@ async fn history(
     )))
 }
 
-async fn history_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: Vec::new(),
-        default_sort: "finishedAt:desc".to_owned(),
-        fields: TASK_FIELDS.infos(),
-    })
-}
-
 async fn history_batch(
     State(api): State<TasksApi>,
     Query(scope): Query<QueueQuery>,
@@ -618,8 +603,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
         types::TasksQueuesChanged,
         types::TasksStale,
         types::TasksFinishedBatch,
-        types::TasksAttemptEvent,
-        types::TasksAttempts,
     );
 }
 

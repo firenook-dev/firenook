@@ -7,6 +7,7 @@
 
 import { CheckIcon, CopyIcon } from '@phosphor-icons/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { copyToClipboard } from '@/lib/copy'
 
 /** How long the tick stays, ms: Kumo's own. */
 const COPIED_MS = 1500
@@ -34,8 +35,9 @@ export function CopyGlyph({ copied }: { copied: boolean }) {
 }
 
 /**
- * `copied` for a moment after `flash`. `copy` writes the text and flashes
- * only once the clipboard has it, so a refused write shows no tick.
+ * `copied` for a moment after `flash`. `copy` writes the text through
+ * `copyToClipboard` and flashes only once the clipboard has it, so a
+ * refused write shows no tick and says why in a toast.
  */
 export function useCopied() {
   const [copied, setCopied] = useState(false)
@@ -48,13 +50,9 @@ export function useCopied() {
   }, [])
   const copy = useCallback(
     async (text: string) => {
-      try {
-        await navigator.clipboard.writeText(text)
-        flash()
-        return true
-      } catch {
-        return false
-      }
+      const written = await copyToClipboard(text)
+      if (written) flash()
+      return written
     },
     [flash],
   )

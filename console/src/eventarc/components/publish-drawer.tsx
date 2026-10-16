@@ -28,7 +28,7 @@ import {
   publishProblems,
 } from '../publish'
 import { channelLabel } from '../topology'
-import { CopyAsMenu } from './copy-as-menu'
+import { EventCode } from './event-code'
 
 /** A value that settles `delay` ms after it last changed: what the matcher is asked. */
 function useSettled<T>(value: T, delay = 250): T {
@@ -449,7 +449,7 @@ function PublishFooter({
   return (
     <InspectorFooter
       testId="publish-footer"
-      tools={<CopyAsMenu draft={draft} label={labels} testId="publish-copy-as" />}
+      tools={<EventCode draft={draft} label={labels} testId="publish-code" />}
       primary={
         <SendButton onSend={onPublish} pending={pending} label="Publish" testId="publish-send" />
       }

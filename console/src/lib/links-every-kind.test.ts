@@ -5,6 +5,7 @@
 // registry, as a log line or a trigger chip resolves it, and the page it names
 // must exist in the route tree and take the search the link carries — as the
 // router reads it from the address, so a link opened in a new tab works too.
+// Every action ⌘K offers from anywhere is held to the same.
 
 import { QueryClient } from '@tanstack/react-query'
 import { createMemoryHistory, createRouter, defaultStringifySearch } from '@tanstack/react-router'
@@ -14,8 +15,15 @@ import { routeTree } from '@/routeTree.gen'
 import { sectionEntry, testStatus } from '@/test/status'
 import kinds from './entity-kinds.json'
 import { linkTo } from './links'
+import { SECTION_ACTIONS } from './palette-actions'
 import { parseSearch } from './search-params'
 import { SECTIONS } from './services'
+
+/**
+ * Kinds that may open in another section's page: a schedule is Pub/Sub's
+ * scheduler, shown on its function's Schedule tab in Functions.
+ */
+const OPENS_IN: Readonly<Record<string, string>> = { 'pubsub.schedule': 'functions' }
 
 const everySectionReady = testStatus({
   sections: SECTIONS.map((section) => sectionEntry(section.id)),
@@ -55,14 +63,34 @@ describe('every kind of link', () => {
       const link = linkTo(entity, everySectionReady)
       expect(link, `${entity.kind} resolves`).not.toBeNull()
       if (!link) return
-      // The page exists, and the section that owns the kind is the one it opens.
+      // The page exists, and the section that owns the kind is the one it
+      // opens (or the one `OPENS_IN` names for it).
       expect(Object.keys(router.routesByPath)).toContain(link.to)
-      expect(link.to.split('/')[1]).toBe(entity.kind.slice(0, entity.kind.indexOf('.')))
+      const owner = entity.kind.slice(0, entity.kind.indexOf('.'))
+      expect([owner, OPENS_IN[entity.kind] ?? owner]).toContain(link.to.split('/')[1])
       // Nothing the link says is dropped: every param reaches the page (an
       // id the page reads as a number may arrive as one).
       const search = validated(link.to, link.search) as Record<string, unknown>
       for (const [key, value] of Object.entries(link.search ?? {}))
         if (value !== undefined)
           expect(String(search[key]), `${entity.kind} ${key}`).toBe(String(value))
+    })
+})
+
+describe('every ⌘K action', () => {
+  const actions = Object.values(SECTION_ACTIONS).flat()
+
+  it('has an id of its own', () => {
+    expect(actions.length).toBeGreaterThan(10)
+    expect(new Set(actions.map((action) => action.id)).size).toBe(actions.length)
+  })
+
+  for (const action of actions)
+    it(`${action.id} opens a real page that takes its search`, () => {
+      expect(Object.keys(router.routesByPath)).toContain(action.link.to)
+      const search = validated(action.link.to, action.link.search) as Record<string, unknown>
+      for (const [key, value] of Object.entries(action.link.search ?? {}))
+        if (value !== undefined)
+          expect(String(search[key]), `${action.id} ${key}`).toBe(String(value))
     })
 })

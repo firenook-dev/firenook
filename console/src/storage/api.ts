@@ -25,24 +25,19 @@ import { API_BASE, ApiError, type ApiErrorCode, parseErrorBody } from '@/api/cli
 import type { BatchGetResponse } from '@/api/generated/BatchGetResponse'
 import type { Job } from '@/api/generated/Job'
 import type { ListMeta } from '@/api/generated/ListMeta'
-import type { Page } from '@/api/generated/Page'
 import type { RulesDiagnostic } from '@/api/generated/RulesDiagnostic'
 import type { RulesMethod } from '@/api/generated/RulesMethod'
 import type { RulesVersion } from '@/api/generated/RulesVersion'
 import type { StorageAccess } from '@/api/generated/storage/StorageAccess'
 import type { StorageAccessBody } from '@/api/generated/storage/StorageAccessBody'
 import type { StorageActivity } from '@/api/generated/storage/StorageActivity'
-import type { StorageArchive } from '@/api/generated/storage/StorageArchive'
 import type { StorageBatchGetRequest } from '@/api/generated/storage/StorageBatchGetRequest'
 import type { StorageBuckets } from '@/api/generated/storage/StorageBuckets'
 import type { StorageBulkBody } from '@/api/generated/storage/StorageBulkBody'
 import type { StorageBulkPreview } from '@/api/generated/storage/StorageBulkPreview'
 import type { StorageCreateFolderBody } from '@/api/generated/storage/StorageCreateFolderBody'
-import type { StorageDecisionBatch } from '@/api/generated/storage/StorageDecisionBatch'
 import type { StorageDecisionDetail } from '@/api/generated/storage/StorageDecisionDetail'
-import type { StorageDecisionsParams } from '@/api/generated/storage/StorageDecisionsParams'
 import type { StorageDeleteObjectBody } from '@/api/generated/storage/StorageDeleteObjectBody'
-import type { StorageDiscardSessionBody } from '@/api/generated/storage/StorageDiscardSessionBody'
 import type { StorageEntry } from '@/api/generated/storage/StorageEntry'
 import type { StorageEvaluateBody } from '@/api/generated/storage/StorageEvaluateBody'
 import type { StorageEvaluateRequest } from '@/api/generated/storage/StorageEvaluateRequest'
@@ -70,13 +65,10 @@ import type { StorageRulesInstalled } from '@/api/generated/storage/StorageRules
 import type { StorageRulesWrite } from '@/api/generated/storage/StorageRulesWrite'
 import type { StorageTokenBody } from '@/api/generated/storage/StorageTokenBody'
 import type { StorageUpdateObjectBody } from '@/api/generated/storage/StorageUpdateObjectBody'
-import type { StorageUploadSession } from '@/api/generated/storage/StorageUploadSession'
 import { RulesCompileError } from '@/rules/text'
 
 /** Every Storage route is under this. */
 export const STORAGE_API = `${API_BASE}/storage`
-/** The Storage emulator's own API, on the console's origin (the protocol an app speaks). */
-export const STORAGE_NATIVE = `${STORAGE_API}/native`
 
 /** The header every console request carries; the engine records the request as the console's. */
 const CONSOLE_HEADER = 'x-firenook-console'
@@ -394,17 +386,6 @@ export function resendEvent(
   return call('POST', '/object/resend', body, options)
 }
 
-/** A zip's entries from its central directory (≤ 2,000). */
-export function getArchive(
-  bucket: string,
-  name: string,
-  generation: string,
-  limit?: number,
-  signal?: AbortSignal,
-): Promise<StorageArchive> {
-  return get('/object/archive', { bucket, name, g: generation, limit }, { signal })
-}
-
 /** The object's changes and the rules decisions on its name, newest first. */
 export function getActivity(
   bucket: string,
@@ -597,26 +578,6 @@ export function uploadObject(
 }
 
 // ---------------------------------------------------------------------------
-// Resumable sessions an app started.
-
-/** Resumable uploads not finished, newest activity first. */
-export function listSessions(
-  bucket: string,
-  page: { cursor?: string | undefined; before?: string | undefined; limit?: number | undefined },
-  signal?: AbortSignal,
-): Promise<Page<StorageUploadSession>> {
-  return get('/sessions', { bucket, ...page }, { signal })
-}
-
-/** Removes a session and its staged bytes (Admin only). */
-export function discardSession(
-  body: StorageDiscardSessionBody,
-  options?: CallOptions,
-): Promise<void> {
-  return call('POST', '/session/discard', body, options)
-}
-
-// ---------------------------------------------------------------------------
 // Rules.
 
 /** The rules governing a bucket (its scope's, in single-file mode every bucket's). */
@@ -656,19 +617,6 @@ export function evaluateRules(
   return call('POST', '/rules/evaluate', body, { signal })
 }
 
-/** The retained decisions the topic's parameters match: the first paint before the topic replays. */
-export function getDecisions(
-  params: StorageDecisionsParams,
-  signal?: AbortSignal,
-): Promise<StorageDecisionBatch> {
-  return get(
-    '/rules/decisions',
-    { ...params, denied: params.denied ? true : undefined },
-    { signal },
-  )
-}
-
-/** A decision, run again with every expression's value; `null` once it left the re-runnable window. */
 export async function getDecision(
   id: string,
   signal?: AbortSignal,

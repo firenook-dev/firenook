@@ -2,7 +2,7 @@
 // message as its title, the level and time beside it, and bands for the
 // whole message (wrapped and selectable), the payload's tree (each value
 // can filter the list), where the line came from, and every link it
-// carries — each a link only where the section it opens is built. It
+// carries — each a link only where this engine runs the section it opens. It
 // follows the list's cursor (↑ ↓, or its chevrons). The footer copies the
 // line, hides lines like it, and reads the log around it in time.
 //

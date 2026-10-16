@@ -115,7 +115,7 @@ test('J-SC-01 a new schema says what is wrong, where, until it parses', async ({
   }
 })
 
-test('J-SC-02 revisions: commit, diff, roll back and delete', async ({ page, engine }) => {
+test('J-SC-02 an edited definition commits as a new revision', async ({ page, engine }) => {
   const id = uniqueId('sc02')
   try {
     await createSchema(engine, id, order('double'))
@@ -123,87 +123,51 @@ test('J-SC-02 revisions: commit, diff, roll back and delete', async ({ page, eng
     const commit = page.getByTestId('pubsub-schema-commit')
     await expect(commit).toBeDisabled()
 
-    // A field's type edited: ⌘S commits it as revision 2.
+    // A field's type edited: ⌘S commits it as revision 2, now the latest.
     await replaceText(page, 'pubsub-schema-source', order('long'))
     await expect(page.getByTestId('pubsub-schema-edited')).toBeVisible()
     await expect(commit).toBeEnabled()
     await page.keyboard.press('ControlOrMeta+s')
-    await expect(page.getByRole('tab', { name: /Revisions 2/ })).toBeVisible()
     await expect(page.getByTestId('pubsub-schema-edited')).toHaveCount(0)
-    const [first, second] = (await revisionsOf(engine, id)).map((revision) => revision.id)
-
-    // The first against the editor: double out, long in.
-    await page.getByRole('tab', { name: /Revisions/ }).click()
-    const table = page.getByTestId('pubsub-schema-revisions-table')
-    await table.locator(`tr[data-key="${first}"]`).click({ button: 'right' })
-    await page.getByTestId('row-menu-diff').click()
-    await expect(page).toHaveURL(new RegExp(`diff=${first}`))
-    await expect(
-      page.locator('[data-testid="pubsub-schema-diff-lines"] [data-kind="removed"]'),
-    ).toContainText('"double"')
-    await expect(
-      page.locator('[data-testid="pubsub-schema-diff-lines"] [data-kind="added"]'),
-    ).toContainText('"long"')
-
-    // Rolled back: a third revision with the first's definition, in the editor.
-    await page.getByRole('tab', { name: /Revisions/ }).click()
-    await table.locator(`tr[data-key="${first}"]`).click({ button: 'right' })
-    await page.getByTestId('row-menu-rollback').click()
-    await expect(page.getByRole('tab', { name: /Revisions 3/ })).toBeVisible()
-    await expect(page.getByTestId('pubsub-schema-source')).toContainText('"double"')
-    const third = (await revisionsOf(engine, id)).at(-1)
-    expect(JSON.parse(third?.definition ?? '{}')).toEqual(JSON.parse(order('double')))
-
-    // The middle one deleted; then down to one, which cannot go.
-    await page.getByRole('tab', { name: /Revisions/ }).click()
-    await table.locator(`tr[data-key="${second}"]`).click({ button: 'right' })
-    await page.getByTestId('row-menu-delete').click()
-    await page.getByTestId('pubsub-revision-delete-confirm-confirm').click()
-    await expect(page.getByRole('tab', { name: /Revisions 2/ })).toBeVisible()
-    await table.locator(`tr[data-key="${first}"]`).click({ button: 'right' })
-    await page.getByTestId('row-menu-delete').click()
-    await page.getByTestId('pubsub-revision-delete-confirm-confirm').click()
-    await expect(page.getByRole('tab', { name: /Revisions 1/ })).toBeVisible()
-    await table.locator(`tr[data-key="${third?.id ?? ''}"]`).click({ button: 'right' })
-    const last = page.getByTestId('row-menu-delete')
-    await expect(last).toHaveAttribute('data-disabled', '')
-    // Its tooltip's trigger wraps it, and takes the pointer.
-    await last.hover({ force: true })
-    await expect(page.locator('.kumo-tooltip-popup')).toContainText(
-      'Cannot delete last revision. Please use DeleteSchema.',
+    await expect(commit).toBeDisabled()
+    const revisions = await revisionsOf(engine, id)
+    expect(revisions).toHaveLength(2)
+    const latest = revisions.at(-1)?.id ?? ''
+    expect(JSON.parse(revisions.at(-1)?.definition ?? '{}')).toEqual(JSON.parse(order('long')))
+    await expect(page.getByTestId('pubsub-schema-status')).toContainText(
+      latest.length > 12 ? latest.slice(0, 8) : latest,
     )
-    expect(await revisionsOf(engine, id)).toHaveLength(1)
+    // A definition that does not parse cannot be committed.
+    await replaceText(page, 'pubsub-schema-source', order('strin'))
+    await expect(page.getByTestId('pubsub-schema-status')).toContainText(
+      'Unknown primitive type: strin',
+    )
+    await expect(commit).toBeDisabled()
   } finally {
     await deleteSchema(engine, id)
   }
 })
 
-test('J-SC-03 a test message names the path that fails, and an example passes', async ({
+test('J-SC-03 Used by lists the topics bound to a schema, each a link', async ({
   page,
   engine,
 }) => {
   const id = uniqueId('sc03')
+  const topic = `${id}-topic`
   try {
     await createSchema(engine, id, order('double'))
-    await openSchemas(page, engine.origin, `schema=${id}`)
-    await page.getByTestId('pubsub-schema-test-toggle').click()
-    await expect(page).toHaveURL(/panel=test/)
-    // It opens on the engine's example, which passes.
-    await expect(page.getByTestId('schema-test-valid')).toContainText('Valid against the latest')
-    await replaceText(page, 'schema-test-data', '{"orderId":"o_1","amount":"42.5"}')
-    await expect(page.getByTestId('schema-test-problem')).toHaveText(
-      '$.amount: expected a number, found string "42.5"',
-    )
-    await expect(page.getByTestId('schema-test-engine')).toHaveText(
-      'A publish would answer: Could not parse JSON Avro message',
-    )
-    await page.getByTestId('schema-test-example').click()
-    await expect(page.getByTestId('schema-test-valid')).toContainText('Valid against the latest')
-    // Escape closes the panel.
-    await page.getByTestId('pubsub-schema-tabs').click()
-    await page.keyboard.press('Escape')
-    await expect(page.getByTestId('pubsub-schema-test')).toHaveCount(0)
+    await createTopic(engine, topic, {
+      schema: { schema: schemaName(engine, id), encoding: 'BINARY' },
+    })
+    await openSchemas(page, engine.origin, `schema=${id}&view=used-by`)
+    const table = page.getByTestId('pubsub-schema-used-by-table')
+    await expect(page.getByRole('tab', { name: /Used by 1/ })).toBeVisible()
+    await expect(table.getByTestId('data-row')).toHaveCount(1)
+    await expect(table.getByTestId('data-row').first()).toContainText('binary')
+    await table.getByRole('link', { name: topic }).click()
+    await expect(page).toHaveURL(new RegExp(`/console/pubsub\\?.*topic=${topic}`))
   } finally {
+    await deleteTopic(engine, topic)
     await deleteSchema(engine, id)
   }
 })

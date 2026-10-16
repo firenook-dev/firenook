@@ -1,5 +1,6 @@
-// Who requests run as: Firestore's "view as", the rules playgrounds,
-// compute's "Call as", Storage's "As", Cloud Tasks' enqueue. The engine
+// Who requests run as: Firestore's "view as", Storage's "As" and its rules
+// playground, Functions' "Call as" (an Invoke and a callable), and the
+// user a sign-in fills in from on Authentication's Activity. The engine
 // applies rules and auth checks to every request, so picking an identity
 // shows exactly what that identity's app would get.
 //

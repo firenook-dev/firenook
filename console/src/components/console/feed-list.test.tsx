@@ -359,6 +359,20 @@ describe('FeedList', () => {
     expect(onOpenTarget).toHaveBeenCalledWith(expect.objectContaining({ id: 'l1' }))
   })
 
+  it('inline, takes no keys and lets its rows be read and selected', async () => {
+    const store = createFeedStore<Line>({ max: 100, key: rowKey })
+    render(<Feed store={store} startPaused inline />)
+    act(() => store.push(lines(10)))
+    await frame()
+    key('ArrowDown')
+    key('j')
+    expect(selected()).toBeNull()
+    for (const row of screen.getAllByTestId('feed-row')) {
+      expect(row).toHaveClass('select-text')
+      expect(row).not.toHaveClass('select-none')
+    }
+  })
+
   it('paused without a scroll, a newest-first list holds the row on top as rows arrive above it', async () => {
     const store = createFeedStore<Line>({ max: 100, key: rowKey })
     render(<Feed store={store} order="newest-first" startPaused />)

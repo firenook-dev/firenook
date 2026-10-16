@@ -1,13 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  csvCell,
-  csvColumns,
-  csvField,
-  csvRow,
-  documentToJson,
-  exportFilename,
-  formatInfo,
-} from './export'
+import { csvCell, csvColumns, csvField, csvRow, documentToJson, exportFilename } from './export'
 import type { FsDocument } from './value'
 
 const ROOT = 'projects/demo/databases/(default)/documents'
@@ -105,13 +97,5 @@ describe('the CSV', () => {
 
   it('ends every row with a newline so lines concatenate into a file', () => {
     expect(csvRow(['a', 'b'])).toBe('a,b\n')
-  })
-})
-
-describe('the formats offered', () => {
-  it('always resolves to one, and each carries its own media type', () => {
-    expect(formatInfo('json').mediaType).toBe('application/json')
-    expect(formatInfo('ndjson').mediaType).toBe('application/x-ndjson')
-    expect(formatInfo('csv').mediaType).toBe('text/csv')
   })
 })

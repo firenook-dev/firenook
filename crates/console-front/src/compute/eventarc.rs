@@ -10,7 +10,6 @@
 use std::collections::BTreeMap;
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use firenook_functions_runtime::console::{ChannelView, RuntimeStatus};
@@ -23,7 +22,7 @@ use ts_rs::TS;
 
 use super::extensions::ExtensionDeclaredEvent;
 use super::filters::event_filter;
-use super::functions::{BODY_LIMIT, FunctionStatus, NoBody};
+use super::functions::{BODY_LIMIT, FunctionStatus};
 use super::{ComputeState, console_error, grouped, random_uuid};
 use crate::api_error::ApiError;
 use crate::entity::EntityRef;
@@ -195,10 +194,7 @@ pub(crate) fn router(state: ComputeState) -> Router {
     let limit = Extension(BodyLimit(BODY_LIMIT));
     Router::new()
         .route("/eventarc/channels", get(snapshot))
-        .route(
-            "/eventarc/events",
-            get(events).delete(clear_events).layer(limit),
-        )
+        .route("/eventarc/events", get(events).layer(limit))
         .route("/eventarc/events/{id}", get(event))
         .route("/eventarc/events/{id}/replay", post(replay).layer(limit))
         .route("/eventarc/channel/publish", post(publish).layer(limit))
@@ -447,14 +443,6 @@ async fn events(
         ),
         live_cursor,
     }))
-}
-
-async fn clear_events(
-    State(state): State<ComputeState>,
-    ConsoleJson(NoBody {}): ConsoleJson<NoBody>,
-) -> StatusCode {
-    state.monitor().clear_events();
-    StatusCode::NO_CONTENT
 }
 
 fn event_not_kept(state: &ComputeState) -> ApiError {

@@ -2,19 +2,17 @@
 // while rows are ticked: Disable, Enable, Verify email, Revoke, Claims…,
 // Export, and Delete N last in red. "Select all N matching" turns the
 // selection into the filter itself, so the change reaches every match when
-// the job runs. Every change is one engine job; a small selection starts at
-// once and says what changed, a large one (or every match) asks the engine
-// for its numbers first.
+// the job runs. Every change is one engine job, whose progress is the
+// page's jobs banner; a small selection starts at once, a large one (or
+// every match) asks the engine for its numbers first.
 
 import { Button, Tooltip } from '@cloudflare/kumo'
 import { DownloadSimpleIcon, TrashIcon } from '@phosphor-icons/react'
 import { useMutation } from '@tanstack/react-query'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import type { Total } from '@/api/generated/Total'
 import { SelectionBar } from '@/components/console/selection-bar'
-import { jobProgress } from '@/components/console/danger-confirm'
 import { formatNumber } from '@/lib/format'
-import { useJob } from '@/lib/jobs'
 import { toast } from '@/lib/toasts'
 import { startBulk } from '../api'
 import { SIMPLE_VERBS, type SimpleVerb, VERB_WORDS, bulkTarget, needsDryRun } from '../bulk'
@@ -25,22 +23,6 @@ import { BulkConfirm } from './bulk-confirm'
 import { BulkDeleteDialog } from './bulk-delete-dialog'
 
 type Open = { kind: 'simple'; verb: SimpleVerb } | { kind: 'claims' } | { kind: 'delete' } | null
-
-/** Says how a job this tab started at once ended, once. */
-function useStartedJobToast(jobId: string | undefined, title: string, verb: string) {
-  const job = useJob(jobId)
-  const said = useRef<string | undefined>(undefined)
-  useEffect(() => {
-    if (!job || job.state === 'running' || said.current === job.id) return
-    said.current = job.id
-    toast({
-      key: `job:${job.id}`,
-      title: job.state === 'done' ? title : `${title}: ${job.state}`,
-      description: jobProgress(job, verb),
-      tone: job.state === 'done' ? 'success' : job.state === 'cancelled' ? 'warning' : 'danger',
-    })
-  }, [job, title, verb])
-}
 
 export function useUserBulk(options: {
   project: string
@@ -57,8 +39,6 @@ export function useUserBulk(options: {
   const tenant = usersTenant(scope)
   const [open, setOpen] = useState<Open>(null)
   const [jobId, setJobId] = useState<string | undefined>(undefined)
-  const [quick, setQuick] = useState<{ id: string; title: string; verb: string } | undefined>()
-  useStartedJobToast(quick?.id, quick?.title ?? '', quick?.verb ?? '')
   const selecting = selection.everything || selection.checked.size > 0
   const target = bulkTarget(scope, selection, q)
   const count = selection.everything
@@ -66,10 +46,6 @@ export function useUserBulk(options: {
     : selection.checked.size
   const startQuick = useMutation({
     mutationFn: (verb: SimpleVerb) => startBulk(project, verb, { target }),
-    onSuccess: (job, verb) => {
-      const words = VERB_WORDS[verb]
-      setQuick({ id: job.id, title: words.doneTitle(count), verb: words.done })
-    },
     onError: (error) =>
       toast({
         key: 'auth.bulk',

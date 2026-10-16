@@ -3,22 +3,21 @@
 // folder, the import seed when that is safe, the project's export folder.
 // The browser names a destination, never a path; any other folder is the
 // `firenook emulators:export <dir>` command to run. A folder that already
-// holds files is replaced only after a second, explicit confirmation.
+// holds files is replaced only after a second, explicit confirmation. The
+// engine saves it as a suite job: the dialog closes once the job has
+// started, and every tab hears where it went.
 
 import { Button, Dialog, Radio } from '@cloudflare/kumo'
 import { FloppyDiskIcon, XIcon } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { ApiError, apiSend } from '@/api/client'
+import { ApiError } from '@/api/client'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import type { ExportDestination } from '@/api/generated/ExportDestination'
-import type { ExportResult } from '@/api/generated/ExportResult'
 import type { Job } from '@/api/generated/Job'
 import { CopyField } from '@/components/console/copy-button'
 import { DangerConfirm } from '@/components/console/danger-confirm'
-import { destinationsQuery } from '@/components/shell/engine-popover'
-import { formatDuration } from '@/lib/format'
-import { toast } from '@/lib/toasts'
+import { destinationsQuery, saveSnapshot } from '../api'
 import { SnapshotTargets, snapshotServices } from './snapshot-targets'
 
 const EXPORT_COMMAND = 'firenook emulators:export <dir>'
@@ -66,18 +65,12 @@ export function SaveSnapshotDialog({
     setSaving(true)
     setError(undefined)
     try {
-      const result = await apiSend<ExportResult>('POST', '/suite/export', {
+      await saveSnapshot(client, {
         destination: target.id,
         ...(chosen.length === services.length ? {} : { targets: chosen }),
-        ...(overwrite ? { overwrite: true } : {}),
+        overwrite,
       })
       setReplacing(undefined)
-      toast({
-        key: 'overview-save-snapshot',
-        title: 'Snapshot saved',
-        description: `${result.path} · ${formatDuration(result.tookMs)}`,
-        tone: 'success',
-      })
       setSaving(false)
       close(false)
     } catch (thrown) {

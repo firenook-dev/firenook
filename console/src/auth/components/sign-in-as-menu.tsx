@@ -5,7 +5,8 @@
 // a sign-in runs it (its claims and session claims in the token; the
 // account not changed; its own side effects happen). Copied as a token, an
 // Authorization header, a custom token for the app's devtools, a Firestore
-// request; or opened in Firestore and the rules playground as this user.
+// request; viewed in Inspect a token, with what still differs from a real
+// sign-in; or opened in Firestore and the rules playground as this user.
 
 import { Button, DropdownMenu, Tooltip } from '@cloudflare/kumo'
 import {
@@ -15,7 +16,6 @@ import {
   EyeIcon,
   FlaskIcon,
   KeyIcon,
-  SignInIcon,
   TerminalIcon,
   UserFocusIcon,
 } from '@phosphor-icons/react'
@@ -29,9 +29,12 @@ import { MenuCheck } from '@/components/kit'
 import { hostLiteral, defaultConnectHost } from '@/lib/connect'
 import { toast } from '@/lib/toasts'
 import { mintToken } from '../api'
+import { identifierOf } from '../identifier'
+import { handOffToken } from '../inspect-handoff'
 import { firestoreAsUser, playgroundAsUser } from '../links'
 import { providerLabel } from '../providers'
 import { hooksQuery } from '../queries'
+import { projectParam } from '../tenant-scope'
 import {
   type FactorChoice,
   type TokenChoice,
@@ -40,18 +43,16 @@ import {
   firestoreCurl,
   tokenRequest,
 } from '../token-request'
-import { type UserTarget, copyToClipboard, refusal } from '../user-actions'
+import { copyToClipboard } from '@/lib/copy'
+import { type UserTarget, refusal } from '../user-actions'
 
 export function SignInAsMenu({
   detail,
   target,
-  onView,
   words = true,
 }: {
   detail: AuthUserDetail
   target: UserTarget
-  /** "View the token…": the token dialog, with what it was minted with. */
-  onView: (minted: AuthMintedToken, choice: TokenChoice) => void
   /** Room for the word on the trigger (the footer gives it up by width). */
   words?: boolean
 }) {
@@ -85,7 +86,11 @@ export function SignInAsMenu({
   }
   const copyFrom = (what: string, pick: (minted: AuthMintedToken) => string) => async () => {
     const minted = await mint(what)
-    if (minted) await copyToClipboard(pick(minted), what)
+    if (minted)
+      await copyToClipboard(pick(minted), {
+        what,
+        refused: 'Allow clipboard access for this page, or copy it from the inspector.',
+      })
   }
   const as = { uid: target.uid, tenant: target.tenant, email: detail.row.email }
   const factorLabel =
@@ -267,16 +272,21 @@ export function SignInAsMenu({
             icon={EyeIcon}
             onClick={() =>
               void mint('a token to view').then((minted) => {
-                if (minted) onView(minted, choice)
+                if (!minted) return
+                handOffToken(minted.idToken, { who: identifierOf(detail.row).text, minted })
+                void navigate({
+                  to: '/auth/activity' as never,
+                  search: { panel: 'inspect', project: projectParam(target.project) } as never,
+                })
               })
             }
             data-testid="view-token"
           >
             View the token…
           </DropdownMenu.Item>
-          <DropdownMenu.Separator />
           {firestore && (
             <>
+              <DropdownMenu.Separator />
               <DropdownMenu.Item
                 icon={DatabaseIcon}
                 onClick={() => {
@@ -299,23 +309,6 @@ export function SignInAsMenu({
               </DropdownMenu.Item>
             </>
           )}
-          <DropdownMenu.Item
-            icon={SignInIcon}
-            onClick={() =>
-              void navigate({
-                to: '/auth/activity' as never,
-                search: {
-                  panel: 'try',
-                  method: detail.row.phoneNumber && !detail.row.email ? 'phone' : 'password',
-                  tenant: target.tenant,
-                  project: target.project,
-                } as never,
-              })
-            }
-            data-testid="sign-in-for-real"
-          >
-            Sign in for real… (Try a sign-in)
-          </DropdownMenu.Item>
         </div>
       </DropdownMenu.Content>
     </DropdownMenu>

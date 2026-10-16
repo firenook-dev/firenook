@@ -438,6 +438,12 @@ impl RulesEvaluator {
         }
     }
 
+    /// The runtime every front evaluates against, whose recorded decisions
+    /// these routes explain.
+    pub(crate) const fn runtime(&self) -> &RulesRuntime {
+        &self.rules
+    }
+
     pub(crate) fn router(self) -> axum::Router {
         axum::Router::new()
             .route("/rules/evaluate", axum::routing::post(evaluate))
@@ -512,7 +518,8 @@ impl RulesEvaluator {
         let Some(decision) = self.rules.decision(request_id) else {
             return Err(ApiError::not_found(if self.rules.retains_decisions() {
                 format!(
-                    "decision {request_id} is not retained: decisions are kept for ten minutes, up to the 256 most recent"
+                    "decision {request_id} is not retained: the engine keeps the newest {} decisions",
+                    firenook_rules_runtime::RETAINED_DECISIONS
                 )
             } else {
                 "decisions are not retained: request diagnostics are off".to_owned()

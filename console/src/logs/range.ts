@@ -3,6 +3,8 @@
 // `reload` (since the last Functions reload). Every line the engine keeps
 // when neither is set. Times are when each line was recorded.
 
+import { clockTime, pad } from '@/lib/format'
+
 /** The windows the range picker offers by name. */
 export interface RangePreset {
   id: 'all' | '1m' | '5m' | '15m' | '1h' | 'reload'
@@ -33,15 +35,13 @@ export function presetOf(
   return RANGE_PRESETS.find((preset) => preset.from === normal)
 }
 
-const pad = (value: number) => String(value).padStart(2, '0')
-
 /** `12:05`, `12:05:10` when it has seconds, with the day in front when it is not today. */
 export function clockText(ms: number, now = Date.now()): string {
   const date = new Date(ms)
-  const time =
-    date.getSeconds() === 0 && date.getMilliseconds() === 0
-      ? `${pad(date.getHours())}:${pad(date.getMinutes())}`
-      : `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  const time = clockTime(
+    date,
+    date.getSeconds() === 0 && date.getMilliseconds() === 0 ? 'minute' : 'second',
+  )
   const today = new Date(now)
   const sameDay =
     date.getFullYear() === today.getFullYear() &&

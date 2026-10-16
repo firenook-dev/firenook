@@ -107,6 +107,46 @@ fn words_search_the_summary_path_error_and_function() {
 }
 
 #[test]
+fn topic_and_queue_match_what_caused_the_invocation() {
+    let mut message = summary(1, "us-central1-onEmail", FunctionKind::Pubsub);
+    message.cause = InvocationCause::Pubsub {
+        topic: "projects/demo/topics/emails".to_owned(),
+        message_id: Some("7".to_owned()),
+        event_id: None,
+    };
+    assert!(keeps("topic:emails", &message));
+    assert!(keeps("topic:projects/demo/topics/emails", &message));
+    assert!(keeps("topic:projects/demo/topics/*", &message));
+    assert!(keeps("topic:email*", &message));
+    assert!(!keeps("topic:projects/other/topics/emails", &message));
+    assert!(!keeps("topic:mail", &message));
+    assert!(!keeps("queue:emails", &message));
+    let mut tick = summary(2, "us-central1-nightly", FunctionKind::Schedule);
+    tick.cause = InvocationCause::Schedule {
+        topic: "projects/demo/topics/firebase-schedule-nightly".to_owned(),
+        event_id: None,
+    };
+    assert!(keeps("topic:firebase-schedule-nightly", &tick));
+    let mut task = summary(3, "us-central1-resize", FunctionKind::Tasks);
+    task.cause = InvocationCause::Task {
+        queue: "queue:demo-us-central1-resize".to_owned(),
+        task: "t1".to_owned(),
+        retry_count: 0,
+        execution_count: 1,
+    };
+    assert!(keeps("queue:demo-us-central1-resize", &task));
+    assert!(keeps("queue:queue:demo-us-central1-resize", &task));
+    assert!(keeps("queue:demo-us-central1-*", &task));
+    assert!(!keeps("queue:demo-us-central1-orders", &task));
+    assert!(!keeps("topic:resize", &task));
+    // Anything else has neither.
+    let call = summary(4, "us-central1-api", FunctionKind::Http);
+    assert!(!keeps("topic:*", &call));
+    assert!(!keeps("queue:*", &call));
+    assert!(keeps("-queue:*", &call));
+}
+
+#[test]
 fn unknown_keys_and_bad_values_are_refused_with_their_span() {
     let error = invocation_filter("fn:a nope:b")
         .err()

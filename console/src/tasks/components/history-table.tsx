@@ -34,6 +34,7 @@ import { SectionBody } from '@/components/console/section-page'
 import { TableFooter } from '@/components/console/table-footer'
 import { SectionToolbar } from '@/components/console/toolbar'
 import { useCursorRows } from '@/components/console/use-cursor-rows'
+import { copyToClipboard } from '@/lib/copy'
 import { formatBytes, formatDuration, formatNumber } from '@/lib/format'
 import { useShortcuts } from '@/lib/shortcuts'
 import { toast } from '@/lib/toasts'
@@ -44,7 +45,8 @@ import { useQueueListener } from '../queue-live'
 import { displayName, generatedDetail, outcomeChip } from '../states'
 import { FilterLine, useTaskFields, usableQuery } from './filter-line'
 import type { TaskActions } from './task-actions'
-import { PayloadCell, rowElement } from './task-table'
+import { rowElement } from '@/components/console/confirm-popover'
+import { PayloadCell } from './task-table'
 import { ResultChip } from './result-chip'
 
 const NOUN = { one: 'finished task', other: 'finished tasks' }
@@ -203,8 +205,7 @@ export function HistoryView({
         'curl',
         origin,
       )
-      await navigator.clipboard.writeText(code)
-      toast({ key: 'tasks-copy', title: `Copied ${subject(row).label} as curl` })
+      await copyToClipboard(code, { title: `Copied ${subject(row).label} as curl` })
     } catch {
       toast({ key: 'tasks-copy', title: 'Could not copy the task as code', tone: 'danger' })
     }
@@ -239,10 +240,7 @@ export function HistoryView({
       icon: CopyIcon,
       shortcut: 'Mod+c',
       run: () => {
-        void navigator.clipboard.writeText(row.name).then(
-          () => toast({ key: 'tasks-copy', title: `Copied ${subject(row).label}` }),
-          () => toast({ key: 'tasks-copy', title: 'Could not copy', tone: 'danger' }),
-        )
+        void copyToClipboard(row.name, { what: subject(row).label })
       },
     },
   ]

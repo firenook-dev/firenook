@@ -2,31 +2,28 @@
 // the JSON view, subcollections with counts, save and delete. It is a
 // detail view; getting around happens in the path bar and the grid.
 
-import {
-  Button,
-  InlineCopyText,
-  Popover,
-  Text,
-  Tooltip,
-  useKumoToastManager,
-} from '@cloudflare/kumo'
+import { Button, Text, Tooltip, useKumoToastManager } from '@cloudflare/kumo'
 import {
   ArrowSquareOutIcon,
-  CaretDownIcon,
-  CaretUpIcon,
-  CodeIcon,
   CopyIcon,
   FolderIcon,
   PlusIcon,
   TrashIcon,
-  XIcon,
 } from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
 import { statusQuery } from '@/api/queries'
+import { CodePopover } from '@/components/console/code-popover'
+import {
+  Inspector as InspectorFrame,
+  InspectorFooter,
+  InspectorTitle,
+  useInspectorRoom,
+} from '@/components/console/inspector'
+import { codeTab } from '@/components/console/request/as-code'
 import { PanelTitle } from '@/components/kit'
-import { useEffect, useMemo, useState } from 'react'
 import { useCreateDialog } from '../create'
-import { CODE_TARGETS, type CodeTarget, documentAsCode } from '../query'
+import { type CodeTarget, documentAsCode } from '../query'
 import { documentQuery } from '../queries'
 import { commit, documentRoot, quoteFieldSegment } from '../rest'
 import { type Subcollection, workbenchSubcollectionsQuery } from '../subcollections'
@@ -48,16 +45,22 @@ import {
   formatNumber,
   relativeTime,
 } from '../value'
-import { CodeBlock } from '@/components/console/code-block'
-import { StepButton } from '@/components/console/inspector'
-import { CODE_LABEL_AT, useInspectorWidth } from '@/components/console/inspector-width'
-import { WidthHandle } from '@/components/console/width-handle'
 import { FieldsPanel } from './field-editor'
 import { useKnownFields } from './known-fields'
 import { TriggerChip } from './trigger-chip'
-import { useLayout } from '@/lib/layout'
 import { useGridSteps } from '../grid-steps'
 import { useWorkbench } from './workbench-context'
+
+/** The document's code, in the console's dialects: the Admin SDK is `node`'s tab. */
+const CODE_TABS: ReadonlyArray<{
+  target: CodeTarget
+  dialect: 'web' | 'node' | 'flutter' | 'rest'
+}> = [
+  { target: 'web', dialect: 'web' },
+  { target: 'admin', dialect: 'node' },
+  { target: 'flutter', dialect: 'flutter' },
+  { target: 'rest', dialect: 'rest' },
+]
 
 /** Where an app sends REST calls: the Firestore port the engine advertises. */
 function firestoreOrigin(
@@ -75,12 +78,7 @@ function readSize(path: string, nodes: readonly DraftNode[]): SizeReading {
 
 export function Inspector({ path, onDelete }: { path: string; onDelete: (path: string) => void }) {
   const workbench = useWorkbench()
-  const { width } = useInspectorWidth('firestore')
   const steps = useGridSteps()
-  // Counted while open, as the kit's inspector is: on a narrow window the
-  // section panel steps aside for it.
-  const inspectorOpened = useLayout((state) => state.inspectorOpened)
-  useEffect(() => inspectorOpened(), [inspectorOpened])
   const document = useQuery(documentQuery(workbench.scope, path))
   // The editor below holds the draft; the header up here says how big it
   // is. What the editor last reported is kept against the editor it came
@@ -99,48 +97,25 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
   // row the inspector was opened from has usually asked already.
   const subcollections = useQuery(workbenchSubcollectionsQuery(workbench, path))
 
+  // The kit's inspector frame, which was measured on this one: the path
+  // (copyable) as the title, size and age beside it, the trigger chip and
+  // "open in grid" as actions, the grid's previous and next, close; its
+  // width is the person's, and below `xl` it floats over the grid rather
+  // than squeezing it into a sliver.
   return (
-    <aside
-      // Wide enough for the grid to keep working beside it, the inspector
-      // sits in the flow. Below that it floats over the right of the grid
-      // instead, because squeezing the grid into the remaining sliver makes
-      // both halves useless.
-      //
-      // `relative` in the flow, never `static`: the two lay out identically,
-      // but only a positioned element is a containing block, and under
-      // `static` the grip on its edge escaped to an ancestor and drew itself
-      // 523 px away, down the left side of the grid.
-      className="absolute inset-y-0 right-0 z-20 flex min-h-0 max-w-full shrink-0 flex-col border-l border-kumo-line bg-kumo-base shadow-lg xl:relative xl:shadow-none"
-      style={{ width }}
-      data-testid="inspector"
-    >
-      <WidthHandle widthKey="firestore" />
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-kumo-line pr-3 pl-5">
-        {/* Kumo's monospace variants are fixed at 13 px; the face is asked
-            for here and the size comes from the scale. */}
-        <Tooltip
-          content={path}
-          render={
-            <InlineCopyText
-              value={path}
-              variant="body"
-              size="xs"
-              className="min-w-0 flex-1 truncate font-mono"
-            >
-              {path}
-            </InlineCopyText>
-          }
-        />
-        {/* Size and age beside the name, the way a file list writes them.
-            Both quiet: neither is a thing to act on until the size is
-            near the ceiling, and then the size alone takes colour. */}
-        {(size || document.data?.updateTime) && (
-          <span className="flex shrink-0 items-center gap-1.5 text-xs text-kumo-subtle tabular-nums">
+    <InspectorFrame
+      widthKey="firestore"
+      title={<InspectorTitle value={path} />}
+      meta={
+        // Size and age beside the name, the way a file list writes them.
+        // Both quiet: neither is a thing to act on until the size is near
+        // the ceiling, and then the size alone takes colour.
+        size || document.data?.updateTime ? (
+          <>
             {size && (
               // Firestore refuses a document over 1 MiB and this engine
-              // does not, so a document that writes happily here can
-              // fail on the first deploy. This is the only warning
-              // there is.
+              // does not, so a document that writes happily here can fail
+              // on the first deploy. This is the only warning there is.
               <Tooltip
                 content={size.title}
                 render={
@@ -175,54 +150,41 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
                 }
               />
             )}
-          </span>
-        )}
-        {/* Which functions a change to this document runs, when any do; the
-            functions listen to the emulator's own project only. */}
-        {document.data && !workbench.foreign && (
-          <TriggerChip database={workbench.database} path={path} />
-        )}
-        {parentCollection(path) !== workbench.collectionPath && (
-          <Tooltip
-            content={`Open ${parentCollection(path)} in the grid`}
-            render={
-              <Button
-                variant="ghost"
-                size="sm"
-                shape="square"
-                icon={<ArrowSquareOutIcon />}
-                aria-label="Open this document's collection in the grid"
-                onClick={() => workbench.setPath(path)}
-                data-testid="open-in-grid"
-              />
-            }
-          />
-        )}
-        <span className="flex shrink-0 items-center gap-0.5">
-          <StepButton
-            label="Previous document"
-            keyHint="↑"
-            icon={<CaretUpIcon />}
-            onClick={steps.previous}
-            testId="inspector-prev"
-          />
-          <StepButton
-            label="Next document"
-            keyHint="↓"
-            icon={<CaretDownIcon />}
-            onClick={steps.next}
-            testId="inspector-next"
-          />
-        </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          shape="square"
-          icon={<XIcon />}
-          aria-label="Close the document"
-          onClick={() => workbench.selectDocument(undefined)}
-        />
-      </header>
+          </>
+        ) : undefined
+      }
+      actions={
+        <>
+          {/* Which functions a change to this document runs, when any do;
+              the functions listen to the emulator's own project only. */}
+          {document.data && !workbench.foreign && (
+            <TriggerChip database={workbench.database} path={path} />
+          )}
+          {parentCollection(path) !== workbench.collectionPath && (
+            <Tooltip
+              content={`Open ${parentCollection(path)} in the grid`}
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  shape="square"
+                  icon={<ArrowSquareOutIcon />}
+                  aria-label="Open this document's collection in the grid"
+                  onClick={() => workbench.setPath(path)}
+                  data-testid="open-in-grid"
+                />
+              }
+            />
+          )}
+        </>
+      }
+      onPrev={steps.previous}
+      onNext={steps.next}
+      noun="document"
+      onClose={() => workbench.selectDocument(undefined)}
+      closeLabel="Close the document"
+      testId="inspector"
+    >
       {document.isPending ? (
         <div className="p-4">
           <Text variant="secondary" size="sm">
@@ -248,7 +210,7 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
           subcollections={<Subcollections parent={path} found={subcollections.data ?? []} />}
         />
       )}
-    </aside>
+    </InspectorFrame>
   )
 }
 
@@ -371,10 +333,9 @@ function DocumentEditor({
   const openCreate = useCreateDialog((state) => state.open)
   const [nodes, setNodes] = useState<DraftNode[]>(() => nodesFrom(document.fields, true))
   const [jsonError, setJsonError] = useState<string | undefined>()
-  const [codeTarget, setCodeTarget] = useState<CodeTarget>('web')
-  // The footer is as wide as the panel, so the panel's own width is the
-  // footer's measurement and no observer of its own is needed.
-  const roomForTheWord = useInspectorWidth('firestore').width >= CODE_LABEL_AT
+  // Code is the one control down here that changes nothing, so it is the
+  // first word the row gives up when the row runs out of them, by width.
+  const room = useInspectorRoom()
   // Every change to the draft goes through here, so the size the header
   // shows moves as you type rather than after Save — which is the only
   // moment it can save you anything.
@@ -445,160 +406,108 @@ function DocumentEditor({
         onOpenReference={(path) => workbench.selectDocument(path)}
       />
       {subcollections}
-      <footer className="flex h-12 shrink-0 items-center gap-2 border-t border-kumo-line px-5">
-        {/* Tools on the left, the action on the right: a footer's main
-            button is where a hand goes looking for it, and Save is the
-            one control down here anybody clicks twice. The risk that
-            invites — seating the confirming action against the
-            destroying one — is answered by sending the tools the other
-            way, so the two coloured controls sit at opposite ends of the
-            row with three hundred pixels between them. */}
-        <div className="flex shrink-0 items-center gap-1">
-          {/* The only control down here that changes nothing — it opens
-              a panel showing how to fetch this document in code — so it
-              is the first word the row gives up when the row runs out
-              of them. It gives it up late: see CODE_LABEL_AT. The
-              tooltip stands either way, because a glyph on its own has
-              to be hoverable to be nameable. */}
-          <Popover>
+      {/* Tools on the left, the action on the right: a footer's main button
+          is where a hand goes looking for it, and Save is the one control
+          down here anybody clicks twice. The rule divides the row by what
+          the controls do: looking at this document (Code) on one side,
+          changing which documents exist (Duplicate, Delete) on the other,
+          so the two coloured controls sit at opposite ends of the row. */}
+      <InspectorFooter
+        tools={
+          <CodePopover
+            title="This document as code"
+            kind="firestore.document"
+            tabs={CODE_TABS.map(({ target, dialect }) =>
+              codeTab(
+                dialect,
+                documentAsCode(target, document.path, forCode, {
+                  project: workbench.project,
+                  database: workbench.database,
+                  origin: firestoreOrigin(status.data?.services),
+                }),
+              ),
+            )}
+            label={room.labels}
+            testId="document-code"
+          />
+        }
+        danger={
+          <>
+            {/* Carries its word: the header above has a copy glyph too,
+                which copies the path. The tooltip says what duplicating
+                means here — the fields are carried into a new document
+                that does not exist until it is saved. */}
             <Tooltip
-              content="This document as code"
+              content="Opens a new document with these fields"
               render={
-                <Popover.Trigger
-                  render={
-                    // Two elements rather than one with the word
-                    // conditional on it: Kumo draws a labelled button
-                    // and an icon-only one from different shapes of
-                    // props, a square among them, and a `children` that
-                    // is sometimes undefined satisfies neither.
-                    roomForTheWord ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        icon={<CodeIcon />}
-                        aria-label="This document as code"
-                        data-testid="document-code"
-                      >
-                        Code
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        shape="square"
-                        icon={<CodeIcon />}
-                        aria-label="This document as code"
-                        data-testid="document-code"
-                      />
-                    )
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<CopyIcon />}
+                  onClick={() =>
+                    openCreate({
+                      kind: 'document',
+                      collection: document.collection,
+                      template: document,
+                    })
                   }
-                />
+                  data-testid="duplicate-document"
+                >
+                  Duplicate
+                </Button>
               }
             />
-            <Popover.Content className="w-[560px] max-w-[calc(100vw-2rem)]">
-              <CodeBlock
-                label="This document as code"
-                value={codeTarget}
-                onValueChange={(id) => setCodeTarget(id as CodeTarget)}
-                dialects={CODE_TARGETS.map((target) => ({
-                  id: target.id,
-                  label: target.label,
-                  code: documentAsCode(target.id, document.path, forCode, {
-                    project: workbench.project,
-                    database: workbench.database,
-                    origin: firestoreOrigin(status.data?.services),
-                  }),
-                }))}
-              />
-            </Popover.Content>
-          </Popover>
-          {/* The rule divides the row by what the controls do, not by
-              which one is frightening: looking at this document on one
-              side, changing which documents exist on the other. Delete
-              confirms in a dialog, so seating it beside Duplicate costs
-              nothing a misclick could not take back. */}
-          <span className="mx-1 h-5 w-px shrink-0 bg-kumo-line" />
-          {/* Carries its word now. It was the one bare glyph in a row of
-              labelled controls, and a bare copy glyph in particular: the
-              header above has one too, which copies the path. The
-              tooltip says what duplicating means here, which a label
-              cannot — the fields are carried into a new document that
-              does not exist until it is saved. */}
-          <Tooltip
-            content="Opens a new document with these fields"
-            render={
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={<CopyIcon />}
-                onClick={() =>
-                  openCreate({
-                    kind: 'document',
-                    collection: document.collection,
-                    template: document,
-                  })
-                }
-                data-testid="duplicate-document"
-              >
-                Duplicate
-              </Button>
-            }
-          />
-          {/* Red says what it does; the border was saying it twice. A
-              bordered destructive button was the strongest mark in the
-              footer at rest — louder than Save, in an editor whose usual
-              business is reading. Kumo has no ghost destructive, so the
-              colour rides on the children of a ghost. */}
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<TrashIcon className="text-kumo-danger" />}
-            onClick={() => onDelete(document.path)}
-            aria-label="Delete this document"
-          >
-            <span className="text-kumo-danger">Delete</span>
-          </Button>
-        </div>
-        <div className="ml-auto flex min-w-0 items-center gap-2">
-          {save.isError ? (
-            <Text variant="error" size="sm" truncate>
-              {save.error.message}
-            </Text>
-          ) : jsonError !== undefined ? (
-            // The JSON view holds text that is not a document. The rows
-            // behind it are the last ones that were, and writing those
-            // would be writing something other than what is on screen.
-            <Text variant="error" size="sm" truncate data-testid="save-blocked">
-              The JSON does not parse yet
-            </Text>
-          ) : problems.size > 0 ? (
-            <Text variant="error" size="sm" data-testid="save-blocked">
-              {problems.size} field{problems.size === 1 ? '' : 's'} to fix
-            </Text>
-          ) : changed > 0 ? (
-            <Text variant="secondary" size="sm" data-testid="save-pending">
-              {changed} change{changed === 1 ? '' : 's'}
-            </Text>
-          ) : null}
-          {/* The fill says there is something to save, and says nothing
-              otherwise. It used to be the brand fill always, which a
-              disabled button draws at half opacity — so "nothing to save"
-              and "save now" differed only by translucency, and a washed
-              accent still pulled the eye hardest in a panel you mostly
-              read. Outlined at rest, filled the moment the count beside
-              it is not zero. */}
-          <Button
-            variant={changed > 0 && jsonError === undefined ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => save.mutate()}
-            disabled={changed === 0 || problems.size > 0 || jsonError !== undefined}
-            loading={save.isPending}
-            data-testid="save-document"
-          >
-            Save
-          </Button>
-        </div>
-      </footer>
+            {/* Red says what it does; Kumo has no ghost destructive, so the
+                colour rides on the children of a ghost. */}
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<TrashIcon className="text-kumo-danger" />}
+              onClick={() => onDelete(document.path)}
+              aria-label="Delete this document"
+            >
+              <span className="text-kumo-danger">Delete</span>
+            </Button>
+          </>
+        }
+        primary={
+          <>
+            {save.isError ? (
+              <Text variant="error" size="sm" truncate>
+                {save.error.message}
+              </Text>
+            ) : jsonError !== undefined ? (
+              // The JSON view holds text that is not a document. The rows
+              // behind it are the last ones that were, and writing those
+              // would be writing something other than what is on screen.
+              <Text variant="error" size="sm" truncate data-testid="save-blocked">
+                The JSON does not parse yet
+              </Text>
+            ) : problems.size > 0 ? (
+              <Text variant="error" size="sm" data-testid="save-blocked">
+                {problems.size} field{problems.size === 1 ? '' : 's'} to fix
+              </Text>
+            ) : changed > 0 ? (
+              <Text variant="secondary" size="sm" data-testid="save-pending">
+                {changed} change{changed === 1 ? '' : 's'}
+              </Text>
+            ) : null}
+            {/* The fill says there is something to save, and says nothing
+                otherwise: outlined at rest, filled the moment the count
+                beside it is not zero. */}
+            <Button
+              variant={changed > 0 && jsonError === undefined ? 'primary' : 'secondary'}
+              size="sm"
+              onClick={() => save.mutate()}
+              disabled={changed === 0 || problems.size > 0 || jsonError !== undefined}
+              loading={save.isPending}
+              data-testid="save-document"
+            >
+              Save
+            </Button>
+          </>
+        }
+      />
     </>
   )
 }

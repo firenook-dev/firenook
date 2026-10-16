@@ -14,7 +14,7 @@
 import { type QueryKey, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import type { AuthUsersChanged } from '@/api/generated/auth/AuthUsersChanged'
-import { FLASH_MS } from '@/components/console/use-cursor-rows'
+import { FLASH_MS } from '@/components/kit'
 import type { SubscriptionStatus } from '@/lib/live/channel'
 import { readUsersWindow, useUsersTopic } from './live'
 import { authKeys } from './queries'

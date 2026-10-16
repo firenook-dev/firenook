@@ -12,14 +12,8 @@
 
 import type { AuthUserDetail } from '@/api/generated/auth/AuthUserDetail'
 
+/** What `userAsCode` writes: the console's `node`, `python` and `rest` dialects, and an accounts.json entry. */
 export type CodeDialect = 'node' | 'python' | 'rest' | 'accounts'
-
-export const CODE_DIALECTS: readonly { id: CodeDialect; label: string }[] = [
-  { id: 'node', label: 'Node (Admin SDK)' },
-  { id: 'python', label: 'Python (Admin SDK)' },
-  { id: 'rest', label: 'REST (curl)' },
-  { id: 'accounts', label: 'accounts.json entry' },
-]
 
 export interface CodeContext {
   project: string

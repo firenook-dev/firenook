@@ -9,25 +9,18 @@
 //   hold it.
 // - `pubsub.topic` (invalidation): new message ids of the topic in view, and
 //   the keys of rows that moved — backlog positions of the scoped
-//   subscription, messages whose marks moved, the snapshots list.
+//   subscription, messages whose marks moved.
 // - `pubsub.push` (a feed): push streaks, upserted in place by streak.
-// - `pubsub.deliveries` (invalidation): event ids whose outcome moved, and
-//   how many deliveries are new.
-// - `pubsub.schedules` (state, compared by the scheduler's revision).
 
 import { type QueryClient, type QueryKey, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { MessagingSecondWindow } from '@/api/generated/messaging/MessagingSecondWindow'
-import type { Page } from '@/api/generated/Page'
 import type { PubsubCountersFrame } from '@/api/generated/messaging/PubsubCountersFrame'
-import type { PubsubDeliveriesChanged } from '@/api/generated/messaging/PubsubDeliveriesChanged'
 import type { PubsubPublished } from '@/api/generated/messaging/PubsubPublished'
 import type { PubsubPushAttempts } from '@/api/generated/messaging/PubsubPushAttempts'
 import type { PubsubPushStreak } from '@/api/generated/messaging/PubsubPushStreak'
 import type { PubsubRejectedChanged } from '@/api/generated/messaging/PubsubRejectedChanged'
 import type { PubsubResourcesChanged } from '@/api/generated/messaging/PubsubResourcesChanged'
-import type { PubsubSchedule } from '@/api/generated/messaging/PubsubSchedule'
-import type { PubsubSchedulesFrame } from '@/api/generated/messaging/PubsubSchedulesFrame'
 import type { PubsubStale } from '@/api/generated/messaging/PubsubStale'
 import type { PubsubTopicIndex } from '@/api/generated/messaging/PubsubTopicIndex'
 import type { SubscriptionStatus } from '@/lib/live/channel'
@@ -55,22 +48,12 @@ declare module '@/lib/live/topics' {
       params: { project?: string; subscription: string }
       events: { attempts: PubsubPushAttempts }
     }
-    'pubsub.deliveries': {
-      params: { project?: string; topic: string }
-      events: { changed: PubsubDeliveriesChanged }
-    }
-    'pubsub.schedules': {
-      params: { project?: string }
-      events: { schedules: PubsubSchedulesFrame }
-    }
   }
 }
 
 declareTopic('pubsub.counters', 'compare')
 declareTopic('pubsub.topic', 'none')
 declareTopic('pubsub.push', 'replay')
-declareTopic('pubsub.deliveries', 'none')
-declareTopic('pubsub.schedules', 'compare')
 
 /** Topics whose throughput one counters subscription follows (the engine refuses more). */
 export const MAX_THROUGHPUT = 24
@@ -92,8 +75,6 @@ export function resourceKeys(project: string, kinds: readonly string[]): QueryKe
         pubsubKeys.topicDetails(project),
         pubsubKeys.subscriptionDetails(project),
       )
-    else if (kind === 'snapshots')
-      keys.push(pubsubKeys.snapshots(project), pubsubKeys.topicDetails(project))
     else if (kind === 'schemas')
       keys.push(
         pubsubKeys.topics(project),
@@ -111,7 +92,6 @@ export function countersKeys(project: string): QueryKey[] {
     pubsubKeys.topics(project),
     pubsubKeys.topicDetails(project),
     pubsubKeys.subscriptionDetails(project),
-    pubsubKeys.snapshots(project),
     pubsubKeys.rejected(project),
   ]
 }
@@ -215,18 +195,14 @@ export function splitStaleKeys(keys: readonly string[]): {
   backlog: string[]
   /** Message ids whose subscription or function marks moved. */
   messages: string[]
-  /** The topic's snapshots changed. */
-  snapshots: boolean
 } {
   const backlog: string[] = []
   const messages: string[] = []
-  let snapshots = false
   for (const key of keys) {
     if (key.startsWith('backlog:')) backlog.push(key.slice('backlog:'.length))
     else if (key.startsWith('message:')) messages.push(key.slice('message:'.length))
-    else if (key === 'snapshots') snapshots = true
   }
-  return { backlog, messages, snapshots }
+  return { backlog, messages }
 }
 
 export interface TopicLiveHandlers {
@@ -280,8 +256,8 @@ export function publishedStep(
 
 /**
  * Holds `pubsub.topic` for the topic in view (and the subscription in view,
- * whose backlog rows it names). Message details and the snapshots list are
- * read again here; rows go to the handlers.
+ * whose backlog rows it names). Message details are read again here; rows
+ * go to the handlers.
  */
 export function useTopicLive(
   project: string | undefined,
@@ -302,10 +278,6 @@ export function useTopicLive(
         handlers.onMessageKeys?.(split.messages)
         for (const id of split.messages)
           void client.invalidateQueries({ queryKey: pubsubKeys.message(project, topic, id) })
-      }
-      if (split.snapshots) {
-        void client.invalidateQueries({ queryKey: pubsubKeys.snapshots(project) })
-        void client.invalidateQueries({ queryKey: pubsubKeys.topic(project, topic) })
       }
     },
     onReset: () => {
@@ -355,88 +327,4 @@ export function usePushFeed(
     },
   )
   return { store, status }
-}
-
-// ------------------------------------------------------------ deliveries
-
-export interface DeliveriesLiveHandlers {
-  /** Event ids whose outcome moved: the deliveries table's `applyKeys`. */
-  onKeys?: (eventIds: string[]) => void
-  /** New deliveries: at the top the head page is read again, else they go to `newAbove`. */
-  onAdded?: (count: number) => void
-  /** Too many to name, a reconnect, or a reset: back to page one, the counts with it. */
-  onReset?: () => void
-  /** The engine took the subscription: a head read before it reads again (`TopicLiveHandlers.onTaken`). */
-  onTaken?: () => void
-}
-
-/** Holds `pubsub.deliveries` for the topic whose Deliveries tab is open. */
-export function useDeliveriesLive(
-  project: string | undefined,
-  topic: string | undefined,
-  handlers: DeliveriesLiveHandlers,
-): SubscriptionStatus {
-  return useLiveTopic('pubsub.deliveries', project && topic ? { project, topic } : null, {
-    onChanged: (changed) => {
-      if (changed.overflow) {
-        handlers.onReset?.()
-        return
-      }
-      if (changed.keys.length > 0) handlers.onKeys?.(changed.keys)
-      if (changed.added > 0) handlers.onAdded?.(changed.added)
-    },
-    onReset: () => handlers.onReset?.(),
-    onEnd: () => handlers.onReset?.(),
-    onTaken: () => handlers.onTaken?.(),
-  })
-}
-
-// ------------------------------------------------------------ schedules
-
-/** A schedules frame's states put into the cached list (runs themselves come with the next read). */
-export function applySchedulesFrame(
-  page: Page<PubsubSchedule>,
-  frame: PubsubSchedulesFrame,
-): Page<PubsubSchedule> {
-  const states = new Map(frame.schedules.map((state) => [state.functionId, state]))
-  let changed = false
-  const items = page.items.map((schedule) => {
-    const state = states.get(schedule.functionId)
-    if (!state) return schedule
-    changed = true
-    return {
-      ...schedule,
-      paused: state.paused,
-      automatic: state.automatic,
-      nextRunAt: state.nextRunAt,
-      runs: state.runs,
-    }
-  })
-  return changed ? { ...page, items } : page
-}
-
-/**
- * Holds `pubsub.schedules` (the Schedules page): each frame patches the
- * list's states at once and reads the list again shortly after, for the
- * runs and their outcomes.
- */
-export function useSchedulesLive(project: string | undefined): SubscriptionStatus {
-  const client = useQueryClient()
-  const [invalidator] = useState(() =>
-    createInvalidator((key) => void client.invalidateQueries({ queryKey: key }), 250),
-  )
-  useEffect(() => () => invalidator.dispose(), [invalidator])
-  return useLiveTopic('pubsub.schedules', project ? { project } : null, {
-    onSchedules: (frame) => {
-      if (!project) return
-      const key = pubsubKeys.schedules(project)
-      client.setQueryData<Page<PubsubSchedule>>(key, (page) =>
-        page ? applySchedulesFrame(page, frame) : page,
-      )
-      invalidator.push([key])
-    },
-    onReset: () => {
-      if (project) invalidator.flush([pubsubKeys.schedules(project)])
-    },
-  })
 }

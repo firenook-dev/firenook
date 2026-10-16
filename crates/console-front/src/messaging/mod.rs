@@ -108,8 +108,7 @@ impl PubsubConsole {
     }
 }
 
-/// Cloud Tasks' part of the console. Building it installs the attempt sink
-/// that feeds the console's attempts ring.
+/// Cloud Tasks' part of the console.
 #[derive(Clone)]
 pub struct TasksConsole {
     /// The Tasks application, mounted at `/tasks/native`.
@@ -117,22 +116,16 @@ pub struct TasksConsole {
     pub runtime: TasksRuntime,
     /// Matches attempts to the invocations they caused.
     pub monitor: Option<Monitor>,
-    feed: tasks::topics::AttemptFeed,
 }
 
 impl TasksConsole {
-    /// The console's part of a running Cloud Tasks emulator. Installs the
-    /// attempt sink: every attempt is kept in the console's ring (10,000
-    /// attempts, 8 MiB) for the Attempts view.
+    /// The console's part of a running Cloud Tasks emulator.
     #[must_use]
     pub fn new(native: Router, runtime: TasksRuntime, monitor: Option<Monitor>) -> Self {
-        let feed = tasks::topics::AttemptFeed::new();
-        feed.install(&runtime, monitor.clone());
         Self {
             native,
             runtime,
             monitor,
-            feed,
         }
     }
 

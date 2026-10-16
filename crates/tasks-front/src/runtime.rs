@@ -12,6 +12,7 @@ use std::time::{Duration, Instant, SystemTime};
 use axum::http::header::{ACCEPT, USER_AGENT};
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use firenook_functions_bridge::FunctionsInventory;
+use firenook_suite_front::window::{SecondCounts, TenSecondCounts};
 use indexmap::IndexMap;
 
 use crate::config::{QUEUE_CAPACITY, QueueConfig};
@@ -98,10 +99,6 @@ where
     }
 }
 
-/// Receives every finished attempt inline, once its response snippet is
-/// read; it must not block.
-pub type AttemptSink = Arc<dyn Fn(AttemptRecord) + Send + Sync>;
-
 /// The dispatch resolution; the official loop runs on a zero timeout while
 /// any queue is active and sleeps a second when none is.
 /// The official controller re-arms `listen()` immediately while any queue is
@@ -120,99 +117,26 @@ const SNIPPET_BYTES: usize = 1_024;
 const SNIPPET_WAIT: Duration = Duration::from_millis(500);
 /// Finished tasks a queue's history keeps.
 pub const HISTORY_CAPACITY: usize = 1_000;
-/// The bytes a queue's history keeps.
-pub const HISTORY_BYTES: usize = 32 * 1024 * 1024;
-/// The bytes every queue's history keeps together.
-pub const ALL_HISTORY_BYTES: usize = 256 * 1024 * 1024;
+/// The bytes a queue's history keeps: a thousand ordinary tasks fit with
+/// room, a run of large bodies is cut to its newest.
+pub const HISTORY_BYTES: usize = 4 * 1024 * 1024;
+/// The bytes every queue's history keeps together, taken first from the
+/// queue holding the most.
+pub const ALL_HISTORY_BYTES: usize = 32 * 1024 * 1024;
 /// Changed rows a queue remembers for live views.
 const CHANGE_RING: usize = 1_000;
 /// Refused requests kept.
 const REFUSED_CAPACITY: usize = 200;
 
-/// Counts per bucket, `SLOTS` buckets of `WIDTH` seconds ending at the
-/// newest bucket an event fell in, so a view can age it without a frame.
-#[derive(Debug, Clone)]
-pub(crate) struct Buckets<const SLOTS: usize, const WIDTH: u64> {
-    counts: [u32; SLOTS],
-    /// The newest bucket, as seconds since the epoch divided by `WIDTH`.
-    newest: u64,
-}
-
-impl<const SLOTS: usize, const WIDTH: u64> Default for Buckets<SLOTS, WIDTH> {
-    fn default() -> Self {
-        Self {
-            counts: [0; SLOTS],
-            newest: 0,
-        }
-    }
-}
-
-impl<const SLOTS: usize, const WIDTH: u64> Buckets<SLOTS, WIDTH> {
-    fn slot(bucket: u64) -> usize {
-        usize::try_from(bucket % SLOTS as u64).unwrap_or(0)
-    }
-
-    pub(crate) fn record(&mut self, at: SystemTime, count: u32) {
-        let bucket = at
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            / WIDTH;
-        if bucket > self.newest {
-            for step in 1..=(bucket - self.newest).min(SLOTS as u64) {
-                self.counts[Self::slot(self.newest + step)] = 0;
-            }
-            self.newest = bucket;
-        } else if bucket + SLOTS as u64 <= self.newest {
-            return;
-        }
-        let slot = Self::slot(bucket);
-        self.counts[slot] = self.counts[slot].saturating_add(count);
-    }
-
-    /// The window: when its newest bucket ends, and `(buckets before it,
-    /// count)` for the non-zero buckets, newest first.
-    pub(crate) fn window(&self) -> StampedWindow {
-        let buckets = (0..SLOTS)
-            .filter_map(|age| {
-                let age = u8::try_from(age).ok()?;
-                let bucket = self.newest.checked_sub(u64::from(age))?;
-                let count = self.counts[Self::slot(bucket)];
-                (count > 0).then_some((age, count))
-            })
-            .collect();
-        StampedWindow {
-            ends_at: std::time::UNIX_EPOCH + Duration::from_secs((self.newest + 1) * WIDTH - 1),
-            width_seconds: u32::try_from(WIDTH).unwrap_or(1),
-            buckets,
-        }
-    }
-}
-
-/// A count over time that a view ages on its own clock: it sends nothing
-/// while traffic stops, and the bars decay as `ends_at` grows old.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StampedWindow {
-    /// The last whole second the newest bucket covers.
-    pub ends_at: SystemTime,
-    /// One bucket's width: 1 or 10 seconds.
-    pub width_seconds: u32,
-    /// `(buckets before the newest, count)` for the non-zero buckets,
-    /// newest first.
-    pub buckets: Vec<(u8, u32)>,
-}
+pub use firenook_suite_front::window::StampedWindow;
 
 /// A queue's stamped windows.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct QueueWindows {
     /// Attempts sent, per second over a minute.
-    pub dispatched: Buckets<60, 1>,
-    /// Attempts answered 2xx, per second over a minute.
-    pub succeeded: Buckets<60, 1>,
+    pub dispatched: SecondCounts,
     /// Tasks that ran out of retries, per ten seconds over five minutes.
-    pub failed: Buckets<30, 10>,
-    /// Tasks enqueued, per ten seconds over five minutes.
-    pub added: Buckets<30, 10>,
+    pub failed: TenSecondCounts,
 }
 
 /// A request the Tasks port refused, coalesced by operation, queue, status
@@ -380,7 +304,6 @@ struct Inner {
     /// Replaced once the console builds its sink (`set_log_sink`).
     log: Mutex<LogSink>,
     ticker: Mutex<Option<tokio::task::JoinHandle<()>>>,
-    attempt_sink: Mutex<Option<AttemptSink>>,
     /// Wakes the ticker early after a console control that frees work.
     wake: tokio::sync::Notify,
     /// The console revision, announced when it moved.
@@ -742,7 +665,6 @@ impl TasksRuntime {
                 http,
                 log: Mutex::new(log),
                 ticker: Mutex::new(None),
-                attempt_sink: Mutex::new(None),
                 wake: tokio::sync::Notify::new(),
                 revision: tokio::sync::watch::channel(0).0,
             }),
@@ -955,14 +877,10 @@ impl TasksRuntime {
         }
         task.id = id;
         task.enqueued_at = SystemTime::now();
-        let at = task.enqueued_at;
         queue
             .enqueue(task, Instant::now(), controls)
             .map_err(|Conflict| EnqueueError::NameReserved)?;
         state.next_task = id;
-        if let Some(console) = state.console.get_mut(key) {
-            console.windows.added.record(at, 1);
-        }
         self.finish(state);
         Ok(id)
     }
@@ -1189,12 +1107,6 @@ impl TasksRuntime {
         state.record_finished(key, finished);
         self.finish(state);
         Ok((u32::try_from(removed).unwrap_or(u32::MAX), stopped))
-    }
-
-    /// Hands every finished attempt to `sink` from now on (the console's
-    /// attempts feed), once its response snippet is read.
-    pub fn set_attempt_sink(&self, sink: AttemptSink) {
-        *lock(&self.inner.attempt_sink) = Some(sink);
     }
 
     /// `getStatistics`: every queue's statistics in registration order.
@@ -1432,8 +1344,7 @@ impl TasksRuntime {
 
     /// `runTask`'s request, its outcome written back into the slot (or into
     /// the task's history entry when it left the slot meanwhile), then the
-    /// first 1 KiB of the response attached and the attempt handed to the
-    /// attempt sink.
+    /// first 1 KiB of the response attached.
     async fn run(&self, request: RunRequest) {
         let started_at = SystemTime::now();
         let started = Instant::now();
@@ -1467,14 +1378,9 @@ impl TasksRuntime {
                     queue.complete(request.dispatch_id, outcome, record.clone(), now)
                 });
             if !completed
-                && state.attach_to_history(&request.queue_key, request.dispatch_id, record.clone())
+                && state.attach_to_history(&request.queue_key, request.dispatch_id, record)
             {
                 state.stamp(&request.queue_key);
-            }
-            if status.is_some_and(|status| (200..=299).contains(&status))
-                && let Some(console) = state.console.get_mut(&request.queue_key)
-            {
-                console.windows.succeeded.record(SystemTime::now(), 1);
             }
             self.finish(state);
         }
@@ -1482,40 +1388,32 @@ impl TasksRuntime {
             Some(response) => read_snippet(response).await,
             None => None,
         };
-        let record = match snippet {
-            Some(text) => self
-                .attach_response(&request, text.clone())
-                .unwrap_or(AttemptRecord {
-                    response: Some(text),
-                    ..record
-                }),
-            None => record,
-        };
-        let sink = lock(&self.inner.attempt_sink).clone();
-        if let Some(sink) = sink {
-            sink(record);
+        if let Some(text) = snippet {
+            self.attach_response(&request, text);
         }
     }
 
     /// Attaches a response snippet to the attempt, in its slot or in its
     /// task's history entry.
-    fn attach_response(&self, request: &RunRequest, text: String) -> Option<AttemptRecord> {
+    fn attach_response(&self, request: &RunRequest, text: String) {
         let mut state = lock(&self.inner.state);
         let text = match state.queues.get_mut(&request.queue_key) {
             Some(queue) => {
                 match queue.attach_response(request.dispatch_id, request.attempt, text) {
-                    Ok(record) => {
+                    Ok(()) => {
                         self.finish(state);
-                        return Some(record);
+                        return;
                     }
                     Err(text) => text,
                 }
             }
             None => text,
         };
-        let entry = state.history_entry(&request.queue_key, request.dispatch_id)?;
+        let Some(entry) = state.history_entry(&request.queue_key, request.dispatch_id) else {
+            return;
+        };
         let task = entry.finished.task.id;
-        let record = entry
+        entry
             .finished
             .attempts
             .attach_response(request.attempt, text);
@@ -1532,7 +1430,6 @@ impl TasksRuntime {
         }
         state.stamp(&request.queue_key);
         self.finish(state);
-        record
     }
 
     /// Logs a dispatch failure with its queue and task.

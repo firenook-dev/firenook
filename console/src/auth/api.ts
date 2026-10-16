@@ -8,7 +8,8 @@
 // Console API. Edits go through the official API instead — the Identity
 // Toolkit as the Admin SDK or an app calls it — so each one behaves exactly
 // as it would from code, and Activity records it (`x-firenook-console:
-// write`, hidden there by default; `try` and `replay` are always shown).
+// write`, hidden there by default; a replay, and the beforeSignIn run of
+// Sign in as, are always shown).
 //
 // Every Console API route takes `project`; absent is the configured one.
 // Nothing here creates a project or a tenant by reading it.
@@ -36,8 +37,9 @@ import type { AuthSetClaimsRequest } from '@/api/generated/auth/AuthSetClaimsReq
 import type { AuthSummary } from '@/api/generated/auth/AuthSummary'
 import type { AuthTenant } from '@/api/generated/auth/AuthTenant'
 import type { AuthTenantCreate } from '@/api/generated/auth/AuthTenantCreate'
-import type { AuthTenantPage } from '@/api/generated/auth/AuthTenantPage'
+import type { AuthTenantList } from '@/api/generated/auth/AuthTenantList'
 import type { AuthTokenInspection } from '@/api/generated/auth/AuthTokenInspection'
+import type { AuthTokenInspectRequest } from '@/api/generated/auth/AuthTokenInspectRequest'
 import type { AuthTokenRequest } from '@/api/generated/auth/AuthTokenRequest'
 import type { AuthUserDetail } from '@/api/generated/auth/AuthUserDetail'
 import type { AuthUsersBatchGet } from '@/api/generated/auth/AuthUsersBatchGet'
@@ -172,10 +174,11 @@ export function inspectToken(
   token: string,
   signal?: AbortSignal,
 ): Promise<AuthTokenInspection> {
+  const body: AuthTokenInspectRequest = { token }
   return apiSend<AuthTokenInspection>(
     'POST',
     withQuery('/auth/token/inspect', scoped(project)),
-    { token },
+    body,
     cancellable(signal),
   )
 }
@@ -396,33 +399,27 @@ export function clearActivity(project: string): Promise<void> {
 export interface TenantsRequest {
   /** Filters by id and display name. */
   q?: string | undefined
-  cursor?: string | undefined
+  /** At most this many (the engine's default and most: 500). */
   limit?: number | undefined
 }
 
-/** `GET /tenants`: tenants by id, each with its user count; never creates one. */
+/**
+ * `GET /tenants`: the tenants `q` matches in id order, each with its user
+ * count, and how many it matches; never creates one.
+ */
 export function getTenants(
   project: string,
   request: TenantsRequest,
   signal?: AbortSignal,
-): Promise<AuthTenantPage> {
-  return apiGet<AuthTenantPage>(
+): Promise<AuthTenantList> {
+  return apiGet<AuthTenantList>(
     '/auth/tenants',
-    scoped(project, {
-      q: request.q || undefined,
-      cursor: request.cursor,
-      limit: request.limit,
-    }),
+    scoped(project, { q: request.q || undefined, limit: request.limit }),
     signal,
   )
 }
 
-/** `GET /tenants/meta`. */
-export function getTenantsMeta(project: string, signal?: AbortSignal): Promise<ListMeta> {
-  return apiGet<ListMeta>('/auth/tenants/meta', scoped(project), signal)
-}
-
-/** `POST /tenants:batchGet`: the tenants an `auth.config` event names (`row: null` once deleted). */
+/** `POST /tenants:batchGet`: tenants by id (`row: null` for one that does not exist, or no longer does). */
 export function batchGetTenants(
   project: string,
   request: BatchGetRequest,
@@ -484,9 +481,6 @@ export function emulatorPath(
   const scope = tenant ? `/tenants/${encodeURIComponent(tenant)}` : ''
   return `/emulator/v1/projects/${encodeURIComponent(project)}${scope}/${rest}`
 }
-
-/** The secure token endpoint (the refresh grant). */
-export const SECURE_TOKEN_PATH = '/securetoken.googleapis.com/v1/token'
 
 /** One call to the Auth emulator through the console's mount. */
 export interface EmulatorRequest {

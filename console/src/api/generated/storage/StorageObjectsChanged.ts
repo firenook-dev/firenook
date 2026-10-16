@@ -26,11 +26,6 @@ folders: Array<string>,
  */
 truncated: boolean, 
 /**
- * Ids of upload sessions that started, advanced, finished or were
- * discarded.
- */
-sessions: Array<string>, 
-/**
  * The folder index finished building in this window: counts that were
  * null are known now.
  */

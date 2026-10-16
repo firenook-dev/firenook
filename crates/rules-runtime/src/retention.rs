@@ -8,24 +8,31 @@
 //! path, auth, documents and query) and the ruleset that decided it makes the
 //! decision re-runnable with an explanation, at any time while it is kept.
 //!
-//! The ring is bounded exactly like the Requests history — 256 entries, ten
-//! minutes, the same byte budget — and admission never blocks a producer: a
-//! contended ring skips the entry and counts it, as the history does. A
-//! decision is retained before its event is published, so an id a console
-//! sees is already retained unless admission was contended.
+//! The ring keeps the newest [`RETAINED_DECISIONS`] within
+//! [`RETAINED_BYTES`], each ruleset's source charged once however many
+//! decisions it made — the window Storage keeps — so "why" still answers
+//! for a denial the console's decisions feed lists from a while ago. (It
+//! used to be bounded like the Requests history, 256 for ten minutes, and
+//! "See why" on an older denial found nothing.) Admission never blocks a
+//! producer: a contended ring skips the entry and counts it, as the history
+//! does. A decision is retained before its event is published, so an id a
+//! console sees is already retained unless admission was contended.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use firenook_core_store::{DatabaseName, Snapshot};
 use firenook_rules_engine::{
     EvaluationRequest, EvaluationResult, QueryFilter, Resource, Ruleset, Value,
 };
 
-use crate::request_history::{MAXIMUM_AGE, MAXIMUM_BYTES, MAXIMUM_EVENTS};
 use crate::{EvaluationAccess, InstalledRules, RulesRuntime};
+
+/// Decisions whose evaluation context is kept for a re-run.
+pub const RETAINED_DECISIONS: usize = 2_000;
+/// Bytes charged against those contexts, each ruleset source once.
+pub const RETAINED_BYTES: usize = 16 * 1024 * 1024;
 
 /// The verdict of one decision, as the Requests feed names it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -117,8 +124,8 @@ impl RetainedDecision {
     }
 
     /// Bytes this entry is charged against the byte budget: its documents,
-    /// auth and query values plus the ruleset source, the same source a
-    /// Requests event carries in full.
+    /// auth and query values. Its ruleset's source is charged apart, once
+    /// for every decision it made.
     fn charged_bytes(&self) -> usize {
         let request = &self.request;
         let auth = request.auth.as_ref().map_or(0, |auth| {
@@ -135,7 +142,6 @@ impl RetainedDecision {
             + request.request_resource.as_ref().map_or(0, resource_bytes)
             + auth
             + request.query.filter.as_ref().map_or(0, filter_bytes)
-            + self.installed.rules.source().len()
     }
 }
 
@@ -182,10 +188,11 @@ pub(crate) struct DecisionRetention {
 struct Ring {
     entries: VecDeque<Entry>,
     bytes: usize,
+    /// Retained entries per ruleset source hash: a source is charged once.
+    sources: HashMap<String, usize>,
 }
 
 struct Entry {
-    recorded: Instant,
     bytes: usize,
     decision: Arc<RetainedDecision>,
 }
@@ -200,25 +207,6 @@ impl DecisionRetention {
         installed: &Arc<InstalledRules>,
         request: &EvaluationRequest,
         result: &EvaluationResult,
-    ) -> bool {
-        self.retain_at(
-            request_id,
-            project,
-            installed,
-            request,
-            result,
-            Instant::now(),
-        )
-    }
-
-    fn retain_at(
-        &self,
-        request_id: &str,
-        project: &str,
-        installed: &Arc<InstalledRules>,
-        request: &EvaluationRequest,
-        result: &EvaluationResult,
-        now: Instant,
     ) -> bool {
         // Probe first, as the history does: a contended ring costs the
         // producer nothing, not even the copy of the request.
@@ -237,19 +225,33 @@ impl DecisionRetention {
             outcome: DecisionOutcome::of(result),
         };
         let bytes = decision.charged_bytes();
-        if bytes > MAXIMUM_BYTES {
-            return self.omit();
-        }
         let Ok(mut ring) = self.ring.try_lock() else {
             return self.omit();
         };
-        ring.expire(now);
-        while ring.entries.len() >= MAXIMUM_EVENTS || ring.bytes + bytes > MAXIMUM_BYTES {
+        let hash = installed.source_hash.as_str();
+        let source = installed.rules.source().len();
+        let charged_source = |ring: &Ring| {
+            if ring.sources.contains_key(hash) {
+                0
+            } else {
+                source
+            }
+        };
+        if bytes + charged_source(&ring) > RETAINED_BYTES {
+            drop(ring);
+            return self.omit();
+        }
+        while ring.entries.len() >= RETAINED_DECISIONS
+            || (!ring.entries.is_empty()
+                && ring.bytes + bytes + charged_source(&ring) > RETAINED_BYTES)
+        {
             ring.evict();
         }
-        ring.bytes += bytes;
+        // The eviction above may have released this very source.
+        let fresh = charged_source(&ring);
+        *ring.sources.entry(hash.to_owned()).or_insert(0) += 1;
+        ring.bytes += bytes + fresh;
         ring.entries.push_back(Entry {
-            recorded: now,
             bytes,
             decision: Arc::new(decision),
         });
@@ -263,13 +265,8 @@ impl DecisionRetention {
     }
 
     pub(crate) fn find(&self, request_id: &str) -> Option<Arc<RetainedDecision>> {
-        self.find_at(request_id, Instant::now())
-    }
-
-    fn find_at(&self, request_id: &str, now: Instant) -> Option<Arc<RetainedDecision>> {
-        let mut ring = self.lock();
-        ring.expire(now);
-        ring.entries
+        self.lock()
+            .entries
             .iter()
             .rev()
             .find(|entry| entry.decision.request_id == request_id)
@@ -277,17 +274,23 @@ impl DecisionRetention {
     }
 
     pub(crate) fn of_database(&self, database: &DatabaseName) -> Vec<Arc<RetainedDecision>> {
-        self.of_database_at(database, Instant::now())
-    }
-
-    fn of_database_at(&self, database: &DatabaseName, now: Instant) -> Vec<Arc<RetainedDecision>> {
-        let mut ring = self.lock();
-        ring.expire(now);
-        ring.entries
+        self.lock()
+            .entries
             .iter()
             .filter(|entry| &entry.decision.database == database)
             .map(|entry| entry.decision.clone())
             .collect()
+    }
+
+    /// How many decisions are retained now.
+    pub(crate) fn len(&self) -> usize {
+        self.lock().entries.len()
+    }
+
+    /// Decisions that were not retained: a contended ring, or an entry
+    /// larger than the whole budget.
+    pub(crate) fn omitted(&self) -> usize {
+        self.omitted.load(Ordering::Relaxed)
     }
 
     /// Readers are the console, never a producer, and only hold the ring to
@@ -298,32 +301,22 @@ impl DecisionRetention {
             Err(poisoned) => poisoned.into_inner(),
         }
     }
-
-    #[cfg(test)]
-    fn omitted(&self) -> usize {
-        self.omitted.load(Ordering::Relaxed)
-    }
 }
 
 impl Ring {
     fn evict(&mut self) {
-        if let Some(entry) = self.entries.pop_front() {
-            self.bytes -= entry.bytes;
-        }
-    }
-
-    fn expire(&mut self, now: Instant) {
-        // Admission order is not time order across producers, so every
-        // bounded entry is inspected, as the history does.
-        let mut bytes = self.bytes;
-        self.entries.retain(|entry| {
-            let keep = now.saturating_duration_since(entry.recorded) < MAXIMUM_AGE;
-            if !keep {
-                bytes -= entry.bytes;
+        let Some(entry) = self.entries.pop_front() else {
+            return;
+        };
+        self.bytes = self.bytes.saturating_sub(entry.bytes);
+        let installed = &entry.decision.installed;
+        if let Some(count) = self.sources.get_mut(&installed.source_hash) {
+            *count -= 1;
+            if *count == 0 {
+                self.sources.remove(&installed.source_hash);
+                self.bytes = self.bytes.saturating_sub(installed.rules.source().len());
             }
-            keep
-        });
-        self.bytes = bytes;
+        }
     }
 }
 
@@ -355,6 +348,17 @@ impl RulesRuntime {
             .as_ref()
             .map(|recorder| recorder.retention().of_database(database))
             .unwrap_or_default()
+    }
+
+    /// How many decisions can be re-run now (every database), and how many
+    /// were recorded without their context: a contended ring, or one
+    /// larger than the whole budget.
+    #[must_use]
+    pub fn retained_counts(&self) -> (usize, usize) {
+        self.recorder.as_ref().map_or((0, 0), |recorder| {
+            let retention = recorder.retention();
+            (retention.len(), retention.omitted())
+        })
     }
 }
 

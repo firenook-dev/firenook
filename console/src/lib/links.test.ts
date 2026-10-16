@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SectionStatus } from '@/api/generated/SectionStatus'
 import { sectionEntry, testStatus } from '@/test/status'
-import { whileUnbuilt } from '@/test/unbuilt'
 import { linkTo } from './links'
-import { auth } from './sections/auth'
-import { storage } from './sections/storage'
 
 const status = (sections: Array<Pick<SectionStatus, 'id' | 'state'>>) =>
   testStatus({ sections: sections.map(({ id, state }) => sectionEntry(id, { state })) })
@@ -29,19 +26,6 @@ describe('links between sections', () => {
     expect(
       linkTo({ kind: 'firestore.collection', key: '(default)|users' }, starting),
     ).not.toBeNull()
-  })
-
-  it('are plain text into a section that is not built yet', async () => {
-    const running = status([
-      { id: 'auth', state: 'ready' },
-      { id: 'storage', state: 'ready' },
-    ])
-    await whileUnbuilt(auth, () =>
-      expect(linkTo({ kind: 'auth.user', key: '|u_9f3k2' }, running)).toBeNull(),
-    )
-    await whileUnbuilt(storage, () =>
-      expect(linkTo({ kind: 'storage.object', key: 'demo.appspot.com|a.png' }, running)).toBeNull(),
-    )
   })
 
   it('are plain text for a kind nobody knows', () => {

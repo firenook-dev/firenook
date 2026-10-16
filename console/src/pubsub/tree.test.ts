@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { PROJECT, subscriptionSummary, topicIndex, topicSummary } from './test/index-fixture'
+import {
+  PROJECT,
+  subscriptionSummary,
+  topicIndex,
+  topicSummary,
+} from './index-fixture.test-support'
 import { mostBehind, orphanedNote, pathToCurrent, topicTree } from './tree'
 import { GROUP } from './tree-store'
 
@@ -35,6 +40,15 @@ const schedule = topicSummary('firebase-schedule-nightly', {
     subscriptionSummary('emulator-sub-firebase-schedule-nightly', 'firebase-schedule-nightly', {
       managed: 'functions',
     }),
+  ],
+  functions: [
+    {
+      functionId: 'us-central1-nightly',
+      name: 'nightly',
+      region: 'us-central1',
+      kind: 'schedule',
+      entity: { kind: 'functions.function', key: 'us-central1-nightly' },
+    },
   ],
 })
 const index = topicIndex([topicSummary('audit-log'), orders, schedule], {
@@ -105,6 +119,11 @@ describe('the topics tree (PS-01)', () => {
     })
     const deleted = tree.nodes.find((entry) => entry.id === GROUP.detached)
     expect(deleted?.children?.[0]).toMatchObject({ label: 'left-behind', count: 7 })
+    // A scheduled function's row opens its schedule, in Functions.
+    expect(tree.targets.get('us-central1-nightly')).toEqual({
+      kind: 'schedule',
+      functionId: 'us-central1-nightly',
+    })
   })
 
   it('shows an orphaned functions subscription as the ordinary subscription it now is', () => {

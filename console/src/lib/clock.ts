@@ -2,8 +2,11 @@
 // ago" used to keep its own interval (the decisions panel ran one every
 // 30 s); a page with five such panels ran five, each re-rendering on its
 // own beat. Here there is one timer per granularity, shared by every
-// reader, started by the first and stopped by the last, and a reader
-// re-renders only when the value it reads changes.
+// reader, started by the first and stopped by the last. A reader of the
+// time itself re-renders on every tick of its granularity; a reader that
+// passes `select` ("12 min ago" from the time) re-renders only when what it
+// selects changes, so a minute-old row on the second clock renders once a
+// minute, not sixty times.
 //
 // The `second` clock is for feeds ("3 s ago"); it stops while the tab is
 // hidden, where nobody can read it, and catches up once when the tab is
@@ -93,11 +96,16 @@ const clocks: Record<Granularity, Clock> = {
 }
 
 /**
- * Now, re-rendering at most once per `granularity` (one shared timer). The
- * `second` timer stops while the tab is hidden and fires once when it is
- * shown again.
+ * Now, re-rendering at most once per `granularity` (one shared timer); with
+ * `select`, what it makes of now, re-rendering only when that changes (it
+ * must answer with a value equal by `Object.is` for an equal input, such
+ * as a string). The `second` timer stops while the tab is hidden and fires
+ * once when it is shown again.
  */
-export function useNow(granularity: Granularity): number {
+export function useNow(granularity: Granularity): number
+export function useNow<T>(granularity: Granularity, select: (now: number) => T): T
+export function useNow<T>(granularity: Granularity, select?: (now: number) => T): number | T {
   const clock = clocks[granularity]
-  return useSyncExternalStore(clock.subscribe, clock.snapshot, clock.snapshot)
+  const read = () => (select ? select(clock.snapshot()) : clock.snapshot())
+  return useSyncExternalStore(clock.subscribe, read, read)
 }

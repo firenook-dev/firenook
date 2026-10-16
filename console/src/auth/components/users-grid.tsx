@@ -12,7 +12,7 @@
 import { UsersIcon } from '@phosphor-icons/react'
 import type { ReactNode } from 'react'
 import type { Total } from '@/api/generated/Total'
-import type { AuthTenantPage } from '@/api/generated/auth/AuthTenantPage'
+import type { AuthTenantList } from '@/api/generated/auth/AuthTenantList'
 import type { AuthUserRow } from '@/api/generated/auth/AuthUserRow'
 import {
   DataTable,
@@ -35,15 +35,15 @@ const USERS = { one: 'user', other: 'users' }
 /** Other scopes that hold users, for the empty tenant's "where are they" line. */
 export function usersElsewhere(
   scope: TenantScope,
-  tenants: Pick<AuthTenantPage, 'items' | 'projectUsers'> | undefined,
+  tenants: Pick<AuthTenantList, 'items' | 'projectUsers'> | undefined,
 ): { scope: TenantScope; label: string; users: number }[] {
   if (!tenants) return []
   const found: { scope: TenantScope; label: string; users: number }[] = []
-  if (scope.kind !== 'project' && (tenants.projectUsers ?? 0) > 0)
+  if (scope.kind !== 'project' && tenants.projectUsers > 0)
     found.push({
       scope: { kind: 'project' },
       label: 'Project users',
-      users: tenants.projectUsers ?? 0,
+      users: tenants.projectUsers,
     })
   for (const tenant of tenants.items)
     if (tenant.users > 0 && !(scope.kind === 'tenant' && scope.tenant === tenant.tenantId))
@@ -91,7 +91,7 @@ export function UsersGrid({
   project: string
   /** The page shows another project than the emulator's (`?project=`). */
   foreign: boolean
-  tenants: AuthTenantPage | undefined
+  tenants: AuthTenantList | undefined
   /** Users in this scope whatever the filter (from the figures). */
   scopeTotal: number | undefined
   total: Total | undefined

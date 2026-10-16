@@ -1,4 +1,4 @@
-// Enqueue a task by hand (TK-40, TK-41, TK-43, S23): the payload as the
+// Enqueue a task by hand (TK-40, TK-41, S23): the payload as the
 // Admin SDK sends it (`{"data": …}`) or a raw JSON body, a task id with the
 // reservation rule said where it bites, headers, a delay, a dispatch
 // deadline and a URL. The engine builds the task through the same path the
@@ -6,14 +6,8 @@
 // enqueue what no SDK could send; the size is measured here as it is typed,
 // with the engine's own sentence, before the engine says it again.
 
-import { Button, Dialog, DropdownMenu, Input, Radio, Select, Text, Tooltip } from '@cloudflare/kumo'
-import {
-  CaretDownIcon,
-  CaretRightIcon,
-  ClockCounterClockwiseIcon,
-  InfoIcon,
-  XIcon,
-} from '@phosphor-icons/react'
+import { Button, Dialog, Input, Radio, Select, Text, Tooltip } from '@cloudflare/kumo'
+import { CaretDownIcon, CaretRightIcon, InfoIcon, XIcon } from '@phosphor-icons/react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { type KeyboardEvent, type ReactNode, useState } from 'react'
 import type { TasksQueue } from '@/api/generated/messaging/TasksQueue'
@@ -21,9 +15,9 @@ import type { TasksTaskRow } from '@/api/generated/messaging/TasksTaskRow'
 import { JsonField } from '@/components/console/json-field'
 import { KeyValueEditor, type KeyValueRow, rowId } from '@/components/console/key-value-editor'
 import { Kbd } from '@/components/kit'
-import { formatBytes, relativeTime } from '@/lib/format'
+import { formatBytes } from '@/lib/format'
 import { enqueue } from '../api'
-import { errorText } from '@/messaging/confirm-popover'
+import { errorText } from '@/lib/error-text'
 import {
   type EnqueueDraft,
   REQUEST_LIMIT,
@@ -33,8 +27,6 @@ import {
   draftFrom,
   emptyDraft,
   enqueueBody,
-  recentPayloads,
-  rememberPayload,
   requestSize,
   sizeProblem,
   taskIdProblem,
@@ -135,8 +127,6 @@ function EnqueueForm({
   const [headers, setHeaders] = useState<KeyValueRow[]>([])
   const [showHeaders, setShowHeaders] = useState(false)
   const [showUrl, setShowUrl] = useState(false)
-  // Read from this browser's storage; a form lives for one opening, so it never goes stale.
-  const recent = key ? recentPayloads(key) : []
 
   // "Edit and enqueue a copy": filled once from the task, never its name.
   const source = useQuery({
@@ -190,11 +180,7 @@ function EnqueueForm({
       if (!queue) throw new Error('Pick a queue first.')
       return { row: await enqueue(enqueueBody(queue.key, withHeaders)), queue }
     },
-    onSuccess: ({ row, queue: into }) => {
-      if (draft.text.trim() !== '')
-        rememberPayload(into.key, { sendAs: draft.sendAs, text: draft.text })
-      onEnqueued(row, into)
-    },
+    onSuccess: ({ row, queue: into }) => onEnqueued(row, into),
   })
   const send = () => {
     if (!blocked && !submit.isPending) submit.mutate()
@@ -417,39 +403,6 @@ function EnqueueForm({
         </p>
       )}
       <div className="mt-5 flex items-center gap-2">
-        <DropdownMenu>
-          <DropdownMenu.Trigger
-            render={
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={<ClockCounterClockwiseIcon />}
-                disabled={recent.length === 0}
-                data-testid="enqueue-recent"
-              >
-                Recent
-              </Button>
-            }
-          />
-          <DropdownMenu.Content align="start" className="max-w-[480px]">
-            {recent.map((entry) => (
-              <DropdownMenu.Item
-                key={`${entry.at}-${entry.text.length}`}
-                className="items-start"
-                onClick={() => set({ sendAs: entry.sendAs, text: entry.text })}
-              >
-                <span className="grid min-w-0 gap-0.5">
-                  <span className="truncate font-mono text-[12px]">
-                    {entry.text.replace(/\s+/g, ' ')}
-                  </span>
-                  <span className="text-[12px] text-kumo-subtle">
-                    {entry.sendAs === 'data' ? 'data' : 'raw body'} · {relativeTime(entry.at)}
-                  </span>
-                </span>
-              </DropdownMenu.Item>
-            ))}
-          </DropdownMenu.Content>
-        </DropdownMenu>
         <span className="min-w-0 flex-1 truncate">
           {size?.ok && (
             <Tooltip

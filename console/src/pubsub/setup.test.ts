@@ -17,7 +17,12 @@ import {
   setupCounts,
   setupProjects,
 } from './setup'
-import { PROJECT, subscriptionSummary, topicIndex, topicSummary } from './test/index-fixture'
+import {
+  PROJECT,
+  subscriptionSummary,
+  topicIndex,
+  topicSummary,
+} from './index-fixture.test-support'
 
 const topic = (id: string, project = PROJECT) => `projects/${project}/topics/${id}`
 const subscription = (id: string, project = PROJECT) => `projects/${project}/subscriptions/${id}`

@@ -8,10 +8,16 @@ import { Button, Tabs } from '@cloudflare/kumo'
 import { useState } from 'react'
 import { CopyGlyph, PanelTitle, useCopied } from '@/components/kit'
 
+/** How a block of code is written, said on the block as `data-language`. */
+export type CodeLanguage = 'json' | 'js' | 'ts' | 'python' | 'go' | 'dart' | 'shell'
+
+/** One tab of a block: what it is called and the code it holds. */
 export interface CodeDialect {
   id: string
   label: string
   code: string
+  /** The tab's language, when it differs from the block's. */
+  language?: CodeLanguage | undefined
 }
 
 export function CodeBlock({
@@ -29,7 +35,7 @@ export function CodeBlock({
   dialects?: readonly CodeDialect[]
   /** One block without tabs. */
   code?: string
-  language?: 'json' | 'js' | 'ts' | 'python' | 'go' | 'shell'
+  language?: CodeLanguage
   /** The dialect shown, when the caller keeps it (Firestore remembers its last). */
   value?: string
   onValueChange?: (id: string) => void
@@ -46,7 +52,11 @@ export function CodeBlock({
     onValueChange?.(id)
   }
   return (
-    <div className="grid min-w-0 gap-2" data-testid={testId} data-language={language}>
+    <div
+      className="grid min-w-0 gap-2"
+      data-testid={testId}
+      data-language={shown?.language ?? language}
+    >
       <div className="flex min-w-0 items-center justify-between gap-3">
         {label ? <PanelTitle as="h4">{label}</PanelTitle> : <span />}
         <Button

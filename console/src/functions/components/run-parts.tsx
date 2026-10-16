@@ -1,18 +1,10 @@
 // The pieces every Run form shares: its footer (tools left, the one primary
-// right), Copy as (curl, fetch, the CLI), the saved tests menu, the paused
-// warning a test event shows before it is sent, a labelled row, and the
-// answer — the invocation it made, how it ended, and its own log lines,
-// live while it runs.
+// right), Copy as (curl, fetch, the CLI), the paused warning a test event
+// shows before it is sent, a labelled row, and the answer — the invocation
+// it made, how it ended, and its own log lines, live while it runs.
 
 import { Button, DropdownMenu, Text, Tooltip } from '@cloudflare/kumo'
-import {
-  CaretDownIcon,
-  CopyIcon,
-  DownloadSimpleIcon,
-  FloppyDiskIcon,
-  TrashIcon,
-  UploadSimpleIcon,
-} from '@phosphor-icons/react'
+import { CaretDownIcon, CopyIcon } from '@phosphor-icons/react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { apiSend } from '@/api/client'
@@ -24,20 +16,10 @@ import { DurationText } from '@/compute/duration-text'
 import { formatNumber } from '@/lib/format'
 import { createFeedStore } from '@/lib/live/feed-store'
 import { useLiveTopic } from '@/lib/live/use-live-topic'
-import { toast } from '@/lib/toasts'
 import { invocationQuery } from '../api'
 import { chipStatus } from '../kinds'
 import { useInvocationLive } from '../live'
-import {
-  type SavedKind,
-  type SavedTest,
-  deleteTest,
-  exportTests,
-  importTests,
-  saveTest,
-  useSavedTests,
-} from '../saved-tests'
-import { copyText } from '../use-functions'
+import { copyToClipboard } from '@/lib/copy'
 import { LogLines, lineKey } from './log-lines'
 
 /** A labelled row of a Run form: the label 12 px quiet, the control beside it. */
@@ -110,7 +92,7 @@ export function CopyAsMenu({
               disabled={dialect.text === undefined}
               onClick={() => {
                 if (dialect.text !== undefined)
-                  void copyText(dialect.text, `the ${dialect.label} command`)
+                  void copyToClipboard(dialect.text, { what: `the ${dialect.label} command` })
               }}
               data-testid={`${testId}-${dialect.id}`}
             >
@@ -131,184 +113,6 @@ export function CopyAsMenu({
       </DropdownMenu.Content>
     </DropdownMenu>
   )
-}
-
-/** "Saved ▾" and "Save as…": the function's saved tests, export and import. */
-export function SavedMenu({
-  project,
-  functionId,
-  kind,
-  current,
-  onLoad,
-}: {
-  project: string
-  functionId: string
-  kind: SavedKind
-  /** The draft to save as it stands. */
-  current: () => SavedTest['draft']
-  onLoad: (test: SavedTest) => void
-}) {
-  const saved = useSavedTests(project, functionId).filter((test) => test.kind === kind)
-  const [naming, setNaming] = useState(false)
-  const [name, setName] = useState('')
-  const input = useRef<HTMLInputElement>(null)
-  const file = useRef<HTMLInputElement>(null)
-  const save = () => {
-    const result = saveTest(project, functionId, { name, kind, draft: current() })
-    if ('refused' in result) {
-      toast({
-        key: 'functions.saved-tests',
-        title: 'Could not save the test',
-        description: result.refused,
-        tone: 'warning',
-        action:
-          saved.length > 0
-            ? { label: 'Export', run: () => exportFile(functionId, saved) }
-            : undefined,
-      })
-      return
-    }
-    toast({ key: 'functions.saved-tests', title: `Saved ${name.trim()}`, tone: 'success' })
-    setNaming(false)
-    setName('')
-  }
-  useEffect(() => {
-    if (naming) input.current?.focus()
-  }, [naming])
-  if (naming)
-    return (
-      <span className="flex items-center gap-1">
-        <input
-          ref={input}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              save()
-            } else if (event.key === 'Escape') {
-              event.preventDefault()
-              event.stopPropagation()
-              setNaming(false)
-            }
-          }}
-          placeholder="Name this test"
-          aria-label="Name of the saved test"
-          className="h-7 w-36 rounded-md bg-kumo-control px-2 text-[12px] ring ring-kumo-line outline-none placeholder:text-kumo-inactive focus:ring-kumo-focus"
-          data-testid="saved-name"
-        />
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={<FloppyDiskIcon />}
-          onClick={save}
-          data-testid="saved-save"
-        >
-          Save
-        </Button>
-      </span>
-    )
-  return (
-    <>
-      <DropdownMenu>
-        <DropdownMenu.Trigger
-          render={
-            <Button variant="ghost" size="sm" data-testid="saved-menu">
-              <span className="flex items-center gap-1">
-                Saved{saved.length > 0 ? ` · ${formatNumber(saved.length)}` : ''}
-                <CaretDownIcon size={12} className="text-kumo-subtle" />
-              </span>
-            </Button>
-          }
-        />
-        <DropdownMenu.Content align="start" className="w-64">
-          {saved.length === 0 && (
-            <div className="px-2 py-1.5 text-[12px] text-kumo-subtle">
-              No saved tests for this function yet.
-            </div>
-          )}
-          {saved.map((test) => (
-            <DropdownMenu.Item
-              key={test.name}
-              onClick={() => onLoad(test)}
-              data-testid="saved-item"
-            >
-              <span className="min-w-0 flex-1 truncate">{test.name}</span>
-              <Button
-                variant="ghost"
-                size="xs"
-                shape="square"
-                icon={<TrashIcon />}
-                aria-label={`Delete ${test.name}`}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  deleteTest(project, functionId, test.name)
-                }}
-              />
-            </DropdownMenu.Item>
-          ))}
-          <DropdownMenu.Separator />
-          <DropdownMenu.Item
-            icon={FloppyDiskIcon}
-            onClick={() => setNaming(true)}
-            data-testid="saved-save-as"
-          >
-            Save as…
-          </DropdownMenu.Item>
-          <DropdownMenu.Item
-            icon={DownloadSimpleIcon}
-            disabled={saved.length === 0}
-            onClick={() => exportFile(functionId, saved)}
-          >
-            Export…
-          </DropdownMenu.Item>
-          <DropdownMenu.Item icon={UploadSimpleIcon} onClick={() => file.current?.click()}>
-            Import…
-          </DropdownMenu.Item>
-        </DropdownMenu.Content>
-      </DropdownMenu>
-      <input
-        ref={file}
-        type="file"
-        accept="application/json,.json"
-        className="hidden"
-        aria-hidden
-        tabIndex={-1}
-        onChange={(event) => {
-          const chosen = event.target.files?.[0]
-          event.target.value = ''
-          if (!chosen) return
-          void chosen.text().then((text) => {
-            const result = importTests(project, functionId, text)
-            toast(
-              'refused' in result
-                ? {
-                    key: 'functions.saved-tests',
-                    title: 'Could not import the tests',
-                    description: result.refused,
-                    tone: 'warning',
-                  }
-                : {
-                    key: 'functions.saved-tests',
-                    title: `Imported ${formatNumber(result.imported)} saved ${result.imported === 1 ? 'test' : 'tests'}`,
-                    tone: 'success',
-                  },
-            )
-          })
-        }}
-      />
-    </>
-  )
-}
-
-function exportFile(functionId: string, tests: readonly SavedTest[]) {
-  const blob = new Blob([exportTests(functionId, tests)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `${functionId}.tests.json`
-  link.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 /** The paused warning a test event shows before it is sent (the only paused-state copy compute draws). */

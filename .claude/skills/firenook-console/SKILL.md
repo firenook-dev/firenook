@@ -15,11 +15,13 @@ in it may assume localhost, a port number or an anonymous operator.
 
 React 19, TypeScript strict, Vite 8 (Rolldown) with the React Compiler
 (`react({ compiler: true })`), TanStack Router (file routes, typed search
-params), TanStack Query (server state), TanStack Table + Virtual (grids),
-TanStack Form + zod (editors), Zustand (ephemeral UI state), Kumo on Base UI
-(components), Tailwind 4 with Kumo's semantic tokens, Phosphor icons. Not
-used: TanStack Start (there is no JavaScript server; the Rust binary serves
-the app), TanStack DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
+params), TanStack Query (server state), TanStack Virtual (grids and feeds,
+under the kit's own `DataTable`), zod (search params and editors), Zustand
+(ephemeral UI state), Kumo on Base UI (components), Tailwind 4 with Kumo's
+semantic tokens, Phosphor icons. Not used: TanStack Start (there is no
+JavaScript server; the Rust binary serves the app), TanStack Table and Form
+(the kit's `DataTable` and plain controlled editors do their jobs), TanStack
+DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 
 ## Where state lives
 
@@ -73,6 +75,11 @@ the app), TanStack DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 - The content column has no padding of its own. Document-like pages wrap
   themselves in `<Page>` (`page.tsx`, the reading gutter); workbenches fill
   it edge to edge with their own toolbar and borders.
+- The top bar's engine badge says the live channel's state and is a link to
+  the Overview's engine section (`/#engine`, `components/shell/overview-parts.ts`):
+  the engine's facts (version, where the data lives, how writes reach the
+  disk, folders, switches) are drawn once, there. Its popover, with its own
+  copy of those facts and an "Export now", was cut in the trim.
 
 ## Speed rules, enforced
 
@@ -87,13 +94,21 @@ the app), TanStack DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
   budget" is never by itself a reason to refuse something a route loads
   lazily. Check the manifest before claiming it; the rules editor carried
   that wrong claim in a header comment for months. The Overview's dialogs
-  (snapshot, save, reset) load when first asked for, which kept the
+  (save, reset) load when first asked for, which kept the
   dropdown, dialog, radio, checkbox and danger-confirm chunks off the
   landing route.
 - Every script, stylesheet and SVG over 1 KB gets a gzip copy at build time
   (`precompress` in `vite.config.ts`); the engine serves it when the
   request accepts gzip, with `Vary: accept-encoding` (`serve` in
   console-front's `lib.rs`).
+- Icons ship three weights, not Phosphor's six: `iconWeights()`
+  (`scripts/icon-weights.mjs`, in the app, design-system and kit-harness
+  builds) cuts duotone, light and thin out of every icon's `defs` module,
+  11 KB gzip off the first route and 2–18 KB off each section route. An
+  icon drawn in a stripped weight would render empty, so
+  `src/test/icon-weights.test.ts` reads every `weight` the console, the
+  design system and Kumo ask for and fails on any other; a new weight goes
+  into `ICON_WEIGHTS`, never around the test.
 - Assets ship inside the binary with immutable cache headers; the shell is
   `no-cache`. Fonts are self-hosted, never fetched.
 - The engine does the heavy lifting (key cursors, index counts, incremental
@@ -214,10 +229,16 @@ One file per section, assembled by `lib/services.ts` in the order of
 route, so it holds icons, types and pure string helpers only — never a
 component import beyond `shellMount`'s lazy one.
 
-- `built` — `false` keeps the route's honest `SectionPlaceholder` until the
-  section's journeys pass. Never flip it before.
+- A section joins the registry with its pages, when its journeys pass
+  against a real engine; there is no flag for a section that is not
+  finished, so a half-built page never ships behind one.
 - `pages` (sub-items, each with its own `badges`), `badges` (ids from the
-  badge table), `actions` (⌘K rows; `?new=` and `?dialog=` open dialogs).
+  badge table).
+- The section's ⌘K rows (`?new=` and `?dialog=` open dialogs) are not in the
+  registry: they live beside it in `lib/sections/<id>-actions.ts`,
+  assembled by `lib/palette-actions.ts`, which only the lazy palette
+  imports, so their icons stay off the first route (5 KB gzip).
+  `links-every-kind.test.ts` opens every action's page with its search.
 - `routes` — `kind → (key) => SectionLink`: serves engine search hits and
   every `EntityRef` another section's payload carries (`linkTo(ref)`,
   `useLinkTo`). Keys split at the first `|` (the first three for
@@ -412,7 +433,7 @@ title or the body.
   names encoded); `lib/download.ts` on the client.
 - **Links between sections**: `EntityRef { kind, key, label? }`, built only
   through `entity.rs`'s constructors; rendered with `EntityLink` (plain text
-  while the target section is absent or not built).
+  while the target section is absent from the engine).
 - **The guard** (`guard.rs`, on the whole mount): a change is JSON, or
   carries `x-firenook-console` (`[a-z0-9-]{1,16}`) for a binary body — a
   bodiless POST is a simple request any page can send; `Sec-Fetch-Site`
@@ -425,8 +446,8 @@ title or the body.
   (`serviceAddress`).
 - **Section hooks**: `Section::summary` (the Overview's figures) and
   `Section::clear` (`POST /suite/clear`); suite controls (`/suite/background`,
-  `/suite/destinations`, `/suite/export`); `ForeignProjects` and
-  `projectScope`.
+  `/suite/destinations`, `/suite/export` as a `suite.export` job);
+  `ForeignProjects` and `projectScope`.
 - **Late services**: a service that starts after the console is a `Late<T>`
   (`get()` answers `ApiError::starting` with its label until `set`);
   `late_native` serves a native mount the same way; a topic waits for it.
@@ -509,7 +530,7 @@ defaults never in the URL):
 | `tab` | Only the inspector's tab |
 | `view` | The main area's tab of a scope |
 | `layout` | A display mode (Storage list / grid) |
-| `panel` | A side panel of tools (rules pages, Auth try/inspect) |
+| `panel` | A side panel of tools (rules pages, Auth's Inspect a token) |
 | `state`, `outcome` | A single-choice switch with counts, named after its field |
 | `db`, `bucket`, `codebase`, `channel`, `queue`, `location`, `topic`, `tenant` | The scope picker's value |
 | `path` | A path inside the scope |
@@ -528,6 +549,7 @@ defaults never in the URL):
 | `jobs` | `{ section? }` | `job` | replay |
 | `firestore.changes` | `{ database?, scope? }` | `change` | replay (path-only ring) |
 | `firestore.rules` | `{ database? }` | `rules`, `file` | compare |
+| `firestore.decisions` | `{ database?, path?, uid?, denied?, method? }` | `decisions` | replay |
 | `auth.users` | `{ project?, tenant? }` | `changed`, `cleared` | none |
 | `auth.activity` | `{ project?, tenant?, q?, console? }` | `calls` | replay |
 | `auth.inbox` | `{ project?, tenant?, q? }` | `messages` | replay |
@@ -543,11 +565,9 @@ defaults never in the URL):
 | `pubsub.counters` | `{ project?, throughput? }` | `counters`, `resources`, `rejected` | compare |
 | `pubsub.topic` | `{ project?, topic, subscription? }` | `published`, `stale` | none |
 | `pubsub.push` | `{ project?, subscription }` | `attempts` | replay |
-| `pubsub.deliveries` | `{ project?, topic }` | `changed` | none |
 | `pubsub.schedules` | `{ project? }` | `schedules` | compare |
 | `tasks.counters` | `{ project? }` | `counters`, `queues` | compare |
 | `tasks.queue` | `{ project?, queue }` | `stale`, `finished` | none |
-| `tasks.attempts` | `{ project?, queue?, task? }` | `attempts` | replay |
 | `logs.entries` | `{ q?, from?, to? }` | `entries` | replay |
 | `overview` | `{}` | `state` | compare |
 
@@ -583,7 +603,7 @@ Filtered Logs links are `linkToLogs({ function?, execution?, instance?,
 service?, level?, from?, to?, entry?, since? })`, never hand-spelled.
 
 **Headers** — one `x-firenook-*` family: `x-firenook-console` (every console
-request; Auth's `write`/`try`/`replay`), `x-firenook-cause-<kind>` (what made a
+request; Auth's `write`/`replay`), `x-firenook-cause-<kind>` (what made a
 function run), `x-firenook-activity` and `x-firenook-execution` (answers, only
 to a request that asked), Storage's `x-firenook-metadata`/`-keep-tokens`,
 Firestore's `x-firenook-preview`. All are stripped before user code.
@@ -601,10 +621,13 @@ The only spellings: `useLiveTopic`, `useInvalidateOn`, `useCursorRows`,
 `IdentityPicker`, `SectionBanner`, `ShellBanners`, `FilterField`,
 `MatchCount`, `ToolbarDivider`, `LiveNotice`, `RequiresNotice`, `PauseButton`,
 `MaskedValue`, `RowMenu`, `FacetList`, `CodeBlock`, `EntityLink`,
-`DangerConfirm`, `ExportDialog`, `OutcomeChip`, `LogLine`, `MiniBars`,
+`DangerConfirm`, `ConfirmPopover`, `CodePopover`, `SectionJobs`,
+`FeedTime`, `ExportDialog`, `OutcomeChip`, `LogLine`, `MiniBars`,
 `JobsWatch`, `routes`, `badgeLink`, `shellMount`, `linkTo`, `linkToLogs`,
 `resolveAuthorization`, `identityKey`, `useTriggersFor`, `useLocalBadge`,
-`useJobs`, `toast`, `connectSnippet`, `ApiError`, `api_error.rs`,
+`useJobs`, `toast`, `copyToClipboard`, `errorText`, `clockTime`,
+`createRecents`, `connectSnippet`, `connectDialects`, `CODE_DIALECTS`,
+`codeTab`, `FLASH_MS`, `ApiError`, `api_error.rs`,
 `ConsoleJson`, `EntityRef`, `Job`, `BulkTarget`, `JobRegistry`,
 `SearchSource`, `ReplayOptions`, `replay_topic`, `ComputeParts`,
 `ForeignProjects`, `HookContext`, `Section::summary`, `Section::clear`. A
@@ -618,16 +641,40 @@ barrel, so a route chunk carries only what it uses. The shell imports only
 route chunks. Identity: requests run as a `ViewAs` through
 `resolveAuthorization`/`fetchAs` (the engine mints a user's token; never
 `mintUnsignedToken` directly); `IdentityPicker` picks it. Requests:
-`components/console/request/` (`sendComposed` streams, `requestAsCode`,
-`useRequestHistory`, `ResponseView`, `CodePopover`). Every piece has a
+`components/console/request/` (`requestAsCode`, `useRequestHistory`,
+`ResponseView`; an invoke streams through the engine,
+`functions/invoke-stream.ts`). Copy as code is `CodePopover`
+(`components/console/code-popover.tsx`): a footer's Code button and a
+`CodeBlock` with a tab per dialect, labels from the one list
+`CODE_DIALECTS` (`request/as-code.ts`, through `codeTab(id, code)`), a
+note under it, and the last tab remembered per `kind`. Every piece has a
 design-system card (`console/design-system/src/cards/`, one file per
 stream, loaded by glob). A few behaviours worth knowing:
 
+- **Running the app's code again asks in a popover, destroying data in a
+  dialog.** `ConfirmPopover` (`components/console/confirm-popover.tsx`) is
+  the one confirmation for a replay, a run now, a run or enqueue again: a
+  popover beside the row (`rowElement(testId, key)`) or the button, the
+  page's upper middle when neither is there; `r` opens it, Enter confirms,
+  the caller's words say what runs again; an `option` (Eventarc's "Keep the
+  id") and the run's own pending and refusal (`errorText`) live in it.
+  `useConfirmPopover().ask(request)` is the page's one popover for
+  whoever asks. `DangerConfirm` stays the dialog that deletes; with
+  `tone: 'neutral'` (the primary button, no bin) it also asks before a
+  bulk change that destroys nothing, such as Auth's Disable or Verify.
+- A section's bulk work is `SectionJobs` (`components/console/section-jobs.tsx`)
+  under its toolbar: `section`, an optional `filter`, the `verb` its items
+  are counted with, Cancel (or `cancelLabel`), a bar while the total is
+  known, a summary for `summaryMs` (4 s) once it ends, "See why" over the
+  failed items with the section's own `why(error)` beside each, and
+  `onEnded` to read lists again; a job that failed or stopped says why.
+  Test ids: `<testId>s`, `<testId>`, `-progress`, `-message`, `-cancel`,
+  `-see-why`. Its card is `design-system/src/cards/console-shared.tsx`.
 - `DangerConfirm` draws `DangerConfirmBody`, which is exported: a card (or
   any page that needs the confirmation at rest) draws the real body framed,
-  handed a `Job` instead of subscribing. `TriggerLineItem` and
-  `triggerLine` are the trigger line any destructive dialog draws
-  (Firestore's delete dialog uses them).
+  handed a `Job` instead of subscribing. `triggerLine` is the trigger
+  line any destructive dialog draws; `progress` says how far work that is
+  not a job has got (Firestore's browser-side delete loop).
 - `StatusDot` keeps its width; let it shrink (`className="min-w-0
   shrink"`) and its word ends in an ellipsis. `OutcomeChip` keeps its width
   beside a truncating sibling; `shrink` lets it give way (put the whole word
@@ -641,6 +688,21 @@ stream, loaded by glob). A few behaviours worth knowing:
   `cards/shared.tsx` in its providers, so nothing opens a connection; and
   answers any API read from the query cache. `npm run design-system` fails
   on any browser error.
+- Times have one formatter each way (`lib/format.ts`): `clockTime(at,
+  'minute' | 'second' | 'ms')` is the wall clock (`14:02`, `14:02:11`,
+  `14:02:11.348`, local), `formatClock(iso, format)` a feed's time in the
+  console-wide clock setting (`useClockFormat`: time, relative or UTC),
+  `clockOrDate` the time today and the date before it on another day,
+  `pad` the one zero-padder. A feed row's time cell is `FeedTime`
+  (`components/console/feed-time.tsx`: the setting, the other forms on
+  hover); a fact's age is `RelativeTime`. Never slice a formatted time.
+- "Connect your app" has one tab list, `CONNECT_TABS` in
+  `lib/connect-tabs.ts` (each tab's `?connect=` value, generator target,
+  label and title; data only, because the Overview's route schema reads
+  it in the first route). `connectSnippet(target, …)` writes one snippet;
+  `connectDialects(status, { services, params? })` in `lib/connect.ts`
+  gives a `CodeBlock` its tabs from that list (an empty section shows
+  `EMPTY_CONNECT`: web, node, python, go).
 
 ### End-to-end
 
@@ -696,7 +758,7 @@ stream, loaded by glob). A few behaviours worth knowing:
 | `crates/console-front/src/<stream>/` | That stream only |
 | `crates/suite-runtime/src/lib.rs`, `project_scope.rs` | Foundation only (the hooks are pre-placed: streams edit `console_wiring/<stream>.rs`) |
 | `crates/functions-bridge` | Foundation; compute#1 (`explain_match`, cause headers, `note_dropped`); observe's maintenance-commit rule |
-| `crates/rules-engine` | Storage in `analysis.rs`, auth in `claim_reads.rs`, `lib.rs` re-exports only |
+| `crates/rules-engine` | Storage in `analysis.rs`, `lib.rs` re-exports only |
 | Service crates | Their stream; another stream's one-liners only through compute#1 |
 | `console/src/{lib/*, components/console/*, components/kit/*, components/shell/*}` | Foundation only, except the isolated shared-component commits and compute's `lib/triggers.ts` |
 | `console/src/lib/sections/<id>.ts` | That section (Firestore's and Logs' as scheduled) |
@@ -809,7 +871,7 @@ only at `size="lg"`). The console uses it by surface, not by taste:
 
 | | title | body | chrome, counts |
 | --- | --- | --- | --- |
-| page (Overview, a section placeholder) | 20 px `heading size="lg"`, sections 16 px | 14 px | — |
+| page (Overview, a section's gate) | 20 px `heading size="lg"`, sections 16 px | 14 px | — |
 | dialog — it owns the screen | 16 px `text-lg font-semibold` | 14 px | 13 px |
 | popover, dropdown, the inspector | **14 px `PanelTitle`** | 13 px `size="sm"` | 12 px, figures 11 px |
 | toolbar, grid, chips | — | — | 12 px, figures 11 px, `kbd` 10 px |
@@ -1990,7 +2052,7 @@ kept current by that channel, so a dropped channel is a grid that looks
 fresh and is not — the one thing a dev tool must not do quietly. While it
 is up there is nothing to say: a green "Live" in every toolbar was the
 normal case announced beside the engine's own green dot. The toolbar keeps
-a `LiveDot` chip only for this page's own subscription, when the engine
+a `LiveNotice` chip only for this page's own subscription, when the engine
 ended or refused it. A journey drops the channel with `dropLive`
 (`e2e/support/live.ts`: the product's own release path — the tab hidden
 until it lets the connection go, the live routes refused, the tab shown
@@ -2003,22 +2065,37 @@ held, both under the word "change".
 
 ## Security rules (built, `src/firestore/rules-page/` on the rules kit `src/rules/`)
 
-**The rules kit** (`src/rules/`) is what every rules page shares, Firestore's
-and Storage's: the draft (`useRulesDraft` over a backend: the document in
-force, how to install a text, where the draft is kept), the check as you type
-(`useRulesCheck`), the toolbar (`RulesToolbar` with a `scope` slot, its
-`DraftState`, `CoverageToggle`, `DraftActions`), the banners (on
-`SectionBanner`), `Problems` (F8 / Shift+F8 walk them), `HistoryDialog`,
-`diff.ts`, `overlay.ts`, `explain.ts`, `ExplanationView`, `coverage.ts`,
-`tests-core.ts` and `TestsPanel`, `Verdict` (on `StatusDot`), the decisions
-panel shell (`DecisionsShell`; each page's adapter fills it), `focus.ts` and
-the one search schema (`rulesPageSearch('db' | 'bucket')`, with `line`). It
+**The rules kit** (`src/rules/`) is one rules page, Firestore's and
+Storage's. `RulesWorkbench` (`workbench.tsx`) is the frame: the toolbar
+(`RulesToolbar` with a `scope` slot, its `DraftState`, `CoverageToggle`,
+`DraftActions`, `HistoryDialog`), the banners (on `SectionBanner`), the
+editor with its `Problems` strip (F8 / Shift+F8 walk them), the 440 px
+side panel and its tabs, the keys (⌘↵ applies, ⌘S saves) and ⌘K (Apply,
+Revert, Save, History, coverage on or off, every panel, the page's own
+actions, the tests as a file); each service is an adapter that hands it
+its scope, queries, panels and words. Inside it: the draft
+(`useRulesDraft` over a backend), the check as you type
+(`useRulesCheck`), `diff.ts`, `overlay.ts`, `explain.ts`,
+`ExplanationView`, `coverage.ts`, `focus.ts`, `Verdict`; the decisions
+(`decision-log.ts`, a topic's bounded newest-first log with its window
+and gap words; `RulesDecisionsPanel` over `DecisionsShell`;
+`DecisionDetailFrame`, a decision opened, with the page's own facts as
+children); the playground (`RulesPlayground`: method tabs, the page's
+fields, who is asking — the console's `IdentityPicker`, or "As recorded"
+for a handed-over request — run, re-run on every edit, the result and
+Save as a test; `createPlaygroundStore`; `who.ts`, the one `Who`, its
+credentials and its rules-unit-testing context); the map
+(`RulesMapPanel`, the page's rows); starter rules (`starter.ts`:
+`insertBlock` under `FIRESTORE_ROOT` or `STORAGE_ROOT`, `insertStarter`);
+saved tests (`tests-core.ts`, `createRulesTests`, `TestsPanel`); "See
+why" where a request was refused (`RefusalDetail`, a popover); and the
+one search schema (`rulesPageSearch('db' | 'bucket')`, with `line`). It
 imports nothing from a section's directory. Change it with both pages'
-journeys running. **Only a loaded text is checked**: the editor holds an
-empty text until the rules arrive, and checking it flashed `1:1 expected
-"service"` in the Problems strip on every visit (`textToCheck`). A link's
-`line` is revealed and marked once the rules have loaded, then leaves the
-address.
+journeys running (the bodies both run are in `e2e/support/rules.ts`).
+**Only a loaded text is checked**: the editor holds an empty text until
+the rules arrive, and checking it flashed `1:1 expected "service"` in the
+Problems strip on every visit (`textToCheck`). A link's `line` is
+revealed and marked once the rules have loaded, then leaves the address.
 
 Rules are **a page of their own**, `/firestore/rules` (route file
 `routes/firestore_.rules.tsx`, the trailing underscore keeps it out of the
@@ -2039,7 +2116,8 @@ loaded (everything allowed), the file on disk does not compile, the rules
 changed under your draft (Discard / Keep editing), what applying would
 turn around ("Show them" filters the decisions to the flips), saved tests
 that fail against the draft. The editor fills the left; a 440 px side
-panel has Decisions · Playground · Tests · Collections (counts as badges).
+panel has Decisions · Playground · Tests · Collections (failing tests count
+on their tab).
 
 **The editor** is the shared CodeMirror `CodeEditor` with
 `language="rules"` (`components/code-editor/rules/`: a `StreamLanguage`
@@ -2063,37 +2141,49 @@ text. A reveal comes from a click, an overlay's arrival or a link's `line`
 compile errors or the engine's lint warnings (`code`: `open-access`,
 `auth-only`, `unvalidated-write`; positions are UTF-16 `from`/`to`), the
 outline, and the map against the schema index. The Problems strip under
-the editor lists them; Collections shows the warnings and the map
-(governing match blocks with the operations their allows grant, uncovered
+the editor lists them, the one place a warning is listed (`rules-problem`,
+`data-code`); Collections shows the map (governing match blocks with the operations their allows grant, uncovered
 collections, match blocks that reach no data). "Add starter rules"
 (`starter.ts`) writes a match block from sampled fields: ownership from a
 `users/{userId}` ancestor, `users` itself, or an owner field; a
 `valid<Name>(data)` with `hasOnly`, `hasAll` for fields every sample
 carries, and type checks; inserted before the documents block closes.
 
-**Decisions** (`decisions.ts`, `decisions-panel.tsx`, `decision-detail.tsx`)
-are drawn by the rules kit's `DecisionsShell`, the same panel as Storage's:
-one filter field (Firestore matches path, user and method in the browser;
-Storage parses `path uid:<uid> method` into the topic's parameters), All /
-Denied, Clear, the count line, two-line rows from `DecisionRowParts`
-(verdict, method, path; when, who, extras, the draft's flip, the deciding
-lines) and the "Holding the last N…" footer. They read the official
-Requests websocket, unchanged — its JSON is pinned by conformance
-fixtures. **History arrives as one JSON array, live events
-one by one**; the old drawer parsed only objects and silently dropped the
-replay. Typed rules values (`intValue`, `pathValue`, `undefined` …) become
-`FsValue` through `fromRulesValue`. A decision opens onto who asked
-(claims, provider), the lines that ran (deduplicated with ×n), the
-document before/after with changed keys, and **Why**: `GET
-/rules/decisions/{requestId}` re-runs the retained context against the
-ruleset that decided it and returns the explanation. "See why" on a denied
-grid read links with `path`, `uid`, `denied` and **`pick`**: pick opens the
-newest matching denial **once** and is cleared — the first version
-re-picked every time the list came back, so "All decisions" bounced (and
-the React Compiler memoizes the filtered list, so a sabotage that drops
-`decision` from the effect's dependencies does not reproduce it). An empty
-list says the Admin SDK and the console as admin skip rules; a database
-with no rules file says nothing is checked.
+**Decisions** (`decisions.ts`, `decision-detail.tsx`, the kit's panel)
+come from the `firestore.decisions` topic, built as `storage.decisions` is
+(`crates/console-front/src/firestore_decisions.rs`): the rules runtime
+hands every decision it records to a tap
+(`RulesRuntime::subscribe_decisions`, beside the Requests event and the
+retained context), a forwarder keeps a ring of 10,000 summaries
+(`FirestoreDecision`: id, time, database, method, path — a list's
+collection, a group as `**` and its id — outcome, who asked, the lines it
+ran, the ruleset's hash, `viaConsole`), the topic replays it by cursor
+with gaps, and every parameter (`database`, a `path` and what is under
+it, `uid`, `denied`, `method`) is evaluated by the engine. It exists
+while diagnostics record decisions (`features.diagnostics`). The page used
+to read the official Requests websocket, which stays exactly as it is for
+the Google Emulator UI and conformance: four clients, 256 decisions for
+ten minutes, filtered in the browser — a fifth tab was refused, and "See
+why" on an older denial found nothing. One filter field (a path,
+`uid:<uid>`, a method) beside All / Denied is the URL; Clear forgets this
+tab's list. A decision opens onto who asked (claims from the re-run), the
+lines that ran, **Why** — `GET /rules/decisions/{requestId}` re-runs the
+retained context against the ruleset that decided it, for the newest
+2,000 (the runtime's `RETAINED_DECISIONS`, each ruleset source charged
+once) — the query a list ran, the document before and after, "Open in
+Data" and "Try in the playground". `pick` opens the newest matching
+denial **once** and is cleared — the first version re-picked every time
+the list came back, so "All decisions" bounced. An empty list says the
+Admin SDK and the console as admin skip rules; a database with no rules
+file says nothing is checked.
+
+**See why** on a denied grid read is the kit's `RefusalDetail` popover
+(`rules-page/see-why.tsx`), on the data page: Firestore's 403 is the
+protocol's plain one, so it finds the newest denial the console's own
+read made on that path as that identity (`viaConsole`) on the topic,
+runs it again for every value, and offers "Try in the playground" and
+"Open in Rules" (the decision, or `path`/`uid`/`denied`/`pick` when none
+is held).
 
 **Inline values** (`src/rules/explain.ts`, `inlineSteps`): the engine reports every
 expression evaluated; written after each, a line is unreadable. Keep each
@@ -2105,26 +2195,35 @@ it) and lists steps inside called functions separately, plus the
 `get()`/`exists()` count and `queryReason` (which filter a list needs).
 
 **Coverage** is the official report, read from the console origin at
-`/console/api/v1/firestore/emulator/v1/projects/{p}:ruleCoverage` and
-refetched when the decisions feed grows (no timer). Offsets are Unicode
-scalars with an **inclusive** end (`scalarToUtf16`); the `report` key is
+`/console/api/v1/firestore/emulator/v1/projects/{p}:ruleCoverage` — only
+while Coverage is on, which it is not until asked for (remembered per
+page, `useCoveragePreference(page)`) — and read again as decisions
+arrive, at most once a second (no timer). Offsets are Unicode scalars
+with an **inclusive** end (`scalarToUtf16`); the `report` key is
 **absent** when the rules have nothing to count (`if true` alone) — that
 crashed the page once. Drawn only over the text it describes.
 
-**Playground** (`playground.tsx`, `requests.ts`): a form becomes the
-request a real client sends — a token minted like View as, data typed by
-`fromJson(INFER)` + `encodeFields`, a list query through `parseQuery` +
+**Playground** (`playground.tsx` on the kit's `RulesPlayground`,
+`requests.ts`): a form becomes the request a real client sends — who is
+asking from the `IdentityPicker` (an Auth user found by search, a custom
+identity), minted as a custom identity's token; data typed by
+`fromJson(INFER)` + `encodeFields`; a list query through `parseQuery` +
 `toStructuredQuery` — and `POST /rules/evaluate` runs it against the
 **editor's text** (a dry run: nothing committed or recorded), again on
 every edit. "Try in the playground" loads a decision's replayable
-`request` (recorded auth, before-document, time).
+`request` (recorded auth, before-document, time) and runs it on arrival;
+a decision past the retained window is tried from its summary. Tests
+saved before the picker (`{ kind: 'user', claims: '…' }`) are revived as
+the custom identities they were.
 
-**Tests** (`tests-store.ts` on the kit's `tests-core.ts`): saved cases per project+database in
-localStorage, run against the editor's text after each edit (an error
-counts as a deny, as in Firestore); export as a
-`@firebase/rules-unit-testing` file (`tests-export.ts`: seeds the
-document read with `withSecurityRulesDisabled`, `assertSucceeds` /
-`assertFails`) or as JSON.
+**Tests** (`tests-store.ts`, `createRulesTests` in the kit's
+`tests-core.ts`): saved cases per project+database in localStorage, run
+against the editor's text after each edit (an error counts as a deny, as
+in Firestore); exported as a `@firebase/rules-unit-testing` file
+(`tests-export.ts`: seeds the document read with
+`withSecurityRulesDisabled`, `assertSucceeds` / `assertFails`) from the
+panel's Export and ⌘K. There is no JSON copy or import: a JSON of
+browser-local cases ran nowhere.
 
 **History and the file.** `GET /rules/history` (startup, console, file,
 reload); the dialog diffs any version — and the file on disk when it
@@ -2138,14 +2237,17 @@ the engine watches each configured rules file (1 s debounce, a broken file
 keeps the rules in force and reports `fileProblems`). No polling anywhere.
 
 **Engine contract**: `crates/console-front/src/rules.rs` (read, apply,
-check, history, the `firestore.rules` topic) and `rules_eval.rs` (evaluate, decision detail,
-impact); generated types in `src/api/generated/`. A Rust doc comment that
+check, history, the `firestore.rules` topic), `rules_eval.rs` (evaluate,
+decision detail, impact) and `firestore_decisions.rs` (the
+`firestore.decisions` topic); generated types in `src/api/generated/`,
+and every body the page sends is typed by its generated `Rules…Body`. A Rust doc comment that
 contains `*/` — a pattern like `users/*/orders` — closes the generated
 TypeScript comment and breaks the console build; spell it out.
 
 **Test hooks**: Kumo's `Badge` and `Select` do not pass `data-testid`
 through — wrap the badge, find the select by role and name. Journeys live
-in `e2e/rules.spec.ts`; each one that changes rules restores the rules in
+in `e2e/rules.spec.ts` (and the bodies both rules pages run, in
+`e2e/support/rules.ts`); each one that changes rules restores the rules in
 force and the file on disk in `finally`, because the data journeys read
 through them. Typing into CodeMirror meets its bracket closing and
 indenting: paste instead (`pasteRules`).
@@ -2154,10 +2256,11 @@ indenting: paste instead (`pasteRules`).
 
 - Data path: the browser talks Firestore REST to the console's own origin
   (`/console/api/v1/firestore/v1/...`, a second `rest-front` router on the
-  same service), Identity Toolkit at `/console/api/v1/auth/...` and the
-  official Requests websocket at `/console/api/v1/firestore/requests`,
-  which the rules page reads as its decisions. Never reach the service
-  ports from the browser.
+  same service) and Identity Toolkit at `/console/api/v1/auth/...`; the
+  rules page's decisions are the `firestore.decisions` topic. The official
+  Requests websocket stays mounted at `/console/api/v1/firestore/requests`
+  for the Google Emulator UI; the console does not read it. Never reach
+  the service ports from the browser.
 - Live: the `firestore.changes` topic on the console's one live channel
   (`useLiveTopic`, `src/lib/live`), fed by the store's commit observer
   (`ChangeFeed` in `crates/console-front/src/firestore.rs`, a ring of
@@ -2314,19 +2417,25 @@ indenting: paste instead (`pasteRules`).
   REST wire shape, and `isRestShape` in `value.ts` is what lets the import
   recognise such a file and decode it rather than storing `{"stringValue":…}`
   as a map; it matches on the wire's own field names, so a person's own
-  one-key map is not mistaken for it. The dialog names the scope and whose
-  identity it reads as, because rules apply.
+  one-key map is not mistaken for it. The dialog is the kit's
+  `ExportDialog` in its `run` mode (the file is built in the tab, since it
+  reads through the rules; `notes` say what each format holds and
+  `renderOptions` adds "Keep Firestore types exactly"); it names the scope and
+  whose identity it reads as, because rules apply. Test ids `export-what`,
+  `export-confirm`, `export-progress`.
 - There is no undo: the write log and its undo were taken out (see "The
   write log and its undo were taken out" under Design), and there is no
   `changelog.rs`, `GET /changelog` or `POST /undo`.
-- Rules are a page of their own — see "Security rules" below. `?view=rules`
-  and `/requests` redirect there.
+- Rules are a page of their own — see "Security rules" below.
 - ⌘K is the shell's palette; pages contribute through
   `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
-  Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for
-  path-shaped text, recents (`src/firestore/recents.ts`, localStorage per
-  project+database, twelve kept), every pattern of the schema tree (a nested one opens
-  as its group) and its actions; the panel toggle (`t`) and the nav modes
+  Firestore's provider (`src/firestore/palette.tsx`) adds recents
+  (`src/firestore/recents.ts`, localStorage per project+database, twelve
+  kept) and its actions. Collections and documents are the engine's
+  search hits alone (its "Collections" and "Documents" groups, from any
+  page, a typed document path read exactly); the page once listed the
+  schema tree and a "Go to" row as well, which only repeated them and the
+  path bar. The panel toggle (`t`) and the nav modes
   are the shell's "Layout" group. `matchesQuery` is word-wise: every word
   of the query must appear in the title, breadcrumbs or keywords.
 - The root landing shows **one row of recents, in the collection cards'
@@ -2349,6 +2458,13 @@ indenting: paste instead (`pasteRules`).
   `[data-kumo-component='InlineCopyText'][aria-label='Copied'] > svg`.
   The path's copy gave no answer at all before. A new copy button takes
   the glyph; the `ticked` helper in the journeys checks it.
+- **Every copy goes through `copyToClipboard`** (`lib/copy.ts`): the text,
+  and a note — `what` ("Copied the code 482913") or a whole `title` for
+  the toast, an optional `description`, `refused` for what to do when the
+  browser has no clipboard, a `key` when the toast must replace another.
+  Without `what` or `title` it says nothing on success (`useCopied` uses
+  it so: the tick says it); a refused write always says so and never
+  throws. Never call `navigator.clipboard` directly.
 - Kumo gotchas met here: `DropdownMenu.RadioItem` needs `closeOnClick`;
   a `Tooltip` given a `Button` as its **child** nests two `<button>`s and
   React says so in the console — pass it as `render={<Button … />}`, which
@@ -2557,8 +2673,10 @@ section is project-scoped: every route and topic takes `project` from
 and `tab`; create dialogs open from `?new=` (`user`, `import`, `sample`;
 `tenant` goes to Settings, where the tenant dialog lives) and Export from
 `?dialog=export`; Inbox has `message`, Activity `entry`, `console` (the
-console's own edits shown), `panel=try|inspect` and `method`; Settings has
-`section`. A feed paused is `?paused=true`.
+console's own edits shown) and `panel=inspect`; Settings has `section`. A
+feed paused is `?paused=true`. The user inspector's tabs are Details,
+Claims and Raw; a user's calls and messages are links from Details into
+Activity and the Inbox (`q=uid:<uid>`), never a list of their own.
 
 **Links**: the registry's `routes` open `auth.user` (`<tenant>|<uid>`,
 split at the first bar; no bar is a project user), `auth.call` (call id)
@@ -2589,8 +2707,8 @@ subscription too.
 
 **Writes go through the official API**: `callAuthEmulator` (`auth/api.ts`)
 sends Identity Toolkit calls through the mount with `x-firenook-console:
-write` (`try` and `replay` for Try a sign-in and Replay), so every edit is
-recorded in Activity and behaves as the Admin SDK's. The answer carries
+write` (`replay` for Replay), so every edit is recorded in Activity and
+behaves as the Admin SDK's. The answer carries
 `x-firenook-activity: <call id>` only when the request carried the console
 header. Bulk changes (`POST /auth/users:<verb>`: disable, enable, verify,
 revoke, setClaims, removeClaims, delete) take a `BulkTarget` (keys or the
@@ -2599,6 +2717,9 @@ works in chunks of 2,000 and can be cancelled between them; imports upload
 first (`POST /auth/imports`, streamed), preview, then run as a job (`POST
 /auth/users:import`); export is `GET /auth/users:export` in the emulator's
 own format; `POST /auth/tenants` creates a tenant with the id you choose.
+Tenants are a plain list (`GET /auth/tenants`: the first 500 a filter
+matches, in id order, and how many it matches), read again on every
+`auth.config` event; a project has a handful of them, not pages.
 
 **Tokens come from the engine** through the foundation's
 `resolveAuthorization`: `POST /auth/tokens` mints what a sign-in would —
@@ -2611,7 +2732,13 @@ for every scope with a cached token and drops a token the moment its
 account's token fields change or it is deleted. `POST /auth/token/inspect`
 judges a pasted token for each consumer (the rules, the emulator's own
 calls, `verifyIdToken` with and without the revocation check, a sign-in)
-with a reason and a fix.
+with a reason and a fix. Inspect a token is the one place a token is
+viewed: Sign in as's "View the token…" hands its mint over
+(`auth/inspect-handoff.ts`, never the address) with what the engine said
+of it — for whom, beforeSignIn's run, `differences` — shown above the
+verdicts while that token is in the box. The claims preview shows the
+mint's `payload`, decoded by the engine as the inspection is; the
+console decodes no token itself.
 
 **Live**: topics on the one channel per browser — `auth.users` (keys with
 fields, coalesced in 100 ms windows, a refresh-only change sends nothing,
@@ -2628,8 +2755,8 @@ page's subscription ended; the channel's state is the top-bar badge.
 
 **Codes are fetched by call id, never raced**: `GET
 /auth/messages?activity=<call id>` returns what that call sent
-(`callMessagesQuery`). The observer records a call before its response is
-returned.
+(`sentMessageLink`, the "Open in inbox" of a code the console sent). The
+observer records a call before its response is returned.
 
 **Activity comes from the Auth app itself**: one `CallRecord` per finished
 call (the engine keeps the newest 10,000; messages 2,000) with its steps —
@@ -2638,8 +2765,9 @@ claims and the invocation id read from `x-firenook-execution` after
 sending `x-firenook-cause-auth-call`; triggers; messages sent and used;
 user changes; configuration. Bodies are kept as received and sent, at
 most 16 KiB each, and only with diagnostics on. `x-firenook-console:
-write` calls are hidden unless `?console=true`; `try` and `replay` are
-always shown; Replay asks first for operations that are not idempotent.
+write` calls are hidden unless `?console=true`; `replay` and `try` (the
+beforeSignIn run of Sign in as) are always shown; Replay asks first for
+operations that are not idempotent.
 Errors are explained from `auth/errors.ts` with the SDK's own code and
 sentence from `auth/sdk-errors.gen.ts`, which `scripts/auth-sdk-errors.mjs`
 regenerates from `@firebase/auth` (1.13.5); `operations.ts` must label
@@ -2652,15 +2780,19 @@ bar as a brand gradient, so a tone replaces the `from-`/`via-`/`to-` stops
 (a `bg-` colour never shows). Auth overwrites `email`, `email_verified`,
 `phone_number`, `provider_id`, `user_id` and `auth_time` in the token, and
 custom `name`/`picture` replace the profile's (`shadowed`, `overrides` on
-the minted token). Where rules read a claim comes from
-`Ruleset::claim_reads()` (`crates/rules-engine/src/claim_reads.rs`) on the
-rules documents (`claimReads`) — never a regex over rule text.
+the minted token).
 
 **Suite facts are not Auth's**: foreign projects (`ForeignProjects`, which
 Auth feeds at start), background triggers (`ConsoleStatus`), which
 functions listen (`useTriggersFor`), connection snippets (`lib/connect.ts`)
 and toasts (`lib/toasts.ts`) each have one owner; Auth draws no banner for
-them.
+them. Nor a second copy of what another page owns: Settings links to the
+Users page's Export, Import and Sample users dialogs, to the Overview's
+reset (every user of every tenant) and to the Overview's connect
+snippets; bulk jobs are `SectionJobs`, the user's Code is `CodePopover`.
+Sample users come 10, 100 or 1,000 at a time, one mix (email, phone,
+Google; some disabled, unverified, with MFA or claims), marked `sample-`
+on `sample.test`.
 
 **Persistence** is snapshotted under the lock and encoded off it
 (`crates/auth-front/src/persist.rs`): a change reaches `auth-state.json`
@@ -2716,8 +2848,11 @@ the reader had been. The Rules page reads the rules kit's schema,
 Files links to Rules only through `storage/rules-link.ts`
 (`useRulesPageLink`, `useTryInPlayground`), which offers a link only while
 the router knows `/storage_/rules`. Links out are `EntityRef`s through
-`EntityLink`/`linkTo` (an Auth user in Activity, a function a trigger
-reached), never hand-built URLs; Storage's own keys are pinned in
+`EntityLink`/`linkTo` (an Auth user in Activity; each invocation a
+change's event started, which the activity route joins from the
+Functions record by the event ids the change record keeps, or the
+functions its trigger names before they begin), never hand-built URLs;
+Storage's own keys are pinned in
 `entity.rs`: `storage.object` and `storage.folder` are `<bucket>|<path>`,
 `storage.decision` is `<bucket or *>|<id>`.
 
@@ -2773,8 +2908,9 @@ sends `nosniff` and a sandbox CSP (PDF excepted) with an inline
 disposition; HTML is shown as source or in a script-less `srcdoc` frame,
 never `<iframe src>`; "Open in new tab" stays on the console's origin.
 **Previews ask for what they draw**: 256 KB of text ("Load all" up to 16 MB),
-64 KB of hex, a zip's central directory, a 320 px thumbnail; a gzip-encoded
-object is read decoded and never by range (`media.ts`). Text up to 1 MB that
+64 KB of hex (a zip too, with what its first bytes say), a 320 px
+thumbnail; a gzip-encoded object is read decoded and never by range
+(`media.ts`). Text up to 1 MB that
 is valid UTF-8 and not gzip-encoded edits in place; Save writes it as one
 upload that keeps the metadata. The list draws type icons; only the grid
 and the inspector show pictures, and SVG, AVIF, ICO and images up to
@@ -2796,7 +2932,7 @@ the one way to stand in for XHR (tests, the design-system card).
 a file the access check (`POST /storage/rules/access`, `get` and `delete`
 for each page, recorded nowhere) refuses is a lock tile with its line, not a
 picture, since an `<img>` cannot carry a token. Tokens are Admin-only (the
-official API's rule), and so are Send again and Discard. A refusal is an
+official API's rule), and so is Send again. A refusal is an
 `ApiError` `permission-denied` with `decision`, `line`, `noRuleset`,
 `evaluation` and `request` extras, so `RefusalDetail` explains it ("See
 why") and hands it to the playground ("Try in the playground") even after
@@ -2901,8 +3037,12 @@ inspector `tab=run|trigger|environment`, an invocation with `invocation=`,
 edit and replay with `prefill=`, `paused`, `q`, `sort`, `source`),
 `/functions/invocations` (`q`, `invocation`, `paused`), `/extensions`
 (`instance`, `view=overview|configuration|functions|events|readme`, `edit`,
-`q`), `/eventarc` (`channel`, `q`, `event`, `new=event`, `prefill`,
-`paused`) and `/eventarc/channels` (`channel`). Each schema lives in the
+`q`) and `/eventarc` (`channel`, `q`, `event`, `new=event`, `prefill`,
+`paused`); a channel in scope shows its publishers, subscribers and
+warnings over its events (there is no channels page, and a publisher's
+warning is said there only, linking to its instance's Events tab, which
+counts the instance's events and opens them in Eventarc filtered by
+`publisher:`). Each schema lives in the
 section's `search.ts`; the pages read it through `useRouteSearch`, so the
 first route carries the schemas alone. There is no `/eventarc/alerts`: the
 engine does not deliver Firebase Alerts yet, an alert function is
@@ -2911,14 +3051,16 @@ engine does not deliver Firebase Alerts yet, an alert function is
 **Where things are.** Pure logic with Vitest beside it in
 `src/functions/*.ts` (kinds and their verbs, trigger text, the panel tree,
 filters, envelopes, callable, identity headers, blocking, Copy as commands,
-curl paste, the invoke request and stream, run drafts, saved tests);
+curl paste, the invoke request and stream, run drafts);
 pages and forms in `src/functions/components/` (overview, codebase view,
-workbench and its Run / Trigger / Environment tabs, the six run forms on
+workbench and its Run / Trigger / Environment tabs — the inspector,
+`run-side-panel.tsx`, loads through `lazy-inspector.ts` once a function is
+open, so nothing else may import the forms statically — the six run forms on
 `run-parts.tsx`, invocation list, row and detail, `request-view.tsx`,
 `invocation-actions.tsx`). `src/extensions/` and `src/eventarc/` follow
 the same split. UI shared by the three lives in `src/compute/`:
 `KindBadge`, `DurationText`, `EnvChangeDialog` (every env or parameter
-save), `ReplayConfirm` (every replay), the event row, the status words,
+save), the event row, the status words,
 `SecretInput` (a password group with its eye and the kit's `CopyButton`
 inside the field — not Kumo's `SensitiveInput`, whose copy tab rises over
 the field's top edge) and `useSeededPending`. Registry entries in
@@ -2995,8 +3137,17 @@ Generated types in `src/api/generated/compute/`.
   (`entity.rs` constructors); filtered Logs go through `linkToLogs`.
   Compute exports no link builder. Task causes link the task by
   `task_id(queue, task)` and the queue; Run now goes through messaging's
-  `ScheduleControl::run` and Enqueue through `TasksConsole::enqueue_console`
-  (a reserved name or a full queue is a conflict, said in the form).
+  `ScheduleControl::run`. The Run tab has no broker routes of its own:
+  "Publish to <topic>" is Pub/Sub's console publish (`POST
+  /pubsub/topic/publish`, `publish_from_console`, so a refusal is never
+  counted as the app's) and Enqueue is Cloud Tasks' (`POST /tasks/tasks`,
+  its refusals and fixes said in the form).
+- **Invocations is where every run is listed.** Other sections do not keep
+  their own delivery or attempt lists; they link to
+  `/functions/invocations` with the engine's filter: `function:`,
+  `topic:` (a Pub/Sub or schedule topic, by name or full name) or
+  `queue:` (a Cloud Tasks queue key, with or without its `queue:`), all
+  held to `invocation-filter-cases.json` on both sides.
 - **"Which functions fire here" has one matcher**: `GET
   /functions/triggers` (through `useTriggersFor`, `'unknown'` while
   starting, one reference-counted `functions.events {changesOnly}`
@@ -3034,15 +3185,18 @@ Generated types in `src/api/generated/compute/`.
   mount.
 - **Outcome words and classes** come from the engine; the client never
   derives a class. `OutcomeChip` is the foundation's.
-- **Invocation logs** are observe's `LogLine` rows through `LogLines`: in
-  an invocation, a 52 px offset column (84 px once a line is a minute in)
-  and no level column while every line is info, so a one-line message
-  gets the row; a codebase's load log keeps the clock column.
+- **Invocation logs** are observe's `LogLine` rows through `LogLines`, on
+  the kit's `FeedList` (`inline`: selectable text, no keys of its own, so
+  the page's invocation list keeps j/k): in an invocation, a 52 px offset
+  column (84 px once a line is a minute in) and no level column while
+  every line is info, so a one-line message gets the row; a codebase's
+  load log keeps the clock column. Fields and cut lines open under the
+  row, in the message's column.
 - **Per browser**: run drafts per tab in sessionStorage
-  (`firenook.console.run-drafts`), saved tests in localStorage (50 per
-  function, 1 MB per project, export and import as JSON), the editor that
-  stack frames open in (`firenook.console.editor`: VS Code, Cursor,
-  JetBrains).
+  (`firenook.console.run-drafts`) and the editor that stack frames open in
+  (`firenook.console.editor`: VS Code, Cursor, JetBrains). There are no
+  saved tests: a run is kept as its invocation (Replay, Edit and replay),
+  its URL and Copy as.
 
 **Journeys** (`--project compute`): `e2e/functions*.spec.ts`,
 `extensions.spec.ts`, `eventarc.spec.ts`, helpers in
@@ -3069,51 +3223,66 @@ exchange, so the greeter fixture calls a plain `initializeApp()`.)
 
 ## Pub/Sub and Cloud Tasks (built, `src/pubsub/`, `src/tasks/`, shared code in `src/messaging/`)
 
-**Pages.** Pub/Sub is one nav entry with three pages: Topics (`/pubsub`,
-`routes/pubsub.tsx`), Schemas (`/pubsub/schemas`, `routes/pubsub_.schemas.tsx`)
-and Schedules (`/pubsub/schedules`, `routes/pubsub_.schedules.tsx`). Schedules
-lives under Pub/Sub because a tick is a publish to `firebase-schedule-<name>`;
-this stream owns the scheduler and the `ScheduleControl` trait
-(`crates/pubsub-front/src/schedule_control.rs`) that compute's Run now calls.
+**Pages.** Pub/Sub is one nav entry with two pages: Topics (`/pubsub`,
+`routes/pubsub.tsx`) and Schemas (`/pubsub/schemas`,
+`routes/pubsub_.schemas.tsx`). A schedule's page is its function's: the
+scheduled function's Run tab in Functions is its Schedule tab
+(`src/functions/components/schedule-form.tsx`, the overview's lead in
+`components/next-run.tsx`, the words in `functions/schedule-text.ts`), which
+reads Pub/Sub's scheduler through `functions/schedules.ts`
+(`GET /pubsub/schedules`, `pubsub.schedules`, `/pubsub/schedule/run|pause|resume`).
+This stream owns the scheduler and the `ScheduleControl` trait
+(`crates/pubsub-front/src/schedule_control.rs`), the Schedule tab and that
+lead; the topics tree keeps the schedule topics (Function schedules) as the
+transport they are, a scheduled function's row opening its tab.
 Cloud Tasks is one page (`/tasks`, `routes/tasks.tsx`): the queues in the
-panel, a queue with Tasks, Attempts, History and Configuration, a task in the
-inspector (Payload, Request, Attempts).
+panel, a queue with Tasks, History and Configuration, a task in the
+inspector (Payload, Request, Attempts). A queue's attempts as they happen
+are Functions › Invocations filtered to its function (every attempt is an
+invocation): row two links there through the queue function's
+`invocationsRef` (`functions.invocations`, keyed by the filter).
 
 **Search parameters.** Topics: `topic` and `subscription` (an id under the
 page's project, or a full name that travelled whole), `view` (`messages`,
-`subscriptions`, `deliveries`, `snapshots`, `settings` on a topic; `backlog`,
-`pull`, `push`, `dead-letters`, `settings` on a subscription), `message`,
-`tab`, `q`, `expr` (a subscription filter expression over attributes),
-`state`, `function`, `outcome`, `paused`, `new`, `dialog` (`replay`, `setup`,
-`export`), `prefill`, `project`. Schemas: `schema`, `revision`, `diff`, `view`,
-`panel=test`, `new=schema`. Schedules: `schedule` (the function id). Tasks:
+`subscriptions`, `settings` on a topic; `backlog`, `push`, `dead-letters`,
+`settings` on a subscription), `message`, `tab`, `q`, `expr` (a subscription
+filter expression over attributes), `state`, `paused`, `new`, `dialog`
+(`setup`, `export`), `prefill`, `project`. Schemas: `schema`, `view`
+(`definition`, `used-by`), `new=schema`. Tasks:
 `queue` by id with `location` only when two locations register that id (the
 page drops it otherwise), `view`, `task` (the console's decimal id), `tab`,
-`state`, `outcome`, `q`, `paused`, `new=task`, `prefill`. The router parses
+`state`, `outcome`, `q`, `new=task`, `prefill`. The router parses
 query values as JSON, so `?message=40` arrives as a number and an id of
 digits is written quoted (`message=%2246%22`): the schemas accept a string or
 a number and normalize (`text` in `routes/pubsub.tsx`, `src/tasks/search.ts`).
 
 **Links.** `pubsub.topic`, `pubsub.subscription` and `pubsub.schema` are keyed
 by full name, `pubsub.message` by `<topic full name>|<id>`, `pubsub.schedule`
-by function id, `tasks.queue` by `<project>|<location>|<queue>` and
-`tasks.task` by that plus `|<task id>`; the registries' `routes` open them
-(`src/messaging/links.ts`). A link always writes `project` (and `location`
+by function id (it opens the function's Schedule tab in Functions, the one
+kind `links-every-kind.test.ts` lets open in another section), `tasks.queue`
+by `<project>|<location>|<queue>` and `tasks.task` by that plus `|<task id>`;
+the registries' `routes` open them (`src/messaging/links.ts`). A topic's
+functions' runs are `functions.invocations` (an Invocations filter, on the
+topic detail's `invocations`). A link always writes `project` (and `location`
 for Tasks) and the page tidies what it does not need; a subscription link
 carries no topic, which the Topics page completes from its index. These pages
 link out only through `EntityLink`, `linkTo` and `linkToLogs`, and never
-write another section's URL.
+write another section's URL. Another section opens a queue's Configuration
+or the Enqueue dialog on it through the Cloud Tasks registry's
+`tasksQueueLink(<tasks.queue key>, 'config' | 'enqueue')` (the dialog's one
+parameter is `new=task`).
 
-**Topics, not streams.** Eight, declared in `src/pubsub/live.ts` and
+**Topics, not streams.** Declared in `src/pubsub/live.ts`,
+`src/functions/schedules.ts` (`pubsub.schedules`) and
 `src/tasks/live.ts`: `pubsub.counters`, `pubsub.schedules` and
 `tasks.counters` are `compare` (state: without a cursor they open with every
 entity of the project, and over 1,000 they answer a reset instead; then
 changes after the revision, at most every 250 ms and 200 a frame, throughput
-for at most 24 topics on screen); `pubsub.topic`, `pubsub.deliveries` and
-`tasks.queue` are invalidation (published ids, moved backlog keys, delivery
-event ids, task row keys and finished ids, which the page reads back through
-`:batchGet`); `pubsub.push` and `tasks.attempts` are `replay` over a console
-ring fed inline by the runtime's sink. Time is a stamp, not a window: a
+for at most 24 topics on screen); `pubsub.topic` and `tasks.queue` are
+invalidation (published ids, moved backlog keys, messages whose marks moved,
+task row keys and finished ids, which the page reads back through
+`:batchGet`); `pubsub.push` is `replay` over a console ring fed inline by
+the runtime's sink. Time is a stamp, not a window: a
 throughput window carries its end and the client ages it
 (`src/messaging/windows.ts`). A list read again catches up with the frames
 that arrived meanwhile (`src/messaging/frames.ts`, 32 frames or 10 s per
@@ -3126,19 +3295,19 @@ Never a per-message broadcast, never `new EventSource`.
 wake on it. Everything the console needs goes on `console`. A console-only
 bump on `changed` makes every waiting pull spin.
 
-**Lists are pages with meta; mutable rows are patched.** `messageList`,
-`backlogList`, `deliveryList`, `taskList` and `historyList` (in each section's
-`queries.ts`) go through `useCursorRows`. Backlog, task and delivery rows are
-keyed by position or event id and patched in place through `:batchGet`;
-message and History heads read again at the top and count `newAbove` below
-it; the window is 20 pages. Message rows are deduplicated by id and backlog
-places renumbered (`src/messaging/rows.ts`).
+**Lists are pages; mutable rows are patched.** `messageList`, `backlogList`,
+`taskList` and `historyList` (in each section's `queries.ts`) go through
+`useCursorRows`. Backlog and task rows are keyed by position and patched in
+place through `:batchGet`; message and History heads read again at the top
+and count `newAbove` below it; the window is 20 pages. Message rows are
+deduplicated by id and backlog places renumbered (`src/pubsub/rows.ts`).
 
-**Peek is the default, Pull is a choice.** Nothing on screen leases a message
-unless the person pressed Pull. Pull warns when a subscriber is connected, is
-absent on a subscription the functions consumer drains, and explains itself
-on a push subscription. `a`, `x` and `e` act only in the Pull tab, on a
-received row.
+**Peek, never pull.** Nothing on screen leases a message: the backlog is read
+without leasing, a row is acknowledged or returned (behind `DangerConfirm`
+when a subscriber holds its lease), and Purge acknowledges everything that
+waits (`POST /pubsub/subscription/purge`, a seek to now). Pulls, snapshots,
+seeks and schema revisions are the app's, through the wire API, which keeps
+all of them.
 
 **Console-only controls never reach the wire**: pause, hold, stop retrying,
 force acknowledge, release, publish jobs (foundation `Job`s), schedule pause
@@ -3146,9 +3315,11 @@ and clear. Every engine change in these crates passes the oracle replays:
 `npm run replay:pubsub` and `npm run replay:functions:runtime -- --fixture
 fixtures/tasks-v1/emulator-programs.json --profiles tasks`.
 
-**Deliveries are compute's record joined by event id**: a topic's Deliveries
-tab and a message's deliveries read the fanout the runtime recorded and the
-invocation compute keeps; `GET /pubsub/dispatch?event=` serves the request
+**Deliveries are compute's record joined by event id**: a message's deliveries
+(its inspector's tab, and its row's marks) read the fanout the runtime
+recorded and the invocation compute keeps; every run of a topic's functions
+is listed in Functions › Invocations, one link away;
+`GET /pubsub/dispatch?event=` serves the request
 each delivery received (a run again has its own CloudEvent id). When the SDK
 caught the handler's throw itself (`onSchedule` answers 500 with no body), the
 failure takes its error from the invocation's first error-level log line.
@@ -3166,7 +3337,12 @@ gives up come from the engine (`TasksQueueCounters.outcomes`,
 `TasksQueueConfig.ladder`, the dispatcher's own rules), never from the
 browser. A newly enqueued task opens in the inspector. A real
 `onTaskDispatched` answers 204, and an `HttpsError` arrives in the attempt's
-response snippet, not its error.
+response snippet, not its error. Live traffic is Configuration's alone (the
+queue list says state, not rates), and the token bucket shows only while
+the rate limit is what holds tasks back: tasks pending, a slot free, no
+whole token at the engine's last figures (`rateLimiting` in
+`src/tasks/states.ts`, so it does not blink between a refill and the
+dispatch that spends it); otherwise the rate is said in words.
 
 **Names travel whole in query strings**, never as path segments; a queue
 travels to the engine as its opaque key.
@@ -3176,10 +3352,10 @@ Any new console-held state in these crates needs a bound and an eviction rule
 in the same commit.
 
 **Shared code** (`src/messaging/`): `api.ts` (query strings, page cursors),
-`frames.ts`, `links.ts`, `rows.ts`, `windows.ts` and `confirm-popover.tsx`
-(`useConfirmPopover`, `errorText`, `rowElement`): Run again, Run now and
-Enqueue again ask in a popover anchored to the row or the button, because
-they run the handler; Delete goes through `DangerConfirm`.
+`frames.ts`, `links.ts` and `windows.ts`. Run again, Run now and
+Enqueue again ask through the kit's `ConfirmPopover` (`useConfirmPopover`,
+`rowElement`), because they run the handler; Delete goes through
+`DangerConfirm`; a failure reads through `errorText` (`lib/error-text.ts`).
 
 **The messaging fixture**: `scripts/fixtures/functions/messaging.js` (the real
 SDK, loaded through `FIXTURE_STREAMS`) and the seeders `scripts/seed/pubsub.mjs`
@@ -3199,10 +3375,9 @@ banner).
 
 **Keys**: the foundation's reserved-keys table, no new row. `n` publishes on
 a topic (a new schema on Schemas, Enqueue on a queue), `p` pauses the Push
-and Attempts feeds, `r` and Shift+R run again (behind a confirmation, or
-through a form), `l` opens in Logs while Logs is built, `a`/`x`/`e` only in
-the Pull tab, Delete acknowledges ticked backlog rows, `c` and Shift+C copy
-in the Attempts feed.
+feed, `r` and Shift+R run again (behind a confirmation, or through a form),
+`l` opens in Logs while Logs is built, Delete acknowledges ticked backlog
+rows.
 
 **Testing gotchas.** Kumo `Select` does not forward `data-testid`: find it with
 `getByRole('combobox', { name })`. A single-key shortcut pressed while focus
@@ -3221,8 +3396,9 @@ job and its file). Producers write `LogInput` (`suite-front`
 `suite-runtime/src/console_wiring/observe.rs`. Console: `src/logs/` (the page),
 `src/overview/` (`/`), `src/observe/` (only what those two share: the topic
 declarations, kinds, `LevelWord`, `SourceChip`, the level series and
-`LevelStrip`), the registry `src/lib/sections/logs.ts` (badge, routes, the
-suite-wide ⌘K actions, `linkToLogs`). Journeys: `e2e/logs.spec.ts`,
+`LevelStrip`), the registry `src/lib/sections/logs.ts` (badge, routes,
+`linkToLogs`) and `logs-actions.ts` beside it (Logs' own ⌘K rows; the suite-wide
+ones are the palette's Suite group, `suiteItems` in `command-palette.tsx`). Journeys: `e2e/logs.spec.ts`,
 `e2e/overview*.spec.ts`, helpers `e2e/support/observe.ts`, profile `observe`.
 
 - **The log ring.** One `ReplayRing` of 20,000 lines / 16 MiB, and a problem
@@ -3276,11 +3452,39 @@ suite-wide ⌘K actions, `linkToLogs`). Journeys: `e2e/logs.spec.ts`,
   move a separate count by revision, so an app writing to another project
   id never inflates this project's card.
 - **Data actions are foundation jobs.** Never run a reset or an export inside
-  a request: a snapshot is a `suite.snapshot` job, a reset `/suite/clear`,
-  and the registry's one-`suite.*`-job rule keeps them apart (the next is
-  `409`). The snapshot's id is `job.result.snapshot` (128 random bits), not
-  the job id; the engine keeps the newest one for 10 minutes or until it is
-  downloaded, and only the tab that started it downloads it by itself.
+  a request: a snapshot is a `suite.snapshot` job, saving one on the engine's
+  machine a `suite.export` job (`POST /suite/export` answers `202`; its
+  result is the `ExportResult`, and it cannot be stopped once the hub has the
+  command), a reset `/suite/clear`, and the registry's one-`suite.*`-job rule
+  keeps them apart both ways (the next is `409`) — an export once captured a
+  half-done reset. The snapshot's id is `job.result.snapshot` (128 random
+  bits), not the job id; the engine keeps the newest one for 10 minutes or
+  until it is downloaded, and only the tab that started it (its button, or
+  ⌘K's "Download a snapshot") downloads it by itself. A snapshot download
+  holds every service the engine runs; choosing services is the save's.
+- **A data job's progress is shown once.** On the Overview its Data card
+  follows it (snapshot and save on the Snapshot card, a reset on the Reset
+  card, with Cancel when it can stop): each dialog closes once the engine
+  has started the job, and the shell's job toasts (`JobsWatch`, `jobToast`)
+  leave a running suite job alone while the Overview is on screen. Every
+  other page and tab follows it in the toast; how it ended is toasted
+  everywhere.
+- **The Overview's links.** Other pages lead here with `/?connect=<tab>`
+  (Connect on that tab, in view), `/?dialog=reset&section=<id>` (that
+  section's reset, nothing while it cannot be reset), `/?dialog=save`, and
+  the hashes `#engine` and `#data` (`useRevealHash`, which reveals in the
+  column, never `scrollIntoView`, and again on each ask while the page is
+  open, since a link to the address shown changes nothing the router sees).
+  ⌘K's Suite group (`suiteItems`) holds the suite-wide actions once, from
+  any page; the Overview's own palette adds "Connect your app" and the
+  snippet copies.
+- **The `overview` topic ignores plain output.** Its generation is the
+  problems and warnings logged and the minute, and it follows the log's
+  `notable_changes` watch (warnings, errors, problems), not every line: an
+  info flood resent the whole state twice a second before. The state
+  carries `problemsLogged`, not the log's totals, and the strip's tooltip
+  names warnings and errors only, because the minute's other lines go stale
+  between states.
 - **A reset is maintenance.** Firestore's clear commits through
   `commit_maintenance`: listeners and the change feed see it, the trigger
   observer does not (unless `runTriggers`), and open Firestore pages reload

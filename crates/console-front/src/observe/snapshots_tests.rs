@@ -289,31 +289,6 @@ async fn a_download_abandoned_mid_way_still_removes_the_folder() {
     wait_empty(&scratch).await;
 }
 
-#[tokio::test]
-async fn a_discarded_snapshot_is_gone_with_its_folder() {
-    let scratch = Scratch::new("discard");
-    let harness = harness(port(&scratch, exporter(None, 10), None));
-    let job = finished(
-        &harness.jobs,
-        &start(&harness, &json!({ "targets": ["firestore"] }))
-            .await
-            .id,
-    )
-    .await;
-    let id = snapshot_of(&job);
-    let delete = |id: &str| {
-        Request::delete(format!("/overview/snapshots/{id}"))
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from("{}"))
-            .expect("request")
-    };
-    let (status, _, _) = send(&harness.router, delete(&id)).await;
-    assert_eq!(status, StatusCode::OK);
-    wait_empty(&scratch).await;
-    let (status, _, _) = send(&harness.router, delete(&id)).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-}
-
 #[tokio::test(start_paused = true)]
 async fn a_snapshot_nobody_downloads_expires_after_ten_minutes() {
     let scratch = Scratch::new("expiry");
@@ -384,26 +359,24 @@ async fn a_snapshot_that_would_not_fit_is_refused_before_any_job() {
 }
 
 #[tokio::test]
-async fn targets_are_the_services_this_engine_can_export() {
+async fn a_snapshot_holds_every_service_the_engine_runs_and_takes_no_arguments() {
     let scratch = Scratch::new("targets");
     let harness = harness(port(&scratch, exporter(None, 10), None));
-    for (body, message) in [
-        (
-            json!({ "targets": ["database"] }),
-            "`database` is not a service this engine can export. Use firestore, auth or storage.",
-        ),
-        (
-            json!({ "targets": ["storage"] }),
-            "Storage does not run in this engine, so a snapshot cannot hold it.",
-        ),
-    ] {
-        let (status, _, answer) = send(&harness.router, post(&body)).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        let error: Value = serde_json::from_slice(&answer).expect("json");
-        assert_eq!(error["error"]["message"], message);
+    for body in [json!({ "targets": ["firestore"] }), json!({ "extra": 1 })] {
+        let (status, _, _) = send(&harness.router, post(&body)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     }
-    let (status, _, _) = send(&harness.router, post(&json!({ "extra": 1 }))).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let mut nothing = port(&scratch, exporter(None, 10), None);
+    nothing.targets = vec!["pubsub".to_owned()];
+    let empty = self::harness(nothing);
+    let (status, _, answer) = send(&empty.router, post(&json!({}))).await;
+    assert_eq!(status, StatusCode::PRECONDITION_FAILED);
+    let error: Value = serde_json::from_slice(&answer).expect("json");
+    assert_eq!(
+        error["error"]["message"],
+        "No service this engine runs keeps data a snapshot could hold."
+    );
+    assert_eq!(empty.jobs.list(Some("suite")).len(), 0, "no job started");
     let detached = router(Snapshots::new(None, JobRegistry::new(), running().1));
     let (status, _, _) = send(&detached, post(&json!({}))).await;
     assert_eq!(status, StatusCode::PRECONDITION_FAILED);

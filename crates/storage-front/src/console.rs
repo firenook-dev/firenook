@@ -18,7 +18,6 @@ use axum::response::Response;
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 
-use crate::archive::ArchiveListing;
 use crate::decisions::{NO_RULESET_MESSAGE, RulesCheck, judge};
 use crate::download::MediaMode;
 use crate::filter::StorageFilter;
@@ -113,7 +112,7 @@ pub enum ConsoleError {
     Precondition { message: String, current: u64 },
     /// The request conflicts with the current state (409).
     Conflict(String),
-    /// A type with no thumbnail or archive (415).
+    /// A type with no thumbnail (415).
     Unsupported(String),
     /// Over a limit (413).
     TooLarge(String),
@@ -935,35 +934,6 @@ impl StorageConsoleApi {
             })?;
         cache.insert(bucket, name, stored.generation, width, rendered.clone());
         Ok((rendered, current))
-    }
-
-    /// The entries of a `.zip` object, from its central directory (an
-    /// operator read), at most `limit` (up to 2,000).
-    pub async fn archive(
-        &self,
-        bucket: &str,
-        name: &str,
-        limit: usize,
-    ) -> Result<ArchiveListing, ConsoleError> {
-        let stored = self
-            .stored(bucket, name)
-            .ok_or_else(|| not_found(bucket, name))?;
-        if stored.content_encoding.is_some() {
-            return Err(ConsoleError::Unsupported(
-                "This archive is stored with a contentEncoding; download it to look inside."
-                    .to_owned(),
-            ));
-        }
-        let path = self.state.config.data_dir.join(&stored.data_file);
-        self.state
-            .tasks
-            .run_blocking(move || crate::archive::list(&path, limit))
-            .ok_or_else(|| ConsoleError::Unavailable("The service is stopping.".to_owned()))?
-            .await
-            .map_err(|_| ConsoleError::Unavailable("The service is stopping.".to_owned()))?
-            .map_err(|error| {
-                ConsoleError::Unsupported(format!("This .zip cannot be read: {error}."))
-            })
     }
 
     /// What a folder holds, read from its first [`PROFILE_OBJECTS`] files in

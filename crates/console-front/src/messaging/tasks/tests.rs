@@ -55,6 +55,17 @@ async fn wait_for(suite: &Suite, what: &str, check: impl Fn(&Value) -> bool, uri
     panic!("{what} within ten seconds");
 }
 
+/// One queue as the project's list holds it (the console reads no other way).
+async fn queue_in_list(suite: &Suite, key: &str) -> Value {
+    let (status, list) = suite.call(Method::GET, "/api/v1/tasks/queues", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    list["items"]
+        .as_array()
+        .and_then(|items| items.iter().find(|queue| queue["key"] == key))
+        .cloned()
+        .unwrap_or_else(|| panic!("{key} in {list}"))
+}
+
 fn encoded(text: &str) -> String {
     let mut out = String::new();
     for byte in text.bytes() {
@@ -85,6 +96,14 @@ async fn tasks_through_the_console() {
     assert_eq!(
         queue["function"]["functionRef"]["key"],
         "us-central1-processOrder"
+    );
+    // Its attempts are the function's invocations, which Functions lists.
+    assert_eq!(
+        queue["function"]["invocationsRef"],
+        json!({
+            "kind": "functions.invocations",
+            "key": "function:us-central1-processOrder",
+        })
     );
     let (_, other) = suite
         .call(Method::GET, "/api/v1/tasks/queues?project=demo-other", None)
@@ -274,13 +293,7 @@ async fn tasks_through_the_console() {
         .await;
     assert_eq!(outcomes["total"]["count"], 1);
     // The History switch's counts ride the queue's counters.
-    let (_, queue) = suite
-        .call(
-            Method::GET,
-            &format!("/api/v1/tasks/queue?queue={}", encoded(PROCESS_ORDER)),
-            None,
-        )
-        .await;
+    let queue = queue_in_list(&suite, PROCESS_ORDER).await;
     let counts = &queue["counters"]["outcomes"];
     assert_eq!(counts["purged"], 1, "{queue}");
     assert_eq!(counts["deleted"], 1, "{queue}");
@@ -346,13 +359,7 @@ async fn tasks_through_the_console() {
         .await;
     assert_eq!(status, StatusCode::OK, "{stopped}");
     assert_eq!(stopped["state"], "finished");
-    let (_, queue) = suite
-        .call(
-            Method::GET,
-            &format!("/api/v1/tasks/queue?queue={}", encoded(&retrying)),
-            None,
-        )
-        .await;
+    let queue = queue_in_list(&suite, &retrying).await;
     assert_eq!(queue["origin"], "client");
     assert_eq!(queue["config"]["maxAttempts"], 5.0);
     suite.stop.send(true).expect("stop");
@@ -672,17 +679,22 @@ async fn a_task_taking_a_slot_is_a_new_key() {
 #[tokio::test]
 async fn task_lists_are_pages_with_meta() {
     let suite = suite(None);
-    for uri in ["/api/v1/tasks/tasks/meta", "/api/v1/tasks/history/meta"] {
-        let (status, meta) = suite.call(Method::GET, uri, None).await;
-        assert_eq!(status, StatusCode::OK, "{uri}");
-        let fields: Vec<&str> = meta["fields"]
-            .as_array()
-            .expect("fields")
-            .iter()
-            .filter_map(|field| field["key"].as_str())
-            .collect();
-        assert_eq!(fields, ["name", "is"], "{uri}");
-    }
+    // One meta for both lists: History filters with the same fields.
+    let (status, meta) = suite
+        .call(Method::GET, "/api/v1/tasks/tasks/meta", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{meta}");
+    let fields: Vec<&str> = meta["fields"]
+        .as_array()
+        .expect("fields")
+        .iter()
+        .filter_map(|field| field["key"].as_str())
+        .collect();
+    assert_eq!(fields, ["name", "is"]);
+    let (status, _) = suite
+        .call(Method::GET, "/api/v1/tasks/history/meta", None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     let cases: Value = serde_json::from_str(TASK_CASES).expect("cases");
     for (field, info) in cases["fields"]
         .as_array()

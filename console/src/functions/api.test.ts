@@ -4,7 +4,6 @@ import { triggersKey } from '@/lib/triggers'
 import {
   clearInvocations,
   editEnv,
-  enqueueTask,
   functionKeys,
   getCodebaseLog,
   getFunction,
@@ -13,12 +12,10 @@ import {
   getInvocations,
   invocationBodyUrl,
   matchTriggers,
-  publishMessage,
   reloadCodebase,
   restartWorker,
   revealHeader,
   revealSecret,
-  runSchedule,
 } from './api'
 
 interface Sent {
@@ -173,43 +170,18 @@ describe('changes', () => {
     })
   })
 
-  it('publish, enqueue and run now through the brokers', async () => {
-    answer = { status: 200, body: { transport: 'pubsub' } }
-    await publishMessage('us-central1-onEmail', {
-      data: '{"to":"ada"}',
-      encoding: 'text',
-      attributes: { kind: 'welcome' },
-      orderingKey: null,
-    })
-    expect(last()).toMatchObject({
-      url: '/console/api/v1/functions/us-central1-onEmail/publish',
-      body: { data: '{"to":"ada"}', attributes: { kind: 'welcome' } },
-    })
-    await enqueueTask('us-central1-resize', { payload: { url: 'a.png' }, runAfterSeconds: null })
-    expect(last()).toMatchObject({
-      url: '/console/api/v1/functions/us-central1-resize/enqueue',
-      body: { payload: { url: 'a.png' }, runAfterSeconds: null },
-    })
-    await runSchedule('us-central1-nightly')
-    expect(last()).toMatchObject({
-      url: '/console/api/v1/functions/us-central1-nightly/run',
-      body: {},
-    })
-  })
-
   it('say when the engine refused, with the fix it gave', async () => {
     answer = {
       status: 409,
       body: {
         error: {
           code: 'conflict',
-          message:
-            'Background triggers are paused, so Pub/Sub would accept this message and deliver it to no function.',
-          fix: 'Resume background triggers.',
+          message: 'The codebase app is still loading, so its worker cannot restart.',
+          fix: 'Wait until it has loaded.',
         },
       },
     }
-    const error = await runSchedule('us-central1-nightly').catch((caught: unknown) => caught)
-    expect(error).toMatchObject({ code: 'conflict', fix: 'Resume background triggers.' })
+    const error = await restartWorker('app').catch((caught: unknown) => caught)
+    expect(error).toMatchObject({ code: 'conflict', fix: 'Wait until it has loaded.' })
   })
 })

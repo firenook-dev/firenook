@@ -2,7 +2,9 @@
 // the panel), live, filtered in the engine, each with what became of it;
 // the delivery trace of the one open; and the publish drawer, with a
 // preview of who an event would reach before it is sent. Replay and edit
-// run again what the engine kept.
+// run again what the engine kept. A channel in scope shows, over its
+// events, who publishes to it and who listens, and what does not line up
+// (the channels snapshot, kept current by the same topic).
 
 import { Button, Tooltip } from '@cloudflare/kumo'
 import {
@@ -38,8 +40,9 @@ import { CopyButton } from '@/components/console/copy-button'
 import { PanelToggle } from '@/components/shell/section-panel'
 import { Kbd } from '@/components/kit'
 import { EVENT_LIST } from '@/compute/event-row'
-import { ReplayConfirm } from '@/compute/replay-confirm'
+import { ConfirmPopover, rowElement } from '@/components/console/confirm-popover'
 import { useSeededPending } from '@/compute/seeded-pending'
+import { copyToClipboard } from '@/lib/copy'
 import { linkTo } from '@/lib/links'
 import { useFunctionsEvents } from '@/functions/live'
 import { type SubscriptionStatus, liveChannel } from '@/lib/live/channel'
@@ -51,7 +54,8 @@ import { eventFields, toggleFailed } from '../filters'
 import { useEventarcPalette } from '../palette'
 import { type PublishDraft, draftFromEvent, emptyDraft, publishRequest } from '../publish'
 import type { EventsSearch } from '../search'
-import { channelLabel, channelNamed, knownTypes } from '../topology'
+import { channelLabel, channelNamed, channelWarnings, knownTypes } from '../topology'
+import { ChannelFlow } from './channel-flow'
 import { ChannelsPanel } from './channels-panel'
 import { EventDetail, eventFigure } from './event-detail'
 import { EventList, useEventFeed, useNeighbours } from './event-list'
@@ -59,9 +63,7 @@ import { PublishDrawer } from './publish-drawer'
 
 /** Copies an event's id, and says so. */
 function copyId(id: string) {
-  void navigator.clipboard
-    .writeText(id)
-    .then(() => toast({ key: 'eventarc.copy', title: `Copied ${id}`, tone: 'success' }))
+  void copyToClipboard(id, { what: id })
 }
 
 /** Whether this page's subscription stopped, so `LiveNotice` has something to say. */
@@ -177,7 +179,7 @@ export function EventsPage() {
           title:
             index === -1
               ? 'No function ran for this event.'
-              : 'Its invocation opens in Functions once that section is built.',
+              : 'Functions is not running here, so its invocation cannot be opened.',
         })
     })
   }
@@ -188,9 +190,8 @@ export function EventsPage() {
   const copyJson = (id: string) =>
     void client
       .fetchQuery(eventQuery(project, id))
-      .then((view) => navigator.clipboard.writeText(JSON.stringify(view.detail, null, 2)))
-      .then(() =>
-        toast({ key: 'eventarc.copy', title: 'Copied the event as JSON', tone: 'success' }),
+      .then((view) =>
+        copyToClipboard(JSON.stringify(view.detail, null, 2), { what: 'the event as JSON' }),
       )
 
   /** One event's actions: its row's menu (right-click, Shift+F10), ⌘K, and the keys. */
@@ -298,10 +299,15 @@ export function EventsPage() {
   useEventarcPalette(channels.data, {
     publish: () => openDrawer(),
     scope: (name) => update({ channel: name, event: undefined }),
-    channelsPage: () => void navigate({ to: '/eventarc/channels' }),
   })
 
   const label = scope ? channelLabel(scope) : undefined
+  // Every channel's events: the channels where something does not line up,
+  // each opened to see what.
+  const everyChannel = channels.data ? [...channels.data.channels, channels.data.native] : []
+  const warned = everyChannel
+    .map((each) => ({ channel: each, count: channelWarnings(each, everyChannel).length }))
+    .filter((entry) => entry.count > 0)
   const fields = eventFields(() =>
     channels.data ? knownTypes([...channels.data.channels, channels.data.native]) : [],
   )
@@ -394,39 +400,82 @@ export function EventsPage() {
         />
       </ToolbarRow>
       <SectionBody testId="events-body">
-        <div
-          className={EVENT_LIST}
-          onContextMenu={(event) => {
-            if (openMenuAt(event.target, { x: event.clientX, y: event.clientY }))
-              event.preventDefault()
-          }}
-        >
-          <EventList
-            store={feed.store}
-            loading={feed.page.isPending}
-            failed={
-              feed.page.isError ? (
-                <QueryError
-                  error={feed.page.error}
-                  onRetry={() => void feed.page.refetch()}
-                  section="eventarc"
-                />
-              ) : null
-            }
-            q={q}
-            onClearFilter={() => update({ q: undefined }, { replace: true })}
-            channelName={search.channel}
-            selected={search.event}
-            onSelect={select}
-            onOpenTarget={(event) => openTarget(event.id)}
-            follow={!paused}
-            onFollowChange={(follow) =>
-              update({ paused: follow ? undefined : true }, { replace: true })
-            }
-            hasMore={feed.hasMore}
-            loadMore={feed.loadOlder}
-            onPublish={() => openDrawer()}
-          />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {!scope && warned.length > 0 && (
+            <p
+              className="m-0 shrink-0 border-b border-kumo-line bg-kumo-base px-4 py-2 text-[12px] text-kumo-default"
+              data-testid="events-channel-warnings"
+            >
+              <span
+                className="mr-2 inline-block size-1.5 rounded-full bg-kumo-warning align-middle"
+                aria-hidden
+              />
+              Something does not line up on{' '}
+              {warned.map(({ channel: warnedChannel, count }, index) => (
+                <span key={warnedChannel.name}>
+                  {index > 0 && ', '}
+                  <button
+                    type="button"
+                    className="font-mono text-kumo-link underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
+                    onClick={() => update({ channel: warnedChannel.name, event: undefined })}
+                    data-testid="events-channel-warning"
+                  >
+                    {channelLabel(warnedChannel).id}
+                  </button>{' '}
+                  <span className="text-kumo-subtle">
+                    ({count} {count === 1 ? 'warning' : 'warnings'})
+                  </span>
+                </span>
+              ))}
+              ; open it to see what.
+            </p>
+          )}
+          {scope && channels.data && (
+            <div
+              className="max-h-[45%] shrink-0 overflow-y-auto border-b border-kumo-line bg-kumo-base"
+              data-testid="events-channel-flow"
+            >
+              <ChannelFlow
+                channel={scope}
+                warnings={channelWarnings(scope, [...channels.data.channels, channels.data.native])}
+                heading={false}
+              />
+            </div>
+          )}
+          <div
+            className={EVENT_LIST}
+            onContextMenu={(event) => {
+              if (openMenuAt(event.target, { x: event.clientX, y: event.clientY }))
+                event.preventDefault()
+            }}
+          >
+            <EventList
+              store={feed.store}
+              loading={feed.page.isPending}
+              failed={
+                feed.page.isError ? (
+                  <QueryError
+                    error={feed.page.error}
+                    onRetry={() => void feed.page.refetch()}
+                    section="eventarc"
+                  />
+                ) : null
+              }
+              q={q}
+              onClearFilter={() => update({ q: undefined }, { replace: true })}
+              channelName={search.channel}
+              selected={search.event}
+              onSelect={select}
+              onOpenTarget={(event) => openTarget(event.id)}
+              follow={!paused}
+              onFollowChange={(follow) =>
+                update({ paused: follow ? undefined : true }, { replace: true })
+              }
+              hasMore={feed.hasMore}
+              loadMore={feed.loadOlder}
+              onPublish={() => openDrawer()}
+            />
+          </div>
         </div>
         <RowMenuPopup
           items={menu ? rowItems(menu.id) : []}
@@ -472,7 +521,7 @@ export function EventsPage() {
           />
         ) : null}
       </SectionBody>
-      <ReplayConfirm
+      <ConfirmPopover
         open={confirming !== undefined}
         onOpenChange={(open) => {
           if (!open) {
@@ -488,12 +537,10 @@ export function EventsPage() {
             : 'Publish the event again?'
         }
         description="It goes out on its channel as before, and every trigger that listens for it runs again; whatever they write is written again."
+        confirm="Replay"
+        anchor={confirming ? rowElement('event-list', confirming) : null}
         option={{ label: 'Keep the id', checked: keepId, onChange: setKeepId }}
-        pending={replay.isPending}
-        error={refusal(replay.error)?.message}
-        onConfirm={() => {
-          if (confirming) replay.mutate(confirming)
-        }}
+        run={() => (confirming ? replay.mutateAsync(confirming) : undefined)}
         testId="event-replay-confirm"
       />
     </SectionPage>

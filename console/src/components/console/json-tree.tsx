@@ -32,6 +32,7 @@ import {
   useState,
 } from 'react'
 import type { EntityRef } from '@/api/generated/EntityRef'
+import { copyToClipboard } from '@/lib/copy'
 import { formatNumber } from '@/lib/format'
 import { describeKey, isMac } from '@/lib/shortcuts'
 import { EntityLink } from './entity-link'
@@ -311,7 +312,7 @@ function TreeRows({
             ? formatPath(row.path, rootLabel) || undefined
             : copyValue(row)
       if (selected !== '' || text === undefined) handled = false
-      else void navigator.clipboard.writeText(text).catch(() => undefined)
+      else void copyToClipboard(text)
     } else handled = false
     if (!handled) return
     event.preventDefault()

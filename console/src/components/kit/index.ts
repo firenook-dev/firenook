@@ -1,7 +1,7 @@
 export { CopyGlyph, useCopied } from './copy-glyph'
 export { CountBadge, type CountTone } from './count-badge'
+export { FLASH_MS } from './flash'
 export { Kbd } from './kbd'
-export { LiveDot, type LiveState } from './live-dot'
 export { Mark } from './mark'
 export { MenuCheck } from './menu-check'
 export { NavBadge, NavIconWithDot } from './nav-badge'

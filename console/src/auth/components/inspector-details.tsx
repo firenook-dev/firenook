@@ -7,21 +7,27 @@
 // The profile, status and the two times are the draft (Save writes them in
 // one `accounts:update`); the password, revocation, providers, second
 // factors and the codes a developer sends act at once, through the official
-// API, as `updateUser`, `revokeRefreshTokens` and the app's SDK would.
+// API, as `updateUser`, `revokeRefreshTokens` and the app's SDK would. The
+// last section links to where the user's calls, messages and rules
+// decisions are listed: Activity, the Inbox and Firestore's rules page.
 
 import { Button, DatePicker, Input, Popover, Switch, Tooltip, cn } from '@cloudflare/kumo'
 import { PlusIcon, TrashIcon } from '@phosphor-icons/react'
-import { useMutation } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { type ReactNode, useRef, useState } from 'react'
 import type { AuthUserDetail } from '@/api/generated/auth/AuthUserDetail'
+import { statusQuery } from '@/api/queries'
 import { Anchored } from '@/components/console/completions'
 import { InspectorSection } from '@/components/console/inspector'
 import { MaskedValue } from '@/components/console/masked-value'
 import { RelativeTime } from '@/components/console/relative-time'
 import { PanelTitle } from '@/components/kit'
-import { relativeTime, utcStamp } from '@/lib/format'
+import { clockTime, relativeTime, utcStamp } from '@/lib/format'
+import { useConsoleProject } from '@/lib/project'
+import type { SectionLink } from '@/lib/services'
 import { toast } from '@/lib/toasts'
+import { userTraceLinks } from '../links'
 import { providerGlyph, providerLabel } from '../providers'
 import {
   type UserTarget,
@@ -246,7 +252,7 @@ function TimeBox({
               <input
                 type="time"
                 step="1"
-                value={`${pad(base.getHours())}:${pad(base.getMinutes())}:${pad(base.getSeconds())}`}
+                value={clockTime(base, 'second')}
                 onChange={(event) => {
                   const [hours = 0, minutes = 0, seconds = 0] = event.target.value
                     .split(':')
@@ -270,10 +276,6 @@ function TimeBox({
       )}
     </div>
   )
-}
-
-function pad(value: number): string {
-  return String(value).padStart(2, '0')
 }
 
 /** A value shown, not edited: the data face, or a short rule for none. */
@@ -496,7 +498,58 @@ export function InspectorDetails({
           linked.
         </p>
       )}
+      <TracesSection target={target} />
     </div>
+  )
+}
+
+/** Where this user's calls, messages and rules decisions are listed, each filtered to them. */
+function TracesSection({ target }: { target: UserTarget }) {
+  const status = useQuery(statusQuery)
+  const { project, foreign } = useConsoleProject()
+  const firestore = status.data?.services.some((service) => service.name === 'firestore') === true
+  const links = userTraceLinks({
+    project: foreign ? project : undefined,
+    tenant: target.tenant,
+    uid: target.uid,
+  })
+  return (
+    <InspectorSection title="Activity" testId="section-traces">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <TraceLink link={links.calls} testId="user-calls">
+          Calls in Activity ↗
+        </TraceLink>
+        <TraceLink link={links.messages} testId="user-messages">
+          Messages in Inbox ↗
+        </TraceLink>
+        {firestore && (
+          <TraceLink link={links.decisions} testId="user-rules-decisions">
+            Rules decisions ↗
+          </TraceLink>
+        )}
+      </div>
+    </InspectorSection>
+  )
+}
+
+function TraceLink({
+  link,
+  testId,
+  children,
+}: {
+  link: SectionLink
+  testId: string
+  children: ReactNode
+}) {
+  return (
+    <Link
+      to={link.to as never}
+      search={link.search as never}
+      className="text-[12px] leading-5 text-kumo-link hover:underline focus-visible:underline focus-visible:outline-none"
+      data-testid={testId}
+    >
+      {children}
+    </Link>
   )
 }
 

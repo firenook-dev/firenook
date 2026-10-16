@@ -9,7 +9,12 @@ import type { LiveChannel, TopicListener } from '@/lib/live/channel'
 // The calls reach the engine through `apiGet` / `apiSend` and the browser's
 // download; both are stood in for so the module's own bookkeeping is what
 // is tested. The Overview's journeys exercise the real routes.
-const calls = vi.hoisted(() => ({ get: vi.fn(), send: vi.fn(), download: vi.fn() }))
+const calls = vi.hoisted(() => ({
+  get: vi.fn(),
+  send: vi.fn(),
+  download: vi.fn(),
+  toast: vi.fn(),
+}))
 
 vi.mock('@/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/client')>()),
@@ -17,26 +22,27 @@ vi.mock('@/api/client', async (importOriginal) => ({
   apiSend: calls.send,
 }))
 vi.mock('@/lib/download', () => ({ download: calls.download }))
+vi.mock('@/lib/toasts', () => ({ toast: calls.toast }))
 
 const { ApiError } = await import('@/api/client')
 const { jobKey, sectionJobsKey } = await import('@/lib/jobs')
 const {
-  discardSnapshot,
   downloadSnapshot,
   engineQuery,
   laterJob,
   latestJob,
-  memoryQuery,
   overviewKeys,
   overviewQuery,
   prepareSnapshot,
   runningSuiteJob,
+  saveSnapshot,
   snapshotDownloadUrl,
   snapshotFileQuery,
   snapshotResult,
   startClear,
   useOverviewLive,
 } = await import('./api')
+const { startSnapshot, useSnapshotTab } = await import('./snapshot')
 
 let client: QueryClient
 const wrapper = ({ children }: { children: ReactNode }) => (
@@ -48,6 +54,7 @@ beforeEach(() => {
   calls.get.mockReset()
   calls.send.mockReset()
   calls.download.mockReset()
+  calls.toast.mockReset()
 })
 
 const job = (overrides: Partial<Job> = {}): Job => ({
@@ -73,7 +80,7 @@ const state = (problems = 0): OverviewState => ({
   notices: [],
   problems: [],
   hour: [],
-  logs: { entries: 10, errors: problems, warnings: 0, problems },
+  problemsLogged: problems,
 })
 
 /** A channel that records subscriptions and lets a test speak for the engine. */
@@ -97,7 +104,6 @@ describe('the overview queries', () => {
   it('key everything under the section and the project', () => {
     expect(overviewQuery('demo-x').queryKey).toEqual(['overview', 'demo-x'])
     expect(engineQuery('demo-x').queryKey).toEqual(['overview', 'demo-x', 'engine'])
-    expect(memoryQuery('demo-x').queryKey).toEqual(['overview', 'demo-x', 'memory'])
     expect(snapshotFileQuery('demo-x', SNAPSHOT).queryKey).toEqual([
       'overview',
       'demo-x',
@@ -106,10 +112,9 @@ describe('the overview queries', () => {
     ])
   })
 
-  it('never refetch the state or the engine by themselves; the buffers read afresh when shown', () => {
+  it('never refetch the state or the engine by themselves', () => {
     expect(overviewQuery('p').staleTime).toBe(Number.POSITIVE_INFINITY)
     expect(engineQuery('p').staleTime).toBe(Number.POSITIVE_INFINITY)
-    expect(memoryQuery('p').staleTime).toBe(0)
     expect(snapshotFileQuery('p', SNAPSHOT).retry).toBe(false)
   })
 
@@ -117,12 +122,10 @@ describe('the overview queries', () => {
     calls.get.mockResolvedValue({})
     await client.fetchQuery(overviewQuery('p'))
     await client.fetchQuery(engineQuery('p'))
-    await client.fetchQuery(memoryQuery('p'))
     await client.fetchQuery(snapshotFileQuery('p', SNAPSHOT))
     expect(calls.get.mock.calls.map((call) => call[0])).toEqual([
       '/overview',
       '/overview/engine',
-      '/status/memory',
       `/overview/snapshots/${SNAPSHOT}`,
     ])
   })
@@ -186,14 +189,43 @@ describe('snapshots', () => {
   it('start as a job every view of the job reads at once', async () => {
     const started = job()
     calls.send.mockResolvedValue(started)
-    await expect(prepareSnapshot(client, ['firestore'])).resolves.toEqual(started)
-    expect(calls.send).toHaveBeenCalledWith('POST', '/overview/snapshots', {
-      targets: ['firestore'],
-    })
+    await expect(prepareSnapshot(client)).resolves.toEqual(started)
+    expect(calls.send).toHaveBeenCalledWith('POST', '/overview/snapshots', {})
     expect(client.getQueryData(jobKey('j1'))).toEqual(started)
     expect(client.getQueryData(sectionJobsKey('suite'))).toEqual([started])
-    await prepareSnapshot(client)
-    expect(calls.send).toHaveBeenLastCalledWith('POST', '/overview/snapshots', {})
+  })
+
+  it('start from ⌘K as this tab’s own, so it downloads here, and say a refusal', async () => {
+    calls.send.mockResolvedValueOnce(job({ id: 'mine' }))
+    await expect(startSnapshot(client)).resolves.toBe(true)
+    expect(useSnapshotTab.getState().started.has('mine')).toBe(true)
+    calls.send.mockRejectedValueOnce(
+      new ApiError(409, 'Another suite action is still running.', 'conflict'),
+    )
+    await expect(startSnapshot(client)).resolves.toBe(false)
+    expect(calls.toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'The snapshot did not start',
+        description: 'Another suite action is still running.',
+        tone: 'danger',
+      }),
+    )
+  })
+
+  it('save on the engine’s machine as a job, naming services only when not all', async () => {
+    const saving = job({ id: 's1', kind: 'suite.export' })
+    calls.send.mockResolvedValue(saving)
+    await expect(saveSnapshot(client, { destination: 'project' })).resolves.toEqual(saving)
+    expect(calls.send).toHaveBeenLastCalledWith('POST', '/suite/export', {
+      destination: 'project',
+    })
+    expect(client.getQueryData(jobKey('s1'))).toEqual(saving)
+    await saveSnapshot(client, { destination: 'seed', targets: ['auth'], overwrite: true })
+    expect(calls.send).toHaveBeenLastCalledWith('POST', '/suite/export', {
+      destination: 'seed',
+      targets: ['auth'],
+      overwrite: true,
+    })
   })
 
   it('keep the end of a short job that the topic said before the start answered', async () => {
@@ -227,18 +259,6 @@ describe('snapshots', () => {
       `/console/api/v1/overview/snapshots/${SNAPSHOT}/download`,
     )
     expect(client.getQueryData(overviewKeys.snapshot('p', SNAPSHOT))).toBeUndefined()
-  })
-
-  it('discard one the engine keeps, and treat one already gone as discarded', async () => {
-    client.setQueryData(overviewKeys.snapshot('p', SNAPSHOT), { id: SNAPSHOT })
-    calls.send.mockResolvedValueOnce({})
-    await discardSnapshot(client, 'p', SNAPSHOT)
-    expect(calls.send).toHaveBeenCalledWith('DELETE', `/overview/snapshots/${SNAPSHOT}`, {})
-    expect(client.getQueryData(overviewKeys.snapshot('p', SNAPSHOT))).toBeUndefined()
-    calls.send.mockRejectedValueOnce(new ApiError(404, 'gone', 'not-found'))
-    await expect(discardSnapshot(client, 'p', SNAPSHOT)).resolves.toBeUndefined()
-    calls.send.mockRejectedValueOnce(new ApiError(0, 'down', 'network'))
-    await expect(discardSnapshot(client, 'p', SNAPSHOT)).rejects.toThrow('down')
   })
 })
 

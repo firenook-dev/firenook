@@ -6,7 +6,7 @@
 // The answer is the engine's own matcher (`useTriggersFor`, `GET
 // /functions/triggers`), asked once per document and kept, so reopening a
 // document asks nothing; a codebase reload refreshes it. While Functions are
-// absent, starting or not built, or nothing listens, there is no chip.
+// absent or starting, or nothing listens, there is no chip.
 
 import { Button, Popover } from '@cloudflare/kumo'
 import { LightningIcon } from '@phosphor-icons/react'

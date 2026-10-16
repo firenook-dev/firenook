@@ -5,6 +5,7 @@ import { type Engine, expect, test } from './fixtures'
 import { readClipboard } from './support/clipboard'
 import {
   ENGINE_SENTINEL,
+  type InvocationSummary,
   callFunction,
   codebaseOf,
   consoleJson,
@@ -535,28 +536,32 @@ test('a schedule says when it runs next, runs now, and keeps its phase across a 
   page,
   engine,
 }) => {
-  type Detail = { schedule: { evaluatedIn: string | null; nextRun: string | null } | null }
-  const nightly = await consoleJson<Detail>(engine, `/functions/${functionId('nightly')}`)
-  expect(nightly.schedule?.evaluatedIn).toBeTruthy()
-  expect(nightly.schedule?.nextRun).toBeTruthy()
-  const next = Date.parse(nightly.schedule!.nextRun!)
+  // What the scheduler makes of it is Pub/Sub's, read on the function's tab.
+  type Schedule = { functionId: string; evaluatedIn: string; nextRunAt: string | null }
+  const nightlyOf = async () =>
+    (await consoleJson<{ items: Schedule[] }>(engine, '/pubsub/schedules')).items.find(
+      (item) => item.functionId === functionId('nightly'),
+    )
+  const nightly = await nightlyOf()
+  expect(nightly?.evaluatedIn).toBe('UTC')
+  expect(nightly?.nextRunAt).toBeTruthy()
+  const next = Date.parse(nightly?.nextRunAt ?? '')
   expect(next - Date.now()).toBeLessThanOrEqual(5 * 60_000)
 
   await openFunction(page, engine, 'nightly', 'run')
   await expect(page.getByTestId('schedule-expression')).toHaveText('every 5 minutes')
-  await expect(page.getByTestId('schedule-zone')).toHaveText(
-    `Evaluated in ${nightly.schedule!.evaluatedIn}`,
-  )
-  await expect(page.getByTestId('schedule-form')).toContainText(/\(in \d+ (min|s)/)
+  await expect(page.getByTestId('schedule-zone')).toHaveText('None declared · evaluated in UTC')
+  await expect(page.getByTestId('schedule-next')).toContainText(/\(in \d+ (min|s)|due now/)
 
   // Run now: the scheduler's own tick, followed to its invocation.
   await page.getByTestId('schedule-run').click()
   await expect(page.getByTestId('run-outcome')).toContainText('Succeeded')
   await expect(rowWith(page, 'scheduled tick').first()).toBeVisible()
 
-  // A declared zone is the one it is evaluated in.
+  // A declared zone is the one it is evaluated in, the cron in words.
   await openFunction(page, engine, 'cleanup', 'run')
-  await expect(page.getByTestId('schedule-zone')).toContainText('America/New_York')
+  await expect(page.getByTestId('schedule-zone')).toHaveText('Declared America/New_York')
+  await expect(page.getByTestId('schedule-words')).toHaveText('every day at 03:00')
 
   // A reload keeps the phase: the next run does not move.
   const source = projectFile(engine, 'functions/compute.js')
@@ -564,17 +569,16 @@ test('a schedule says when it runs next, runs now, and keeps its phase across a 
     const before = await loadsOf(engine, 'default')
     source.write(`${source.original}\n// touched by the schedule journey\n`)
     await nextLoad(engine, 'default', before)
-    const after = await consoleJson<Detail>(engine, `/functions/${functionId('nightly')}`)
-    expect(after.schedule?.nextRun).toBe(nightly.schedule?.nextRun)
+    expect((await nightlyOf())?.nextRunAt).toBe(nightly?.nextRunAt)
   } finally {
     const before = await loadsOf(engine, 'default')
     if (source.restore()) await nextLoad(engine, 'default', before)
   }
 
-  // Its schedule, in Pub/Sub.
+  // Each tick is a message on its schedule topic, in Pub/Sub.
   await openFunction(page, engine, 'nightly', 'run')
-  await page.getByTestId('schedule-link').click()
-  await expect(page).toHaveURL(/\/console\/pubsub/)
+  await page.getByTestId('schedule-topic-link').click()
+  await expect(page).toHaveURL(/\/console\/pubsub\?.*topic=firebase-schedule-nightly/)
 })
 
 test('enqueue a task through Cloud Tasks and follow its attempt', async ({ page, engine }) => {
@@ -602,6 +606,39 @@ test('enqueue a task through Cloud Tasks and follow its attempt', async ({ page,
   expect(view.refs.some((ref) => ref.kind === 'tasks.task' || ref.kind === 'tasks.queue')).toBe(
     true,
   )
+  // Retries and rate limits are the queue's, in Cloud Tasks' configuration.
+  await page.getByTestId('task-queue-config').click()
+  await expect(page).toHaveURL(/\/console\/tasks\?.*view=config/)
+})
+
+test("publish to a Pub/Sub function's topic for real, through Pub/Sub's own publish", async ({
+  page,
+  engine,
+}) => {
+  const to = unique('ada')
+  await openFunction(page, engine, 'onEmail', 'run')
+  await page
+    .getByTestId('event-data')
+    .fill(`{"data": {"to": "${to}"}, "attributes": {"kind": "welcome"}}`)
+  await page.getByTestId('event-publish').click()
+  await expect(page.getByTestId('event-real-result')).toContainText('Published message')
+  await expect(page.getByTestId('event-real-result')).toContainText('to emails.')
+  await expect(page.getByTestId('run-outcome')).toContainText('Succeeded')
+  // The delivery, found by the topic that caused it, ran the handler with
+  // the message as published: Pub/Sub delivered it like an app's publish.
+  let delivered: InvocationSummary | undefined
+  await expect
+    .poll(async () => {
+      for (const candidate of await invocations(engine, 'topic:emails outcome:succeeded')) {
+        const view = await invocationOf(engine, candidate.id)
+        if (view.detail.logs.some((line) => line.message.includes(`email to ${to}`)))
+          delivered = candidate
+      }
+      return delivered !== undefined
+    })
+    .toBe(true)
+  expect(delivered?.origin).toBe('emulator')
+  expect(delivered?.cause.type).toBe('pubsub')
 })
 
 test('a blocking function decides a sign-up, tested and for real', async ({ page, engine }) => {
@@ -701,6 +738,11 @@ test('the environment says where each value comes from, and saves secrets and pa
     const greeting = tab.locator('[data-testid="env-variable"][data-key="GREETING"]')
     await expect(greeting).toContainText('hello')
     await expect(greeting).toContainText('.env')
+    // A value is changed in its file; the tab says where, and has no editor of its own.
+    await expect(page.getByTestId('env-edit-hint')).toContainText(
+      'To change a value, edit its file in functions/',
+    )
+    await expect(tab.getByRole('button', { name: /^Edit / })).toHaveCount(0)
     // A secret is masked until asked for, and read from the file then.
     await expect(page.getByTestId('env-secret-API_KEY-masked')).toBeVisible()
     await expect(tab).not.toContainText('s3cret')

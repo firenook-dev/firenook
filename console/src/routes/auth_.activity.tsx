@@ -2,8 +2,6 @@ import { createFileRoute, stripSearchParams } from '@tanstack/react-router'
 import { z } from 'zod'
 import { ActivityPage } from '@/auth/components/activity-page'
 import { SectionFrame } from '@/components/console/section-gate'
-import { UnbuiltSection } from '@/components/section-placeholder'
-import { auth } from '@/lib/sections/auth'
 import { zFlag } from '@/lib/search-params'
 
 // Every view of Activity is a link: the project and tenant it shows, its
@@ -22,21 +20,8 @@ const searchSchema = z.object({
   console: zFlag,
   /** The feed is paused (stored only while paused). */
   paused: zFlag,
-  /** The side panel of tools: Try a sign-in or Inspect a token. */
-  panel: z.enum(['try', 'inspect']).optional(),
-  /** Try a sign-in's method. */
-  method: z
-    .enum([
-      'password',
-      'signUp',
-      'anonymous',
-      'emailLink',
-      'phone',
-      'customToken',
-      'federated',
-      'refresh',
-    ])
-    .optional(),
+  /** The side panel: Inspect a token. */
+  panel: z.enum(['inspect']).optional(),
 })
 
 export const Route = createFileRoute('/auth_/activity')({
@@ -46,8 +31,6 @@ export const Route = createFileRoute('/auth_/activity')({
 })
 
 function ActivityRoute() {
-  // The section's placeholder until its journeys pass.
-  if (!auth.built) return <UnbuiltSection section={auth} />
   return (
     <SectionFrame section="auth">
       <ActivityPage />

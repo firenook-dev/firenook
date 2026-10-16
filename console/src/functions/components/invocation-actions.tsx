@@ -1,10 +1,10 @@
 // What can be done to an invocation, the same from a row's menu, the
-// detail's footer and the keys: open it, replay it (`r`, always through
-// ReplayConfirm — a replay re-runs side effects), edit and replay it
-// (`Shift+R`: its request or event into the Run tab), open what caused it
-// (`o`: the document, object, user, message, task or event, through its
-// EntityRef), open it in Logs (`l`), copy its id (`c`) or the row as JSON
-// (`Shift+C`).
+// detail's footer and the keys: open it, replay it (`r`, always through a
+// ConfirmPopover beside its row — a replay re-runs side effects), edit and
+// replay it (`Shift+R`: its request or event into the Run tab), open what
+// caused it (`o`: the document, object, user, message, task or event,
+// through its EntityRef), open it in Logs (`l`), copy its id (`c`) or the
+// row as JSON (`Shift+C`).
 
 import {
   ArrowCounterClockwiseIcon,
@@ -24,12 +24,11 @@ import { statusQuery } from '@/api/queries'
 import type { RowMenuItem } from '@/components/console/row-menu'
 import { linkTo } from '@/lib/links'
 import { linkToLogs } from '@/lib/sections/logs'
-import { sectionById } from '@/lib/services'
 import { toast } from '@/lib/toasts'
 import { getInvocation } from '../api'
 import { replayInvocation } from '../invoke-stream'
-import { copyText } from '../use-functions'
-import { ReplayConfirm } from '@/compute/replay-confirm'
+import { copyToClipboard } from '@/lib/copy'
+import { ConfirmPopover } from '@/components/console/confirm-popover'
 import { formatNumber } from '@/lib/format'
 
 /**
@@ -78,12 +77,12 @@ export function causeRefs(refs: readonly EntityRef[]): EntityRef[] {
 
 /** `c`: the invocation's id. */
 function copyId(invocation: InvocationSummary) {
-  void copyText(invocation.id, 'the invocation id')
+  void copyToClipboard(invocation.id, { what: 'the invocation id' })
 }
 
 /** `Shift+C`: the row as JSON. */
 function copyJson(invocation: InvocationSummary) {
-  void copyText(JSON.stringify(invocation, null, 2), 'the invocation as JSON')
+  void copyToClipboard(JSON.stringify(invocation, null, 2), { what: 'the invocation as JSON' })
 }
 
 export interface InvocationActions {
@@ -98,7 +97,7 @@ export interface InvocationActions {
   copyId: (invocation: InvocationSummary) => void
   copyJson: (invocation: InvocationSummary) => void
   replaying: boolean
-  /** The confirmation dialog: render it once on the page. */
+  /** The replay's confirmation popover: render it once on the page. */
   dialog: React.ReactNode
 }
 
@@ -109,16 +108,25 @@ export function useInvocationActions({
 }): InvocationActions {
   const navigate = useNavigate()
   const status = useQuery(statusQuery)
-  const logsBuilt =
-    sectionById('logs')?.built === true &&
-    status.data?.sections.find((entry) => entry.id === 'logs')?.state !== 'absent'
-  const [asking, setAsking] = useState<InvocationSummary | null>(null)
+  const logsRun = status.data?.sections.find((entry) => entry.id === 'logs')?.state !== 'absent'
+  // The invocation `r` asks about, and its row for the popover to hang off.
+  const [asking, setAsking] = useState<{
+    invocation: InvocationSummary
+    anchor: Element | null
+  } | null>(null)
+  const ask = (invocation: InvocationSummary) =>
+    setAsking({
+      invocation,
+      anchor: document.querySelector(
+        `[data-testid="feed-row"][data-key="${CSS.escape(invocation.id)}"]`,
+      ),
+    })
   const [replaying, setReplaying] = useState(false)
 
-  const replay = (invocation: InvocationSummary) => {
+  const replay = (invocation: InvocationSummary): Promise<void> => {
     setReplaying(true)
     let opened = false
-    replayInvocation(invocation.id, {
+    return replayInvocation(invocation.id, {
       onFrame: (frame) => {
         if (frame.frame === 'started' && !opened) {
           opened = true
@@ -143,10 +151,7 @@ export function useInvocationActions({
           tone: 'danger',
         }),
       )
-      .finally(() => {
-        setReplaying(false)
-        setAsking(null)
-      })
+      .finally(() => setReplaying(false))
   }
 
   const editAndReplay = (invocation: InvocationSummary) =>
@@ -171,7 +176,7 @@ export function useInvocationActions({
           description:
             causeRefs(view.refs).length === 0
               ? 'This invocation was called directly; nothing in another section caused it.'
-              : 'What caused it lives in a section that is not built yet.',
+              : 'What caused it lives in a section this engine does not run.',
           tone: 'info',
         })
       })
@@ -185,7 +190,7 @@ export function useInvocationActions({
       )
   }
 
-  const openLogs = logsBuilt
+  const openLogs = logsRun
     ? (invocation: InvocationSummary) => {
         const link = linkToLogs({ function: invocation.functionId, execution: invocation.id })
         void navigate({ to: link.to as never, search: link.search as never })
@@ -205,7 +210,7 @@ export function useInvocationActions({
       label: 'Replay…',
       icon: ArrowCounterClockwiseIcon,
       shortcut: 'r',
-      run: () => setAsking(invocation),
+      run: () => ask(invocation),
     },
     {
       id: 'edit-replay',
@@ -250,7 +255,7 @@ export function useInvocationActions({
 
   return {
     menu,
-    askReplay: setAsking,
+    askReplay: ask,
     replay,
     editAndReplay,
     openCause,
@@ -259,15 +264,17 @@ export function useInvocationActions({
     copyJson,
     replaying,
     dialog: (
-      <ReplayConfirm
+      <ConfirmPopover
         open={asking !== null}
         onOpenChange={(open) => {
           if (!open) setAsking(null)
         }}
-        title={`Replay #${formatNumber(asking?.seq ?? 0)}?`}
+        title={`Replay #${formatNumber(asking?.invocation.seq ?? 0)}?`}
         description="The handler runs again with the same request, against the code loaded now; whatever it writes is written again."
-        pending={replaying}
-        onConfirm={() => asking && replay(asking)}
+        confirm="Replay"
+        anchor={asking?.anchor}
+        run={() => (asking ? replay(asking.invocation) : undefined)}
+        testId="replay-confirm"
       />
     ),
   }

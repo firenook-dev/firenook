@@ -10,7 +10,7 @@ import type { FirestoreSearch } from '@/routes/firestore'
 import { EMPTY_QUERY, QueryParseError, type WorkbenchQuery, parseQuery, printQuery } from '../query'
 import { type FirestoreScope, firestoreScope } from '../rest'
 import { isPattern } from '../schema'
-import { type ViewAs, parseViewAs, serializeViewAs } from '../view-as'
+import { type ViewAs, parseViewAs, serializeViewAs } from '@/lib/identity'
 
 export const DEFAULT_DATABASE = '(default)'
 

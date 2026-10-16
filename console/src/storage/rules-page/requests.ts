@@ -5,13 +5,11 @@
 // content type, custom metadata) — and here it becomes the request a real
 // client would send, through the engine's own request builder.
 //
-// Who is asking is an identity from the console's picker: an anonymous
-// client, an Auth user or a custom identity. Either of the last two runs as
-// a token minted the way the SDK's emulator tokens are (`authorizationFor`
-// on a custom identity with the user's uid, email and claims), so a run here,
-// a saved test and the exported `@firebase/rules-unit-testing` file all
-// decide alike, Auth record or not. A replayed decision keeps the identity,
-// the file and the time it was recorded with until the request is changed.
+// Who is asking is the rules kit's `Who` (`src/rules/who.ts`), the same as
+// Firestore's: an identity from the console's picker, run as a token minted
+// for it, or a recorded request's own credentials. A replayed decision keeps
+// the identity, the file and the time it was recorded with until the
+// request is changed.
 
 import type { EvaluateAuth } from '@/api/generated/EvaluateAuth'
 import type { RulesMethod } from '@/api/generated/RulesMethod'
@@ -21,14 +19,9 @@ import type { StorageProposedObject } from '@/api/generated/storage/StoragePropo
 import type { StorageRulesObjectView } from '@/api/generated/storage/StorageRulesObjectView'
 import { type KeyValueRow, rowId } from '@/components/console/key-value-editor'
 import { formatBytes } from '@/lib/format'
-import { type ViewAs, authorizationFor, describeViewAsShort } from '@/lib/identity'
+import { ANONYMOUS, type Who, credentialsOf, describeWho } from '@/rules/who'
 
-/** The identity a request carries. */
-export type Who =
-  /** Picked in the console: an anonymous client, an Auth user or a custom identity. */
-  | { kind: 'as'; viewAs: ViewAs }
-  /** As a recorded request carried it: `request.auth` exactly, or the header it was sent with. */
-  | { kind: 'recorded'; auth: EvaluateAuth | null; authorization?: string | null | undefined }
+export type { Who }
 
 export const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const
 export type SizeUnit = (typeof SIZE_UNITS)[number]
@@ -77,7 +70,7 @@ export const EMPTY_FORM: PlaygroundForm = {
   method: 'get',
   bucket: '',
   path: '',
-  who: { kind: 'as', viewAs: { kind: 'anonymous' } },
+  who: ANONYMOUS,
   size: '1',
   unit: 'MB',
   contentType: 'image/png',
@@ -119,32 +112,6 @@ export function pathProblem(method: RulesMethod, path: string): string | undefin
   return undefined
 }
 
-/**
- * A user or a custom identity as the custom identity whose token is minted
- * here: the uid, the email (a password account, verified, as the Auth
- * emulator's accounts are), the claims, and a tenant user's tenant.
- */
-function customOf(
-  viewAs: Extract<ViewAs, { kind: 'user' | 'custom' }>,
-): Extract<ViewAs, { kind: 'custom' }> {
-  if (viewAs.kind === 'custom') return viewAs
-  const email = viewAs.email
-  const claims: Record<string, unknown> = { ...viewAs.claims }
-  if (viewAs.tenant)
-    claims.firebase = {
-      identities: email ? { email: [email] } : {},
-      sign_in_provider: email ? 'password' : 'custom',
-      tenant: viewAs.tenant,
-    }
-  return {
-    kind: 'custom',
-    uid: viewAs.uid,
-    claims,
-    signInProvider: email ? 'password' : 'custom',
-    ...(email ? { email, emailVerified: true } : {}),
-  }
-}
-
 /** The custom metadata a form proposes: values to set, and for an update `null` to remove. */
 export function metadataOf(
   rows: readonly KeyValueRow[],
@@ -180,19 +147,10 @@ export function toEvaluateRequest(
     path: form.method === 'list' ? folderOf(form.path) : form.path,
   }
 
-  const who = form.who
-  if (who.kind === 'recorded') {
-    if (who.authorization) request.authorization = who.authorization
-    else if (who.auth) request.auth = who.auth
-  } else if (who.viewAs.kind === 'owner') {
-    return {
-      error: 'Admin skips the rules. Ask as a user, an anonymous client or a custom identity.',
-    }
-  } else if (who.viewAs.kind !== 'anonymous') {
-    if (!who.viewAs.uid.trim()) return { error: 'Give the identity a uid.' }
-    const authorization = authorizationFor(customOf(who.viewAs), project)
-    if (authorization) request.authorization = authorization
-  }
+  const credentials = credentialsOf(form.who, project)
+  if ('error' in credentials) return credentials
+  if (credentials.authorization) request.authorization = credentials.authorization
+  else if (credentials.auth) request.auth = credentials.auth
 
   if (proposes(form.method)) {
     const proposed: StorageProposedObject = {}
@@ -319,42 +277,6 @@ export function formFromDecision(decision: StorageDecision): PlaygroundForm {
     existing: 'store',
     time: '',
   }
-}
-
-/**
- * Who an `Authorization` header says is asking: the email or the uid of its
- * ID token (the console's own and the Auth emulator's are both readable
- * JWTs); undefined when it is not one.
- */
-export function tokenWho(authorization: string): string | undefined {
-  const token = /^(?:Bearer|Firebase)\s+(\S+)$/i.exec(authorization.trim())?.[1]
-  const payload = token?.split('.')[1]
-  if (!payload) return undefined
-  try {
-    const padded = payload.replace(/-/g, '+').replace(/_/g, '/')
-    const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4))
-    const text = new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)))
-    const claims = JSON.parse(text) as Record<string, unknown>
-    for (const key of ['email', 'user_id', 'sub'])
-      if (typeof claims[key] === 'string' && claims[key] !== '') return claims[key]
-  } catch {
-    return undefined
-  }
-  return undefined
-}
-
-/** Who a request is from, in a few words. */
-export function describeWho(who: Who): string {
-  if (who.kind === 'recorded') {
-    if (!who.auth)
-      return who.authorization
-        ? (tokenWho(who.authorization) ?? 'the token it carried')
-        : 'not signed in'
-    const email = who.auth.token.email
-    return typeof email === 'string' ? email : who.auth.uid
-  }
-  if (who.viewAs.kind === 'anonymous') return 'not signed in'
-  return describeViewAsShort(who.viewAs)
 }
 
 /**

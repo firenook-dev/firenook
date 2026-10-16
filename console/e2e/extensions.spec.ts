@@ -285,3 +285,30 @@ test('how it works renders the notes safely and keeps console links in the app',
   await expect(page).toHaveURL(/\/console\/firestore/)
   expect(loads).toBe(1)
 })
+
+test('the events tab says what the instance publishes and counts it, the events themselves in Eventarc', async ({
+  page,
+  engine,
+}) => {
+  const name = `ada-${Date.now().toString(36)}`
+  await greet(engine, name)
+  await openInstance(page, engine, 'events')
+  const tab = page.getByTestId('instance-events')
+  await expect(tab.getByTestId('events-channel')).toHaveText(
+    `projects/${engine.project}/locations/us-central1/channels/firebase`,
+  )
+  await expect(
+    tab.locator('[data-testid="declared-event"][data-type="test.greeter.v1.greeted"]'),
+  ).toContainText('Allowed')
+  await expect(tab.getByTestId('events-snippet')).toContainText('onCustomEventPublished')
+  // A count, not a second live list: the events are Eventarc's.
+  await expect(tab.getByTestId('events-published-count')).toHaveText(
+    /^[\d,]+ events? since the engine started\.$/,
+  )
+  await tab.getByTestId('events-open-published').click()
+  await expect(page).toHaveURL(/\/console\/eventarc\?/)
+  await expect(page.getByTestId('events-filter')).toContainText('publisher:greeter')
+  await expect(
+    page.getByTestId('event-cells').filter({ hasText: `greetings/${name}` }),
+  ).toBeVisible()
+})

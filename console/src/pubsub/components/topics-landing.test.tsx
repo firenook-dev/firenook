@@ -5,7 +5,7 @@ import type { PubsubRejectedList } from '@/api/generated/messaging/PubsubRejecte
 import { renderInConsole } from '@/test/render'
 import { testStatus } from '@/test/status'
 import { pubsubKeys } from '../queries'
-import { PROJECT, topicIndex, topicSummary } from '../test/index-fixture'
+import { PROJECT, topicIndex, topicSummary } from '../index-fixture.test-support'
 import { refusedSentence } from './refused-banner'
 import { LANDING_CARDS, TopicsLanding } from './topics-landing'
 

@@ -16,7 +16,6 @@ import type { BatchGetRequest } from '@/api/generated/BatchGetRequest'
 import type { BatchGetResponse } from '@/api/generated/BatchGetResponse'
 import type { RulesMethod } from '@/api/generated/RulesMethod'
 import type { StorageBuckets } from '@/api/generated/storage/StorageBuckets'
-import type { StorageDecisionsParams } from '@/api/generated/storage/StorageDecisionsParams'
 import type { StorageEntry } from '@/api/generated/storage/StorageEntry'
 import type { StorageListPage } from '@/api/generated/storage/StorageListPage'
 import type { StorageRulesDocument } from '@/api/generated/storage/StorageRulesDocument'
@@ -37,10 +36,8 @@ import {
   coverageUrl,
   getAccess,
   getActivity,
-  getArchive,
   getBuckets,
   getDecision,
-  getDecisions,
   getEventPayloads,
   getFolder,
   getImpact,
@@ -50,7 +47,6 @@ import {
   getRules,
   getRulesHistory,
   listObjects,
-  listSessions,
   putRules,
 } from './api'
 
@@ -111,12 +107,9 @@ export const storageKeys = {
     [ST, project, bucket, 'events', name] as const,
   events: (project: string, bucket: string, name: string, generation: string) =>
     [ST, project, bucket, 'events', name, generation] as const,
-  archive: (project: string, bucket: string, name: string, generation: string) =>
-    [ST, project, bucket, 'archive', name, generation] as const,
   profilesOf: (project: string, bucket: string) => [ST, project, bucket, 'profile'] as const,
   profile: (project: string, bucket: string, prefix: string) =>
     [ST, project, bucket, 'profile', prefix] as const,
-  sessions: (project: string, bucket: string) => [ST, project, bucket, 'sessions'] as const,
   /** Every access check of a bucket. */
   accessOf: (project: string, bucket: string) => [ST, project, bucket, 'access'] as const,
   access: (project: string, bucket: string, as: string, names: readonly string[]) =>
@@ -133,8 +126,6 @@ export const storageKeys = {
     [ST, project, scope, 'rules-impact', source] as const,
   rulesDecision: (project: string, scope: string, id: string) =>
     [ST, project, scope, 'rules-decision', id] as const,
-  rulesDecisions: (project: string, params: StorageDecisionsParams) =>
-    [ST, project, 'rules-decisions', params] as const,
 } satisfies Record<string, (...args: never[]) => QueryKey>
 
 /** The rules scope of a bucket: the bucket itself in per-bucket mode, `'*'` otherwise. */
@@ -323,22 +314,6 @@ export const eventsQuery = (project: string, bucket: string, name: string, gener
     staleTime: FOREVER,
   })
 
-export const archiveQuery = (project: string, bucket: string, name: string, generation: string) =>
-  queryOptions({
-    queryKey: storageKeys.archive(project, bucket, name, generation),
-    queryFn: ({ signal }) => getArchive(bucket, name, generation, undefined, signal),
-    staleTime: FOREVER,
-    retry: false,
-  })
-
-/** The first page of a bucket's unfinished resumable uploads (the popover's list). */
-export const sessionsQuery = (project: string, bucket: string) =>
-  queryOptions({
-    queryKey: storageKeys.sessions(project, bucket),
-    queryFn: ({ signal }) => listSessions(bucket, {}, signal),
-    staleTime: FOREVER,
-  })
-
 /**
  * What `viewAs` may do with each of `names` (≤ 200), from a dry run against
  * the rules in force: nothing is recorded. Kept until the rules or the
@@ -408,15 +383,6 @@ export const storageDecisionQuery = (project: string, scope: string, id: string)
   queryOptions({
     queryKey: storageKeys.rulesDecision(project, scope, id),
     queryFn: ({ signal }) => getDecision(id, signal),
-    staleTime: FOREVER,
-    retry: false,
-  })
-
-/** The decisions the engine holds for the topic's parameters: the panel's first paint. */
-export const storageDecisionsQuery = (project: string, params: StorageDecisionsParams) =>
-  queryOptions({
-    queryKey: storageKeys.rulesDecisions(project, params),
-    queryFn: ({ signal }) => getDecisions(params, signal),
     staleTime: FOREVER,
     retry: false,
   })

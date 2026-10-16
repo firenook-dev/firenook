@@ -8,7 +8,7 @@ import {
   resolveQueue,
   tidyAddress,
 } from './queue-address'
-import { PROJECT, testQueue } from './test-data'
+import { PROJECT, testQueue } from './fixtures.test-support'
 
 const processOrder = testQueue('processOrder')
 const sendEmail = testQueue('sendEmail')

@@ -17,7 +17,6 @@ import type { AuthActivityParams } from '@/api/generated/auth/AuthActivityParams
 import type { AuthConfigParams } from '@/api/generated/auth/AuthConfigParams'
 import type { AuthInboxParams } from '@/api/generated/auth/AuthInboxParams'
 import type { AuthUsersParams } from '@/api/generated/auth/AuthUsersParams'
-import { splitKey } from '@/lib/sections/keys'
 
 /** The pages a scope belongs to: Users and Settings read one tenant, the feeds read all by default. */
 export type AuthPage = 'users' | 'inbox' | 'activity' | 'settings'
@@ -136,12 +135,6 @@ export function userKey(tenant: string | null | undefined, uid: string): string 
 }
 
 /** An `auth.user` key read back; a key without a bar is a project user's uid. */
-export function parseUserKey(key: string): { tenant: string | undefined; uid: string } {
-  const [first = '', rest] = splitKey(key)
-  if (rest === undefined) return { tenant: undefined, uid: first }
-  return { tenant: first === '' ? undefined : first, uid: rest }
-}
-
 /** A bulk job over ticked users of one scope (at most 10,000 keys, the engine's limit). */
 export function keysTarget(scope: TenantScope, uids: readonly string[]): BulkTarget {
   const tenant = usersTenant(scope)

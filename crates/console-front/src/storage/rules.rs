@@ -26,14 +26,13 @@ use time::format_description::well_known::Rfc3339;
 use ts_rs::TS;
 
 use super::StorageRoutes;
-use super::decision_feed::{StorageDecisionBatch, StorageDecisionsParams};
 use super::files::StorageRulesMode;
 use crate::api_error::ApiError;
 use crate::blocking::blocking;
 use crate::json::ConsoleJson;
 use crate::rules::{
-    GoverningMatch, RulesClaimRead, RulesDiagnostic, RulesOrigin, RulesOutline, RulesVersion,
-    UnusedMatch, diagnostic, not_compiled, operations, origin, outline_view, version,
+    GoverningMatch, RulesDiagnostic, RulesOrigin, RulesOutline, RulesVersion, UnusedMatch,
+    diagnostic, not_compiled, operations, origin, outline_view, version,
 };
 use crate::rules_eval::{AllowTrace, EvaluateAuth, ExplainStep, RulesMethod, RulesOutcome};
 
@@ -66,11 +65,6 @@ pub(crate) struct StorageRulesDocument {
     pub governs: Vec<String>,
     /// These are the emulator's open default rules for a demo project.
     pub open_default: bool,
-    /// Every place the rules in force read a claim of the caller's token
-    /// (`request.auth.token.<claim>`), in source order; null when no
-    /// ruleset is in force, so an empty list always means the rules read
-    /// none.
-    pub claim_reads: Option<Vec<RulesClaimRead>>,
 }
 
 /// `PUT /storage/rules`.
@@ -123,10 +117,6 @@ pub(crate) struct StorageRulesCheck {
     /// Which match blocks govern the bucket's folders; null when the draft
     /// does not compile or the folder index is still being built.
     pub map: Option<StorageRulesMap>,
-    /// Every place the draft reads a claim of the caller's token, in source
-    /// order; null when the draft does not compile, so an empty list always
-    /// means it reads none.
-    pub claim_reads: Option<Vec<RulesClaimRead>>,
 }
 
 /// Which match blocks govern which folder shapes of a bucket.
@@ -825,14 +815,6 @@ pub(crate) async fn read_rules(
         file_problems: rules.file_problems(&scope).iter().map(diagnostic).collect(),
         governs,
         open_default: mode == RulesMode::OpenDefault,
-        claim_reads: current.as_ref().map(|installed| {
-            installed
-                .ruleset
-                .claim_reads()
-                .iter()
-                .map(RulesClaimRead::from)
-                .collect()
-        }),
     }))
 }
 
@@ -903,7 +885,6 @@ pub(crate) async fn check_rules(
                     diagnostics: errors.iter().map(diagnostic).collect(),
                     outline: None,
                     map: None,
-                    claim_reads: None,
                 });
             }
         };
@@ -911,13 +892,6 @@ pub(crate) async fn check_rules(
             diagnostics: ruleset.lints().iter().map(diagnostic).collect(),
             outline: Some(outline_view(&ruleset.outline())),
             map: rules.map(&bucket, &ruleset).as_ref().map(rules_map),
-            claim_reads: Some(
-                ruleset
-                    .claim_reads()
-                    .iter()
-                    .map(RulesClaimRead::from)
-                    .collect(),
-            ),
         })
     })
     .await
@@ -997,18 +971,6 @@ pub(crate) async fn evaluate(
 fn diagnostics_off() -> ApiError {
     ApiError::unavailable("Storage rules decisions are not recorded in this engine.")
         .with_fix("Start the engine without --no-diagnostics to record them.")
-}
-
-/// `GET /storage/rules/decisions`: the decisions the feed holds that pass
-/// the topic's params, the first paint before the topic replays.
-pub(crate) async fn decisions(
-    State(routes): State<StorageRoutes>,
-    Query(params): Query<StorageDecisionsParams>,
-) -> Result<Json<StorageDecisionBatch>, ApiError> {
-    let feed = routes.feed.clone().ok_or_else(diagnostics_off)?;
-    blocking("the decisions task", move || Ok(feed.snapshot(&params)))
-        .await
-        .map(Json)
 }
 
 /// `GET /storage/rules/decisions/{id}`: one decision re-run with every

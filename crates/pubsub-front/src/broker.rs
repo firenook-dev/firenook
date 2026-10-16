@@ -575,9 +575,6 @@ struct SnapshotEntry {
     topic_generation: u64,
     unacked: BTreeSet<u64>,
     created: Instant,
-    created_at: SystemTime,
-    /// The subscription it was taken from.
-    source: String,
 }
 
 #[derive(Debug, Clone)]
@@ -663,18 +660,16 @@ struct State {
 pub enum ResourceKind {
     Topics,
     Subscriptions,
-    Snapshots,
     Schemas,
 }
 
 impl ResourceKind {
-    /// `topics`, `subscriptions`, `snapshots` or `schemas`.
+    /// `topics`, `subscriptions` or `schemas`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Topics => "topics",
             Self::Subscriptions => "subscriptions",
-            Self::Snapshots => "snapshots",
             Self::Schemas => "schemas",
         }
     }
@@ -684,7 +679,6 @@ impl ResourceKind {
 struct ResourceStamps {
     topics: u64,
     subscriptions: u64,
-    snapshots: u64,
     schemas: u64,
 }
 
@@ -833,65 +827,12 @@ pub fn wall_clock(at: Instant) -> SystemTime {
 }
 
 /// Counts per second over the last minute, ending at `ends_at` (the last
-/// whole second counted); the console ages it on its own clock.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SecondWindow {
-    pub ends_at: SystemTime,
-    /// `(seconds before ends_at, count)` for the non-zero seconds, newest first.
-    pub buckets: Vec<(u8, u32)>,
-}
+/// whole second counted); the console ages it on its own clock. The suite's
+/// one counting window, which Cloud Tasks uses too.
+pub use firenook_suite_front::window::StampedWindow as SecondWindow;
 
-/// A topic's publishes per second: sixty slots and the second the newest
-/// one counts.
-#[derive(Debug, Clone)]
-struct Throughput {
-    slots: [u32; 60],
-    second: u64,
-}
-
-impl Default for Throughput {
-    fn default() -> Self {
-        Self {
-            slots: [0; 60],
-            second: 0,
-        }
-    }
-}
-
-impl Throughput {
-    fn slot(second: u64) -> usize {
-        usize::try_from(second % 60).unwrap_or(0)
-    }
-
-    fn record(&mut self, at: SystemTime, count: usize) {
-        let second = at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        if second > self.second {
-            for step in 1..=(second - self.second).min(60) {
-                self.slots[Self::slot(self.second + step)] = 0;
-            }
-            self.second = second;
-        } else if second + 60 <= self.second {
-            return;
-        }
-        let slot = Self::slot(second);
-        self.slots[slot] =
-            self.slots[slot].saturating_add(u32::try_from(count).unwrap_or(u32::MAX));
-    }
-
-    fn window(&self) -> SecondWindow {
-        let buckets = (0..60_u8)
-            .filter_map(|age| {
-                let second = self.second.checked_sub(u64::from(age))?;
-                let count = self.slots[Self::slot(second)];
-                (count > 0).then_some((age, count))
-            })
-            .collect();
-        SecondWindow {
-            ends_at: UNIX_EPOCH + Duration::from_secs(self.second),
-            buckets,
-        }
-    }
-}
+/// A topic's publishes per second over the last minute.
+type Throughput = firenook_suite_front::window::SecondCounts;
 
 /// A backlog row's place in delivery order: outstanding and pushing
 /// messages first by when they are due (phase 0), then available ones in
@@ -2066,14 +2007,11 @@ impl Broker {
                 topic_generation: generation,
                 unacked,
                 created: Instant::now(),
-                created_at: now,
-                source: subscription.to_owned(),
             },
         );
         if let Some(generation) = state.generations.get_mut(&generation) {
             generation.snapshots += 1;
         }
-        state.touch(ResourceKind::Snapshots);
         self.finish(state, false);
         Ok(snapshot)
     }
@@ -2124,7 +2062,6 @@ impl Broker {
             return Err(PubsubError::not_found("Snapshot does not exist"));
         };
         state.snapshot_removed(snapshot.topic_generation);
-        state.touch(ResourceKind::Snapshots);
         self.finish(state, false);
         Ok(())
     }
@@ -2463,7 +2400,6 @@ impl Broker {
         for kind in [
             ResourceKind::Topics,
             ResourceKind::Subscriptions,
-            ResourceKind::Snapshots,
             ResourceKind::Schemas,
         ] {
             state.touch(kind);
@@ -2532,7 +2468,10 @@ impl State {
             entry.published_total += u64::try_from(messages.len()).unwrap_or(u64::MAX);
             entry.last_published_at = Some(last.published_at);
             entry.latest_id = Some(last.id);
-            entry.throughput.record(last.published_at, messages.len());
+            entry.throughput.record(
+                last.published_at,
+                u32::try_from(messages.len()).unwrap_or(u32::MAX),
+            );
             *revision += 1;
             entry.stamp = *revision;
         }
@@ -2722,7 +2661,6 @@ impl State {
         let stamp = match kind {
             ResourceKind::Topics => &mut self.resources.topics,
             ResourceKind::Subscriptions => &mut self.resources.subscriptions,
-            ResourceKind::Snapshots => &mut self.resources.snapshots,
             ResourceKind::Schemas => &mut self.resources.schemas,
         };
         *stamp = self.revision;

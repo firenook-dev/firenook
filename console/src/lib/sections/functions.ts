@@ -1,14 +1,11 @@
 // Functions' registry entry: its two pages, the two badges the engine
-// publishes for it, what ⌘K offers from anywhere, and where a function, an
-// invocation or a codebase opens when another section's payload points at
-// one (an `EntityRef` the engine built) or ⌘K's engine search finds one.
-// Compute exports no link builder: every link here goes through `routes`.
-//
-// Built: its journeys (`e2e/functions*.spec.ts`) pass against a real engine,
-// so the nav opens its pages, a link into Functions opens there, and ⌘K
-// offers what it holds.
+// publishes for it, and where a function, an invocation or a codebase opens
+// when another section's payload points at one (an `EntityRef` the engine
+// built) or ⌘K's engine search finds one. Compute exports no link builder:
+// every link here goes through `routes`. What ⌘K offers from anywhere is in
+// `./functions-actions.ts`.
 
-import { LightningIcon, ListIcon } from '@phosphor-icons/react'
+import { LightningIcon } from '@phosphor-icons/react'
 import type { ConsoleSection } from '../services'
 
 export const functions: ConsoleSection = {
@@ -18,7 +15,6 @@ export const functions: ConsoleSection = {
   services: ['functions'],
   area: 'compute',
   icon: LightningIcon,
-  built: true,
   summary:
     'Every function by codebase with its trigger and health, invoke HTTP and callable functions as any user, send test events or do the real thing, and every invocation with its own logs, replay and timing.',
   // Each badge sits on the page it is about, so the page that shows the
@@ -41,19 +37,12 @@ export const functions: ConsoleSection = {
       keywords: 'runs executions history calls',
     },
   ],
-  actions: [
-    {
-      id: 'functions.invocations',
-      title: 'Show every invocation',
-      keywords: 'runs executions history',
-      icon: ListIcon,
-      link: { to: '/functions/invocations' },
-    },
-  ],
   searchLabels: { 'functions.function': 'Functions' },
   routes: {
     'functions.function': (id) => ({ to: '/functions', search: { function: id } }),
     'functions.invocation': (id) => ({ to: '/functions/invocations', search: { invocation: id } }),
+    // Key: an Invocations filter (`function:us-central1-processOrder`).
+    'functions.invocations': (q) => ({ to: '/functions/invocations', search: { q } }),
     'functions.codebase': (codebase) => ({ to: '/functions', search: { codebase } }),
   },
 }

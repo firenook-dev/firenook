@@ -26,7 +26,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { type ReactNode, memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { formatNumber } from '@/lib/format'
 import { type FeedRow, type FeedStore, useFeed } from '@/lib/live/feed-store'
-import { useShortcuts } from '@/lib/shortcuts'
+import { type Shortcut, useShortcuts } from '@/lib/shortcuts'
 
 /** Rows from the older edge at which the next page of history is asked for. */
 const LOAD_AHEAD = 20
@@ -129,6 +129,12 @@ export interface FeedListProps<T> {
   loadMore?: (() => void) | undefined
   /** Puts a row in view (Logs' `entry=`); the list keeps it there while rows arrive. */
   scrollToKey?: { key: string; align?: 'center' | 'start' | undefined } | undefined
+  /**
+   * A list read in place, inside an inspector (an invocation's log): its
+   * rows' text can be selected and copied, and it registers no keys, which
+   * stay with the page's own list.
+   */
+  inline?: boolean | undefined
   /** The column header, above the rows. */
   header?: ReactNode
   empty: ReactNode
@@ -178,6 +184,7 @@ export function FeedList<T>({
   hasMore = false,
   loadMore,
   scrollToKey,
+  inline = false,
   header,
   empty,
   testId,
@@ -377,7 +384,7 @@ export function FeedList<T>({
     selectAt(selectedDisplay === -1 ? (items[0]?.index ?? 0) : selectedDisplay - 1, -1)
   const down = () =>
     selectAt(selectedDisplay === -1 ? (items[0]?.index ?? 0) : selectedDisplay + 1, 1)
-  useShortcuts({ id: `feed:${ariaLabel}`, label: ariaLabel }, [
+  const keys: Shortcut[] = [
     { key: 'ArrowUp', label: 'Move between rows', group: 'Feed', when: has, run: up },
     { key: 'ArrowDown', label: 'Move between rows', group: 'Feed', when: has, run: down },
     { key: 'k', label: 'Move between rows', group: 'Feed', when: has, run: up },
@@ -443,7 +450,8 @@ export function FeedList<T>({
           },
         ]
       : []),
-  ])
+  ]
+  useShortcuts({ id: `feed:${ariaLabel}`, label: ariaLabel }, inline ? [] : keys)
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-kumo-base" data-testid={testId}>
@@ -513,6 +521,7 @@ export function FeedList<T>({
                     open={open}
                     wrap={wrap}
                     measure={open || wrap ? virtualizer.measureElement : undefined}
+                    selectable={inline}
                     renderRow={renderRow}
                     renderExpanded={renderExpanded}
                     onSelect={onSelect}
@@ -556,6 +565,7 @@ function FeedRowViewInner<T>({
   open,
   wrap,
   measure,
+  selectable,
   renderRow,
   renderExpanded,
   onSelect,
@@ -569,6 +579,8 @@ function FeedRowViewInner<T>({
   open: boolean
   wrap: boolean
   measure: ((element: HTMLDivElement | null) => void) | undefined
+  /** Its text can be selected (an inline list's rows are read, not pressed). */
+  selectable: boolean
   renderRow: (item: T) => ReactNode
   renderExpanded: ((item: T) => ReactNode) | undefined
   onSelect: ((item: T) => void) | undefined
@@ -581,7 +593,8 @@ function FeedRowViewInner<T>({
       data-testid="feed-row"
       aria-selected={selected}
       className={cn(
-        'absolute inset-x-0 cursor-default select-none',
+        'absolute inset-x-0',
+        selectable ? 'select-text' : 'cursor-default select-none',
         selected ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-kumo-brand)]' : 'hover:ink',
       )}
       style={{ transform: `translateY(${top}px)`, ...(open || wrap ? {} : { height }) }}

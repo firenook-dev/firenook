@@ -21,11 +21,6 @@ export interface HistoryEntry extends ComposedRequest {
   bodyOmitted?: string
 }
 
-/** "body omitted (2.1 MB)" for an entry whose body was not kept. */
-export function bodyNote(entry: HistoryEntry): string | undefined {
-  return entry.bodyOmitted === undefined ? undefined : `body omitted (${entry.bodyOmitted})`
-}
-
 const PREFIX = 'firenook.console.requests'
 
 /** The entry as it is kept: a large body left out, everything else as sent. */

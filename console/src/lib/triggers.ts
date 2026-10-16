@@ -13,10 +13,9 @@
 // explanation). No polling.
 //
 // "No function listens" is said only when the engine knows it. While the
-// answer is not known — the Functions section not built yet, Functions
-// starting, the question not answered — the hook says `'unknown'`, and
-// callers draw no trigger line at all; `'absent'` when the suite runs no
-// Functions.
+// answer is not known — Functions starting, the question not answered —
+// the hook says `'unknown'`, and callers draw no trigger line at all;
+// `'absent'` when the suite runs no Functions.
 
 import { type QueryClient, type QueryKey, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
@@ -27,7 +26,6 @@ import type { FunctionsLiveBatch } from '@/api/generated/compute/FunctionsLiveBa
 import { statusQuery } from '@/api/queries'
 import { type LiveChannel, liveChannel } from './live/channel'
 import { createInvalidator } from './live/use-live-topic'
-import { functions as functionsSection } from './sections/functions'
 
 /** One function that would run, as the engine names it. */
 export type TriggerFunction = {
@@ -44,8 +42,8 @@ export type TriggerService = 'firestore' | 'auth' | 'storage' | 'pubsub' | 'even
 
 /**
  * The functions that would fire, with whether background triggers are
- * delivered at all; `'unknown'` while the answer is not known (the
- * Functions section not built, Functions starting, not answered yet);
+ * delivered at all; `'unknown'` while the answer is not known (Functions
+ * starting, not answered yet);
  * `'absent'` when Functions are not part of the suite.
  */
 export type TriggersAnswer =
@@ -184,7 +182,7 @@ export function useTriggersFor(
   const status = useQuery(statusQuery)
   const project = status.data?.projectId ?? ''
   const entry = status.data?.sections.find((section) => section.id === 'functions')
-  const asking = functionsSection.built && entry?.state === 'ready' && resource !== undefined
+  const asking = entry?.state === 'ready' && resource !== undefined
   const answer = useQuery({
     queryKey: triggersKey(project, service, resource ?? '', event),
     queryFn: ({ signal }) => fetchTriggers(service, resource ?? '', event, signal),

@@ -2,9 +2,8 @@
 // the function an event ran, the document a trigger read — without the
 // section drawing it knowing the other's URLs. The target's registry says
 // where a kind opens (`routes[kind]`, through `linkTo`), so the link follows
-// that section as it lands: while the target section is absent from this
-// engine or not built yet, the same thing is plain text, never a link into
-// a placeholder.
+// that section: while the target section is absent from this engine, the
+// same thing is plain text, never a link into a page that cannot show it.
 //
 // It is data, so it is the data face at 12 px, and it can always be copied:
 // the thing a person most often does with an id is paste it somewhere.

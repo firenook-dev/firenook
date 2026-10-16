@@ -146,7 +146,6 @@ pub struct TopicView {
     pub subscriptions: Vec<SubscriptionView>,
     /// Subscriptions that dead-letter into this topic.
     pub dead_letter_for: Vec<String>,
-    pub snapshots: Vec<SnapshotView>,
     pub keys: SeenKeys,
 }
 
@@ -171,21 +170,6 @@ pub struct SubscriptionView {
     pub created_at: SystemTime,
     /// The dead-letter topic's kept messages that came from this subscription.
     pub dead_lettered_in_history: u32,
-}
-
-/// A snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SnapshotView {
-    pub name: String,
-    pub project: String,
-    pub id: String,
-    pub topic: String,
-    pub topic_deleted: bool,
-    /// The subscription it was taken from.
-    pub source: Option<String>,
-    pub created_at: SystemTime,
-    pub expire_time: SystemTime,
-    pub unacked: u32,
 }
 
 /// A schema as the schemas list shows it.
@@ -771,12 +755,6 @@ impl Broker {
                 })
                 .map(|(member, _)| member.clone())
                 .collect();
-            let snapshots = state
-                .snapshots
-                .iter()
-                .filter(|(_, snapshot)| snapshot.topic_generation == entry.generation)
-                .map(|(snapshot, found)| snapshot_view(&state, snapshot, found))
-                .collect();
             let (capacity_messages, capacity_bytes) = entry.capacity(&state.limits);
             let schema = entry.topic.schema_settings.as_ref().map(|settings| {
                 let bound = entry.schema.as_ref();
@@ -811,7 +789,6 @@ impl Broker {
                 throughput: entry.throughput.window(),
                 subscriptions,
                 dead_letter_for,
-                snapshots,
                 keys: SeenKeys {
                     ordering_keys: entry.ordering_keys.iter().rev().cloned().collect(),
                     attribute_keys: entry.attribute_keys.iter().cloned().collect(),
@@ -1227,19 +1204,6 @@ impl Broker {
             .collect()
     }
 
-    /// The snapshots of `project`.
-    #[must_use]
-    pub fn snapshots_view(&self, project: &str) -> Vec<SnapshotView> {
-        let state = lock(&self.inner.state);
-        let prefix = format!("projects/{project}/snapshots/");
-        state
-            .snapshots
-            .iter()
-            .filter(|(name, _)| name.starts_with(&prefix))
-            .map(|(name, snapshot)| snapshot_view(&state, name, snapshot))
-            .collect()
-    }
-
     /// The schemas of `project`.
     #[must_use]
     pub fn schemas_view(&self, project: &str) -> Vec<SchemaSummary> {
@@ -1364,27 +1328,6 @@ impl Broker {
             .collect()
     }
 
-    /// Every message of `topic`'s history ring that reached the functions
-    /// step, with its fanout, newest first: the deliveries view's records
-    /// (bounded by the ring), copied under one lock.
-    #[must_use]
-    pub fn fanouts(&self, topic: &str) -> Option<Vec<(Arc<StoredMessage>, Fanout)>> {
-        let state = lock(&self.inner.state);
-        let entry = state.topics.get(topic)?;
-        Some(
-            entry
-                .history
-                .iter()
-                .rev()
-                .filter_map(|history| {
-                    history
-                        .fanout()
-                        .map(|fanout| (Arc::clone(&history.message), fanout))
-                })
-                .collect(),
-        )
-    }
-
     /// The topics (full names) whose history ring keeps message `id`, at
     /// most `limit`: a binary search in each ring.
     #[must_use]
@@ -1479,10 +1422,8 @@ pub struct PublishedIds {
 /// New fanout records of the scoped topic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FanoutChanges {
-    pub added: u32,
-    /// Event ids of the new or changed records, at most 100.
-    pub event_ids: Vec<String>,
-    /// The messages those records belong to (their function marks moved).
+    /// The messages whose fanout records are new or changed (their
+    /// function marks moved), at most 100.
     pub message_ids: Vec<u64>,
     pub overflow: bool,
 }
@@ -1682,7 +1623,6 @@ fn resources_since(state: &State, since: u64) -> Vec<ResourceKind> {
     [
         (ResourceKind::Topics, resources.topics),
         (ResourceKind::Subscriptions, resources.subscriptions),
-        (ResourceKind::Snapshots, resources.snapshots),
         (ResourceKind::Schemas, resources.schemas),
     ]
     .into_iter()
@@ -1692,12 +1632,10 @@ fn resources_since(state: &State, since: u64) -> Vec<ResourceKind> {
 }
 
 fn fanouts_since(topic: &TopicEntry, seen: u64) -> FanoutChanges {
-    let added = topic.fanouts - seen;
     let oldest = topic
         .recent_fanouts
         .front()
         .map_or(u64::MAX, |(sequence, _)| *sequence);
-    let mut event_ids = Vec::new();
     let mut message_ids = Vec::new();
     let mut overflow = oldest > seen + 1;
     for (_, id) in topic
@@ -1706,30 +1644,21 @@ fn fanouts_since(topic: &TopicEntry, seen: u64) -> FanoutChanges {
         .rev()
         .take_while(|(sequence, _)| *sequence > seen)
     {
-        let Ok(position) = topic
-            .history
-            .binary_search_by_key(id, |history| history.message.id)
-        else {
+        if message_ids.contains(id)
+            || topic
+                .history
+                .binary_search_by_key(id, |history| history.message.id)
+                .is_err()
+        {
             continue;
-        };
-        if message_ids.len() < 100 && !message_ids.contains(id) {
-            message_ids.push(*id);
         }
-        if let Some(fanout) = topic.history[position].fanout() {
-            for target in fanout.targets {
-                if event_ids.len() >= 100 {
-                    overflow = true;
-                    break;
-                }
-                if !event_ids.contains(&target.event_id) {
-                    event_ids.push(target.event_id);
-                }
-            }
+        if message_ids.len() >= 100 {
+            overflow = true;
+            break;
         }
+        message_ids.push(*id);
     }
     FanoutChanges {
-        added: u32::try_from(added).unwrap_or(u32::MAX),
-        event_ids,
         message_ids,
         overflow,
     }
@@ -1931,33 +1860,6 @@ fn subscription_view(
         detached: entry.topic_deleted || subscription.detached,
         created_at: entry.created_at,
         dead_lettered_in_history: 0,
-    }
-}
-
-fn snapshot_view(state: &State, name: &str, snapshot: &super::SnapshotEntry) -> SnapshotView {
-    let (project, id) = split_name("snapshots", name);
-    let expire = snapshot
-        .snapshot
-        .expire_time
-        .as_ref()
-        .map_or(snapshot.created_at, |time| {
-            std::time::UNIX_EPOCH
-                + Duration::from_secs(u64::try_from(time.seconds).unwrap_or(0))
-                + Duration::from_nanos(u64::try_from(time.nanos).unwrap_or(0))
-        });
-    SnapshotView {
-        name: name.to_owned(),
-        project,
-        id,
-        topic: snapshot.snapshot.topic.clone(),
-        topic_deleted: !state
-            .topics
-            .values()
-            .any(|topic| topic.generation == snapshot.topic_generation),
-        source: Some(snapshot.source.clone()),
-        created_at: snapshot.created_at,
-        expire_time: expire,
-        unacked: u32::try_from(snapshot.unacked.len()).unwrap_or(u32::MAX),
     }
 }
 

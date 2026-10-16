@@ -6,7 +6,9 @@
 // answers NDJSON or CSV as an attachment), and the browser's own download
 // manager reads it, so nothing is assembled in this tab's memory. `run` is
 // for the exports the browser must build itself, such as Firestore's
-// view-as export, which reads through the rules as the chosen identity.
+// view-as export, which reads through the rules as the chosen identity; its
+// Blob is saved as it is. `notes` and `renderOptions` let a section say what its
+// formats hold and offer a choice of its own.
 
 import { Button, Dialog, Tabs, Text } from '@cloudflare/kumo'
 import { DownloadSimpleIcon, XIcon } from '@phosphor-icons/react'
@@ -49,6 +51,8 @@ export function ExportDialog({
   filename,
   href,
   run,
+  notes,
+  renderOptions,
   testId = 'export-dialog',
 }: {
   open: boolean
@@ -66,6 +70,10 @@ export function ExportDialog({
     signal: AbortSignal,
     progress: (done: number, total?: number) => void,
   ) => Promise<Blob>
+  /** A section's own word for what a format holds, in place of the generic note. */
+  notes?: Partial<Record<ExportFormat, string>>
+  /** Choices of the section's own under the format's note (Firestore's exact types). */
+  renderOptions?: (format: ExportFormat) => ReactNode
   testId?: string
 }) {
   const [format, setFormat] = useState<ExportFormat>(formats[0] ?? 'json')
@@ -113,10 +121,8 @@ export function ExportDialog({
         setProgress({ done, total }),
       )
       if (controller.signal.aborted) return
-      await download(
-        () => Promise.resolve(new Response(blob, { headers: { 'content-type': info.mediaType } })),
-        name,
-      )
+      // Built in this tab, so already in memory: saved as it is.
+      await download(blob.type ? blob : new Blob([blob], { type: info.mediaType }), name)
       toast({ key: `export:${name}`, title: 'Exported', description: name, tone: 'success' })
       abort.current = null
       setProgress(null)
@@ -159,8 +165,9 @@ export function ExportDialog({
               />
             )}
             <Text variant="secondary" size="sm">
-              {info.note}
+              {notes?.[chosen] ?? info.note}
             </Text>
+            {renderOptions?.(chosen)}
           </div>
           {progress && (
             <div className="mt-3" data-testid={`${testId}-progress`}>

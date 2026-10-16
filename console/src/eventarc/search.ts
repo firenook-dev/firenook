@@ -1,4 +1,5 @@
-// Every view of the Eventarc pages is a link: the channel in scope, the
+// Every view of the Eventarc page is a link: the channel in scope (its
+// publishers and subscribers drawn over its events), the
 // filter, the event open, the publish drawer (and the event it was filled
 // from), and whether the feed is paused. Defaults never appear in the
 // address: no channel is every channel, no `paused` is following. The
@@ -24,10 +25,3 @@ export const eventsSearch = z.object({
 })
 
 export type EventsSearch = z.infer<typeof eventsSearch>
-
-export const channelsSearch = z.object({
-  /** The channel the page scrolls to and lights. */
-  channel: z.string().optional(),
-})
-
-export type ChannelsSearch = z.infer<typeof channelsSearch>

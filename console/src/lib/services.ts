@@ -52,7 +52,11 @@ export interface SectionPage {
   keywords?: string
 }
 
-/** Something ⌘K offers from anywhere; a link, so a dialog opens from `?new=` or `?dialog=`. */
+/**
+ * Something ⌘K offers from anywhere; a link, so a dialog opens from `?new=`
+ * or `?dialog=`. A section's are in `sections/<id>-actions.ts`, which only
+ * the palette loads (`palette-actions.ts`), never in its registry.
+ */
 export interface SectionAction {
   id: string
   title: string
@@ -72,10 +76,8 @@ export interface ConsoleSection {
   services: readonly string[]
   area: ServiceArea
   icon: Icon
-  /** What the finished section does, in one sentence: the placeholder's and the overview's. */
+  /** What the section does, in one sentence: its gate says it while the service is absent or starting. */
   summary: string
-  /** False keeps the honest placeholder until the section's journeys pass. */
-  built: boolean
   /**
    * The section's own pages, when it has more than one: shown under it in
    * the sidebar. The first is where the section's own entry leads.
@@ -83,8 +85,6 @@ export interface ConsoleSection {
   pages?: readonly SectionPage[]
   /** Badge ids shown on the section's own nav item. */
   badges?: readonly string[]
-  /** What ⌘K offers from anywhere. */
-  actions?: readonly SectionAction[]
   /**
    * Where a thing of this section opens, by entity kind: serves engine
    * search hits (`SearchHit.kind`) and every `EntityRef` another section's
@@ -138,22 +138,6 @@ export function sectionById(id: string): ConsoleSection | undefined {
  */
 export function itemBadges(section: ConsoleSection): readonly string[] {
   return [...(section.badges ?? []), `${section.id}.jobs`]
-}
-
-/**
- * The pages the navigation and ⌘K show under a section: none until it is
- * built, so a section whose registry already lists its pages is still one
- * entry leading to its placeholder, and no page is offered before it works.
- */
-export function shownPages(section: ConsoleSection): readonly SectionPage[] | undefined {
-  return section.built ? section.pages : undefined
-}
-
-/** The section a console path belongs to (`/firestore/rules` → Firestore). */
-export function sectionAt(pathname: string): ConsoleSection | undefined {
-  return SECTIONS.find(
-    (section) => pathname === section.to || pathname.startsWith(`${section.to}/`),
-  )
 }
 
 export const AREA_LABELS: Record<ServiceArea, string> = {

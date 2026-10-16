@@ -1,15 +1,16 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  clockOrDate,
+  clockTime,
   compactIso,
   formatBytes,
   formatClock,
   formatCount,
   formatDuration,
   formatNumber,
-  formatRate,
+  pad,
   relativeTime,
-  shortId,
   utcStamp,
   whenParts,
   whenText,
@@ -76,17 +77,6 @@ describe('durations', () => {
   })
 })
 
-describe('rates', () => {
-  it('compacts thousands and millions', () => {
-    expect(formatRate(1234, 'lines')).toBe('1.2k lines/s')
-    expect(formatRate(12, 'lines')).toBe('12 lines/s')
-    expect(formatRate(0.5, 'events')).toBe('0.5 events/s')
-    expect(formatRate(120_000, 'lines')).toBe('120k lines/s')
-    expect(formatRate(3_400_000, 'events')).toBe('3.4M events/s')
-    expect(formatRate(2000, 'lines')).toBe('2k lines/s')
-  })
-})
-
 describe('times', () => {
   const now = Date.parse('2026-09-20T09:00:00Z')
 
@@ -141,12 +131,6 @@ describe('times', () => {
     expect(whenParts(at.toISOString(), nextDay)?.local).toBe('Oct 13 04:10:27.670')
     expect(whenText('nope')).toBe('nope')
   })
-
-  it('cuts long ids in the middle and leaves short ones whole', () => {
-    expect(shortId('u_9f3k2')).toBe('u_9f3k2')
-    expect(shortId('projects/demo/messages/18340000000000')).toBe('projec…000000')
-    expect(shortId('abcdefghij', 2)).toBe('ab…ij')
-  })
 })
 
 describe('the clock format', () => {
@@ -164,6 +148,25 @@ describe('the clock format', () => {
     expect(formatClock(iso, 'relative', at.getTime() + 125_000)).toBe('2 min ago')
     expect(formatClock(iso, 'relative', at.getTime() - 2_000)).toBe('in 2 s')
     expect(formatClock('soon', 'time')).toBe('soon')
+  })
+
+  it('is one wall clock at three precisions, from a string, a number or a date', () => {
+    const at = new Date(2026, 8, 20, 9, 2, 1, 48)
+    expect(clockTime(at)).toBe('09:02:01.048')
+    expect(clockTime(at.toISOString(), 'second')).toBe('09:02:01')
+    expect(clockTime(at.getTime(), 'minute')).toBe('09:02')
+    expect(clockTime('soon', 'minute')).toBe('soon')
+  })
+
+  it('writes the day before a time that is not today', () => {
+    const at = new Date(2026, 8, 20, 14, 2, 11)
+    expect(clockOrDate(at.toISOString(), at.getTime() + 60_000)).toBe('14:02:11')
+    expect(clockOrDate(at.toISOString(), at.getTime() + 86_400_000)).toBe('2026-09-20 14:02:11')
+    expect(clockOrDate('never')).toBe('never')
+  })
+
+  it('pads to a width', () => {
+    expect([pad(7), pad(12), pad(5, 3)]).toEqual(['07', '12', '005'])
   })
 
   it('is remembered per browser and follows other tabs', async () => {

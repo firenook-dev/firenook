@@ -1,5 +1,7 @@
 // The Problems strip under a rules editor: every error and warning in the
-// text, once, each a way to its place (and F8 / Shift+F8 walk them).
+// text, once, each a way to its place (and F8 / Shift+F8 walk them). It is
+// the one place a warning is listed; the map panels beside the editor list
+// the data, not the warnings again.
 
 import { WarningIcon } from '@phosphor-icons/react'
 import { describeDiagnostic } from './text'
@@ -74,7 +76,9 @@ export function Problems({
             type="button"
             onClick={() => onJump(problem.line)}
             className="flex w-full items-start gap-2 px-3 py-1.5 text-left hover:ink"
+            data-testid="rules-problem"
             data-severity={problem.severity}
+            data-code={problem.code ?? undefined}
           >
             <span
               className={`flex h-lh shrink-0 items-center ${

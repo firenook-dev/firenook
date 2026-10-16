@@ -45,7 +45,7 @@ import {
 } from '../invoke-request'
 import { createResponseBuilder, invokeFunction, stopWaiting } from '../invoke-stream'
 import { type InvokeDraft, useRunDraft } from '../run-drafts'
-import { CopyAsMenu, RunAnswer, RunError, RunFooter, SavedMenu } from './run-parts'
+import { CopyAsMenu, RunAnswer, RunError, RunFooter } from './run-parts'
 
 const COMMON_HEADERS = [
   'accept',
@@ -438,13 +438,6 @@ export function InvokeForm({
                   body: entry.body,
                 })
               }
-            />
-            <SavedMenu
-              project={project}
-              functionId={summary.id}
-              kind="request"
-              current={() => draft}
-              onLoad={(test) => test.draft.kind === 'request' && setDraft(test.draft)}
             />
             <CopyAsMenu
               dialects={[

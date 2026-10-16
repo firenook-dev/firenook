@@ -10,18 +10,7 @@
 // app's own configuration and only adds the emulator lines.
 
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
-
-export type ConnectTarget =
-  | 'web'
-  | 'flutter'
-  | 'apple'
-  | 'android'
-  | 'admin-node'
-  | 'python'
-  | 'go'
-  | 'java'
-  | 'env'
-  | 'firebase-json'
+import { CONNECT_TABS, type ConnectParam, type ConnectTarget } from './connect-tabs'
 
 /** The Android emulator's name for the machine it runs on. */
 export const ANDROID_HOST = '10.0.2.2'
@@ -380,4 +369,30 @@ function adminVariables({
     rows.push(['FIREBASE_STORAGE_EMULATOR_HOST', `${host}:${ports.storage}`])
   if (ports.pubsub !== undefined) rows.push(['PUBSUB_EMULATOR_HOST', `${host}:${ports.pubsub}`])
   return rows
+}
+
+/**
+ * The snippets as a `CodeBlock`'s tabs, for `services` on this engine: every
+ * tab of `CONNECT_TABS`, or the ones `params` names, in the list's order.
+ * Each tab's id is its `connect` value.
+ */
+export function connectDialects(
+  status: ConsoleStatus,
+  options: {
+    services: readonly string[]
+    params?: readonly ConnectParam[] | undefined
+    host?: string | undefined
+  },
+): { id: ConnectParam; label: string; code: string }[] {
+  return CONNECT_TABS.filter((tab) => !options.params || options.params.includes(tab.param)).map(
+    (tab) => ({
+      id: tab.param,
+      label: tab.label,
+      code: connectSnippet(tab.target, {
+        services: options.services,
+        status,
+        host: options.host,
+      }),
+    }),
+  )
 }

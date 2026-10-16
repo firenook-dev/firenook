@@ -87,6 +87,9 @@ pub(crate) struct TasksQueueFunction {
     pub region: String,
     /// `functions.function`.
     pub function_ref: EntityRef,
+    /// `functions.invocations` of this function: every attempt of the
+    /// queue's tasks is one of them.
+    pub invocations_ref: EntityRef,
 }
 
 /// The last time a re-registration replaced the queue.
@@ -156,8 +159,6 @@ pub(crate) struct TasksQueueConfig {
     pub max_dispatches_per_second: f64,
     /// Every key of the stored `taskQueueConfig`, in its order.
     pub values: Vec<TasksConfigValue>,
-    /// The `taskQueueConfig` document as the emulator stores it.
-    pub document: String,
     /// What a task that fails every time runs, from its first attempt: the
     /// dispatcher's own backoff and stop rule, with requests that take no
     /// time.
@@ -191,19 +192,6 @@ pub(crate) struct TasksOutcomeCounts {
     pub replaced: u32,
 }
 
-/// What `/queueStats` answers for a queue, quirks included.
-#[derive(Clone, Debug, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct TasksOfficialStats {
-    #[ts(type = "number")]
-    pub number_of_tasks: i64,
-    pub tasks_added: f64,
-    pub completed_last_min: u32,
-    pub failed_tasks: f64,
-    pub running_tasks: u32,
-}
-
 /// A queue's live figures.
 #[derive(Clone, Debug, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -226,18 +214,14 @@ pub(crate) struct TasksQueueCounters {
     pub max_tokens: f64,
     pub refilled_at: String,
     pub max_dispatches_per_second: f64,
-    /// Stamped windows the console ages.
+    /// Stamped windows the console ages: attempts sent per second over a
+    /// minute, tasks that ran out of retries per ten seconds over five.
     pub dispatched: MessagingSecondWindow,
-    pub succeeded: MessagingSecondWindow,
     pub failed: MessagingTenSecondWindow,
-    pub added: MessagingTenSecondWindow,
     pub oldest_pending_at: Option<String>,
     pub history: u32,
     /// The history by outcome (they add up to `history`).
     pub outcomes: TasksOutcomeCounts,
-    /// What `/queueStats` answers for this queue, quirks included (computed
-    /// on request, never streamed).
-    pub official: Option<TasksOfficialStats>,
 }
 
 /// Where a task is.
@@ -563,26 +547,4 @@ pub(crate) struct TasksFinishedBatch {
     pub added: u32,
     pub ids: Vec<String>,
     pub overflow: bool,
-}
-
-/// One attempt, as `tasks.attempts` sends it.
-#[derive(Clone, Debug, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct TasksAttemptEvent {
-    /// The queue key.
-    pub queue: String,
-    pub task_id: String,
-    pub task_name: String,
-    pub attempt: TasksAttempt,
-}
-
-/// `tasks.attempts` `attempts` (the shape the topic writes from the ring's
-/// serialized attempts).
-#[derive(Clone, Debug, PartialEq, Serialize, TS)]
-#[allow(dead_code, reason = "the topic joins the ring's JSON into this shape")]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct TasksAttempts {
-    pub items: Vec<TasksAttemptEvent>,
 }

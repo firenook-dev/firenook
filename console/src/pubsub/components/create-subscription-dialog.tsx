@@ -9,7 +9,7 @@ import { Button, Checkbox, Dialog, Input, Radio, Select, Text } from '@cloudflar
 import { XIcon } from '@phosphor-icons/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
-import { ApiError } from '@/api/client'
+import { errorText } from '@/lib/error-text'
 import type { PubsubCreateSubscriptionBody } from '@/api/generated/messaging/PubsubCreateSubscriptionBody'
 import { type KeyValueRow, KeyValueEditor } from '@/components/console/key-value-editor'
 import { createSubscription, createTopic } from '../api'
@@ -29,11 +29,6 @@ import {
   endpointProblem,
   maxDeliveriesProblem,
 } from './subscription-settings'
-
-function errorText(error: unknown): string {
-  if (error instanceof ApiError) return error.fix ? `${error.message} ${error.fix}` : error.message
-  return error instanceof Error ? error.message : String(error)
-}
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (

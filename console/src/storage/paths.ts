@@ -9,11 +9,6 @@ export function parentOf(name: string): string {
   return name.slice(0, name.lastIndexOf('/') + 1)
 }
 
-/** The folder above a folder: `users/u1/` → `users/`; the root has none and stays `''`. */
-export function parentFolder(prefix: string): string {
-  return prefix === '' ? '' : parentOf(prefix.slice(0, -1))
-}
-
 /** A folder as the console writes it: `''` for the root, else ending in `/`. Nothing is collapsed. */
 export function normalizeFolder(raw: string): string {
   return raw === '' || raw.endsWith('/') ? raw : `${raw}/`

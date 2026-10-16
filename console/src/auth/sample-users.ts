@@ -1,48 +1,34 @@
 // Sample users: realistic synthetic accounts to fill a project in seconds
-// and to leave it as cleanly. Every one lives on `sample.test` with a uid
-// that starts `sample-`, so `is:sample` finds exactly them and Delete sample
-// users never reaches a real fixture (the seed people are on
-// `example.test`). Generated here, deterministically from a seed, as the
-// emulator's own export (`accounts.json`), and imported through the
-// engine's import: no `user.create` trigger fires, as the emulator's own
-// import fires none.
+// and to leave it as cleanly. Every one is marked as a sample: it lives on
+// `sample.test` with a uid that starts `sample-`, so `is:sample` finds
+// exactly them and Delete sample users never reaches a real fixture (the
+// seed people are on `example.test`). One mix, so a list has something to
+// filter: email and password, phone and Google accounts in equal shares,
+// some disabled, unverified, with a second factor or with claims, every
+// password user signing in with SAMPLE_PASSWORD. Generated here from a
+// seed as the emulator's own export (`accounts.json`), and imported through
+// the engine's import: no `user.create` trigger fires, as the emulator's
+// own import fires none. At most 1,000 at a time.
 
-/** The providers a developer can mix in. */
-export const SAMPLE_PROVIDERS = [
-  'password',
-  'phone',
-  'google.com',
-  'github.com',
-  'apple.com',
-  'anonymous',
-] as const
+/** The sign-in providers of the mix, in equal shares. */
+const SAMPLE_PROVIDERS = ['password', 'phone', 'google.com'] as const
 
-export type SampleProvider = (typeof SAMPLE_PROVIDERS)[number]
+type SampleProvider = (typeof SAMPLE_PROVIDERS)[number]
 
-export const SAMPLE_COUNTS = [10, 100, 1_000, 10_000] as const
+export const SAMPLE_COUNTS = [10, 100, 1_000] as const
+
+/** The password every sample password user shares. */
+export const SAMPLE_PASSWORD = 'password-1'
 
 export interface SampleOptions {
   count: number
-  providers: readonly SampleProvider[]
-  /** Some disabled, unverified, with MFA and with claims. */
-  variety: boolean
-  /** One password every password user shares. */
-  password: string
   /** Lower-case letters and digits; the same seed makes the same users. */
   seed: string
   /** When the users are made, epoch ms (their creation times spread over the 90 days before). */
   now?: number | undefined
 }
 
-/** A seed for a uid: lower-case letters and digits, at most 12. */
-export function cleanSeed(seed: string): string {
-  return seed
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '')
-    .slice(0, 12)
-}
-
-/** A short random seed, when the developer leaves it empty. */
+/** A short random seed: each batch's uids differ from the last one's. */
 export function randomSeed(): string {
   return Math.random().toString(36).slice(2, 7)
 }
@@ -121,11 +107,11 @@ const DAY = 86_400_000
 export function sampleUsers(options: SampleOptions): SampleRecord[] {
   const random = generator(options.seed)
   const now = options.now ?? Date.now()
-  const providers = options.providers.length > 0 ? options.providers : (['password'] as const)
   const users: SampleRecord[] = []
   const pick = <T>(list: readonly T[]) => list[Math.floor(random() * list.length)] as T
   for (let n = 1; n <= options.count; n += 1) {
-    const provider = providers[(n - 1) % providers.length] ?? 'password'
+    const provider: SampleProvider =
+      SAMPLE_PROVIDERS[(n - 1) % SAMPLE_PROVIDERS.length] ?? 'password'
     const first = pick(FIRST)
     const last = pick(LAST)
     const name = `${first} ${last}`
@@ -139,14 +125,14 @@ export function sampleUsers(options: SampleOptions): SampleRecord[] {
       createdAt: String(created),
       ...(signedIn === undefined ? {} : { lastLoginAt: String(signedIn) }),
     }
-    const unverified = options.variety && n % 4 === 0
+    const unverified = n % 4 === 0
     if (provider === 'password') {
       const salt = `fakeSalt${options.seed}${n}`
       Object.assign(user, {
         email,
         emailVerified: !unverified,
         displayName: name,
-        passwordHash: `fakeHash:salt=${salt}:password=${options.password}`,
+        passwordHash: `fakeHash:salt=${salt}:password=${SAMPLE_PASSWORD}`,
         salt,
         providerUserInfo: [{ providerId: 'password', rawId: email, email, displayName: name }],
       })
@@ -155,7 +141,7 @@ export function sampleUsers(options: SampleOptions): SampleRecord[] {
         phoneNumber: phone,
         providerUserInfo: [{ providerId: 'phone', rawId: phone, phoneNumber: phone }],
       })
-    } else if (provider !== 'anonymous') {
+    } else {
       const rawId = String(100_000_000_000 + Math.floor(random() * 899_999_999_999))
       Object.assign(user, {
         email,
@@ -166,21 +152,19 @@ export function sampleUsers(options: SampleOptions): SampleRecord[] {
         ],
       })
     }
-    if (options.variety && provider !== 'anonymous') {
-      if (n % 10 === 0) user.disabled = true
-      if (n % 7 === 0)
-        user.customAttributes = JSON.stringify({ role: pick(ROLES), plan: pick(PLANS) })
-      // Firebase enrols a second factor only on a verified email.
-      if (n % 15 === 0 && provider !== 'phone' && !unverified)
-        user.mfaInfo = [
-          {
-            mfaEnrollmentId: `sample-mfa-${options.seed}-${n}`,
-            phoneInfo: `+1556${String(n).padStart(7, '0')}`,
-            displayName: 'Phone',
-            enrolledAt: new Date(created).toISOString(),
-          },
-        ]
-    }
+    if (n % 10 === 0) user.disabled = true
+    if (n % 7 === 0)
+      user.customAttributes = JSON.stringify({ role: pick(ROLES), plan: pick(PLANS) })
+    // Firebase enrols a second factor only on a verified email.
+    if (n % 15 === 0 && provider !== 'phone' && !unverified)
+      user.mfaInfo = [
+        {
+          mfaEnrollmentId: `sample-mfa-${options.seed}-${n}`,
+          phoneInfo: `+1556${String(n).padStart(7, '0')}`,
+          displayName: 'Phone',
+          enrolledAt: new Date(created).toISOString(),
+        },
+      ]
     users.push(user)
   }
   return users

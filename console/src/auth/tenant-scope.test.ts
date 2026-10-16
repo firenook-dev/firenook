@@ -5,7 +5,6 @@ import {
   feedTenant,
   inboxTopicParams,
   keysTarget,
-  parseUserKey,
   queryTarget,
   tenantKey,
   tenantParam,
@@ -103,9 +102,6 @@ describe('user keys and bulk targets', () => {
     expect(userKey(null, 'u_1')).toBe('|u_1')
     expect(userKey(undefined, 'u_1')).toBe('|u_1')
     expect(userKey('acme', 'a|b')).toBe('acme|a|b')
-    expect(parseUserKey('acme|a|b')).toEqual({ tenant: 'acme', uid: 'a|b' })
-    expect(parseUserKey('|u_1')).toEqual({ tenant: undefined, uid: 'u_1' })
-    expect(parseUserKey('u_1')).toEqual({ tenant: undefined, uid: 'u_1' })
   })
 
   it('name ticked users by key in their scope', () => {

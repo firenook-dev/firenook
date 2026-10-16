@@ -4,21 +4,19 @@
 // page's; a page hands it its store, how a case reads, how it opens in the
 // playground and what the export file is.
 
-import { Button, DropdownMenu, Text, Tooltip } from '@cloudflare/kumo'
+import { Button, Text, Tooltip } from '@cloudflare/kumo'
 import {
-  CaretDownIcon,
   CheckCircleIcon,
   CircleDashedIcon,
-  ExportIcon,
+  DownloadSimpleIcon,
   FlaskIcon,
   PlayIcon,
   TrashIcon,
   XCircleIcon,
 } from '@phosphor-icons/react'
-import { useRef } from 'react'
 import { useStore } from 'zustand'
 import type { RulesOutcome } from '@/api/generated/RulesOutcome'
-import { toast } from '@/lib/toasts'
+import { download } from '@/lib/download'
 import { type TestCaseBase, type TestsStore, passes } from './tests-core'
 import { Verdict } from './verdict'
 
@@ -29,7 +27,6 @@ export function TestsPanel<C extends TestCaseBase, R extends { outcome: RulesOut
   describe,
   onOpen,
   exportFile,
-  isCase,
 }: {
   store: TestsStore<C, R>
   /** The rules text in the editor, which the cases run against. */
@@ -41,8 +38,6 @@ export function TestsPanel<C extends TestCaseBase, R extends { outcome: RulesOut
   onOpen: (test: C) => void
   /** The `@firebase/rules-unit-testing` file the cases export as. */
   exportFile: (cases: readonly C[]) => { name: string; text: string }
-  /** Whether an item of an imported JSON file is a case this page can run. */
-  isCase: (item: unknown) => item is C
 }) {
   const cases = useStore(store, (state) => state.cases)
   const outcomes = useStore(store, (state) => state.outcomes)
@@ -51,21 +46,14 @@ export function TestsPanel<C extends TestCaseBase, R extends { outcome: RulesOut
   const failure = useStore(store, (state) => state.failure)
   const updateTest = useStore(store, (state) => state.update)
   const remove = useStore(store, (state) => state.remove)
-  const replaceAll = useStore(store, (state) => state.replaceAll)
-  const picker = useRef<HTMLInputElement>(null)
   const current = ranSource === source
   const failing = current
     ? cases.filter((test) => passes(test, outcomes[test.id]) === false).length
     : 0
 
-  const download = () => {
+  const saveFile = () => {
     const file = exportFile(cases)
-    const url = URL.createObjectURL(new Blob([file.text], { type: 'text/typescript' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = file.name
-    link.click()
-    URL.revokeObjectURL(url)
+    void download(new Blob([file.text], { type: 'text/typescript' }), file.name)
   }
 
   return (
@@ -95,69 +83,23 @@ export function TestsPanel<C extends TestCaseBase, R extends { outcome: RulesOut
           >
             Run
           </Button>
-          <DropdownMenu>
-            <DropdownMenu.Trigger
-              render={
-                <Button variant="ghost" size="sm" icon={<ExportIcon />} data-testid="tests-share">
-                  Share
-                  <CaretDownIcon size={12} className="text-kumo-subtle" />
+          <Tooltip
+            content="Download the tests as a @firebase/rules-unit-testing file, for CI"
+            render={
+              // A disabled button takes no pointer: the tip hangs on the span.
+              <span className="flex">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<DownloadSimpleIcon />}
+                  onClick={saveFile}
+                  disabled={cases.length === 0}
+                  data-testid="tests-download"
+                >
+                  Export
                 </Button>
-              }
-            />
-            <DropdownMenu.Content align="end">
-              <DropdownMenu.Item
-                onClick={download}
-                disabled={cases.length === 0}
-                data-testid="tests-download"
-              >
-                Download as a rules-unit-testing file
-              </DropdownMenu.Item>
-              <DropdownMenu.Item
-                disabled={cases.length === 0}
-                onClick={() => {
-                  void navigator.clipboard.writeText(JSON.stringify(cases, null, 2))
-                  toast({
-                    key: 'rules-tests',
-                    title: `Copied ${cases.length} test${cases.length === 1 ? '' : 's'} as JSON`,
-                  })
-                }}
-              >
-                Copy as JSON
-              </DropdownMenu.Item>
-              <DropdownMenu.Item onClick={() => picker.current?.click()}>
-                Add tests from a JSON file…
-              </DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu>
-          <input
-            ref={picker}
-            type="file"
-            accept="application/json,.json"
-            className="hidden"
-            onChange={async (event) => {
-              const file = event.target.files?.[0]
-              event.target.value = ''
-              if (!file) return
-              try {
-                const parsed: unknown = JSON.parse(await file.text())
-                const added = (Array.isArray(parsed) ? parsed : []).filter(isCase)
-                replaceAll([
-                  ...cases,
-                  ...added.map((test) => ({ ...test, id: crypto.randomUUID() })),
-                ])
-                toast({
-                  key: 'rules-tests',
-                  title: `Added ${added.length} test${added.length === 1 ? '' : 's'}`,
-                })
-              } catch (error) {
-                toast({
-                  key: 'rules-tests',
-                  title: 'Not added',
-                  description: (error as Error).message,
-                  tone: 'danger',
-                })
-              }
-            }}
+              </span>
+            }
           />
         </span>
       </div>

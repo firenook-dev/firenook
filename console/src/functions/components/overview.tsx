@@ -1,9 +1,10 @@
 // Every function of every codebase in one table — the dashboard the
 // Firebase console has, with numbers that mean something locally: kind,
-// trigger in words, codebase, when it last ran, runs, errors and p95 over
-// the engine's retained window. A function that receives nothing says why
-// in its trigger cell, in the warning tone, instead of looking healthy; the
-// functions the emulator dropped at load are listed too, last.
+// trigger in words (a schedule's led by when it runs next), codebase, when
+// it last ran, runs, errors and p95 over the engine's retained window. A
+// function that receives nothing says why in its trigger cell, in the
+// warning tone, instead of looking healthy; the functions the emulator
+// dropped at load are listed too, last.
 //
 // The snapshot holds every function, so the order and the filter are
 // applied here; the figures arrive live (the page's `functions.events`
@@ -29,6 +30,7 @@ import { formatNumber } from '@/lib/format'
 import { type OverviewRow, filterOverview, overviewRows } from '../filters'
 import { chipStatus } from '../kinds'
 import { notLoadedText, statusText, triggerText } from '../trigger-text'
+import { ScheduleTrigger, useOverviewSchedules } from './next-run'
 
 const MEMORY_KEY = 'functions.overview'
 
@@ -164,6 +166,8 @@ const COLUMNS: readonly DataTableColumn<OverviewRow>[] = [
     copy: (row) => (row.kind === 'notLoaded' ? row.entry.eventType : triggerText(row.summary)),
     cell: (row) => {
       const problem = problemOf(row)
+      if (!problem && row.kind === 'function' && row.summary.kind === 'schedule')
+        return <ScheduleTrigger summary={row.summary} />
       const text = problem?.text ?? (row.kind === 'function' ? triggerText(row.summary) : '')
       const whole =
         row.kind === 'function' && problem ? `${triggerText(row.summary)} — ${problem.text}` : text
@@ -278,6 +282,7 @@ export function FunctionsOverview({
   onOpen: (row: OverviewRow) => void
   rowMenu: (row: OverviewRow) => readonly RowMenuItem[]
 }) {
+  useOverviewSchedules(snapshot)
   const all = overviewRows(snapshot)
   const rows = sortOverview(filterOverview(all, q), sort)
   const hidden = useHiddenColumnCount(MEMORY_KEY, COLUMNS)

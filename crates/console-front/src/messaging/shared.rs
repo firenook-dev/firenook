@@ -5,8 +5,8 @@
 use std::collections::BTreeSet;
 use std::time::{Duration, SystemTime};
 
-use firenook_pubsub_front::broker::{SecondWindow, rfc3339_millis};
-use firenook_tasks_front::StampedWindow;
+use firenook_pubsub_front::broker::rfc3339_millis;
+use firenook_suite_front::window::StampedWindow;
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -46,23 +46,16 @@ pub(crate) fn time_of(at: Option<SystemTime>) -> Option<String> {
     at.map(rfc3339_millis)
 }
 
-/// A broker's per-second window, as the console ages it.
-pub(crate) fn second_window(window: &SecondWindow) -> MessagingSecondWindow {
+/// A per-second window (a topic's publishes, a queue's dispatches), as the
+/// console ages it.
+pub(crate) fn second_window(window: &StampedWindow) -> MessagingSecondWindow {
     MessagingSecondWindow {
         ends_at: time(window.ends_at),
         buckets: window.buckets.clone(),
     }
 }
 
-/// A Tasks per-second window.
-pub(crate) fn stamped_seconds(window: &StampedWindow) -> MessagingSecondWindow {
-    MessagingSecondWindow {
-        ends_at: time(window.ends_at),
-        buckets: window.buckets.clone(),
-    }
-}
-
-/// A Tasks ten-second window.
+/// A ten-second window (a queue's failures).
 pub(crate) fn stamped_ten_seconds(window: &StampedWindow) -> MessagingTenSecondWindow {
     MessagingTenSecondWindow {
         ends_at: time(window.ends_at),

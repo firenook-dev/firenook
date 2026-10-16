@@ -1,19 +1,10 @@
-import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { useState } from 'react'
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/client'
 import type { TasksTaskDetail } from '@/api/generated/messaging/TasksTaskDetail'
 import { SectionGate } from '@/components/console/section-gate'
-import { logs } from '@/lib/sections/logs'
 import { renderInConsole } from '@/test/render'
 import { sectionEntry, testStatus } from '@/test/status'
-import { whileUnbuilt } from '@/test/unbuilt'
-import type { TasksAttemptEvent } from '@/api/generated/messaging/TasksAttemptEvent'
-import { useFeedPending } from '@/components/console/feed-list'
-import { PauseButton } from '@/components/console/pause-button'
-import type { FeedStore } from '@/lib/live/feed-store'
-import { dispatchShortcut } from '@/lib/shortcuts'
-import { attemptKey, createAttemptsStore } from '../live'
 import { tasksKeys } from '../queries'
 import {
   LOCATION,
@@ -24,12 +15,13 @@ import {
   testList,
   testQueue,
   testRow,
-} from '../test-data'
-import { AttemptsView } from './attempts-feed'
+} from '../fixtures.test-support'
 import { AttemptsTimeline } from './attempts-timeline'
-import { type ConfirmRequest, useConfirmPopover } from '@/messaging/confirm-popover'
+import { type ConfirmRequest, useConfirmPopover } from '@/components/console/confirm-popover'
 import { QueuesLanding } from './queues-landing'
 import { panelNodes } from './queues-panel'
+import { QueueConfig } from './queue-config'
+import { AttemptsLink, SlotsAndTokens } from './queue-view'
 import { meantQueue, refusedText } from './refused-banner'
 import { replacedText } from './replaced-banner'
 import type { TaskActions } from './task-actions'
@@ -273,13 +265,17 @@ describe('the attempts timeline (TK-22)', () => {
       expect.stringContaining('/logs?q=function%3Aus-central1-processOrder&from='),
       expect.stringContaining('/logs?q=function%3Aus-central1-processOrder&from='),
     ])
-    // While Logs is not built: no link into a placeholder.
+    // While this engine runs no Logs: no link into a page that cannot show them.
     cleanup()
-    await whileUnbuilt(logs, () =>
-      renderInConsole(() => <AttemptsTimeline detail={detail} queue={testQueue()} />, {
-        status: ready(),
+    await renderInConsole(() => <AttemptsTimeline detail={detail} queue={testQueue()} />, {
+      status: testStatus({
+        sections: [
+          sectionEntry('tasks'),
+          sectionEntry('functions'),
+          sectionEntry('logs', { state: 'absent' }),
+        ],
       }),
-    )
+    })
     expect(screen.getAllByTestId('attempt')).toHaveLength(2)
     expect(screen.queryByTestId('attempt-logs')).not.toBeInTheDocument()
   })
@@ -438,54 +434,52 @@ describe('the task inspector (TK-20…TK-24)', () => {
   })
 })
 
-/** The Attempts tab as the queue view lays it out: the feed, and row two's pause. */
-function AttemptsHarness({ store }: { store: FeedStore<TasksAttemptEvent> }) {
-  const [paused, setPaused] = useState(false)
-  const pending = useFeedPending(store, paused, attemptKey)
-  return (
-    <>
-      <PauseButton paused={paused} pending={pending} onChange={setPaused} testId="attempts-pause" />
-      <AttemptsView
-        queue={testQueue()}
-        store={store}
-        paused={paused}
-        onPaused={setPaused}
-        onOpen={() => {}}
-        banners={null}
-        inspector={() => null}
-        taskId={undefined}
-      />
-    </>
-  )
-}
+describe('where a queue’s attempts are', () => {
+  it('links to Functions › Invocations filtered to the queue’s function', async () => {
+    await renderInConsole(() => <AttemptsLink queue={testQueue()} />, { status: ready() })
+    const link = screen.getByTestId('queue-attempts-link')
+    expect(link).toHaveTextContent('Attempts in Invocations')
+    const href = new URL(link.getAttribute('href') ?? '', 'http://console.test')
+    expect(href.pathname).toBe('/functions/invocations')
+    expect(href.searchParams.get('q')).toBe(`function:${LOCATION}-processOrder`)
+  })
 
-const attemptEvent = (attempt: number): TasksAttemptEvent => ({
-  queue: testQueue().key,
-  taskId: '7',
-  taskName: 'order-1',
-  attempt: testAttempt({ attempt, retryCount: attempt - 1 }),
+  it('is absent for a queue a client registered, and while Functions is not running', async () => {
+    await renderInConsole(() => <AttemptsLink queue={testQueue('ping', { function: null })} />, {
+      status: ready(),
+    })
+    expect(screen.queryByTestId('queue-attempts-link')).not.toBeInTheDocument()
+    cleanup()
+    await renderInConsole(() => <AttemptsLink queue={testQueue()} />, {
+      status: testStatus({
+        sections: [sectionEntry('tasks'), sectionEntry('functions', { state: 'absent' })],
+      }),
+    })
+    expect(screen.queryByTestId('queue-attempts-link')).not.toBeInTheDocument()
+  })
 })
 
-describe('the Attempts feed’s pause (U-18)', () => {
-  it('p holds the feed still and counts what arrives; p again lets it in', async () => {
-    const store = createAttemptsStore()
-    store.push([attemptEvent(1)])
-    await renderInConsole(() => <AttemptsHarness store={store} />, { status: ready() })
-    const button = screen.getByTestId('attempts-pause')
-    expect(button).toHaveTextContent(/^Pause$/)
-    act(() => dispatchShortcut(new KeyboardEvent('keydown', { key: 'p' })))
-    expect(button).toHaveAttribute('aria-pressed', 'true')
-    expect(button).toHaveTextContent(/^Paused$/)
+describe('the token bucket, shown only while the rate limit holds tasks back', () => {
+  const limited = testQueue('processOrder', {
+    counters: testCounters({ pending: 3, tokens: 0.2, refilledAt: new Date().toISOString() }),
+  })
 
-    // The store tells its readers on the next frame.
-    act(() => store.push([attemptEvent(2), attemptEvent(3)]))
-    await waitFor(() => expect(button).toHaveTextContent('Paused · 2 new'))
+  it('in Configuration: the bucket as an alarm, else the rate in words', async () => {
+    await renderInConsole(() => <QueueConfig queue={limited} />, { status: ready() })
+    expect(screen.getByTestId('gauge-tokens')).toHaveTextContent('0.2 of 10')
+    expect(screen.queryByTestId('gauge-rate')).not.toBeInTheDocument()
+    cleanup()
+    await renderInConsole(() => <QueueConfig queue={testQueue()} />, { status: ready() })
+    expect(screen.getByTestId('gauge-rate')).toHaveTextContent('10 a second')
+    expect(screen.queryByTestId('gauge-tokens')).not.toBeInTheDocument()
+  })
 
-    act(() => dispatchShortcut(new KeyboardEvent('keydown', { key: 'p' })))
-    expect(button).toHaveAttribute('aria-pressed', 'false')
-    expect(button).toHaveTextContent(/^Pause$/)
-    expect(store.size()).toBe(3)
-    expect(store.pending()).toBe(0)
+  it('on the Tasks tab’s row two: the slots always, the tokens only then', async () => {
+    await renderInConsole(() => <SlotsAndTokens queue={limited} />, { status: ready() })
+    expect(screen.getByTestId('slots-tokens')).toHaveTextContent('slots 0/2 · 0.2 tokens')
+    cleanup()
+    await renderInConsole(() => <SlotsAndTokens queue={testQueue()} />, { status: ready() })
+    expect(screen.getByTestId('slots-tokens')).toHaveTextContent(/^slots 0\/2$/)
   })
 })
 

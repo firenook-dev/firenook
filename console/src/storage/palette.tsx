@@ -9,7 +9,6 @@
 import {
   ArrowRightIcon,
   ClockCounterClockwiseIcon,
-  CloudArrowUpIcon,
   CopySimpleIcon,
   DownloadSimpleIcon,
   FileIcon,
@@ -36,7 +35,7 @@ import {
   usePaletteProviders,
 } from '@/lib/palette'
 import { exportUrl } from './api'
-import { copyText } from './copy'
+import { copyToClipboard } from '@/lib/copy'
 import type { FilesState } from './files-state'
 import { baseName, gsUrl, parentOf, parseLocation } from './paths'
 import { storageKeys } from './queries'
@@ -47,7 +46,6 @@ import { bucketPatch } from './search'
 export interface PaletteActions {
   uploadFiles: () => void
   uploadFolder: () => void
-  showSessions: () => void
   /** Present while rows are ticked. */
   editSelection?: (() => void) | undefined
   emptyBucket: () => void
@@ -189,15 +187,7 @@ export function storagePaletteGroups(
       description: gsUrl(files.bucket, files.prefix),
       keywords: 'clipboard link',
       icon: <CopySimpleIcon size={16} />,
-      run: () => void copyText(gsUrl(files.bucket, files.prefix), 'the gs:// URL'),
-    },
-    {
-      id: 'storage:sessions',
-      title: 'Uploads in progress',
-      description: 'Resumable uploads your app has not finished',
-      keywords: 'resumable sessions unfinished',
-      icon: <CloudArrowUpIcon size={16} />,
-      run: actions.showSessions,
+      run: () => void copyToClipboard(gsUrl(files.bucket, files.prefix), { what: 'the gs:// URL' }),
     },
     ...(actions.editSelection
       ? [

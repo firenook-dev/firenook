@@ -1,6 +1,7 @@
 // One user in full, beside the table: Details (every stored field, the
-// account actions), Claims (the editor that shows the token it produces),
-// Activity (this user's calls and messages) and Raw (the stored record).
+// account actions, and links to this user's calls and messages), Claims
+// (the editor that shows the token it produces) and Raw (the stored
+// record).
 //
 // Edits are a per-field draft (`user-draft.ts`): an app that keeps signing
 // the user in moves fields the draft does not hold, so it never interrupts
@@ -11,9 +12,8 @@
 import { Button, Tooltip } from '@cloudflare/kumo'
 import { CheckCircleIcon, ProhibitIcon, TrashIcon } from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { ApiError } from '@/api/client'
-import type { AuthMintedToken } from '@/api/generated/auth/AuthMintedToken'
 import type { AuthUserRow } from '@/api/generated/auth/AuthUserRow'
 import {
   Inspector,
@@ -51,12 +51,10 @@ import { ClaimsEditor } from './claims-editor'
 import { InspectorDetails } from './inspector-details'
 import { RawRecord } from './raw-record'
 import { SignInAsMenu } from './sign-in-as-menu'
-import { TokenDialog } from './token-dialog'
-import { UserActivity } from './user-activity'
 import { UserAvatar } from './user-avatar'
 import { UserCodeMenu } from './user-code-menu'
 
-export type InspectorTab = 'details' | 'claims' | 'activity' | 'raw'
+export type InspectorTab = 'details' | 'claims' | 'raw'
 
 const FIELDS: readonly DraftField[] = [
   'displayName',
@@ -88,7 +86,6 @@ export function UserInspector({
   onNext,
   blocked,
   onDelete,
-  onSeen,
 }: {
   project: string
   scope: TenantScope
@@ -101,14 +98,11 @@ export function UserInspector({
   /** Why writes are refused (the tenant was deleted). */
   blocked: string | undefined
   onDelete: (row: AuthUserRow) => void
-  /** The user's name once it is known, for the recents. */
-  onSeen?: ((label: string) => void) | undefined
 }) {
   const queryClient = useQueryClient()
   const detail = useQuery({ ...userQuery(project, scope, uid), enabled: project !== '' })
   const target = { project, tenant: usersTenant(scope), uid }
   const [draft, setDraft] = useState<UserDraft>({})
-  const [viewing, setViewing] = useState<AuthMintedToken | undefined>(undefined)
   const refresh = () =>
     void queryClient.invalidateQueries({
       queryKey: authKeys.user(project, tenantKey(scope), uid),
@@ -117,14 +111,6 @@ export function UserInspector({
 
   const data = detail.data
   const label = data ? identifierOf(data.row).text : undefined
-  // Said once per name: the page's callback is a new function on every render.
-  const seen = useRef(onSeen)
-  useLayoutEffect(() => {
-    seen.current = onSeen
-  })
-  useEffect(() => {
-    if (label !== undefined) seen.current?.(label)
-  }, [label])
 
   const server = data ? valuesOf(data) : undefined
   const shown = server
@@ -232,7 +218,6 @@ export function UserInspector({
               items: [
                 { value: 'details', label: 'Details' },
                 { value: 'claims', label: 'Claims', count: data.row.claimKeys.length || undefined },
-                { value: 'activity', label: 'Activity' },
                 { value: 'raw', label: 'Raw' },
               ],
             }
@@ -255,7 +240,6 @@ export function UserInspector({
             toggling={toggle.isPending}
             onToggle={() => toggle.mutate(!row.disabled)}
             onDelete={() => onDelete(row)}
-            onView={setViewing}
           />
         ) : undefined
       }
@@ -339,19 +323,9 @@ export function UserInspector({
               onSave={doSave}
             />
           )}
-          {tab === 'activity' && <UserActivity project={project} scope={scope} uid={uid} />}
           {tab === 'raw' && <RawRecord detail={data} />}
         </>
       )}
-      <TokenDialog
-        open={viewing !== undefined}
-        onOpenChange={(open) => {
-          if (!open) setViewing(undefined)
-        }}
-        minted={viewing}
-        who={label ?? uid}
-        project={project}
-      />
     </Inspector>
   )
 }
@@ -371,7 +345,6 @@ function UserFooter({
   toggling,
   onToggle,
   onDelete,
-  onView,
 }: {
   row: AuthUserRow
   detail: Parameters<typeof SignInAsMenu>[0]['detail']
@@ -387,7 +360,6 @@ function UserFooter({
   toggling: boolean
   onToggle: () => void
   onDelete: () => void
-  onView: (minted: AuthMintedToken) => void
 }) {
   // The footer is as wide as the panel: words go by width, the least needed
   // first — the destructive pair's words, then the tools'. Save keeps its.
@@ -426,7 +398,7 @@ function UserFooter({
     <InspectorFooter
       tools={
         <>
-          <SignInAsMenu detail={detail} target={target} onView={onView} words={words.tools} />
+          <SignInAsMenu detail={detail} target={target} words={words.tools} />
           <UserCodeMenu
             detail={detail}
             project={target.project}

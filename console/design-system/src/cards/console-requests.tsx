@@ -18,7 +18,7 @@ import {
 import type { ReactNode } from 'react'
 import { CodeBlock } from '@/components/console/code-block'
 import { BodyEditor } from '@/components/console/request/body-editor'
-import { CODE_DIALECTS, requestAsCode } from '@/components/console/request/as-code'
+import { REQUEST_DIALECTS, codeTab, requestAsCode } from '@/components/console/request/as-code'
 import { MethodSelect } from '@/components/console/request/method-select'
 import { ResponseView } from '@/components/console/request/response-view'
 import { SendButton } from '@/components/console/request/send-button'
@@ -190,11 +190,9 @@ function RequestComposerCard() {
         <div className="w-[560px] rounded-lg bg-kumo-base p-3 shadow-lg ring ring-kumo-line">
           <CodeBlock
             label="This request as code"
-            dialects={CODE_DIALECTS.map((item) => ({
-              id: item.id,
-              label: item.label,
-              code: requestAsCode(greet, item.id, 'demo-x'),
-            }))}
+            dialects={REQUEST_DIALECTS.map((dialect) =>
+              codeTab(dialect, requestAsCode(greet, dialect, 'demo-x')),
+            )}
           />
           <div className="mt-2">
             <Text size="xs" variant="secondary">

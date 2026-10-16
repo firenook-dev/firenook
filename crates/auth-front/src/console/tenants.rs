@@ -14,10 +14,10 @@ use crate::state::TenantState;
 use crate::util::{str_field, truthy};
 use crate::{Runtime, lock};
 
-/// Tenants one page holds when the request names no size.
-pub const DEFAULT_TENANT_PAGE: usize = 100;
-/// The most tenants one page holds.
-pub const MAX_TENANT_PAGE: usize = 500;
+/// Tenants a list holds when the request names no size: as many as it may.
+pub const DEFAULT_TENANTS_LISTED: usize = MAX_TENANTS_LISTED;
+/// The most tenants one list holds; a filter finds the others.
+pub const MAX_TENANTS_LISTED: usize = 500;
 
 /// A tenant to create.
 // The flags are the tenant's own settings, one each, as the request has them.
@@ -53,13 +53,11 @@ pub struct TenantInfo {
     pub mfa_providers: Vec<String>,
 }
 
-/// One page of tenants.
+/// The tenants a filter matches, the first of them in id order.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct TenantPage {
+pub struct TenantList {
     pub tenants: Vec<TenantInfo>,
-    /// The id the next page starts after; absent at the end.
-    pub next: Option<String>,
-    /// Tenants `q` matches.
+    /// Tenants `q` matches, the listed ones and any past the limit.
     pub total: u64,
     /// The project's own users.
     pub project_users: u64,
@@ -224,24 +222,18 @@ impl Runtime {
     }
 
     /// Tenants of `project` whose id or display name contains `q`
-    /// (case-insensitive), in id order, after `after`, at most `limit`.
-    /// Creates nothing: an unseen project has no tenants.
+    /// (case-insensitive), in id order, at most `limit`. Creates nothing: an
+    /// unseen project has no tenants.
     #[must_use]
-    pub fn tenant_page(
-        &self,
-        project: &str,
-        q: &str,
-        after: Option<&str>,
-        limit: usize,
-    ) -> TenantPage {
+    pub fn tenant_list(&self, project: &str, q: &str, limit: usize) -> TenantList {
         let limit = match limit {
-            0 => DEFAULT_TENANT_PAGE,
-            limit => limit.min(MAX_TENANT_PAGE),
+            0 => DEFAULT_TENANTS_LISTED,
+            limit => limit.min(MAX_TENANTS_LISTED),
         };
         let needle = q.trim().to_lowercase();
         let data = lock(&self.inner.data);
         let Some(agent) = data.projects.get(project) else {
-            return TenantPage::default();
+            return TenantList::default();
         };
         let matches = |(id, tenant): &(&String, &TenantState)| {
             needle.is_empty()
@@ -250,24 +242,15 @@ impl Runtime {
                     .is_some_and(|name| name.to_lowercase().contains(&needle))
         };
         let total = agent.tenants.iter().filter(matches).count();
-        let mut tenants: Vec<TenantInfo> = agent
+        let tenants = agent
             .tenants
             .iter()
-            .filter(|(id, _)| after.is_none_or(|after| id.as_str() > after))
             .filter(matches)
-            .take(limit + 1)
+            .take(limit)
             .map(|(id, tenant)| info(id, tenant))
             .collect();
-        let next = (tenants.len() > limit).then(|| {
-            tenants.truncate(limit);
-            tenants
-                .last()
-                .map(|tenant| tenant.tenant_id.clone())
-                .unwrap_or_default()
-        });
-        TenantPage {
+        TenantList {
             tenants,
-            next,
             total: u64::try_from(total).unwrap_or(u64::MAX),
             project_users: u64::try_from(agent.project.user_count()).unwrap_or(u64::MAX),
         }

@@ -4,7 +4,7 @@
 // as one engine job judged file by file as the identity the page acts as.
 // Setting `ownerUid` on fifty seeded images is one action, not fifty saves.
 
-import { Autocomplete, Button, Checkbox, Dialog, Input, Text } from '@cloudflare/kumo'
+import { Button, Checkbox, Dialog, Input, Text } from '@cloudflare/kumo'
 import { XIcon } from '@phosphor-icons/react'
 import { useState } from 'react'
 import type { BulkTarget } from '@/api/generated/BulkTarget'
@@ -12,26 +12,7 @@ import type { StorageMetadataPatch } from '@/api/generated/storage/StorageMetada
 import { KeyValueEditor, type KeyValueRow } from '@/components/console/key-value-editor'
 import { formatNumber } from '@/lib/format'
 import { STANDARD_FIELDS, type StandardField, customKeyProblem } from '../metadata-draft'
-
-const SUGGESTIONS: Record<StandardField, readonly string[]> = {
-  contentType: [
-    'image/png',
-    'image/jpeg',
-    'image/webp',
-    'application/json',
-    'text/plain',
-    'application/pdf',
-  ],
-  cacheControl: [
-    'public, max-age=3600',
-    'public, max-age=31536000, immutable',
-    'private, max-age=0',
-    'no-cache',
-  ],
-  contentDisposition: ['inline', 'attachment'],
-  contentEncoding: ['gzip', 'br', 'identity'],
-  contentLanguage: [],
-}
+import { MetadataField } from './metadata-field'
 
 interface FieldEdit {
   value: string
@@ -123,31 +104,14 @@ export function EditMetadataDialog({
                 {/* The row is the box's label, so the box is named by the field. */}
                 <label className="grid grid-cols-[10rem_minmax(0,1fr)] items-center gap-3">
                   <span className="font-mono text-[12px] text-kumo-subtle">{field}</span>
-                  <Autocomplete
-                    items={[...SUGGESTIONS[field]]}
+                  <MetadataField
+                    field={field}
                     value={fields[field].value}
-                    onValueChange={(next) =>
-                      setFields((current) => ({
-                        ...current,
-                        [field]: { value: String(next ?? ''), clear: false },
-                      }))
+                    onChange={(value) =>
+                      setFields((current) => ({ ...current, [field]: { value, clear: false } }))
                     }
-                  >
-                    <Autocomplete.InputGroup
-                      size="sm"
-                      className="font-mono"
-                      placeholder={field === 'contentType' ? "— keep each file's —" : '— keep —'}
-                    />
-                    <Autocomplete.Content>
-                      <Autocomplete.List>
-                        {(item: string) => (
-                          <Autocomplete.Item key={item} value={item}>
-                            <span className="font-mono text-[12px]">{item}</span>
-                          </Autocomplete.Item>
-                        )}
-                      </Autocomplete.List>
-                    </Autocomplete.Content>
-                  </Autocomplete>
+                    placeholder={field === 'contentType' ? "— keep each file's —" : '— keep —'}
+                  />
                 </label>
                 <Checkbox
                   checked={fields[field].clear}

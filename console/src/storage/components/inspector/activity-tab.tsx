@@ -1,7 +1,9 @@
 // What happened to this file, newest first: its changes — who made them
 // (an Auth user links to Authentication), whether from the console or the
-// app, and whether the event went to the Functions emulator — and the rules
-// decisions on its name, arriving live while the tab is open. Each list says
+// app, and whether the event went to the Functions emulator, with a link to
+// each invocation it started while Functions keeps it (the function's
+// trigger otherwise) — and the rules decisions on its name, arriving live
+// while the tab is open. Each list says
 // the window it comes from; a file older than that window closes the list
 // with its own created and updated times, greyed. Below, the exact event
 // bodies the file sends, and the way to send one again.
@@ -17,7 +19,7 @@ import { EntityLink } from '@/components/console/entity-link'
 import { InspectorSection } from '@/components/console/inspector'
 import { exactTime } from '@/components/console/relative-time'
 import { useNow } from '@/lib/clock'
-import { formatBytes, formatClock, useClockFormat } from '@/lib/format'
+import { clockTime, formatBytes, formatClock, useClockFormat, utcStamp } from '@/lib/format'
 import { useTriggersFor } from '@/lib/triggers'
 import { Verdict } from '@/rules/verdict'
 import { useStorageDecisionsLive } from '../../live'
@@ -116,6 +118,38 @@ function Time({ iso }: { iso: string }) {
   )
 }
 
+/** `us-central1-onUpload` → `onUpload`: a function as its name reads. */
+function functionName(id: string): string {
+  return id.replace(/^[a-z]+-[a-z]+\d+-/, '')
+}
+
+/**
+ * Where a sent event went: the invocations it started, each a link to it in
+ * Functions, while the record keeps them; before they begin and once they
+ * have rolled off, the functions its trigger names.
+ */
+function Reached({ change, functions }: { change: StorageObjectChange; functions: string[] }) {
+  const targets =
+    change.invocations.length > 0
+      ? change.invocations.map((invocation) => ({
+          ...invocation,
+          label: functionName(invocation.label ?? invocation.key),
+        }))
+      : functions.map((id) => ({ kind: 'functions.function', key: id, label: functionName(id) }))
+  if (targets.length === 0) return null
+  return (
+    <>
+      {' → '}
+      {targets.map((target, index) => (
+        <span key={`${target.kind}|${target.key}`}>
+          {index > 0 && ', '}
+          <EntityLink entity={target} />
+        </span>
+      ))}
+    </>
+  )
+}
+
 function ChangeRow({ change, functions }: { change: StorageObjectChange; functions: string[] }) {
   const detail =
     change.kind === 'metadata' || change.kind === 'tokens'
@@ -158,23 +192,7 @@ function ChangeRow({ change, functions }: { change: StorageObjectChange; functio
         {delivery && (
           <span className="text-[11px] text-kumo-subtle" data-testid="activity-delivery">
             {delivery}
-            {change.delivery === 'sent' && functions.length > 0 && (
-              <>
-                {' → '}
-                {functions.map((id, index) => (
-                  <span key={id}>
-                    {index > 0 && ', '}
-                    <EntityLink
-                      entity={{
-                        kind: 'functions.function',
-                        key: id,
-                        label: id.replace(/^[a-z]+-[a-z]+\d+-/, ''),
-                      }}
-                    />
-                  </span>
-                ))}
-              </>
-            )}
+            {change.delivery === 'sent' && <Reached change={change} functions={functions} />}
           </span>
         )}
       </span>
@@ -312,8 +330,7 @@ export function ActivityTab({ object }: { object: StorageObjectDetail }) {
           <ul className="grid opacity-60" data-testid="activity-before-window">
             <li className="flex items-baseline justify-between gap-2 py-1 text-[12px] text-kumo-subtle">
               <span>
-                created {formatClock(object.timeCreated, 'utc').slice(0, 19).replace('T', ' ')} ·
-                updated {formatClock(object.updated, 'utc').slice(0, 19).replace('T', ' ')}
+                created {utcStamp(object.timeCreated)} · updated {utcStamp(object.updated)}
               </span>
               <span className="shrink-0 text-[11px]">before this window</span>
             </li>
@@ -321,13 +338,13 @@ export function ActivityTab({ object }: { object: StorageObjectDetail }) {
         )}
         <p className="mt-1 text-[11px] text-kumo-subtle" data-testid="activity-windows">
           {since
-            ? `Since ${formatClock(since, 'time').slice(0, 8)} (changes)`
+            ? `Since ${clockTime(since, 'second')} (changes)`
             : 'Every change since the engine started'}
           {' · '}
           {!diagnostics
             ? 'Rules decisions are off: the suite was started with --no-diagnostics.'
             : activity.data.decisionsSince
-              ? `since ${formatClock(activity.data.decisionsSince, 'time').slice(0, 8)} (decisions)`
+              ? `since ${clockTime(activity.data.decisionsSince, 'second')} (decisions)`
               : 'no rules decision on this name yet'}
         </p>
       </InspectorSection>

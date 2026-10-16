@@ -17,8 +17,8 @@ export const usersSearchSchema = z.object({
   sort: zSort,
   /** The uid open in the inspector. */
   user: z.string().optional(),
-  /** The inspector's tab. */
-  tab: z.enum(['details', 'claims', 'activity', 'raw']).optional(),
+  /** The inspector's tab; one the inspector no longer has opens Details. */
+  tab: z.enum(['details', 'claims', 'raw']).optional().catch(undefined),
   /** Opens a create dialog: New user, Import, Sample users, New tenant. */
   new: z.enum(['user', 'import', 'sample', 'tenant']).optional(),
   /** Opens another link-openable dialog: Export. */

@@ -1056,14 +1056,14 @@ async fn decisions_replay_filter_and_log_denials() {
     );
     assert_eq!(items.last().expect("one")["path"], "users/bob/no.txt");
     assert!(data["window"]["retained"].as_u64().expect("retained") >= 2);
-    // The exact name, from the index, and the first paint route.
-    let (status, exact) = harness
-        .get(
-            &format!("/rules/decisions?bucket={BUCKET}&path=users/ada/ok.txt"),
+    // One exact name, which no other file's decisions pass.
+    let mut exact = decisions
+        .open(
+            &json!({ "bucket": BUCKET, "path": "users/ada/ok.txt" }),
             None,
         )
-        .await;
-    assert_eq!(status, StatusCode::OK);
+        .expect("open");
+    let (_, _, exact) = event(&next(&mut exact).await);
     assert_eq!(exact["items"].as_array().expect("items").len(), 1);
     assert_eq!(exact["items"][0]["method"], "create");
     assert!(
@@ -1303,46 +1303,97 @@ async fn search_source_respects_the_budget() {
     harness.finish().await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rules_documents_carry_claim_reads() {
-    let source = "rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /admin/{file=**} {\n      allow read: if request.auth.token.admin == true;\n    }\n    match /teams/{team}/{file=**} {\n      allow write: if request.auth.token.get('team', '') == team;\n    }\n  }\n}\n";
-    let harness = harness("claims", Some(source));
-    let (_, document) = harness.get("/rules", None).await;
-    let reads = document["claimReads"].as_array().expect("claimReads");
-    assert_eq!(reads.len(), 2, "{reads:?}");
-    assert_eq!(reads[0]["key"], "admin");
-    assert_eq!(reads[0]["form"], "member");
-    assert_eq!(reads[0]["line"], 5);
-    assert_eq!(reads[1]["key"], "team");
-    assert_eq!(reads[1]["form"], "get");
-    // A draft that reads nothing says so; one that does not compile has no
-    // answer rather than an empty one.
-    let (_, none) = harness
-        .json(
-            Method::POST,
-            "/rules/check",
-            &json!({ "source": RULES }),
-            None,
-        )
-        .await;
-    assert_eq!(none["claimReads"], json!([]));
-    let (_, broken) = harness
-        .json(
-            Method::POST,
-            "/rules/check",
-            &json!({ "source": "service firebase.storage {" }),
-            None,
-        )
-        .await;
-    assert!(broken["claimReads"].is_null());
-    let (_, draft) = harness
-        .json(
-            Method::POST,
-            "/rules/check",
-            &json!({ "source": source }),
-            None,
-        )
-        .await;
-    assert_eq!(draft["claimReads"], document["claimReads"]);
-    harness.finish().await;
+#[test]
+fn activity_names_the_invocations_an_event_started() {
+    use axum::body::Bytes;
+    use axum::http::{HeaderMap, HeaderValue};
+    use firenook_functions_runtime::MonitorLimits;
+    use firenook_functions_runtime::monitor::{
+        FunctionKind, InvocationCause, InvocationOrigin, InvocationStart, InvocationTarget,
+    };
+    use firenook_storage_front::{Actor, EventDelivery, ObjectChangeKind, ObjectChangeRecord};
+
+    let monitor = Monitor::new(MonitorLimits::default());
+    let begin = |function: &str, event: &str, replay_of: Option<String>| {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-firenook-event-id",
+            HeaderValue::from_str(event).expect("header"),
+        );
+        monitor
+            .begin(InvocationStart {
+                function_id: function.to_owned(),
+                codebase: "default".to_owned(),
+                kind: FunctionKind::Storage,
+                origin: InvocationOrigin::Emulator,
+                cause: InvocationCause::Storage {
+                    event_type: "google.storage.object.finalize".to_owned(),
+                    bucket: BUCKET.to_owned(),
+                    object: "a.png".to_owned(),
+                    event_id: Some(event.to_owned()),
+                },
+                summary: "a.png finalized".to_owned(),
+                target: InvocationTarget::Trigger,
+                method: "POST".to_owned(),
+                path: "/".to_owned(),
+                headers,
+                body: Bytes::new(),
+                replay_of,
+                delivery: None,
+            })
+            .id
+            .to_string()
+    };
+    // The v1 id reached two v1 functions, the v2 id one v2 function; the
+    // first v1 function was retried, and the developer replayed one.
+    let first = begin("us-central1-thumbs", "111", None);
+    let other = begin("us-central1-audit", "111", None);
+    let retried = begin("us-central1-thumbs", "111", None);
+    let v2 = begin("us-central1-indexer", "c-2", None);
+    begin("us-central1-thumbs", "111", Some(first.clone()));
+    // Another file's event.
+    begin("us-central1-thumbs", "999", None);
+
+    let record = |revision: u64, event_ids: &[&str]| ObjectChangeRecord {
+        revision,
+        at: time::OffsetDateTime::now_utc(),
+        bucket: BUCKET.to_owned(),
+        name: "a.png".to_owned(),
+        kind: ObjectChangeKind::Created,
+        size: 1,
+        content_type: None,
+        metadata_keys: Vec::new(),
+        actor: Actor::Admin,
+        via_console: false,
+        delivery: EventDelivery::Sent,
+        event_ids: event_ids.iter().map(|id| (*id).to_owned()).collect(),
+    };
+    let changes = [record(2, &["111", "c-2"]), record(1, &[])];
+    let started = files::started_by(Some(&monitor), &changes);
+    let named = started
+        .iter()
+        .map(|(event, invocation)| {
+            (
+                event.as_str(),
+                invocation.key.as_str(),
+                invocation.label.as_deref(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        named,
+        [
+            ("111", other.as_str(), Some("us-central1-audit")),
+            ("111", retried.as_str(), Some("us-central1-thumbs")),
+            ("c-2", v2.as_str(), Some("us-central1-indexer")),
+        ]
+    );
+    assert!(
+        started
+            .iter()
+            .all(|(_, invocation)| invocation.kind == "functions.invocation")
+    );
+    // Without Functions, or with no sent event, nothing is read.
+    assert_eq!(files::started_by(None, &changes), Vec::new());
+    assert_eq!(files::started_by(Some(&monitor), &changes[1..]), Vec::new());
 }

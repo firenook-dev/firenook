@@ -3,6 +3,6 @@ import type { StorageDecision } from "./StorageDecision";
 import type { StorageDecisionWindow } from "./StorageDecisionWindow";
 
 /**
- * `storage.decisions` `decisions`, and `GET /storage/rules/decisions`.
+ * `storage.decisions` `decisions`.
  */
 export type StorageDecisionBatch = { items: Array<StorageDecision>, window: StorageDecisionWindow, };

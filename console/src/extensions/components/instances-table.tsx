@@ -24,7 +24,7 @@ import type { RowMenuItem } from '@/components/console/row-menu'
 import { SectionBanner } from '@/components/console/section-banner'
 import { TableFooter } from '@/components/console/table-footer'
 import { StatusDot } from '@/components/kit'
-import { toast } from '@/lib/toasts'
+import { copyToClipboard } from '@/lib/copy'
 import {
   ORIGIN_HELP,
   functionsText,
@@ -203,11 +203,7 @@ export function InstancesTable({
       label: 'Copy the instance id',
       icon: CopyIcon,
       run: () => {
-        void navigator.clipboard
-          .writeText(row.instanceId)
-          .then(() =>
-            toast({ key: 'extensions.copy', title: `Copied ${row.instanceId}`, tone: 'success' }),
-          )
+        void copyToClipboard(row.instanceId, { what: row.instanceId })
       },
     },
   ]

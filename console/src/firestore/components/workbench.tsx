@@ -4,10 +4,11 @@
 // beside it when a document is open. Everything on screen is live from the
 // engine's change feed, a topic on the console's one live channel.
 
-import { Text } from '@cloudflare/kumo'
+import { Checkbox, Text } from '@cloudflare/kumo'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { statusQuery } from '@/api/queries'
+import { EXPORT_FORMAT_INFO, ExportDialog } from '@/components/console/export-dialog'
 import { LiveNotice } from '@/components/console/live-notice'
 import { ToolbarDivider } from '@/components/console/toolbar'
 import { Page } from '@/components/shell/page'
@@ -15,17 +16,18 @@ import { PanelToggle } from '@/components/shell/section-panel'
 import { type SubscriptionStatus, liveChannel } from '@/lib/live/channel'
 import { isTyping, useShortcuts } from '@/lib/shortcuts'
 import { useCreateDialog } from '../create'
-import { useExportDialog } from '../export'
+import { EXPORT_NOTES, exportFilename, renderExport, useExportDialog } from '../export'
+import { printQuery } from '../query'
 import { useLiveChanges } from '../live'
 import { useFirestorePalette } from '../palette'
 import { documentQuery } from '../queries'
 import { resetColumns, useQueryLine } from '../query-line-store'
 import { recentsKey, useRecents } from '../recents'
 import { resetSelection, useSelection } from '../selection'
+import { formatNumber } from '../value'
 import { CreateDialog } from './create-dialog'
 import { DeleteDialog, type DeleteTarget } from './delete-dialog'
 import { ExplainPanel } from './explain-panel'
-import { ExportDialog } from './export-dialog'
 import { Grid } from './grid'
 import { Inspector } from './inspector'
 import { NewMenu } from './new-menu'
@@ -91,10 +93,12 @@ function WorkbenchBody() {
     [loadRecents, workbench.project, workbench.database],
   )
   useEffect(() => {
-    if (workbench.collectionPath) recordRecent(workbench.collectionPath, 'collection')
+    if (workbench.collectionPath)
+      recordRecent({ path: workbench.collectionPath, kind: 'collection' })
   }, [recordRecent, workbench.collectionPath])
   useEffect(() => {
-    if (workbench.selectedDocument) recordRecent(workbench.selectedDocument, 'document')
+    if (workbench.selectedDocument)
+      recordRecent({ path: workbench.selectedDocument, kind: 'document' })
   }, [recordRecent, workbench.selectedDocument])
 
   // The page's keys, through the console's one registry: they stand aside
@@ -161,7 +165,7 @@ function WorkbenchBody() {
       <h1 className="sr-only">Firestore</h1>
       <SchemaPanel />
       <WorkbenchData live={live} onDelete={setDeleting} explain={explain} setExplain={setExplain} />
-      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
+      <ExportDocuments open={exportOpen} onOpenChange={setExportOpen} />
       <CreateDialog />
       <DeleteDialog target={deleting} onOpenChange={(open) => !open && setDeleting(null)} />
     </div>
@@ -269,5 +273,87 @@ function WorkbenchData({
         )}
       </div>
     </>
+  )
+}
+
+/**
+ * Taking the page you are looking at out of the emulator, in the kit's
+ * export dialog: it says exactly what will be written before it writes
+ * anything — which documents, and under whose identity, since an export
+ * made while viewing as a user holds what that user can read — and builds
+ * the file in this tab (its `run` mode), paging the whole result with the
+ * grid's own cursors and reading whole documents, never a cell's preview.
+ */
+function ExportDocuments({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const workbench = useWorkbench()
+  const checked = useSelection((state) => state.checked)
+  const everything = useSelection((state) => state.everything)
+  const [typed, setTyped] = useState(false)
+  // Everything matching is the whole result, which is what an export with
+  // no selection reads anyway.
+  const selected = everything ? [] : [...checked]
+  const only = selected.length > 0 ? selected : undefined
+  const what = only
+    ? `${formatNumber(only.length)} selected ${only.length === 1 ? 'document' : 'documents'}`
+    : workbench.query.where.length > 0 || workbench.query.orderBy.length > 0
+      ? `Every document matching ${printQuery(workbench.query)}`
+      : `Every document in ${workbench.collectionPath}`
+  return (
+    <ExportDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Export"
+      scope={
+        <>
+          <span data-testid="export-what">{what}</span>, read whole — not the shortened values the
+          grid draws.{' '}
+          {workbench.scope.identity.kind === 'owner'
+            ? 'Rules are bypassed, so this is everything the engine holds.'
+            : 'Security rules apply, so this is what the identity you are viewing as can read.'}
+        </>
+      }
+      formats={['json', 'ndjson', 'csv']}
+      notes={EXPORT_NOTES}
+      renderOptions={(format) =>
+        format === 'csv' ? null : (
+          <div className="grid gap-1">
+            <Checkbox
+              checked={typed}
+              onCheckedChange={(value) => setTyped(Boolean(value))}
+              label="Keep Firestore types exactly"
+            />
+            <span className="pl-6">
+              <Text variant="secondary" size="sm">
+                The REST wire shape. References, bytes, geopoints and vectors have no plain-JSON
+                form that survives a round trip.
+              </Text>
+            </span>
+          </div>
+        )
+      }
+      filename={(format) => exportFilename(workbench.collectionPath, format)}
+      run={async (format, signal, progress) => {
+        const { parts } = await renderExport(
+          {
+            scope: workbench.scope,
+            collectionPath: workbench.collectionPath,
+            group: workbench.group,
+            query: workbench.query,
+            only,
+          },
+          { format, typed },
+          progress,
+          signal,
+        )
+        return new Blob(parts, { type: EXPORT_FORMAT_INFO[format].mediaType })
+      }}
+      testId="export"
+    />
   )
 }

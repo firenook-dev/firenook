@@ -428,13 +428,6 @@ export function toStructuredQuery(
 
 export type CodeTarget = 'web' | 'admin' | 'flutter' | 'rest'
 
-export const CODE_TARGETS: Array<{ id: CodeTarget; label: string }> = [
-  { id: 'web', label: 'Web SDK (modular)' },
-  { id: 'admin', label: 'Admin SDK (Node)' },
-  { id: 'flutter', label: 'Flutter' },
-  { id: 'rest', label: 'REST (curl)' },
-]
-
 function literalFor(target: CodeTarget, value: FsValue): string {
   switch (value.type) {
     case 'string':

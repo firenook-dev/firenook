@@ -161,15 +161,18 @@ test('⌘K: the suite’s data actions, each once', async ({ page, engine }) => 
     return page.getByRole('option')
   }
 
+  // Download is the card's own: started at once, followed on the Data
+  // cards, downloaded by this tab when it is ready.
+  const downloaded = page.waitForEvent('download', { timeout: 60_000 })
   const snapshot = (await palette('Download a snapshot')).filter({
-    hasText: 'Download a snapshot…',
+    hasText: 'Download a snapshot',
   })
   await expect(snapshot).toHaveCount(1)
   await snapshot.click()
-  await expect(page).toHaveURL(/\/console\/?\?dialog=snapshot$/)
-  await expect(page.getByTestId('snapshot-dialog')).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId('snapshot-dialog')).toHaveCount(0)
+  await expect(page).toHaveURL(/\/console\/?#data$/)
+  await expect(page.getByTestId('overview-data-section')).toBeInViewport()
+  expect((await downloaded).suggestedFilename()).toMatch(/\.zip$/)
+  await expect(page.getByTestId('overview-snapshot-taken')).toContainText('Snapshot downloaded')
 
   const documents = page.getByTestId('overview-figure-firestore-documents')
   await expect(documents).toHaveText(/^[\d,]+$/)
@@ -183,6 +186,22 @@ test('⌘K: the suite’s data actions, each once', async ({ page, engine }) => 
   await page.getByTestId('reset-dialog-cancel').click()
   await expect(page.getByTestId('reset-dialog')).toHaveCount(0)
   await expect(documents).toHaveText(count)
+
+  // The environment block an app's server code reads, from anywhere.
+  const env = (await palette('Environment variables')).filter({
+    hasText: 'Environment variables for your app',
+  })
+  await expect(env).toHaveCount(1)
+  await env.click()
+  await expect(page).toHaveURL(/\/console\/?\?connect=env$/)
+  await expect(page.getByTestId('overview-connect-snippet')).toContainText(
+    'FIRESTORE_EMULATOR_HOST=',
+  )
+  // A platform's snippet copies from ⌘K; its tab is one click away on the page.
+  const platforms = await palette('flutter')
+  await expect(platforms.filter({ hasText: 'Copy the Flutter snippet' })).toHaveCount(1)
+  await expect(platforms.filter({ hasText: 'Connect with' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
 
   const errors = (await palette('Open logs: errors')).filter({ hasText: 'Open logs: errors only' })
   await expect(errors).toHaveCount(1)

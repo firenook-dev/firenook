@@ -1,7 +1,7 @@
-// What ⌘K offers while an Eventarc page is open: publish an event, every
-// channel's events, and the channels page.
+// What ⌘K offers while the Eventarc page is open: publish an event, and
+// each channel (its events, publishers and subscribers).
 
-import { BroadcastIcon, PaperPlaneTiltIcon, ShareNetworkIcon } from '@phosphor-icons/react'
+import { BroadcastIcon, PaperPlaneTiltIcon } from '@phosphor-icons/react'
 import { useEffect } from 'react'
 import type { EventarcSnapshot } from '@/api/generated/compute/EventarcSnapshot'
 import { type PaletteGroup, matchesQuery, usePaletteProviders } from '@/lib/palette'
@@ -9,9 +9,8 @@ import { channelLabel } from './topology'
 
 export interface EventarcPaletteActions {
   publish: () => void
-  /** Show one channel's events (`undefined`: every channel's). */
+  /** Show one channel (`undefined`: every channel's events). */
   scope: (channel: string | undefined) => void
-  channelsPage: () => void
 }
 
 export function eventarcPaletteGroups(
@@ -28,20 +27,13 @@ export function eventarcPaletteGroups(
       icon: <PaperPlaneTiltIcon size={16} />,
       run: actions.publish,
     },
-    {
-      id: 'eventarc.channels-page',
-      title: 'Show channels',
-      keywords: 'publishers subscribers topology who listens',
-      icon: <ShareNetworkIcon size={16} />,
-      run: actions.channelsPage,
-    },
     ...channels.map((channel) => {
       const label = channelLabel(channel)
       return {
         id: `eventarc.channel:${channel.name}`,
         title: `Events on ${label.id}`,
         description: label.where || undefined,
-        keywords: channel.name,
+        keywords: `${channel.name} publishers subscribers who listens`,
         icon: <BroadcastIcon size={16} />,
         ref: { kind: 'eventarc.channel', key: channel.name },
         run: () => actions.scope(channel.name),

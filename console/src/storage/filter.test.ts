@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StorageProfile } from '@/api/generated/storage/StorageProfile'
-import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden'
+import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden.test-support'
 import cases from './filter-cases.json'
 import { STORAGE_FILTER_FIELDS, filterFields, typeSuggestions } from './filter'
 

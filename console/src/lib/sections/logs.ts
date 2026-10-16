@@ -1,21 +1,13 @@
 // Logs' registry entry, and the one way any section links into Logs:
 // `linkToLogs`. The foundation created this file with the helper; the
-// observe stream owns it (badges, `badgeLink`, routes, actions) and keeps
-// the helper's signature.
+// observe stream owns it (badges, `badgeLink`, routes) and keeps the
+// helper's signature.
 //
 // Logs is one page with no sub-pages: a problem list, one invocation or a
-// time range are filters of the one stream, not other jobs. The Overview has
-// no registry file of its own, so its suite-wide ⌘K actions (a snapshot, a
-// reset, the environment block) are registered here and nowhere else.
+// time range are filters of the one stream, not other jobs. Its ⌘K actions
+// are in `./logs-actions.ts`.
 
-import {
-  ArrowCounterClockwiseIcon,
-  DownloadSimpleIcon,
-  PlugsConnectedIcon,
-  ScrollIcon,
-  WarningCircleIcon,
-  WarningIcon,
-} from '@phosphor-icons/react'
+import { ScrollIcon } from '@phosphor-icons/react'
 import type { ConsoleSection, SectionLink } from '../services'
 
 /**
@@ -93,7 +85,6 @@ export const logs: ConsoleSection = {
   services: ['logging'],
   area: 'observe',
   icon: ScrollIcon,
-  built: true,
   summary:
     "Every service's log in one stream: filters with counts, structured payloads, each function invocation as a group, and links into the section a line is about.",
   badges: ['logs.errors'],
@@ -107,46 +98,4 @@ export const logs: ConsoleSection = {
     'logs.entry': (cursor): SectionLink => ({ to: '/logs', search: { entry: cursor } }),
   },
   searchLink: searchLogs,
-  actions: [
-    {
-      id: 'logs.errors',
-      title: 'Open logs: errors only',
-      description: 'Every error line from every service',
-      keywords: 'logs errors failures level',
-      icon: WarningCircleIcon,
-      link: linkToLogs({ level: 'error' }),
-    },
-    {
-      id: 'logs.problems',
-      title: 'Open logs: problems',
-      description: 'Errors, function failures and rules denials, kept longer than other lines',
-      keywords: 'logs problems denials failures timeouts',
-      icon: WarningIcon,
-      link: { to: '/logs', search: { q: 'is:problem' } },
-    },
-    {
-      id: 'overview.snapshot',
-      title: 'Download a snapshot…',
-      description: "The emulators' data as an export the engine imports with --import",
-      keywords: 'snapshot export backup download data zip',
-      icon: DownloadSimpleIcon,
-      link: { to: '/', search: { dialog: 'snapshot' } },
-    },
-    {
-      id: 'overview.reset',
-      title: 'Reset data…',
-      description: 'Delete the data of one section or of all of them',
-      keywords: 'reset clear delete wipe data',
-      icon: ArrowCounterClockwiseIcon,
-      link: { to: '/', search: { dialog: 'reset' } },
-    },
-    {
-      id: 'overview.env',
-      title: 'Environment variables for your app',
-      description: 'The variables the Admin SDKs and gcloud clients read to find the emulators',
-      keywords: 'environment variables env connect admin sdk emulator host',
-      icon: PlugsConnectedIcon,
-      link: { to: '/', search: { connect: 'env' } },
-    },
-  ],
 }

@@ -52,7 +52,7 @@ import { useRouteSearch } from '@/lib/search-params'
 import { useShortcuts } from '@/lib/shortcuts'
 import { toast } from '@/lib/toasts'
 import { clearMessages } from '../api'
-import { copyWithToast } from '../clipboard'
+import { copyToClipboard } from '@/lib/copy'
 import { MESSAGE_FIELDS, messageFacetGroups } from '../fields'
 import { userLink } from '../links'
 import { useInboxFeed } from '../live'
@@ -226,7 +226,8 @@ export function InboxPage() {
   })
   const act = (message: AuthMessage) => {
     const action = messageAction(message)
-    if (action.kind === 'copy') return void copyWithToast(message.code, `the code ${message.code}`)
+    if (action.kind === 'copy')
+      return void copyToClipboard(message.code, { what: `the code ${message.code}` })
     if (action.kind === 'open') {
       const href = openHref(message)
       if (href) window.open(href, '_blank', 'noopener')
@@ -249,7 +250,7 @@ export function InboxPage() {
         label: 'Copy code',
         icon: CopyIcon,
         shortcut: 'c',
-        run: () => void copyWithToast(message.code, `the code ${message.code}`),
+        run: () => void copyToClipboard(message.code, { what: `the code ${message.code}` }),
       })
     else if (message.link) {
       const link = message.link
@@ -258,7 +259,7 @@ export function InboxPage() {
         label: 'Copy link',
         icon: CopyIcon,
         shortcut: 'c',
-        run: () => void copyWithToast(link, 'the link'),
+        run: () => void copyToClipboard(link, { what: 'the link' }),
       })
       items.push({
         id: 'open-link',
@@ -287,7 +288,7 @@ export function InboxPage() {
       label: 'Copy as JSON',
       icon: BracketsCurlyIcon,
       shortcut: 'Shift+c',
-      run: () => void copyWithToast(messageJson(message), 'the message as JSON'),
+      run: () => void copyToClipboard(messageJson(message), { what: 'the message as JSON' }),
     })
     if (message.uid)
       items.push({
@@ -327,10 +328,9 @@ export function InboxPage() {
       when: () => selected !== undefined,
       run: () => {
         if (selected)
-          void copyWithToast(
-            primaryValue(selected),
-            isSms(selected) ? `the code ${selected.code}` : 'the link',
-          )
+          void copyToClipboard(primaryValue(selected), {
+            what: isSms(selected) ? `the code ${selected.code}` : 'the link',
+          })
       },
     },
     {
@@ -339,7 +339,7 @@ export function InboxPage() {
       group: 'Inbox',
       when: () => selected !== undefined,
       run: () => {
-        if (selected) void copyWithToast(messageJson(selected), 'the message as JSON')
+        if (selected) void copyToClipboard(messageJson(selected), { what: 'the message as JSON' })
       },
     },
     {

@@ -50,7 +50,7 @@ The frame around every page (`components/App/*`).
 | Feature (Google UI 1.15) | Where in the console | Owner | Status |
 | --- | --- | --- | --- |
 | A top bar with a tab for every page | The sidebar, its badges for what needs a look, and ⌘K | foundation | [x] |
-| "Emulator Suite Disconnected" modal, polling `/api/config` every 2 s | The top bar's engine badge says "engine stopped" or "reconnecting" from the one live connection; nothing blocks the page; a restart is recovered without a reload, and an engine whose binary changed asks for one reload | foundation | [x] |
+| "Emulator Suite Disconnected" modal, polling `/api/config` every 2 s | The top bar's engine badge says "engine stopped" or "reconnecting" from the one live connection, and opens the Overview's engine section; nothing blocks the page; a restart is recovered without a reload, and an engine whose binary changed asks for one reload | foundation | [x] |
 
 ## Authentication
 
@@ -62,10 +62,10 @@ The official users page (`components/Auth/*`).
 | Filter users | Authentication › Users: the filter field (`is:disabled provider:google.com claim:role=admin created:>-7d …`, words), facets with counts | auth | [x] |
 | Tenant picker | Authentication › Users, Inbox and Activity: the tenant picker in the panel (and in row one when the panel is shut), with counts, New tenant… and Manage tenants… | auth | [x] |
 | Add a user | Authentication › Users › New user (every kind of account: email and password, phone, anonymous, a provider, custom claims); a taken email explained | auth | [x] |
-| Edit a user: display name, email, password, phone, photo URL, custom claims JSON with validation, MFA phone factors, sign-in method | Authentication › Users › the inspector: Details (name, email, phone, photo URL, verified, times), Password, Claims (Firebase's own checks, the token it makes, where rules read each key), SMS second factors, linked providers | auth | [x] |
+| Edit a user: display name, email, password, phone, photo URL, custom claims JSON with validation, MFA phone factors, sign-in method | Authentication › Users › the inspector: Details (name, email, phone, photo URL, verified, times), Password, Claims (Firebase's own checks and the token they make), SMS second factors, linked providers | auth | [x] |
 | Delete a user | Authentication › Users: the row menu, the inspector and ticked rows › Delete, a job with the functions it runs | auth | [x] |
 | Enable and disable a user | Authentication › Users: the inspector's switch, and Disable / Enable on ticked rows or everything the filter matches (a job) | auth | [x] |
-| Clear all users | Authentication › Settings › Data ("Delete all users of …", one tenant or every tenant, a job) and ⌘K; Overview › Data › Reset | auth | [x] |
+| Clear all users | Overview › Data › Reset › Authentication (every user of every tenant, one suite job; Settings › Data links to it); one tenant's or the project's users: Users › select every match › Delete, or ⌘K "Delete all users…" (a job, with or without triggers) | auth | [x] |
 | One account per email address | Authentication › Settings › Sign-in (the switch, with what it changes for a provider sign-in) | auth | [x] |
 | Refresh | Authentication › Users is live: rows arrive, flash and patch in place from the `auth.users` topic; no refresh button | auth | [x] |
 | Zero state | Authentication › Users: "No users yet" with how an app connects to this engine's Auth; an empty tenant names the scopes that hold users; New user, Sample users and Import | auth | [x] |
@@ -85,8 +85,8 @@ The official data and requests pages (`components/Firestore/*`).
 | Clear all data | Overview › Data › Reset Firestore: every database, as a job, no Functions triggers unless asked, open pages reload once at its start and end | observe | [x] |
 | Typed editors: string, number, boolean, timestamp, geopoint, reference, map and array JSON | Firestore › Data: a typed editor per value in the inspector and in the grid's cells, the JSON view beside them | foundation | [x] |
 | Collection filter: conditions and sort | Firestore › Data: the query line (`where(…).orderBy(…).limit(n)`), column header sort and filter, explain | foundation | [x] |
-| Requests table | Firestore › Rules › Decisions (every rules decision, live, narrowed by path, uid, verdict and operation) | foundation | [x] |
-| Request detail: the rules code, inspection | Firestore › Rules › Decisions › a decision: the lines that decided it lit in the editor, each expression's value, why | foundation | [x] |
+| Requests table | Firestore › Rules › Decisions (every rules decision, live on the `firestore.decisions` topic every tab shares, the newest 10,000, narrowed by the engine by path, uid, verdict and operation; the official Requests socket is unchanged for the Google UI) | foundation | [x] |
+| Request detail: the rules code, inspection | Firestore › Rules › Decisions › a decision: the lines that decided it lit in the editor, each expression's value, why (the newest 2,000 re-run), the documents, Open in Data; and "See why" on a denied read in Data explains it in place | foundation | [x] |
 | Copy a path | Firestore › Data: the path bar's copy, the inspector's title (click to copy) | foundation | [x] |
 | Database picker | Firestore › Data and Rules: the database picker, which a database a client writes to joins | foundation | [x] |
 
@@ -104,8 +104,8 @@ The official files page (`components/Storage/*`).
 | Delete all | Storage › bucket menu › "Empty the bucket…" (the same delete job), and Overview › Data › Reset | storage | [ ] until a journey empties a bucket (the folder-delete journey covers the job path) |
 | Table: name, size, type, modified | Storage › the list: name, size, type, last changed, metadata keys, tokens (and Access as a client); folders first with their figures; sort and filter in the engine; the grid | storage | [x] |
 | Multiple selection | Storage › ticks, Shift ranges, ⌘A, "Select all N" for the whole listing | storage | [x] |
-| Side panel with a preview | Storage › the inspector's Details (every preview kind) and Quick Look | storage | [x] |
-| Location: path, URL, token copy and create | Storage › Details › Location (gs://, path, download URL for the app's address, REST) and Tokens (create, revoke, copy) | storage | [x] |
+| Side panel with a preview | Storage › the inspector's Details and Quick Look: images, video, audio, PDF, text, JSON, CSV and HTML; any other bytes, a zip among them, as hex with what their first bytes say | storage | [x] |
+| Location: path, URL, token copy and create | Storage › Details › Location (gs://, path, the download URL an app connected to the emulator gets, REST) and the row menu's "Copy download URL"; Tokens (create, reveal and copy, revoke) | storage | [x] |
 | Metadata | Storage › Metadata tab (standard fields, one counted Save, the stale-version band) | storage | [x] |
 | Custom metadata | Storage › Metadata tab's custom keys, and metadata for many files at once | storage | [x] |
 
@@ -118,7 +118,7 @@ The official extensions pages (`components/Extensions/*`).
 | Instances table | Extensions › the overview's instances table | compute | [x] |
 | Detail: parameters, a secret shown on demand | Extensions › an instance › Configuration (a secret revealed on request; SecretInput when editing) | compute | [x] |
 | Detail: APIs and resources | Extensions › an instance › Overview (the APIs, emulated or not, and external services) | compute | [x] |
-| Detail: events and their snippet | Extensions › an instance › Events | compute | [x] |
+| Detail: events and their snippet | Extensions › an instance › Events (channel, declared and allowed types, a handler snippet, and how many events it published, opened in Eventarc filtered to the instance) | compute | [x] |
 | Detail: access and roles | Extensions › an instance › Overview (roles) | compute | [x] |
 | Detail: README | Extensions › an instance › How it works (POSTINSTALL, README) | compute | [x] |
 | Detail: related links | Extensions › an instance › Overview (source URL, author) | compute | [x] |

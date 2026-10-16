@@ -171,17 +171,20 @@ dedicated.describe('with engines of their own', () => {
         if (new URL(request.url()).pathname === '/console/api/v1/suite/clear')
           clears.push(request.postDataJSON())
       })
+      // Settings opens the Overview's reset for Authentication, which clears the section.
       await page.goto(`${engine.origin}/console/auth/settings`)
-      await page.getByTestId('data-delete-everything').click()
-      const confirm = page.getByTestId('data-confirm')
-      await expect(confirm).toContainText('Delete every user of every tenant')
-      await expect(confirm).toContainText('No user.delete triggers run')
-      await confirm.getByRole('textbox').fill(engine.project)
-      await confirm.getByRole('button', { name: /^Delete/ }).click()
-      // The dialog says how it ended, and so does the shell's suite toast
-      // (under the dialog, which holds the rest of the page inert).
-      await expect(confirm).toContainText('Done:')
-      await expect(page.getByText('Clear Authentication: done')).toBeVisible()
+      await page.getByTestId('settings-reset').click()
+      await expect(page).toHaveURL(/\/console\/?\?dialog=reset&section=auth$/)
+      const confirm = page.getByTestId('reset-dialog')
+      await expect(confirm).toContainText('Reset Authentication')
+      await expect(confirm).toContainText('Codes and links already issued stay in the inbox.')
+      await confirm.getByRole('button', { name: /^Reset/ }).click()
+      // The dialog closes once the job has started; the reset's progress and
+      // end are said once, on the Overview's own row for Authentication.
+      await expect(confirm).toHaveCount(0)
+      await expect(page.getByTestId('overview-reset-auth')).toContainText('Empty', {
+        timeout: 60_000,
+      })
       expect(clears).toEqual([{ sections: ['auth'] }])
       expect(await usersCount(engine)).toBe(0)
       expect(await usersCount(engine, { tenant: 'acme' })).toBe(0)

@@ -1,7 +1,8 @@
 // A time as people read it in a list — "3 min ago" — with the exact
 // instant a hover away, in local time and in UTC. One shared clock keeps
 // every relative time on screen current (`useNow`): to the second while a
-// time is under an hour old, to the minute after that.
+// time is under an hour old, to the minute after that, and a time renders
+// again only when its words change.
 
 import { Tooltip, cn } from '@cloudflare/kumo'
 import { useNow } from '@/lib/clock'
@@ -37,11 +38,13 @@ export function RelativeTime({
   testId?: string
 }) {
   const then = new Date(iso).getTime()
-  // To the second while the words change every few seconds, to the minute after.
-  const minute = useNow('minute')
-  const recent = Number.isFinite(then) && Math.abs(minute - then) < 3_600_000
-  const now = useNow(recent ? 'second' : 'minute')
-  const text = relativeTime(iso, now)
+  // To the second while the words change every few seconds, to the minute
+  // after; either way the time renders again only when its words change.
+  const recent = useNow(
+    'minute',
+    (minute) => Number.isFinite(then) && Math.abs(minute - then) < 3_600_000,
+  )
+  const text = useNow(recent ? 'second' : 'minute', (now) => relativeTime(iso, now))
   return (
     <Tooltip
       content={exactTime(iso)}

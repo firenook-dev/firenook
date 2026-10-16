@@ -403,11 +403,6 @@ impl EventStore {
             }
         }
     }
-
-    pub(crate) fn clear(&mut self) {
-        self.events.clear();
-        self.retained = 0;
-    }
 }
 
 #[cfg(test)]

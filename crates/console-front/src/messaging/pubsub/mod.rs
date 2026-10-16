@@ -1,14 +1,14 @@
 //! Pub/Sub's console routes, under `/api/v1/pubsub`: the topics index and
 //! details, a topic's history, publishing (at once and as jobs), message
-//! actions, subscriptions with pull, ack and seek, backlogs, deliveries to
-//! functions, snapshots, schemas and their checks, filter checks, schedules,
-//! the setup export and import.
+//! actions, subscriptions with their purge, backlogs, deliveries to
+//! functions, schemas and their checks, filter checks, schedules, the setup
+//! export and import.
 //!
 //! Resource names travel whole (`projects/p/topics/t`) in query strings and
 //! JSON bodies, never as path segments. Every handler first resolves the
 //! late runtime (`503 starting` until Pub/Sub is up). Lists answer a
-//! `Page`; the bounded ones (topics, snapshots, schemas, schedules,
-//! refusals) are one page holding every item. Bodies are read with
+//! `Page`; the bounded ones (topics, schemas, schedules, refusals) are one
+//! page holding every item. Bodies are read with
 //! [`ConsoleJson`]: 64 MiB on the publish, schema and import routes (the
 //! Pub/Sub port's own limit), 1 MiB everywhere else.
 
@@ -23,7 +23,7 @@ pub(crate) mod types;
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
@@ -36,37 +36,30 @@ use firenook_pubsub_front::broker::inspect::{BacklogCursor, MessageQuery};
 use firenook_pubsub_front::broker::{BacklogKey, StoredMessage};
 use firenook_pubsub_front::functions::topic_resource;
 use firenook_pubsub_front::google::pubsub::v1::{
-    DeadLetterPolicy, Encoding, ExpirationPolicy, PubsubMessage, PushConfig, RetryPolicy,
-    SchemaSettings, Subscription, Topic,
+    DeadLetterPolicy, Encoding, ExpirationPolicy, PushConfig, RetryPolicy, SchemaSettings,
+    Subscription, Topic,
 };
 use firenook_pubsub_front::pbjson_types;
 use firenook_pubsub_front::templates::{self, Draft, DraftData};
 use firenook_pubsub_front::{PubsubError, ScheduleControl as _, avro, names};
 use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 
 use self::convert::{Join, Targets};
-use self::errors::{functions_absent, pubsub_error, redeliver_error, schedule_error};
-use self::filters::{MESSAGE_FIELDS, message_query};
+use self::errors::{pubsub_error, redeliver_error, schedule_error};
+use self::filters::message_query;
 use self::types::{
-    PubsubAckBody, PubsubBacklogRow, PubsubBacklogState, PubsubCommitSchemaBody,
-    PubsubCreateSchemaBody, PubsubCreateSnapshotBody, PubsubCreateSubscriptionBody,
-    PubsubCreateTopicBody, PubsubData, PubsubDeleteRevisionBody, PubsubDeleteSubscriptions,
-    PubsubDeleteTopicBody, PubsubDeliveryCounts, PubsubDeliveryPage, PubsubDeliveryRow,
-    PubsubDispatchBody, PubsubFilterCheck, PubsubFilterCheckBody, PubsubFunctionMark,
+    PubsubBacklogRow, PubsubBacklogState, PubsubCommitSchemaBody, PubsubCreateSchemaBody,
+    PubsubCreateSubscriptionBody, PubsubCreateTopicBody, PubsubData, PubsubDeleteSubscriptions,
+    PubsubDeleteTopicBody, PubsubDispatchBody, PubsubFilterCheck, PubsubFilterCheckBody,
     PubsubMessageActionBody, PubsubMessageCheck, PubsubMessageCheckBody, PubsubMessageDetail,
-    PubsubMessageRow, PubsubModifyDeadlineBody, PubsubNameBody, PubsubOutgoingMessage,
-    PubsubPreview, PubsubPublishBody, PubsubPublishResult, PubsubPullBody, PubsubPullResult,
-    PubsubPushConfigBody, PubsubReceived, PubsubRedeliverBody, PubsubRedelivery,
-    PubsubRejectedList, PubsubRollbackSchemaBody, PubsubSchedule, PubsubScheduleBody,
-    PubsubScheduleRun, PubsubSchemaBinding, PubsubSchemaCheck, PubsubSchemaCheckBody,
-    PubsubSchemaDetail, PubsubSchemaEncodeBody, PubsubSchemaEncoded, PubsubSchemaExample,
-    PubsubSchemaExampleBody, PubsubSchemaProblem, PubsubSchemaSummary, PubsubSeekBody,
-    PubsubSeekResult, PubsubSnapshot, PubsubSubscriptionDetail, PubsubSubscriptionSummary,
-    PubsubTopicDetail, PubsubTopicIndex, PubsubTopicSummary, PubsubUpdateSubscriptionBody,
-    PubsubUpdateTopicBody,
+    PubsubMessageRow, PubsubNameBody, PubsubOutgoingMessage, PubsubPreview, PubsubPublishBody,
+    PubsubPublishResult, PubsubPurged, PubsubPushConfigBody, PubsubRedeliverBody, PubsubRedelivery,
+    PubsubRejectedList, PubsubSchedule, PubsubScheduleBody, PubsubScheduleRun, PubsubSchemaBinding,
+    PubsubSchemaCheck, PubsubSchemaCheckBody, PubsubSchemaDetail, PubsubSchemaExample,
+    PubsubSchemaExampleBody, PubsubSchemaProblem, PubsubSchemaSummary, PubsubSubscriptionDetail,
+    PubsubSubscriptionSummary, PubsubTopicDetail, PubsubTopicIndex, PubsubTopicSummary,
+    PubsubUpdateSubscriptionBody, PubsubUpdateTopicBody,
 };
 use super::PubsubConsole;
 use super::shared::{time, u32_of, u64_of};
@@ -77,8 +70,8 @@ use crate::jobs::JobRegistry;
 use crate::json::{BodyLimit, ConsoleJson};
 use crate::late::Late;
 use crate::paging::{
-    BatchGetItem, BatchGetRequest, BatchGetResponse, DEFAULT_LIMIT, ListMeta, MAX_LIMIT, Page,
-    PageBuilder, Total, decode_cursor, encode_cursor, page_of,
+    BatchGetItem, BatchGetRequest, BatchGetResponse, DEFAULT_LIMIT, MAX_LIMIT, Page, PageBuilder,
+    Total, decode_cursor, encode_cursor, page_of,
 };
 use crate::sse::Shutdown;
 
@@ -129,7 +122,6 @@ pub(crate) fn router(api: PubsubApi) -> Router {
         .route("/pubsub/schema/commit", post(commit_schema))
         .route("/pubsub/schema/check", post(check_schema))
         .route("/pubsub/schema/validate-message", post(validate_message))
-        .route("/pubsub/schema/encode", post(encode_schema))
         .route("/pubsub/schema/example", post(example_schema))
         .route("/pubsub/setup/import", post(setup::import))
         .layer(Extension(BodyLimit(LARGE_BODY)));
@@ -140,7 +132,6 @@ pub(crate) fn router(api: PubsubApi) -> Router {
             get(topic_detail).patch(update_topic).delete(delete_topic),
         )
         .route("/pubsub/messages", get(messages))
-        .route("/pubsub/messages/meta", get(messages_meta))
         .route("/pubsub/messages:batchGet", post(messages_batch))
         .route("/pubsub/messages:export", get(export_messages))
         .route("/pubsub/message", get(message_detail))
@@ -157,34 +148,14 @@ pub(crate) fn router(api: PubsubApi) -> Router {
                 .delete(delete_subscription),
         )
         .route("/pubsub/subscription/push-config", post(push_config))
-        .route("/pubsub/subscription/pull", post(pull))
-        .route("/pubsub/subscription/ack", post(acknowledge))
-        .route(
-            "/pubsub/subscription/modify-deadline",
-            post(modify_deadline),
-        )
-        .route("/pubsub/subscription/seek", post(seek))
+        .route("/pubsub/subscription/purge", post(purge))
         .route("/pubsub/backlog", get(backlog))
-        .route("/pubsub/backlog/meta", get(backlog_meta))
         .route("/pubsub/backlog:batchGet", post(backlog_batch))
         .route("/pubsub/backlog:ack", post(jobs::backlog_ack))
         .route("/pubsub/backlog:release", post(jobs::backlog_release))
-        .route("/pubsub/deliveries", get(deliveries))
-        .route("/pubsub/deliveries/meta", get(deliveries_meta))
-        .route("/pubsub/deliveries:batchGet", post(deliveries_batch))
-        .route("/pubsub/snapshots", get(snapshots).post(create_snapshot))
-        .route("/pubsub/snapshots/meta", get(snapshots_meta))
-        .route("/pubsub/snapshot", axum::routing::delete(delete_snapshot))
-        .route("/pubsub/schemas/meta", get(schemas_meta))
         .route("/pubsub/schema", get(schema_detail).delete(delete_schema))
-        .route("/pubsub/schema/rollback", post(rollback_schema))
-        .route(
-            "/pubsub/schema/revision",
-            axum::routing::delete(delete_revision),
-        )
         .route("/pubsub/filter/check", post(check_filter))
         .route("/pubsub/schedules", get(schedules))
-        .route("/pubsub/schedules/meta", get(schedules_meta))
         .route("/pubsub/schedule/run", post(run_schedule))
         .route("/pubsub/schedule/pause", post(pause_schedule))
         .route("/pubsub/schedule/resume", post(resume_schedule))
@@ -288,28 +259,6 @@ pub(crate) struct BacklogScope {
     subscription: String,
     #[serde(default)]
     state: Option<PubsubBacklogState>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct DeliveriesQuery {
-    topic: String,
-    #[serde(default)]
-    function: Option<String>,
-    #[serde(default)]
-    outcome: Option<PubsubFunctionMark>,
-    #[serde(default)]
-    cursor: Option<String>,
-    #[serde(default)]
-    before: Option<String>,
-    #[serde(default)]
-    limit: Option<u32>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct TopicQuery {
-    topic: String,
 }
 
 fn limit_of(limit: Option<u32>) -> usize {
@@ -577,7 +526,7 @@ pub(crate) fn draft(message: &PubsubOutgoingMessage) -> Draft {
 }
 
 /// Message 1 as the publish would send it, or why it would not.
-pub(crate) fn preview(
+fn preview(
     console: &PubsubConsole,
     topic: &str,
     message: &PubsubOutgoingMessage,
@@ -726,14 +675,6 @@ async fn messages(
         )))
     })
     .await
-}
-
-async fn messages_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: Vec::new(),
-        default_sort: "id:desc".to_owned(),
-        fields: MESSAGE_FIELDS.infos(),
-    })
 }
 
 /// The loaded page a row falls in, for a list in descending order: page `i`
@@ -1288,100 +1229,6 @@ async fn push_config(
 }
 
 /// A received message's detail, from the proto message a pull answers.
-fn received_detail(topic: &str, message: &PubsubMessage) -> PubsubMessageDetail {
-    let published_at = message.publish_time.as_ref().map_or(UNIX_EPOCH, |at| {
-        UNIX_EPOCH
-            + Duration::from_secs(u64::try_from(at.seconds).unwrap_or(0))
-            + Duration::from_nanos(u64::try_from(at.nanos).unwrap_or(0))
-    });
-    let stored = StoredMessage {
-        id: message.message_id.parse().unwrap_or(0),
-        size: firenook_pubsub_front::broker::message_size(message),
-        message: message.clone(),
-        published: std::time::Instant::now(),
-        published_at,
-    };
-    convert::message_detail(topic, &stored, false, &[], Vec::new(), Vec::new())
-}
-
-async fn pull(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubPullBody>,
-) -> Answer<PubsubPullResult> {
-    let console = api.console()?;
-    if !(1..=1_000).contains(&body.max) {
-        return Err(ApiError::invalid(format!(
-            "A pull takes 1 to 1,000 messages, not {}.",
-            body.max
-        )));
-    }
-    let broker = console.runtime.broker();
-    let view = broker
-        .subscription_view(&body.subscription)
-        .ok_or_else(subscription_missing)?;
-    let received = broker
-        .pull(&body.subscription, body.max)
-        .map_err(pubsub_error)?;
-    let mut deadline = view.ack_deadline_seconds;
-    if let Some(seconds) = body
-        .ack_deadline_seconds
-        .filter(|seconds| *seconds != view.ack_deadline_seconds)
-        && !received.is_empty()
-    {
-        let ack_ids: Vec<String> = received
-            .iter()
-            .map(|message| message.ack_id.clone())
-            .collect();
-        broker
-            .modify_ack_deadline(&body.subscription, &ack_ids, seconds)
-            .map_err(pubsub_error)?;
-        deadline = seconds;
-    }
-    let lease_expires_at =
-        time(SystemTime::now() + Duration::from_secs(u64::try_from(deadline.max(0)).unwrap_or(0)));
-    let topic = view.summary.topic.clone().unwrap_or_default();
-    Ok(Json(PubsubPullResult {
-        received: received
-            .iter()
-            .filter_map(|received| {
-                let message = received.message.as_ref()?;
-                Some(PubsubReceived {
-                    ack_id: received.ack_id.clone(),
-                    delivery_attempt: received.delivery_attempt,
-                    lease_expires_at: lease_expires_at.clone(),
-                    message: received_detail(&topic, message),
-                })
-            })
-            .collect(),
-    }))
-}
-
-async fn acknowledge(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubAckBody>,
-) -> Result<StatusCode, ApiError> {
-    let console = api.console()?;
-    console
-        .runtime
-        .broker()
-        .acknowledge(&body.subscription, &body.ack_ids)
-        .map_err(pubsub_error)?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-async fn modify_deadline(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubModifyDeadlineBody>,
-) -> Result<StatusCode, ApiError> {
-    let console = api.console()?;
-    console
-        .runtime
-        .broker()
-        .modify_ack_deadline(&body.subscription, &body.ack_ids, body.seconds)
-        .map_err(pubsub_error)?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
 fn timestamp(at: SystemTime) -> pbjson_types::Timestamp {
     let since = at.duration_since(UNIX_EPOCH).unwrap_or_default();
     pbjson_types::Timestamp {
@@ -1390,44 +1237,21 @@ fn timestamp(at: SystemTime) -> pbjson_types::Timestamp {
     }
 }
 
-async fn seek(
+/// Purge: every message waiting at the subscription is acknowledged, as a
+/// seek to now does; what is published after arrives as usual.
+async fn purge(
     State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubSeekBody>,
-) -> Answer<PubsubSeekResult> {
+    ConsoleJson(body): ConsoleJson<PubsubNameBody>,
+) -> Answer<PubsubPurged> {
     let console = api.console()?;
     let broker = console.runtime.broker();
-    let targets = [body.time.is_some(), body.snapshot.is_some(), body.now]
-        .iter()
-        .filter(|set| **set)
-        .count();
-    if targets != 1 {
-        return Err(ApiError::invalid(
-            "A seek names exactly one of time, snapshot or now.",
-        ));
-    }
-    if let Some(snapshot) = &body.snapshot {
-        broker
-            .seek_to_snapshot(&body.subscription, snapshot)
-            .map_err(pubsub_error)?;
-    } else {
-        let at = match &body.time {
-            Some(text) => OffsetDateTime::parse(text, &Rfc3339)
-                .map(SystemTime::from)
-                .map_err(|_| {
-                    ApiError::invalid(format!(
-                        "`{text}` is not a time; write it in RFC 3339, like 2026-10-01T09:00:00Z."
-                    ))
-                })?,
-            None => SystemTime::now(),
-        };
-        broker
-            .seek_to_time(&body.subscription, &timestamp(at))
-            .map_err(pubsub_error)?;
-    }
+    broker
+        .seek_to_time(&body.name, &timestamp(SystemTime::now()))
+        .map_err(pubsub_error)?;
     let counts = broker
-        .subscription_counts(&body.subscription)
+        .subscription_counts(&body.name)
         .ok_or_else(subscription_missing)?;
-    Ok(Json(PubsubSeekResult {
+    Ok(Json(PubsubPurged {
         available: counts.available,
         acked: counts.retained_acked,
     }))
@@ -1502,14 +1326,6 @@ async fn backlog(
     }))
 }
 
-async fn backlog_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: Vec::new(),
-        default_sort: "delivery:asc".to_owned(),
-        fields: Vec::new(),
-    })
-}
-
 async fn backlog_batch(
     State(api): State<PubsubApi>,
     Query(scope): Query<BacklogScope>,
@@ -1562,236 +1378,6 @@ async fn backlog_batch(
     Ok(Json(BatchGetResponse { items }))
 }
 
-// ------------------------------------------------------------ deliveries
-
-/// A deliveries page's cursor: the record's place (newest first).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-struct DeliveryCursor {
-    message: u64,
-    target: usize,
-}
-
-/// Every delivery record of a topic, newest first, joined.
-fn delivery_records(
-    console: &PubsubConsole,
-    topic: &str,
-) -> Result<Vec<(DeliveryCursor, PubsubDeliveryRow)>, ApiError> {
-    let records = console
-        .runtime
-        .broker()
-        .fanouts(topic)
-        .ok_or_else(topic_missing)?;
-    let targets = targets(console);
-    let join = join(
-        console,
-        &targets,
-        records
-            .iter()
-            .flat_map(|(_, fanout)| fanout.targets.iter().map(|target| target.event_id.as_str())),
-    );
-    let mut rows = Vec::new();
-    for (message, fanout) in &records {
-        for (index, target) in fanout.targets.iter().enumerate().rev() {
-            rows.push((
-                DeliveryCursor {
-                    message: message.id,
-                    target: index,
-                },
-                join.row(topic, message, fanout, target),
-            ));
-        }
-    }
-    Ok(rows)
-}
-
-fn count_marks(rows: &[(DeliveryCursor, PubsubDeliveryRow)]) -> PubsubDeliveryCounts {
-    let mut counts = PubsubDeliveryCounts::default();
-    for (_, row) in rows {
-        counts.all += 1;
-        match row.mark {
-            PubsubFunctionMark::Queued => counts.queued += 1,
-            PubsubFunctionMark::Running => counts.running += 1,
-            PubsubFunctionMark::Delivered => counts.delivered += 1,
-            PubsubFunctionMark::Failed => counts.failed += 1,
-            PubsubFunctionMark::Skipped => counts.skipped += 1,
-            // Its outcome is unknown, not a failure: only `all` counts it.
-            PubsubFunctionMark::NotKept => {}
-        }
-    }
-    counts
-}
-
-/// Whether a record sorts after (older than) a cursor.
-fn older(cursor: DeliveryCursor, than: DeliveryCursor) -> bool {
-    (cursor.message, cursor.target) < (than.message, than.target)
-}
-
-async fn deliveries(
-    State(api): State<PubsubApi>,
-    Query(query): Query<DeliveriesQuery>,
-) -> Answer<PubsubDeliveryPage> {
-    let console = api.console()?;
-    if console.monitor.is_none() {
-        return Err(functions_absent());
-    }
-    let (after, before) =
-        cursors::<DeliveryCursor>(query.cursor.as_deref(), query.before.as_deref())?;
-    let limit = limit_of(query.limit);
-    blocking("the deliveries page", move || {
-        let mut rows = delivery_records(&console, &query.topic)?;
-        if let Some(function) = &query.function {
-            rows.retain(|(_, row)| &row.function_id == function);
-        }
-        let counts = count_marks(&rows);
-        if let Some(outcome) = query.outcome {
-            rows.retain(|(_, row)| row.mark == outcome);
-        }
-        let total = u64_of(rows.len());
-        let (start, end) = match (after, before) {
-            (_, Some(before)) => {
-                // Rows newer than the page below's first.
-                let end = rows.partition_point(|(cursor, _)| older(before, *cursor));
-                (end.saturating_sub(limit), end)
-            }
-            (Some(after), None) => {
-                // Rows older than the page above's last.
-                let start = rows.partition_point(|(cursor, _)| !older(*cursor, after));
-                (start, (start + limit).min(rows.len()))
-            }
-            (None, None) => (0, limit.min(rows.len())),
-        };
-        let length = rows.len();
-        let mut builder = PageBuilder::new(limit);
-        let mut taken = start;
-        for (cursor, row) in rows.drain(start..end) {
-            if !builder.push(row, cursor) {
-                break;
-            }
-            taken += 1;
-        }
-        Ok(Json(PubsubDeliveryPage {
-            page: builder.finish(
-                taken < length,
-                start > 0,
-                Some(Total {
-                    count: total,
-                    exact: true,
-                }),
-                None,
-            ),
-            counts,
-        }))
-    })
-    .await
-}
-
-async fn deliveries_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: Vec::new(),
-        default_sort: "publishedAt:desc".to_owned(),
-        fields: Vec::new(),
-    })
-}
-
-async fn deliveries_batch(
-    State(api): State<PubsubApi>,
-    Query(scope): Query<TopicQuery>,
-    ConsoleJson(request): ConsoleJson<BatchGetRequest>,
-) -> Answer<BatchGetResponse<PubsubDeliveryRow>> {
-    request.check()?;
-    let console = api.console()?;
-    if console.monitor.is_none() {
-        return Err(functions_absent());
-    }
-    let (starts, end) = request.window::<DeliveryCursor>()?;
-    let rows = delivery_records(&console, &scope.topic)?;
-    let by_event: HashMap<&str, (DeliveryCursor, &PubsubDeliveryRow)> = rows
-        .iter()
-        .map(|(cursor, row)| (row.event_id.as_str(), (*cursor, row)))
-        .collect();
-    let items = request
-        .keys
-        .iter()
-        .map(|key| {
-            let found = by_event.get(key.as_str());
-            let page = found.and_then(|(cursor, _)| {
-                let position = starts
-                    .iter()
-                    .rposition(|start| start.is_none_or(|start| !older(start, *cursor)))?;
-                if position + 1 == starts.len() && end.is_some_and(|end| older(*cursor, end)) {
-                    return None;
-                }
-                Some(u32_of(position))
-            });
-            BatchGetItem {
-                key: key.clone(),
-                row: found.map(|(_, row)| (*row).clone()),
-                page,
-            }
-        })
-        .collect();
-    Ok(Json(BatchGetResponse { items }))
-}
-
-// ------------------------------------------------------------ snapshots
-
-async fn snapshots(
-    State(api): State<PubsubApi>,
-    Query(query): Query<ProjectQuery>,
-) -> Answer<Page<PubsubSnapshot>> {
-    let console = api.console()?;
-    let project = api.project(query.project.as_deref());
-    Ok(Json(whole(
-        console
-            .runtime
-            .broker()
-            .snapshots_view(&project)
-            .iter()
-            .map(convert::snapshot)
-            .collect(),
-    )))
-}
-
-async fn snapshots_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: Vec::new(),
-        default_sort: "name:asc".to_owned(),
-        fields: Vec::new(),
-    })
-}
-
-async fn create_snapshot(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubCreateSnapshotBody>,
-) -> Result<Response, ApiError> {
-    let console = api.console()?;
-    let broker = console.runtime.broker();
-    broker
-        .create_snapshot(&body.name, &body.subscription, BTreeMap::new())
-        .map_err(pubsub_error)?;
-    let parsed = names::parse("snapshots", &body.name).map_err(pubsub_error)?;
-    let snapshot = broker
-        .snapshots_view(&parsed.project)
-        .iter()
-        .find(|snapshot| snapshot.name == body.name)
-        .map(convert::snapshot)
-        .ok_or_else(|| ApiError::internal("The snapshot was created but cannot be read."))?;
-    Ok((StatusCode::CREATED, Json(snapshot)).into_response())
-}
-
-async fn delete_snapshot(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubNameBody>,
-) -> Result<StatusCode, ApiError> {
-    let console = api.console()?;
-    console
-        .runtime
-        .broker()
-        .delete_snapshot(&body.name)
-        .map_err(pubsub_error)?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
 // ------------------------------------------------------------ schemas
 
 async fn list_schemas(
@@ -1809,14 +1395,6 @@ async fn list_schemas(
             .map(convert::schema_summary)
             .collect(),
     )))
-}
-
-async fn schemas_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: Vec::new(),
-        default_sort: "name:asc".to_owned(),
-        fields: Vec::new(),
-    })
 }
 
 fn schema_detail_of(console: &PubsubConsole, name: &str) -> Result<PubsubSchemaDetail, ApiError> {
@@ -1914,32 +1492,6 @@ async fn commit_schema(
     Ok(Json(schema_detail_of(&console, &body.name)?))
 }
 
-async fn rollback_schema(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubRollbackSchemaBody>,
-) -> Answer<PubsubSchemaDetail> {
-    let console = api.console()?;
-    console
-        .runtime
-        .broker()
-        .rollback_schema(&body.name, &body.revision_id)
-        .map_err(pubsub_error)?;
-    Ok(Json(schema_detail_of(&console, &body.name)?))
-}
-
-async fn delete_revision(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubDeleteRevisionBody>,
-) -> Answer<PubsubSchemaDetail> {
-    let console = api.console()?;
-    console
-        .runtime
-        .broker()
-        .delete_schema_revision(&format!("{}@{}", body.name, body.revision))
-        .map_err(pubsub_error)?;
-    Ok(Json(schema_detail_of(&console, &body.name)?))
-}
-
 async fn delete_schema(
     State(api): State<PubsubApi>,
     ConsoleJson(body): ConsoleJson<PubsubNameBody>,
@@ -2005,30 +1557,16 @@ async fn validate_message(
     let encoding = encoding(&body.encoding)?;
     let bytes = data_bytes(&body.data)?;
     let broker = console.runtime.broker();
-    let (name, schema) = match (&body.schema, &body.definition) {
-        (Some(name), _) if !name.is_empty() => (Some(name.as_str()), None),
-        (_, Some(definition)) => (
-            None,
-            Some(firenook_pubsub_front::google::pubsub::v1::Schema {
-                r#type: firenook_pubsub_front::google::pubsub::v1::schema::Type::Avro as i32,
-                definition: definition.clone(),
-                ..Default::default()
-            }),
-        ),
-        _ => {
-            return Err(ApiError::invalid(
-                "Name a schema (optionally name@revision) or send a definition.",
-            ));
-        }
-    };
-    let engine = broker.validate_message(name, schema, &bytes, encoding);
+    if body.schema.is_empty() {
+        return Err(ApiError::invalid(
+            "Name a schema, optionally as name@revision.",
+        ));
+    }
+    let engine = broker.validate_message(Some(&body.schema), None, &bytes, encoding);
     let explained = if encoding == Encoding::Json && engine.is_err() {
-        let parsed = match (&body.schema, &body.definition) {
-            (Some(name), _) if !name.is_empty() => broker.schema_revision(name),
-            (_, Some(definition)) => avro::parse_definition(definition).ok().map(Arc::new),
-            _ => None,
-        };
-        parsed.and_then(|schema| avro::explain_json(&schema, &bytes).err().map(problem))
+        broker
+            .schema_revision(&body.schema)
+            .and_then(|schema| avro::explain_json(&schema, &bytes).err().map(problem))
     } else {
         None
     };
@@ -2047,44 +1585,13 @@ async fn validate_message(
     }
 }
 
-async fn encode_schema(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubSchemaEncodeBody>,
-) -> Answer<PubsubSchemaEncoded> {
-    let console = api.console()?;
-    let (schema, _) = console
-        .runtime
-        .broker()
-        .topic_schema(&body.topic)
-        .ok_or_else(|| {
-            ApiError::precondition("The topic has no schema bound, so there is nothing to encode.")
-                .with_fix("Bind a schema in the topic's settings, or publish the JSON as JSON.")
-        })?;
-    Ok(Json(
-        match avro::encode_json(&schema, body.json.as_bytes()) {
-            Ok(bytes) => PubsubSchemaEncoded {
-                base64: Some(BASE64.encode(bytes)),
-                problem: None,
-            },
-            Err(found) => PubsubSchemaEncoded {
-                base64: None,
-                problem: Some(problem(found)),
-            },
-        },
-    ))
-}
-
 async fn example_schema(
     State(api): State<PubsubApi>,
     ConsoleJson(body): ConsoleJson<PubsubSchemaExampleBody>,
 ) -> Answer<PubsubSchemaExample> {
     let console = api.console()?;
     let broker = console.runtime.broker();
-    let schema = if let Some(name) = body.schema.as_deref().filter(|name| !name.is_empty()) {
-        broker
-            .schema_revision(name)
-            .ok_or_else(|| pubsub_error(PubsubError::not_found("Schema not found")))?
-    } else if let Some(topic) = body.topic.as_deref().filter(|topic| !topic.is_empty()) {
+    let schema = if let Some(topic) = body.topic.as_deref().filter(|topic| !topic.is_empty()) {
         broker
             .topic_schema(topic)
             .map(|(schema, _)| schema)
@@ -2106,9 +1613,7 @@ async fn example_schema(
             }
         }
     } else {
-        return Err(ApiError::invalid(
-            "Name a schema, a topic, or send a definition.",
-        ));
+        return Err(ApiError::invalid("Name a topic, or send a definition."));
     };
     Ok(Json(match avro::example_json(&schema) {
         Ok(json) => PubsubSchemaExample {
@@ -2256,14 +1761,6 @@ async fn schedules(
     .await
 }
 
-async fn schedules_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: Vec::new(),
-        default_sort: "nextRunAt:asc".to_owned(),
-        fields: Vec::new(),
-    })
-}
-
 fn schedule_of(console: &PubsubConsole, function_id: &str) -> Result<PubsubSchedule, ApiError> {
     schedule_list(console)
         .into_iter()
@@ -2338,7 +1835,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
         types::PubsubSubscriptionDetail,
         types::PubsubMessageRow,
         types::PubsubMessageDetail,
-        types::PubsubDeliveryPage,
         types::PubsubDispatchBody,
         types::PubsubRedelivery,
         types::PubsubRedeliverBody,
@@ -2355,28 +1851,17 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
         types::PubsubUpdateSubscriptionBody,
         types::PubsubNameBody,
         types::PubsubPushConfigBody,
-        types::PubsubPullBody,
-        types::PubsubPullResult,
-        types::PubsubAckBody,
-        types::PubsubModifyDeadlineBody,
         types::PubsubMessageActionBody,
-        types::PubsubSeekBody,
-        types::PubsubSeekResult,
+        types::PubsubPurged,
         types::PubsubBacklogJobBody,
-        types::PubsubSnapshot,
-        types::PubsubCreateSnapshotBody,
         types::PubsubSchemaSummary,
         types::PubsubSchemaDetail,
         types::PubsubCreateSchemaBody,
         types::PubsubCommitSchemaBody,
-        types::PubsubRollbackSchemaBody,
-        types::PubsubDeleteRevisionBody,
         types::PubsubSchemaCheckBody,
         types::PubsubSchemaCheck,
         types::PubsubMessageCheckBody,
         types::PubsubMessageCheck,
-        types::PubsubSchemaEncodeBody,
-        types::PubsubSchemaEncoded,
         types::PubsubSchemaExampleBody,
         types::PubsubSchemaExample,
         types::PubsubFilterCheckBody,
@@ -2391,7 +1876,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
         types::PubsubRejectedChanged,
         types::PubsubPublished,
         types::PubsubStale,
-        types::PubsubDeliveriesChanged,
         types::PubsubSchedulesFrame,
         types::PubsubScheduleState,
         types::PubsubPushAttempts,

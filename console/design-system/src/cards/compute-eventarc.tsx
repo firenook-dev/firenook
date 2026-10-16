@@ -274,11 +274,7 @@ function ChannelFlowCard() {
         note="Publishers with the types they may publish and the ones they only declare; subscribers with the type and filters; what does not line up, one line each underneath."
       >
         <div className="rounded-lg bg-kumo-base ring ring-kumo-line">
-          <ChannelFlow
-            channel={CHANNEL}
-            warnings={channelWarnings(CHANNEL, [CHANNEL])}
-            current={false}
-          />
+          <ChannelFlow channel={CHANNEL} warnings={channelWarnings(CHANNEL, [CHANNEL])} />
         </div>
       </Section>
     </Kit>

@@ -67,6 +67,27 @@ describe('saving a file', () => {
     expect(clicks).toHaveLength(0)
   })
 
+  it('saves a Blob the page built as it is, without asking for a file', async () => {
+    const picker = vi.fn()
+    ;(window as unknown as { showSaveFilePicker: unknown }).showSaveFilePicker = picker
+    const { clicks } = watchClicks()
+    const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:console/2')
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    vi.useFakeTimers()
+    try {
+      await download(new Blob(['it("passes")'], { type: 'text/typescript' }), 'rules.test.ts')
+      expect(picker).not.toHaveBeenCalled()
+      expect(create).toHaveBeenCalledTimes(1)
+      expect(clicks).toEqual([
+        { href: 'blob:console/2', download: 'rules.test.ts', attached: true },
+      ])
+      vi.runAllTimers()
+      expect(revoke).toHaveBeenCalledWith('blob:console/2')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('falls back to a Blob where the browser has no file picker', async () => {
     const { clicks } = watchClicks()
     const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:console/1')

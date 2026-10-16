@@ -7,7 +7,6 @@
 // The answer is read as the foundation's client reads it: `idToken` and
 // `expiresAt`, plus what Auth's own surfaces show.
 
-import type { AuthMintedToken } from '@/api/generated/auth/AuthMintedToken'
 import type { AuthTokenRequest } from '@/api/generated/auth/AuthTokenRequest'
 
 /** The second factor a token carries: the account's default, none, or one enrolled factor. */
@@ -37,15 +36,6 @@ export function tokenRequest(choice: TokenChoice): AuthTokenRequest {
     request.secondFactor = { kind: 'enrollment', id: choice.secondFactor.enrollment }
   if (choice.runBeforeSignIn) request.runBeforeSignIn = true
   return request
-}
-
-/** The ID token and when it stops being accepted, as the foundation's client reads a mint. */
-export function mintedToken(answer: Pick<AuthMintedToken, 'idToken' | 'expiresAt'>): {
-  idToken: string
-  expiresAt: number
-} {
-  const at = Date.parse(answer.expiresAt)
-  return { idToken: answer.idToken, expiresAt: Number.isNaN(at) ? 0 : at }
 }
 
 /** `Authorization: Bearer <token>` as an app sends it. */

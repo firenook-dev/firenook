@@ -11,6 +11,7 @@ import type { FunctionNotLoaded } from '@/api/generated/compute/FunctionNotLoade
 import type { FunctionStatus } from '@/api/generated/compute/FunctionStatus'
 import type { FunctionSummary } from '@/api/generated/compute/FunctionSummary'
 import type { FunctionTrigger } from '@/api/generated/compute/FunctionTrigger'
+import { describeSchedule } from './schedule-text'
 
 /** The last segment of a resource name: `projects/p/topics/emails` → `emails`. */
 export function lastSegment(name: string): string {
@@ -80,9 +81,12 @@ function filterText(filters: Readonly<Record<string, string>>, skip: readonly st
     .join(' ')
 }
 
+/** The expression, in words beside it when it is cron: `0 3 * * * (every day at 03:00) · America/New_York`. */
 function scheduleText(trigger: FunctionTrigger): string {
   const expression = trigger.schedule ?? 'a schedule'
-  return trigger.timeZone ? `${expression} · ${trigger.timeZone}` : expression
+  const words = trigger.schedule ? describeSchedule(trigger.schedule) : undefined
+  const said = words && words !== expression ? `${expression} (${words})` : expression
+  return trigger.timeZone ? `${said} · ${trigger.timeZone}` : said
 }
 
 /**
@@ -162,10 +166,14 @@ export function triggerSentence(
       return `Runs when an Authentication user is ${changeWord(trigger.eventType) ?? 'changed'}`
     case 'pubsub':
       return `Runs for each message published to \`${trigger.topic ? lastSegment(trigger.topic) : ''}\``
-    case 'schedule':
-      return trigger.timeZone
-        ? `Runs \`${trigger.schedule ?? ''}\` in \`${trigger.timeZone}\``
-        : `Runs \`${trigger.schedule ?? ''}\``
+    case 'schedule': {
+      const words = trigger.schedule ? describeSchedule(trigger.schedule) : undefined
+      const said =
+        words && words !== trigger.schedule
+          ? `\`${trigger.schedule ?? ''}\` (${words})`
+          : `\`${trigger.schedule ?? ''}\``
+      return trigger.timeZone ? `Runs ${said} in \`${trigger.timeZone}\`` : `Runs ${said}`
+    }
     case 'eventarc': {
       const filters = filterText(trigger.filters, [])
       const base = `Runs for \`${trigger.eventType ?? ''}\` events on \`${channelName(trigger.channel) ?? 'the default channel'}\``

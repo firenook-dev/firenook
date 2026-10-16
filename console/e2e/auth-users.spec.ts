@@ -29,8 +29,8 @@ import { cutRings, paintOf, paintedAtItsOwnCentre } from './support/look'
 
 // Authentication › Users against the real engine (auth spec §9.3, U1–U16):
 // the table, its filter and facets, live rows, the inspector and its
-// claims, creating users, bulk jobs, import and export, sample users at
-// scale, sign in as, another project, the keyboard and the look. Journeys
+// claims, creating users, bulk jobs, import and export, sample users and
+// ten thousand rows, sign in as, another project, the keyboard and the look. Journeys
 // that make many users, delete in bulk, import or count work in a scratch
 // tenant they delete at the end; users made in the project scope are on
 // `journey.test` and deleted at the end; the seeded people are only read.
@@ -327,7 +327,7 @@ test('U5 the inspector opens from a row and follows the keyboard', async ({ page
   expect(await readClipboard(page)).toBe(firstUid)
 
   // Its tabs, each in the address.
-  for (const tab of ['Claims', 'Activity', 'Raw'] as const) {
+  for (const tab of ['Claims', 'Raw'] as const) {
     await inspector(page)
       .getByRole('tab', { name: new RegExp(`^${tab}`) })
       .click()
@@ -335,6 +335,19 @@ test('U5 the inspector opens from a row and follows the keyboard', async ({ page
   }
   await inspector(page).getByRole('tab', { name: 'Details' }).click()
   await expect(page).not.toHaveURL(/tab=/)
+
+  // The user as code, in the console's dialects and an accounts.json entry.
+  await inspector(page).getByTestId('user-code').click()
+  const code = page.getByTestId('user-code-popover')
+  await expect(code.getByRole('tab')).toHaveText([
+    'Admin (Node.js)',
+    'Python',
+    'REST (curl)',
+    'accounts.json entry',
+  ])
+  await expect(code).toContainText(firstUid ?? '')
+  await page.keyboard.press('Escape')
+  await expect(code).toBeHidden()
 
   // Ages say the instant in a tooltip.
   await inspector(page).getByTestId('user-created').hover()
@@ -352,6 +365,16 @@ test('U5 the inspector opens from a row and follows the keyboard', async ({ page
   await page.keyboard.press('ArrowDown')
   await expect(page).toHaveURL(new RegExp(`user=${encodeURIComponent(secondUid ?? '')}`))
   await expect(inspector(page)).toContainText(secondUid ?? '')
+
+  // Its calls and its messages are a link away, filtered to it.
+  await expect(inspector(page).getByTestId('user-messages')).toHaveAttribute(
+    'href',
+    /\/console\/auth\/inbox\?.*q=uid%3A/,
+  )
+  await inspector(page).getByTestId('user-calls').click()
+  await expect(page).toHaveURL(/\/console\/auth\/activity\?.*q=uid%3A/)
+  await expect(page.getByTestId('auth-activity')).toBeVisible()
+  expect(new URL(page.url()).searchParams.get('q')).toBe(`uid:${secondUid ?? ''}`)
 })
 
 test('U6 an edit keeps its draft through a sign-in, and a real change raises a banner', async ({
@@ -392,7 +415,7 @@ test('U6 an edit keeps its draft through a sign-in, and a real change raises a b
   }
 })
 
-test('U7 the claims editor checks as Firebase does and shows where rules read each claim', async ({
+test('U7 the claims editor checks as Firebase does, and the saved claims reach the rules', async ({
   page,
   engine,
 }) => {
@@ -436,17 +459,9 @@ test('U7 the claims editor checks as Firebase does and shows where rules read ea
     await pasteInto(page, editor, '{"email": "x", "admin": true}')
     await expect(editor.locator('.cm-lintRange-warning')).toHaveText('"email"')
 
-    // Saved: the rules read admin at the line the engine reports.
+    // Saved, with the token they produce on screen first.
     await pasteInto(page, editor, '{"admin": true}')
-    const reads = inspector(page).getByTestId('claim-read').filter({ hasText: 'admin' })
-    await expect(reads.getByTestId('claim-read-line')).toHaveText(String(rule.line))
-    const document = await consoleJson<{ claimReads: { key: string | null; line: number }[] }>(
-      engine,
-      '/firestore/rules?database=(default)',
-    )
-    expect(document.claimReads).toContainEqual(
-      expect.objectContaining({ key: 'admin', line: rule.line }),
-    )
+    await expect(inspector(page).getByTestId('token-preview-tree')).toContainText('admin')
     await expect(save).toBeEnabled()
     await save.click()
     await expect
@@ -462,20 +477,6 @@ test('U7 the claims editor checks as Firebase does and shows where rules read ea
     await expect(page.getByTestId('inspector').getByLabel('secret value')).toHaveValue(
       'only admins read this',
     )
-
-    // "Read by your rules · line N" opens the rules page at that line, which
-    // is revealed and marked once and then leaves the address.
-    await page.goto(users(engine, { user: user.localId, tab: 'claims' }))
-    await inspector(page)
-      .getByTestId('claim-read')
-      .filter({ hasText: 'admin' })
-      .getByTestId('claim-read-line')
-      .click()
-    await expect(page).toHaveURL(/\/console\/firestore\/rules/)
-    const ruleLines = page.getByTestId('rules-source').locator('.cm-line')
-    await expect(ruleLines.nth(rule.line - 1)).toHaveClass(/cm-line-focus/)
-    await expect(page.locator('.cm-lineNumbers .cm-activeLineGutter')).toHaveText(String(rule.line))
-    await expect(page).not.toHaveURL(/line=/)
   } finally {
     await deleteAccounts(engine, [user.localId])
     await rule.restore()
@@ -667,6 +668,20 @@ test('U10 bulk changes are engine jobs that re-attach after a reload and stop on
     expect(finished.state).toBe('done')
     expect(await usersCount(engine, { tenant, q: 'claim:cohort' })).toBe(20_000)
 
+    // A change that destroys nothing asks with the engine's numbers, and its
+    // button is the primary one, without the bin; Cancel sends nothing.
+    await rows(page).first().getByRole('checkbox').click()
+    await page.getByTestId('select-everything').click()
+    await page.getByTestId('bulk-verify').click()
+    const verify = page.getByTestId('bulk-confirm')
+    await expect(verify).toContainText('Mark 20,000 users as verified')
+    await expect(page.getByTestId('bulk-confirm-confirm')).toHaveText(
+      'Mark 20,000 users as verified',
+    )
+    await expect(page.getByTestId('bulk-confirm-confirm').locator('svg')).toHaveCount(0)
+    await page.getByTestId('bulk-confirm-cancel').click()
+    await expect(verify).toBeHidden()
+
     // Delete every match: the functions it runs, the number typed, then
     // Cancel while it runs: the chunks done stay deleted.
     await page.goto(users(engine, { tenant }))
@@ -799,7 +814,7 @@ test('U11 an export loads back with one upload and a small import request', asyn
   })
 })
 
-test('U12 ten thousand sample users scroll smoothly and leave with Delete sample users', async ({
+test('U12 sample users come a thousand at most, ten thousand scroll smoothly, and Delete sample users takes them', async ({
   page,
   engine,
 }) => {
@@ -809,11 +824,15 @@ test('U12 ten thousand sample users scroll smoothly and leave with Delete sample
     await page.goto(users(engine, { tenant, new: 'sample' }))
     const sample = page.getByTestId('sample-users-dialog')
     await sample.getByRole('combobox', { name: 'How many sample users' }).click()
-    await page.getByRole('option', { name: '10,000' }).click()
+    await expect(page.getByRole('option')).toHaveText(['10', '100', '1,000'])
+    await page.getByRole('option', { name: '1,000' }).click()
     await sample.getByTestId('sample-go').click()
     await expect(sample.getByTestId('sample-show')).toBeVisible({ timeout: 120_000 })
     await sample.getByTestId('sample-show').click()
     await expect(page).toHaveURL(/q=is%3Asample/)
+    expect(await usersCount(engine, { tenant, q: 'is:sample' })).toBe(1_000)
+    // Nine thousand more of the same shape, as the Admin SDK would make them.
+    await batchCreate(engine, sampleShaped(9_000, 12), tenant)
     expect(await usersCount(engine, { tenant })).toBe(10_000)
     await expect(countText(page)).toHaveText('10,000 users')
 
@@ -830,7 +849,16 @@ test('U12 ten thousand sample users scroll smoothly and leave with Delete sample
     })
     pages.stop()
     expect(pages.seen.length, 'pages read while scrolling').toBeGreaterThan(0)
-    expect(p95(frames), `p95 frame over ${frames.length} frames`).toBeLessThanOrEqual(25)
+    // A frame budget measures the machine as much as the page (a CI runner
+    // paints in software): held on an opted-in perf run, as the @perf
+    // journeys are, and recorded on every run.
+    const frame = p95(frames)
+    test.info().annotations.push({
+      type: 'frame p95',
+      description: `${frame.toFixed(1)} ms over ${frames.length} frames`,
+    })
+    if (process.env.FIRENOOK_PERF === '1')
+      expect(frame, `p95 frame over ${frames.length} frames`).toBeLessThanOrEqual(25)
     expect(await rows(page).count()).toBeLessThanOrEqual(80)
 
     // Then to the end, a page of rows at a time: never more than the view's

@@ -3,9 +3,13 @@
 // Run, Enqueue, Test), Trigger, Environment — written to the URL's `tab`,
 // over the function's detail. Its width is remembered under
 // `functions.function`; Escape and × close it.
+//
+// It is about half of the section's code (six run forms, the request
+// composer, the trigger explanations, the environment), so the workbench
+// loads this module only once a function is open (`lazy-inspector.ts`): the
+// overview and Invocations never download it.
 
 import { useQuery } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
 import type { FunctionDetail } from '@/api/generated/compute/FunctionDetail'
 import type { FunctionSummary } from '@/api/generated/compute/FunctionSummary'
 import { QueryError } from '@/components/console/empty-state'
@@ -34,6 +38,15 @@ export function inspectorTabs(
   ]
 }
 
+/** What the Run tab needs besides the function's detail. */
+export interface RunTabOptions {
+  /** The function's URL as apps reach it, for kinds that answer on one. */
+  url: string | undefined
+  prefill?: string | undefined
+  onPrefilled: () => void
+  onOpenInvocation: (id: string) => void
+}
+
 export function RunSidePanel({
   project,
   summary,
@@ -47,8 +60,8 @@ export function RunSidePanel({
   tab: FunctionTab
   onTab: (tab: FunctionTab) => void
   onClose: () => void
-  /** The Run tab's contents, given the function's detail; absent: no Run tab. */
-  run?: ((detail: FunctionDetail) => ReactNode) | undefined
+  /** The Run tab, with what it needs; absent: no Run tab. */
+  run?: RunTabOptions | undefined
 }) {
   const detail = useQuery({ ...functionDetailQuery(project, summary.id), enabled: project !== '' })
   const tabs = inspectorTabs(summary, run !== undefined)
@@ -75,7 +88,7 @@ export function RunSidePanel({
       ) : !detail.data ? (
         <div aria-busy className="min-h-0 flex-1" />
       ) : shown === 'run' && run ? (
-        run(detail.data)
+        <RunTab project={project} detail={detail.data} {...run} />
       ) : shown === 'environment' ? (
         <EnvironmentTab detail={detail.data} project={project} />
       ) : (
@@ -86,22 +99,14 @@ export function RunSidePanel({
 }
 
 /** The Run tab: the form the function's kind takes. */
-export function RunTab({
+function RunTab({
   project,
   detail,
   url,
   prefill,
   onPrefilled,
   onOpenInvocation,
-}: {
-  project: string
-  detail: FunctionDetail
-  /** The function's URL as apps reach it, for kinds that answer on one. */
-  url: string | undefined
-  prefill?: string | undefined
-  onPrefilled: () => void
-  onOpenInvocation: (id: string) => void
-}) {
+}: { project: string; detail: FunctionDetail } & RunTabOptions) {
   const form = runForm(detail.summary.kind)
   const common = { project, detail, onOpenInvocation }
   if (form === 'event') return <EventForm {...common} prefill={prefill} onPrefilled={onPrefilled} />

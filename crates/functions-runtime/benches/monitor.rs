@@ -6,7 +6,9 @@
 //! ring does it), `begin` for a 4 MiB body (only its first 256 KiB are
 //! kept), and routing a worker's log line by its execution id, plain and
 //! structured. Criterion reports the numbers; after it, each path is timed
-//! again and the run fails when one breaches its budget.
+//! again and the run fails when one breaches its budget (under `cargo
+//! bench` only: `cargo test` runs the binary once, unoptimized, as a smoke
+//! test).
 //!
 //! The budgets sit about ten times above what a development machine
 //! measures while other work runs on it (a round trip with the sink about
@@ -297,5 +299,10 @@ fn enforce_budgets() {
 fn main() {
     monitor_benches();
     Criterion::default().configure_from_args().final_summary();
-    enforce_budgets();
+    // `cargo test --all-targets` runs this binary once as a smoke test, in an
+    // unoptimized build: the budgets are for `cargo bench`, which passes
+    // `--bench`.
+    if std::env::args().any(|argument| argument == "--bench") {
+        enforce_budgets();
+    }
 }

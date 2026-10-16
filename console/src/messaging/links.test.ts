@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { pubsub } from '@/lib/sections/pubsub'
-import { tasks } from '@/lib/sections/tasks'
+import { pubsubActions } from '@/lib/sections/pubsub-actions'
+import { tasks, tasksQueueLink } from '@/lib/sections/tasks'
+import { tasksActions } from '@/lib/sections/tasks-actions'
 import {
   messageSearch,
   queueSearch,
@@ -40,10 +42,10 @@ describe('where Pub/Sub things open (U-19)', () => {
     })
   })
 
-  it('a schedule by its function id on the Schedules page', () => {
+  it('a schedule by its function id on its Schedule tab in Functions', () => {
     expect(route(pubsub, 'pubsub.schedule', 'us-central1-nightlyCleanup')).toEqual({
-      to: '/pubsub/schedules',
-      search: { schedule: 'us-central1-nightlyCleanup' },
+      to: '/functions',
+      search: { function: 'us-central1-nightlyCleanup', tab: 'run' },
     })
   })
 
@@ -69,7 +71,7 @@ describe('where Pub/Sub things open (U-19)', () => {
       to: '/pubsub',
     })
     expect(messageSearch('|12')).toEqual({})
-    expect(route(pubsub, 'pubsub.schedule', '')).toEqual({ to: '/pubsub/schedules' })
+    expect(route(pubsub, 'pubsub.schedule', '')).toEqual({ to: '/functions' })
   })
 
   it('reads back what it wrote: an id under the page project, or a whole name', () => {
@@ -113,6 +115,20 @@ describe('where Cloud Tasks things open (U-19)', () => {
     })
   })
 
+  it('another section opens a queue’s Configuration or its Enqueue dialog', () => {
+    const key = 'demo-console|us-central1|processOrder'
+    const queue = { project: 'demo-console', queue: 'processOrder', location: 'us-central1' }
+    expect(tasksQueueLink(key, 'config')).toEqual({
+      to: '/tasks',
+      search: { ...queue, view: 'config' },
+    })
+    expect(tasksQueueLink(key, 'enqueue')).toEqual({
+      to: '/tasks',
+      search: { ...queue, new: 'task' },
+    })
+    expect(tasksQueueLink('processOrder', 'enqueue')).toEqual({ to: '/tasks' })
+  })
+
   it('a malformed key opens the section root', () => {
     expect(route(tasks, 'tasks.queue', 'processOrder')).toEqual({ to: '/tasks' })
     expect(route(tasks, 'tasks.queue', 'demo|us-central1|')).toEqual({ to: '/tasks' })
@@ -126,12 +142,6 @@ describe('where Cloud Tasks things open (U-19)', () => {
 })
 
 describe('the registries', () => {
-  it('stay behind their placeholders until their journeys pass', () => {
-    // Pub/Sub's journeys pass (pubsub*.spec.ts); so do Cloud Tasks' (tasks*.spec.ts).
-    expect(pubsub.built).toBe(true)
-    expect(tasks.built).toBe(true)
-  })
-
   it('label every kind they route, and route every kind they label', () => {
     for (const section of [pubsub, tasks])
       expect(Object.keys(section.searchLabels ?? {}).toSorted()).toEqual(
@@ -140,13 +150,13 @@ describe('the registries', () => {
   })
 
   it('open dialogs from their actions with the shared parameters', () => {
-    expect(pubsub.actions?.map((action) => action.link)).toEqual([
+    expect(pubsubActions.map((action) => action.link)).toEqual([
       { to: '/pubsub', search: { new: 'topic' } },
       { to: '/pubsub', search: { new: 'message' } },
       { to: '/pubsub/schemas', search: { new: 'schema' } },
       { to: '/pubsub', search: { dialog: 'setup' } },
     ])
-    expect(tasks.actions?.map((action) => action.link)).toEqual([
+    expect(tasksActions.map((action) => action.link)).toEqual([
       { to: '/tasks', search: { new: 'task' } },
     ])
   })

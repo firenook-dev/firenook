@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { codebase, invocation, summary } from '../fixtures.test-support'
 import { exitWords, workerDown } from './codebase-banners'
 import { diffText, workerWord } from './codebase-view'
-import { SECRET_KEPT, byFile, changedFiles, envFileName } from './env-change-dialog'
-import { envKeyProblem } from './environment-tab'
+import { byFile, changedFiles } from './env-change-dialog'
 import { problemChips } from './function-toolbar'
 import { noInvocationsText } from './function-workbench'
 import { summaryParts } from './invocation-row'
@@ -41,9 +40,7 @@ describe('the Functions page pieces', () => {
     expect(diffText({ added: [], changed: [], removed: [] })).toBe('no function changes')
   })
 
-  it('group an env change by file and name files a new value goes to', () => {
-    expect(envFileName('envProject', 'demo-x')).toBe('.env.demo-x')
-    expect(envFileName('secretLocal', 'demo-x')).toBe('.secret.local')
+  it('group an env change by file', () => {
     const lines = byFile([
       { file: 'env', fileName: '.env', key: 'A', before: '1', after: '2', secret: false },
       {
@@ -61,7 +58,7 @@ describe('the Functions page pieces', () => {
       ['.secret.local', ['S']],
     ])
     // As the shared save dialog lists them: under the codebase's directory,
-    // a secret's present value never held, a removal said as one.
+    // a removal said as one.
     expect(
       changedFiles(
         [
@@ -70,7 +67,7 @@ describe('the Functions page pieces', () => {
             file: 'secretLocal',
             fileName: '.secret.local',
             key: 'S',
-            before: SECRET_KEPT,
+            before: null,
             after: 'x',
             secret: true,
           },
@@ -90,9 +87,6 @@ describe('the Functions page pieces', () => {
         undefined,
       )[0]?.file,
     ).toBe('.env')
-    expect(envKeyProblem('GREETING')).toBeUndefined()
-    expect(envKeyProblem('1BAD')).toMatch(/letters, digits/)
-    expect(envKeyProblem('FIREBASE_CONFIG')).toMatch(/set by the emulator/)
   })
 
   it('chip only what is wrong', () => {

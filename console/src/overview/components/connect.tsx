@@ -16,8 +16,7 @@ import { CodeBlock } from '@/components/console/code-block'
 import { connectSnippet, hostLiteral } from '@/lib/connect'
 import { useConnectHost } from '../host'
 import { reveal } from '../reveal'
-import { CONNECT_TABS, type ConnectTab, connectTab } from '../connect-tabs'
-import type { ConnectParam } from '../search'
+import { CONNECT_TABS, type ConnectParam, type ConnectTab, connectTab } from '@/lib/connect-tabs'
 
 /** The picker's entry for "type a host". */
 const CUSTOM = '\u0000custom'

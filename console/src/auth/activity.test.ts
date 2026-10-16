@@ -63,11 +63,11 @@ function detail(extra: Partial<AuthActivityDetail> = {}): AuthActivityDetail {
 }
 
 describe('a row of Activity', () => {
-  it('says who called, Try and Replay for what the developer asked the console to do', () => {
+  it('says who called, and Replay for a call the developer asked the console to make again', () => {
     expect(callerChip({ caller: 'client', origin: null })).toBe('App')
     expect(callerChip({ caller: 'admin', origin: null })).toBe('Admin')
     expect(callerChip({ caller: 'actionLink', origin: null })).toBe('Link')
-    expect(callerChip({ caller: 'console', origin: 'try' })).toBe('Try')
+    expect(callerChip({ caller: 'console', origin: 'try' })).toBe('Console')
     expect(callerChip({ caller: 'console', origin: 'replay' })).toBe('Replay')
     expect(callerChip({ caller: 'console', origin: 'write' })).toBe('Console')
   })

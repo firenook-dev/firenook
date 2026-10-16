@@ -1,20 +1,22 @@
-// The rules against the data. Every collection the database holds, with
-// the match blocks that govern its documents and what they allow; the
-// ones no rule covers, where every client request is denied; the match
-// blocks that reach no collection at all, which is usually a typo in a
-// path; and the engine's warnings about the rules themselves. Only an
-// emulator can draw this: it holds both the rules and the data.
+// The rules against the data, Firestore's map for the rules kit's map
+// panel (`src/rules/map-panel.tsx`): every collection the database holds,
+// with the match blocks that govern its documents and what they allow; the
+// ones no rule covers, where every client request is denied, each with
+// starter rules drawn from its documents; and the match blocks that reach
+// no collection at all.
 
-import { Button, Text, useKumoToastManager } from '@cloudflare/kumo'
-import { MagicWandIcon, WarningIcon } from '@phosphor-icons/react'
+import { Button, Text } from '@cloudflare/kumo'
+import { MagicWandIcon } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { checkQuery } from './api'
-import type { RulesDiagnostic } from '@/api/generated/RulesDiagnostic'
 import type { CollectionRules } from '@/api/generated/CollectionRules'
-import { fieldsQuery } from './schema-fields'
-import { insertBlock, starterRules } from './starter'
+import { toast } from '@/lib/toasts'
 import type { RulesDraft } from '@/rules/draft'
+import { RulesMapPanel } from '@/rules/map-panel'
+import { FIRESTORE_ROOT, insertStarter } from '@/rules/starter'
+import { checkQuery } from './api'
+import { fieldsQuery } from './schema-fields'
+import { starterRules } from './starter'
 
 const OPERATIONS = ['get', 'list', 'create', 'update', 'delete'] as const
 
@@ -28,133 +30,37 @@ export function CollectionsPanel({
   project: string
   database: string
   draft: RulesDraft
-  /** The text the page last checked, which the map and warnings describe; none before the rules load. */
+  /** The text the page last checked, which the map describes; none before the rules load. */
   checked: string | undefined
   onReveal: (line: number) => void
 }) {
   const check = useQuery({ ...checkQuery(database, checked ?? ''), enabled: checked !== undefined })
-  const warnings = (check.data?.diagnostics ?? []).filter(
-    (diagnostic): diagnostic is RulesDiagnostic => diagnostic.severity === 'warning',
-  )
-  const map = check.data?.map ?? null
-  const errors = (check.data?.diagnostics ?? []).some((item) => item.severity === 'error')
-
+  const map = check.data?.map
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto" data-testid="collections">
-      {warnings.length > 0 && (
-        <section
-          className="grid gap-2 border-b border-kumo-line px-3 py-3"
-          data-testid="rules-warnings"
-        >
-          <Text as="h3" size="xs" bold>
-            Worth a second look
-          </Text>
-          <ul className="grid gap-1.5">
-            {warnings.map((warning) => (
-              <li key={`${warning.line}:${warning.column}:${warning.code ?? ''}`}>
-                <button
-                  type="button"
-                  onClick={() => onReveal(warning.line)}
-                  className="flex w-full items-start gap-2 rounded-md bg-kumo-warning-tint p-2 text-left ring ring-kumo-hairline hover:ink"
-                  data-testid="rules-warning"
-                  data-code={warning.code ?? undefined}
-                >
-                  <WarningIcon size={14} className="mt-0.5 shrink-0 text-kumo-warning" />
-                  <span className="grid gap-0.5">
-                    <span className="text-[13px] text-kumo-default">{warning.message}</span>
-                    <span className="font-mono text-[11px] text-kumo-subtle">
-                      line {warning.line}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {check.isPending && (
-        <div className="p-4">
-          <Text size="sm" variant="secondary">
-            Reading the rules…
-          </Text>
-        </div>
-      )}
-      {check.isError && (
-        <div className="p-4">
-          <Text size="sm" variant="secondary">
-            {check.error.message}
-          </Text>
-        </div>
-      )}
-      {errors && (
-        <div className="p-4">
-          <Text size="sm" variant="secondary">
-            Fix the errors in the editor to see which rules govern your data.
-          </Text>
-        </div>
-      )}
-
-      {map && (
-        <>
-          <section className="grid gap-2 px-3 py-3" data-testid="rules-map">
-            <Text as="h3" size="xs" bold>
-              Collections in your data
-            </Text>
-            {map.collections.length === 0 ? (
-              <Text size="sm" variant="secondary">
-                This database holds no documents yet.
-              </Text>
-            ) : (
-              <ul className="grid gap-1">
-                {map.collections.map((collection) => (
-                  <CollectionRow
-                    key={collection.pattern}
-                    project={project}
-                    database={database}
-                    collection={collection}
-                    draft={draft}
-                    onReveal={onReveal}
-                  />
-                ))}
-              </ul>
-            )}
-          </section>
-          {map.unusedMatches.length > 0 && (
-            <section
-              className="grid gap-2 border-t border-kumo-line px-3 py-3"
-              data-testid="rules-unused"
-            >
-              <Text as="h3" size="xs" bold>
-                Rules that reach no data
-              </Text>
-              <Text size="xs" variant="secondary">
-                No collection in the database matches these. A typo in a path, or a collection that
-                is not there yet.
-              </Text>
-              <ul className="grid gap-0.5">
-                {map.unusedMatches.map((unused) => (
-                  <li key={`${unused.line}:${unused.path}`}>
-                    <button
-                      type="button"
-                      onClick={() => onReveal(unused.line)}
-                      className="flex w-full items-baseline gap-2 rounded px-1.5 py-1 text-left hover:ink"
-                    >
-                      <span className="w-14 shrink-0 font-mono text-[11px] text-kumo-subtle">
-                        line {unused.line}
-                      </span>
-                      <span className="min-w-0 truncate font-mono text-[12px]">
-                        match {unused.path}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-        </>
-      )}
-    </div>
+    <RulesMapPanel
+      testId="collections"
+      check={check}
+      checked={checked}
+      map={map ? { rows: map.collections.length, unused: map.unusedMatches } : undefined}
+      title="Collections in your data"
+      holds="data"
+      unused={{
+        title: 'Rules that reach no data',
+        note: 'No collection in the database matches these. A typo in a path, or a collection that is not there yet.',
+      }}
+      emptyText="This database holds no documents yet."
+      onReveal={onReveal}
+      rows={map?.collections.map((collection) => (
+        <CollectionRow
+          key={collection.pattern}
+          project={project}
+          database={database}
+          collection={collection}
+          draft={draft}
+          onReveal={onReveal}
+        />
+      ))}
+    />
   )
 }
 
@@ -172,7 +78,6 @@ function CollectionRow({
   onReveal: (line: number) => void
 }) {
   const queryClient = useQueryClient()
-  const toasts = useKumoToastManager()
   const [writing, setWriting] = useState(false)
   const granted = new Set(collection.governedBy.flatMap((block) => block.operations))
 
@@ -182,18 +87,19 @@ function CollectionRow({
       const fields = await queryClient.fetchQuery(
         fieldsQuery(project, database, collection.pattern),
       )
-      const { text, line } = insertBlock(draft.source, starterRules(collection.pattern, fields))
-      draft.setSource(text)
-      onReveal(line)
-      toasts.add({
-        title: `Starter rules for ${collection.pattern} are in the editor`,
-        description: 'Read them, then Apply. Nothing is in force until you do.',
-      })
+      insertStarter(
+        draft,
+        [starterRules(collection.pattern, fields)],
+        FIRESTORE_ROOT,
+        `Starter rules for ${collection.pattern} are in the editor`,
+        onReveal,
+      )
     } catch (error) {
-      toasts.add({
+      toast({
+        key: 'rules-starter',
         title: 'No starter rules',
         description: (error as Error).message,
-        variant: 'error',
+        tone: 'danger',
       })
     } finally {
       setWriting(false)

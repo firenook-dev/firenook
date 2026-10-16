@@ -26,7 +26,7 @@ export function callerChip(call: Pick<AuthActivitySummary, 'caller' | 'origin'>)
     case 'emulatorApi':
       return 'Emulator'
     case 'console':
-      return call.origin === 'try' ? 'Try' : call.origin === 'replay' ? 'Replay' : 'Console'
+      return call.origin === 'replay' ? 'Replay' : 'Console'
   }
 }
 

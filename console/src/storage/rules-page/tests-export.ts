@@ -8,39 +8,12 @@
 // delete. Run it with the Storage emulator up —
 // `firebase emulators:exec --only storage`.
 
+import { contextCode } from '@/rules/who'
 import { folderOf, metadataOf, toBytes } from './requests'
 import type { TestCase } from './tests-store'
 
-/** Claims every ID token carries; the rest are what a test passes as token options. */
-const STANDARD = new Set(['iss', 'aud', 'auth_time', 'user_id', 'sub', 'iat', 'exp', 'firebase'])
-
 function quote(text: string): string {
   return JSON.stringify(text)
-}
-
-/** The context a case asks as: unauthenticated, or a uid with its token options. */
-export function contextCode(test: TestCase): string {
-  const who = test.form.who
-  if (who.kind === 'recorded') {
-    if (!who.auth) return 'env.unauthenticatedContext()'
-    const options = Object.fromEntries(
-      Object.entries(who.auth.token).filter(([key]) => !STANDARD.has(key)),
-    )
-    return `env.authenticatedContext(${quote(who.auth.uid)}, ${JSON.stringify(options)})`
-  }
-  const viewAs = who.viewAs
-  if (viewAs.kind === 'anonymous' || viewAs.kind === 'owner') return 'env.unauthenticatedContext()'
-  const email = viewAs.email
-  const options: Record<string, unknown> = {
-    ...(email
-      ? {
-          email,
-          email_verified: viewAs.kind === 'custom' ? (viewAs.emailVerified ?? false) : true,
-        }
-      : {}),
-    ...viewAs.claims,
-  }
-  return `env.authenticatedContext(${quote(viewAs.uid)}, ${JSON.stringify(options)})`
 }
 
 /** `{ contentType, customMetadata }` as SDK metadata, or nothing to pass. */
@@ -145,7 +118,9 @@ export function exportTests(
     lines.push('', `test(${quote(`${test.name} ${verdict}`)}, async () => {`)
     const seed = seedCode(test, bucket)
     if (seed) lines.push(seed)
-    lines.push(`  const storage = ${contextCode(test)}.storage(${quote(`gs://${bucket}`)})`)
+    lines.push(
+      `  const storage = ${contextCode(test.form.who)}.storage(${quote(`gs://${bucket}`)})`,
+    )
     lines.push(
       `  await ${test.expected === 'allow' ? 'assertSucceeds' : 'assertFails'}(${operationCode(test)})`,
     )

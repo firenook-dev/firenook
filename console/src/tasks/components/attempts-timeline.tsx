@@ -13,9 +13,9 @@ import type { TasksTaskDetail } from '@/api/generated/messaging/TasksTaskDetail'
 import { EntityLink } from '@/components/console/entity-link'
 import { OutcomeChip } from '@/components/console/outcome-chip'
 import { useNow } from '@/lib/clock'
-import { formatClock, formatDuration, formatNumber } from '@/lib/format'
+import { clockTime, formatClock, formatDuration, formatNumber } from '@/lib/format'
 import { attemptLogs, useLogsLinkable } from '../logs'
-import { clockTime, omittedText } from '../retry-plan'
+import { omittedText } from '../retry-plan'
 import {
   attemptChip,
   backoffSeconds,
@@ -130,7 +130,7 @@ function NextAttempt({ detail }: { detail: TasksTaskDetail }) {
         <span className="text-[13px] text-kumo-subtle">
           {at ? (
             <>
-              next at <span className="font-mono text-[12px]">{clockTime(at)}</span> ·{' '}
+              next at <span className="font-mono text-[12px]">{clockTime(at, 'second')}</span> ·{' '}
               {countdownText(at, now)}
             </>
           ) : (

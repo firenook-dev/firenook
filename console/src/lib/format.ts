@@ -74,24 +74,6 @@ export function formatDuration(ms: number): string {
   return rest === 0 ? `${days} d` : `${days} d ${rest} h`
 }
 
-/** "0.5 lines/s", "12 lines/s", "1.2k lines/s", "3.4M events/s". */
-export function formatRate(perSecond: number, noun: string): string {
-  const value = Math.max(0, perSecond)
-  return `${compactNumber(value)} ${noun}/s`
-}
-
-function compactNumber(value: number): string {
-  if (value >= 1_000_000) return `${trim(value / 1_000_000)}M`
-  if (value >= 1000) return `${trim(value / 1000)}k`
-  if (value < 10 && !Number.isInteger(value)) return value.toFixed(1).replace(/\.0$/, '')
-  return String(Math.round(value))
-}
-
-/** One decimal below 100, none from there: 1.2k, 12.5k, 120k. */
-function trim(value: number): string {
-  return value < 100 ? value.toFixed(1).replace(/\.0$/, '') : String(Math.round(value))
-}
-
 /** Relative time in the shortest honest form; the exact time stays a hover away. */
 export function relativeTime(iso: string, now = Date.now()): string {
   const then = new Date(iso).getTime()
@@ -171,15 +153,6 @@ export function whenText(iso: string, now = Date.now()): string {
 }
 
 /**
- * An id cut in the middle for a narrow cell: the start says what kind of
- * id it is and the end tells two of them apart. Short ids stay whole.
- */
-export function shortId(id: string, keep = 6): string {
-  if (id.length <= keep * 2 + 1) return id
-  return `${id.slice(0, keep)}…${id.slice(-keep)}`
-}
-
-/**
  * How every feed's time column reads, chosen once for the whole console:
  * the local time to the millisecond (`14:02:11.348`), how long ago
  * (`3 s ago`), or the UTC instant.
@@ -234,11 +207,39 @@ export function formatClock(iso: string, format: ClockFormat, now = Date.now()):
   if (Number.isNaN(then)) return iso
   if (format === 'utc') return date.toISOString()
   if (format === 'relative') return clockAgo(now - then)
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`
+  return clockTime(date)
 }
 
-function pad(value: number, width = 2): string {
+/** A number to a fixed width with leading zeros: `7` → `07`; width 3 for milliseconds. */
+export function pad(value: number, width = 2): string {
   return String(value).padStart(width, '0')
+}
+
+/** How much of a time of day a clock shows: `14:02`, `14:02:11` or `14:02:11.348`. */
+export type ClockPrecision = 'minute' | 'second' | 'ms'
+
+/**
+ * A time of day in local time, the console's one wall clock: `14:02:11.348`,
+ * or to the `second` (`14:02:11`, a planned retry) or the `minute`
+ * (`14:02`, a histogram bucket). `formatClock` draws its `time` form with
+ * it. Text that is not a time comes back as it was.
+ */
+export function clockTime(at: string | number | Date, precision: ClockPrecision = 'ms'): string {
+  const date = at instanceof Date ? at : new Date(at)
+  if (Number.isNaN(date.getTime())) return String(at)
+  const minute = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  if (precision === 'minute') return minute
+  const second = `${minute}:${pad(date.getSeconds())}`
+  return precision === 'second' ? second : `${second}.${pad(date.getMilliseconds(), 3)}`
+}
+
+/** `14:02:11` today, `2026-10-12 14:02:11` on another day; local time. */
+export function clockOrDate(iso: string, now = Date.now()): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  const time = clockTime(date, 'second')
+  if (date.toDateString() === new Date(now).toDateString()) return time
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}`
 }
 
 /** Seconds count in a feed, where "just now" would hide the order of events. */

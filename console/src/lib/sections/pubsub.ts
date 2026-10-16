@@ -1,16 +1,12 @@
-// Pub/Sub's registry entry: three pages (Topics, Schemas, Schedules —
-// schedules live here because a tick is a publish to the function's
-// schedule topic, so a run, its message and its delivery are one story on
-// one page), its badges, its ⌘K actions, and where a topic, subscription,
-// schema, message or schedule opens when ⌘K finds one or another section's
-// payload points at one.
+// Pub/Sub's registry entry: two pages (Topics, Schemas), its badges, and
+// where a topic, subscription, schema, message or schedule opens when ⌘K
+// finds one or another section's payload points at one. A schedule opens
+// in Functions, on the function's Schedule tab: the scheduler is Pub/Sub's
+// (a tick is a publish to the function's schedule topic), the console's
+// place for it is the function's. Its ⌘K actions are in
+// `./pubsub-actions.ts`.
 
-import {
-  ArrowsDownUpIcon,
-  BroadcastIcon,
-  PaperPlaneTiltIcon,
-  PlusIcon,
-} from '@phosphor-icons/react'
+import { BroadcastIcon } from '@phosphor-icons/react'
 import {
   messageSearch,
   scheduleSearch,
@@ -32,20 +28,17 @@ export const pubsub: ConsoleSection = {
   services: ['pubsub'],
   area: 'messaging',
   icon: BroadcastIcon,
-  // Every page's journeys pass (messaging spec §11, commit 18).
-  built: true,
   summary:
-    'Topics with their subscriptions and the functions they trigger, every message with who received it, a composer that publishes JSON, text or bytes with attributes, backlogs you can read without taking them, pull, replay and snapshots, Avro schemas with revisions, and the scheduled functions with run now and pause.',
+    'Topics with their subscriptions and the functions they trigger, every message with who received it, a composer that publishes JSON, text or bytes with attributes, backlogs you can read without taking them and purge, and Avro schemas checked as you type.',
   pages: [
     {
       to: '/pubsub',
       label: 'Topics',
       exact: true,
       badges: ['pubsub.rejected', 'pubsub.dead-lettered'],
-      keywords: 'subscriptions messages publish pull backlog push dead letters snapshots',
+      keywords: 'subscriptions messages publish backlog purge push dead letters',
     },
-    { to: '/pubsub/schemas', label: 'Schemas', keywords: 'avro revisions' },
-    { to: '/pubsub/schedules', label: 'Schedules', keywords: 'cron onSchedule scheduler' },
+    { to: '/pubsub/schemas', label: 'Schemas', keywords: 'avro definition' },
   ],
   // No badges of the section's own: its two counters are the Topics page's
   // (the heading's dot gathers them when the nav is collapsed), and the
@@ -54,38 +47,11 @@ export const pubsub: ConsoleSection = {
   // The API and topics take `project`, so the shell's "Show demo-other"
   // opens the topics an app wrote under another project id.
   projectScope: true,
-  actions: [
-    {
-      id: 'pubsub.new-topic',
-      title: 'Create a topic',
-      icon: PlusIcon,
-      link: { to: '/pubsub', search: { new: 'topic' } },
-    },
-    {
-      id: 'pubsub.publish',
-      title: 'Publish a message',
-      icon: PaperPlaneTiltIcon,
-      link: { to: '/pubsub', search: { new: 'message' } },
-    },
-    {
-      id: 'pubsub.new-schema',
-      title: 'Create a schema',
-      icon: PlusIcon,
-      link: { to: '/pubsub/schemas', search: { new: 'schema' } },
-    },
-    {
-      id: 'pubsub.setup',
-      title: 'Export or import the Pub/Sub setup',
-      keywords: 'topics subscriptions schemas file',
-      icon: ArrowsDownUpIcon,
-      link: { to: '/pubsub', search: { dialog: 'setup' } },
-    },
-  ],
   searchLabels: {
     'pubsub.topic': 'Topics',
     'pubsub.subscription': 'Subscriptions',
     'pubsub.schema': 'Schemas',
-    'pubsub.schedule': 'Schedules',
+    'pubsub.schedule': 'Scheduled functions',
     'pubsub.message': 'Messages',
   },
   // The page's `q` filters one topic's messages; with no topic in the link
@@ -97,8 +63,8 @@ export const pubsub: ConsoleSection = {
     'pubsub.topic': (name) => open('/pubsub', topicSearch(name)),
     'pubsub.subscription': (name) => open('/pubsub', subscriptionSearch(name)),
     'pubsub.schema': (name) => open('/pubsub/schemas', schemaSearch(name)),
-    // Key: the function id, `us-central1-nightlyCleanup`.
-    'pubsub.schedule': (functionId) => open('/pubsub/schedules', scheduleSearch(functionId)),
+    // Key: the function id, `us-central1-nightlyCleanup`: its Schedule tab in Functions.
+    'pubsub.schedule': (functionId) => open('/functions', scheduleSearch(functionId)),
     // Key: `<topic full name>|<message id>`.
     'pubsub.message': (key) => open('/pubsub', messageSearch(key)),
   },

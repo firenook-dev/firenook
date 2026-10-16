@@ -613,10 +613,12 @@ test('each kind of file previews as what it is, and a wrong content type is fixe
     )
     .toBeGreaterThan(0)
 
-  // A zip lists its entries; bytes show as hex.
+  // A zip shows its bytes and says what they are; other bytes show as hex too.
   await open(seed.names.zip)
-  await expect(panel.getByTestId('archive-entry')).toHaveCount(2)
-  await expect(panel.getByTestId('preview-archive')).toContainText('readme.md')
+  await expect(panel.getByTestId('hex-row').first()).toBeVisible()
+  await expect(panel.getByTestId('preview-section')).toContainText(
+    'The first bytes say: ZIP archive',
+  )
   await open(seed.names.blob)
   await expect(panel.getByTestId('hex-row').first()).toBeVisible()
 
@@ -1123,7 +1125,9 @@ test('a folder is deleted as a job: counted first, followed while it runs, found
   await page.reload()
   const banner = page.getByTestId('storage-job').filter({ hasText: /Delete .*doomed-again\// })
   await expect(banner).toBeVisible()
-  await expect(banner.getByTestId('job-progress')).toContainText(`${figure(folder.objects)}`)
+  await expect(banner.getByTestId('storage-job-progress')).toContainText(
+    `${figure(folder.objects)}`,
+  )
   await expect(row(page, 'doomed-again/')).toHaveCount(0)
 })
 
@@ -1427,6 +1431,15 @@ test('the keyboard reaches everything: rows, ticks, Quick Look, the row menu and
   await expect(cursor().getByRole('checkbox')).toBeChecked()
   await page.keyboard.press('Space')
   await expect(cursor().getByRole('checkbox')).not.toBeChecked()
+  // ⌘C copies the cursor row's path; from its name cell, the gs:// URL.
+  await page.keyboard.press('ControlOrMeta+c')
+  await expect.poll(() => readClipboard(page)).toBe(seed.names.events)
+  await cursor().locator('td[data-column="name"]').click()
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('ControlOrMeta+c')
+  await expect
+    .poll(() => readClipboard(page))
+    .toBe(`gs://${bucketsOf(engine).default}/${seed.names.events}`)
   // ⇧Space: Quick Look, a link of its own, stepping with the arrows.
   await page.keyboard.press('Shift+Space')
   await expect(page).toHaveURL(/dialog=quick-look/)
@@ -1584,8 +1597,10 @@ test('an upload reaches the app’s function, and its event can be sent again', 
   })
   const delivery = inspector(page).getByTestId('activity-delivery').first()
   await expect(delivery).toContainText('Sent to the Functions emulator')
-  // Named as a link to the function, in Functions.
-  await expect(delivery.getByRole('link', { name: 'storageFinalized' })).toBeVisible()
+  // Named as a link to the invocation it started, in Functions › Invocations.
+  const invocation = delivery.getByRole('link', { name: 'storageFinalized' })
+  await expect(invocation).toBeVisible()
+  await expect(invocation).toHaveAttribute('href', /\/functions\/invocations\?invocation=/)
   // The v1 body the function got names the same object, as the function recorded it.
   const payloads = inspector(page).getByTestId('event-payloads')
   await payloads.getByRole('tab', { name: 'Raw' }).click()
@@ -1695,97 +1710,6 @@ test('upload options travel with the files and are remembered; many files are ed
   expect((await objectOf(engine, bucket, 'options/o1.png')).customMetadata.place).toBe('été')
 })
 
-test('an upload the app left half way is listed with what arrived, and is discarded', async ({
-  page,
-  engine,
-}) => {
-  const { default: bucket } = bucketsOf(engine)
-  const storage = `http://127.0.0.1:${engine.ports.storage}`
-  const name = 'sessions/half.bin'
-  const start = await fetch(`${storage}/v0/b/${bucket}/o?name=${encodeURIComponent(name)}`, {
-    method: 'POST',
-    headers: {
-      authorization: 'Bearer owner',
-      'content-type': 'application/json',
-      'x-goog-upload-protocol': 'resumable',
-      'x-goog-upload-command': 'start',
-      'x-goog-upload-header-content-length': '200000',
-      'x-goog-upload-header-content-type': 'application/octet-stream',
-    },
-    body: JSON.stringify({ name, contentType: 'application/octet-stream' }),
-  })
-  expect(start.ok).toBe(true)
-  const url = start.headers.get('x-goog-upload-url') ?? ''
-  expect(url).toContain('upload_id=')
-  const chunk = await fetch(url, {
-    method: 'POST',
-    headers: {
-      authorization: 'Bearer owner',
-      'x-goog-upload-command': 'upload',
-      'x-goog-upload-offset': '0',
-    },
-    body: Buffer.alloc(100_000, 3),
-  })
-  expect(chunk.ok).toBe(true)
-
-  await openFiles(page, engine)
-  await page.getByTestId('bucket-menu').click()
-  await expect(page.getByTestId('bucket-sessions')).toHaveText(/Uploads in progress · 1$/)
-  await page.getByTestId('bucket-sessions').click()
-  const popover = page.getByTestId('uploads-in-progress')
-  const session = popover.getByTestId('session-row')
-  await expect(session).toHaveCount(1)
-  await expect(session).toContainText(name)
-  await expect(session).toContainText(/100(\.0)? KB|97\.7 KB|100,000/)
-  await session.getByTestId('session-discard').click()
-  await expect(session).toHaveCount(0)
-  const after = await fetch(url, {
-    method: 'POST',
-    headers: { authorization: 'Bearer owner', 'x-goog-upload-command': 'query' },
-  })
-  expect(after.status).toBe(404)
-})
-
-test('a pasted gs:// location of this bucket is copied into the folder on screen', async ({
-  page,
-  engine,
-}) => {
-  const { default: bucket } = bucketsOf(engine)
-  const source = await objectOf(engine, bucket, seed.names.avatar)
-  await openFiles(page, engine, { path: `users/${seed.users.ada}/` })
-  // ⌘C on a row copies its name cell's value: the gs:// URL.
-  await row(page, seed.names.avatar).locator('td[data-column="name"]').click()
-  await page.keyboard.press('Escape')
-  await page.keyboard.press('ControlOrMeta+c')
-  await expect.poll(() => readClipboard(page)).toBe(`gs://${bucket}/${seed.names.avatar}`)
-  const copied = await readClipboard(page)
-
-  await putFile(engine, { bucket, name: 'pasted/readme.txt', size: 4, contentType: 'text/plain' })
-  await openFiles(page, engine, { path: 'pasted/' })
-  await page.locator('body').evaluate((body, text) => {
-    const browser = globalThis as unknown as {
-      DataTransfer: new () => { setData(type: string, value: string): void }
-      ClipboardEvent: new (type: string, init: object) => unknown
-    }
-    const transfer = new browser.DataTransfer()
-    transfer.setData('text/plain', text)
-    body.ownerDocument.dispatchEvent(
-      new browser.ClipboardEvent('paste', { clipboardData: transfer, bubbles: true }) as never,
-    )
-  }, copied)
-  await expect(page.getByText('Copy avatar.png here?')).toBeVisible()
-  const started = page.waitForResponse(
-    (response) =>
-      response.url().endsWith('/storage/objects:copy') && response.request().method() === 'POST',
-  )
-  await page.getByRole('button', { name: 'Copy here' }).click()
-  expect((await started).status()).toBe(202)
-  await expect(row(page, 'pasted/avatar.png')).toBeVisible()
-  const copy = await objectOf(engine, bucket, 'pasted/avatar.png')
-  expect(copy.downloadTokens).toHaveLength(1)
-  expect(source.downloadTokens).not.toContain(copy.downloadTokens[0])
-})
-
 test('links from elsewhere open a file, and a decision on the Rules page', async ({
   page,
   engine,
@@ -1807,17 +1731,17 @@ test('links from elsewhere open a file, and a decision on the Rules page', async
   // `storage.decision` → the Rules page with that decision open.
   const token = await tokenFor(engine, person('grace').uid)
   expect((await getMetadata(engine, { bucket, name: seed.names.avatar, token })).status).toBe(403)
-  const decisions = await ownerJson<{
-    items: Array<{ id: string; path: string; uid: string | null }>
-  }>(
-    engine,
-    `/storage/rules/decisions?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(seed.names.avatar)}&denied=true`,
+  // Its id, as the Rules page's newest matching denial opens it.
+  const picker = await context.newPage()
+  await picker.goto(
+    `${engine.origin}/console/storage/rules?${new URLSearchParams({ path: seed.names.avatar, uid: person('grace').uid, denied: 'true', pick: 'true' })}`,
   )
-  const decision = decisions.items.find((item) => item.uid === person('grace').uid)
-  expect(decision).toBeDefined()
+  await expect.poll(() => new URL(picker.url()).searchParams.get('decision')).toBeTruthy()
+  const decision = new URL(picker.url()).searchParams.get('decision') ?? ''
+  await picker.close()
   const other = await context.newPage()
   await other.goto(
-    `${engine.origin}/console/storage/rules?${new URLSearchParams({ bucket, panel: 'decisions', decision: decision?.id ?? '' })}`,
+    `${engine.origin}/console/storage/rules?${new URLSearchParams({ bucket, panel: 'decisions', decision })}`,
   )
   const detail = other.getByTestId('decision-detail')
   await expect(detail).toBeVisible()

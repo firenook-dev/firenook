@@ -10,9 +10,11 @@
 //! atomically. A sign-in therefore never waits for an encode, whatever the
 //! number of users.
 //!
-//! [`Persister::flush`] writes synchronously when dirty: the native
-//! checkpoint, imports and the suite's shutdown call it, and so does the last
-//! runtime handle when it drops.
+//! [`Persister::flush`] writes synchronously when dirty: an Auth operation
+//! that changed more than a sign-in's bookkeeping calls it before it answers
+//! (so its failure is the operation's, and an acknowledged change survives a
+//! restart), the native checkpoint, imports and the suite's shutdown call it,
+//! and so does the last runtime handle when it drops.
 
 use std::collections::BTreeMap;
 use std::fs::File;

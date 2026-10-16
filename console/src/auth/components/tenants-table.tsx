@@ -1,9 +1,9 @@
 // The project's tenants on Settings: id, display name, users, the sign-in
-// methods each allows and its multi-factor state, read a page at a time by
-// the engine in id order (`GET /auth/tenants`, never creating one), each
-// row patched in place when `auth.config` names its tenant
-// (`POST /auth/tenants:batchGet`). A filter appears once there are more
-// than 20. A row opens its edit dialog; its menu also deletes it.
+// methods each allows and its multi-factor state, in id order, as one list
+// (`GET /auth/tenants`, never creating one; the engine lists 500 at most and
+// says how many match), read again when `auth.config` says a tenant changed
+// (`useConfigLive`). A filter appears once there are more than 20. A row
+// opens its edit dialog; its menu also deletes it.
 
 import { Empty } from '@cloudflare/kumo'
 import {
@@ -13,17 +13,15 @@ import {
   TrashIcon,
   UsersIcon,
 } from '@phosphor-icons/react'
-import { useInfiniteQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import type { AuthTenant } from '@/api/generated/auth/AuthTenant'
 import { DataTable, type DataTableColumn } from '@/components/console/data-table'
 import { NoMatch } from '@/components/console/empty-state'
 import { PanelFilter } from '@/components/console/panel'
 import type { RowMenuItem } from '@/components/console/row-menu'
-import { cursorPagesOptions, useCursorRows } from '@/components/console/use-cursor-rows'
 import { formatNumber } from '@/lib/format'
-import { useConfigLive } from '../live'
-import { tenantsList } from '../queries'
+import { tenantsQuery } from '../queries'
 import { MFA_STATE_LABELS, type MfaState, signInSummary } from '../tenants'
 
 /** Tenants listed before the table offers a filter. */
@@ -32,6 +30,8 @@ const FILTER_ABOVE = 20
 const VISIBLE_ROWS = 10
 const ROW = 32
 const HEAD = 33
+
+const tenantKey = (tenant: AuthTenant) => tenant.tenantId
 
 /** The table's columns: the id pinned, the counts at the end. */
 const COLUMNS: DataTableColumn<AuthTenant>[] = [
@@ -106,25 +106,14 @@ export function TenantsTable({
     const timer = window.setTimeout(() => setQ(text.trim()), 200)
     return () => window.clearTimeout(timer)
   }, [text])
-  const list = tenantsList(project, q)
-  const query = useInfiniteQuery({
-    ...cursorPagesOptions(list.queryKey, list.fetchPage),
+  // The page's own `useConfigLive` reads the list again on every change.
+  const query = useQuery({
+    ...tenantsQuery(project, q),
     enabled: project !== '',
+    placeholderData: keepPreviousData,
   })
-  const rows = useCursorRows(query, {
-    queryKey: list.queryKey,
-    fetchPage: list.fetchPage,
-    rowKey: list.rowKey,
-    batchGet: list.batchGet,
-    q,
-  })
-  useConfigLive(project, {
-    onChanged: (change) => {
-      if (change.tenant) rows.applyKeys([change.tenant])
-    },
-    onReset: () => rows.reset(),
-  })
-  const total = rows.total?.count
+  const rows = query.data?.items ?? []
+  const total = query.data?.total
   useEffect(() => {
     if (q === '') onCount(total)
   }, [q, total, onCount])
@@ -146,7 +135,8 @@ export function TenantsTable({
     { id: 'users', label: 'Open its users', icon: UsersIcon, run: () => onShowUsers(tenant) },
     { id: 'delete', label: 'Delete…', icon: TrashIcon, danger: true, run: () => onDelete(tenant) },
   ]
-  const shown = Math.max(1, Math.min(rows.rows.length, VISIBLE_ROWS))
+  const shown = Math.max(1, Math.min(rows.length, VISIBLE_ROWS))
+  const unlisted = total === undefined ? 0 : total - rows.length
   const filtering = (total ?? 0) > FILTER_ABOVE || q !== '' || text !== ''
   return (
     <div className="grid gap-2" data-testid="tenants-table">
@@ -163,23 +153,16 @@ export function TenantsTable({
       <div
         className="flex min-h-0 flex-col overflow-hidden rounded-lg ring ring-kumo-line"
         // The rows the table holds, up to ten: a document page, not a workbench.
-        style={{ height: rows.rows.length === 0 ? undefined : HEAD + shown * ROW + 2 }}
+        style={{ height: rows.length === 0 ? undefined : HEAD + shown * ROW + 2 }}
       >
         <DataTable
           ariaLabel="Tenants"
-          rows={rows.rows}
-          rowKey={list.rowKey}
+          rows={rows}
+          rowKey={tenantKey}
           columns={COLUMNS}
           memoryKey="auth.tenants"
           onOpen={onEdit}
           rowMenu={menu}
-          flashes={rows.flashes}
-          hasMore={rows.hasMore}
-          loadMore={rows.loadMore}
-          hasPrevious={rows.hasPrevious}
-          loadPrevious={rows.loadPrevious}
-          rowOffset={rows.rowOffset}
-          total={rows.total}
           loading={query.isPending && project !== ''}
           keyboard="focus"
           empty={
@@ -199,6 +182,12 @@ export function TenantsTable({
           testId="tenants-grid"
         />
       </div>
+      {unlisted > 0 && (
+        <p className="m-0 text-[13px] text-kumo-subtle" data-testid="tenants-unlisted">
+          The first {formatNumber(rows.length)} of {formatNumber(total ?? 0)} tenants; filter by id
+          or name to find the others.
+        </p>
+      )}
     </div>
   )
 }

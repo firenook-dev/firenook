@@ -38,6 +38,7 @@ import type { BatchGetRequest } from '@/api/generated/BatchGetRequest'
 import type { BatchGetResponse } from '@/api/generated/BatchGetResponse'
 import type { Page } from '@/api/generated/Page'
 import type { Total } from '@/api/generated/Total'
+import { FLASH_MS } from '@/components/kit'
 import { liveChannel } from '@/lib/live/channel'
 
 /** Where a page starts: the first page has neither. */
@@ -64,8 +65,6 @@ export const RESET_KEYS = 1_000
 export const BATCH_KEYS = 500
 /** How long keys are collected before they are read again, ms. */
 export const BATCH_MS = 120
-/** How long a patched or created row flashes, ms (the `row-flash` animation's length). */
-export const FLASH_MS = 1_600
 
 /** `maxPages: 20`, `getNextPageParam` from `nextCursor`, `getPreviousPageParam` from `prevCursor`. */
 export function cursorPagesOptions<T>(

@@ -16,13 +16,13 @@ import {
 import { useNavigate } from '@tanstack/react-router'
 import type { AuthUserRow } from '@/api/generated/auth/AuthUserRow'
 import type { RowMenuItem } from '@/components/console/row-menu'
+import { copyToClipboard } from '@/lib/copy'
 import { toast } from '@/lib/toasts'
 import { identifierOf } from '../identifier'
 import { type TenantScope, usersTenant } from '../tenant-scope'
 import {
   announceSent,
   copyIdToken,
-  copyToClipboard,
   refusal,
   sendPasswordReset,
   setUserDisabled,
@@ -58,7 +58,7 @@ export function useUserRowMenu(options: {
         label: 'Copy uid',
         icon: CopyIcon,
         shortcut: 'Mod+c',
-        run: () => void copyToClipboard(row.uid, row.uid),
+        run: () => void copyToClipboard(row.uid, { what: row.uid }),
       },
       {
         id: 'copy-token',

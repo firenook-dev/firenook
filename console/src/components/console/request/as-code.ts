@@ -1,17 +1,43 @@
-// A composed request as code to paste into a terminal or a script: curl,
-// fetch or HTTPie, against the service's own address (`codeUrl`), never the
-// console's mount, with the identity's token as the console sent it.
+// Code to paste into a terminal or a script. `CODE_DIALECTS` is the one
+// list of the dialects the console writes code in, each with the label its
+// tab shows on every page and the language of its block, so "Admin
+// (Node.js)" reads the same in every section's Code popover; `codeTab`
+// makes a `CodePopover` or `CodeBlock` tab from one.
+//
+// A composed request is written in three of them — curl, fetch or HTTPie —
+// against the service's own address (`codeUrl`), never the console's
+// mount, with the identity's token as the console sent it.
 
+import type { CodeDialect as CodeTab, CodeLanguage } from '@/components/console/code-block'
 import { authorizationFor } from '@/lib/identity'
 import { type ComposedRequest, activePairs, bodyContentType, withQuery } from './types'
 
-export type CodeDialect = 'curl' | 'fetch' | 'httpie'
+/** Every dialect the console writes code in: the label its tab shows everywhere, and its language. */
+export const CODE_DIALECTS = {
+  curl: { label: 'curl', language: 'shell' },
+  fetch: { label: 'fetch', language: 'js' },
+  httpie: { label: 'HTTPie', language: 'shell' },
+  web: { label: 'Web', language: 'js' },
+  flutter: { label: 'Flutter', language: 'dart' },
+  node: { label: 'Admin (Node.js)', language: 'js' },
+  python: { label: 'Python', language: 'python' },
+  go: { label: 'Go', language: 'go' },
+  rest: { label: 'REST (curl)', language: 'shell' },
+  gcloud: { label: 'gcloud', language: 'shell' },
+} as const satisfies Record<string, { label: string; language: CodeLanguage }>
 
-export const CODE_DIALECTS: readonly { id: CodeDialect; label: string }[] = [
-  { id: 'curl', label: 'curl' },
-  { id: 'fetch', label: 'fetch' },
-  { id: 'httpie', label: 'HTTPie' },
-]
+export type CodeDialectId = keyof typeof CODE_DIALECTS
+
+/** A tab of code in one of the console's dialects: its label and language from `CODE_DIALECTS`. */
+export function codeTab(id: CodeDialectId, code: string): CodeTab {
+  const { label, language } = CODE_DIALECTS[id]
+  return { id, label, language, code }
+}
+
+/** The dialects a composed request is written in. */
+export const REQUEST_DIALECTS = ['curl', 'fetch', 'httpie'] as const
+
+export type RequestDialect = (typeof REQUEST_DIALECTS)[number]
 
 /** Written for an Auth user whose engine token the caller did not pass. */
 export const TOKEN_PLACEHOLDER = 'Bearer <ID token>'
@@ -129,7 +155,7 @@ function httpie(request: ComposedRequest, headers: [string, string][]): string {
  */
 export function requestAsCode(
   request: ComposedRequest,
-  dialect: CodeDialect,
+  dialect: RequestDialect,
   project: string,
   authorization?: string,
 ): string {

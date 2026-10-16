@@ -378,8 +378,6 @@ export const ADMINS_ONLY = [
 ]
 
 export interface AppliedRule {
-  /** The line of the rule's condition in the applied source. */
-  line: number
   restore(): Promise<void>
 }
 
@@ -393,7 +391,6 @@ export async function applyAdminsOnly(engine: Engine): Promise<AppliedRule> {
   const at = lines.findIndex((line) => line.includes('match /databases/{database}/documents'))
   if (at === -1) throw new Error('the rules in force have no documents block')
   const applied = [...lines.slice(0, at + 1), ...ADMINS_ONLY, ...lines.slice(at + 1)]
-  const line = at + 1 + 2
   await consoleJson(engine, '/firestore/rules', {
     method: 'PUT',
     body: JSON.stringify({ database: '(default)', source: applied.join('\n'), save: false }),
@@ -415,7 +412,6 @@ export async function applyAdminsOnly(engine: Engine): Promise<AppliedRule> {
     ],
   })
   return {
-    line,
     async restore() {
       await write({ writes: [{ delete: `${root}/admins-only/a1` }] })
       await consoleJson(engine, '/firestore/rules', {

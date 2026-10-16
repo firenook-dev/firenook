@@ -31,14 +31,17 @@ export interface KitBuild {
 
 /**
  * Builds the harness in production mode with the console's own plugins
- * (the React compiler, Tailwind, the `@` alias) into a fresh directory.
+ * (the React compiler, Tailwind, the icon weights, the `@` alias) into a
+ * fresh directory.
  */
 export async function buildKitHarness(): Promise<KitBuild> {
-  const [{ build }, { default: react }, { default: tailwindcss }] = await Promise.all([
-    import('vite'),
-    import('@vitejs/plugin-react'),
-    import('@tailwindcss/vite'),
-  ])
+  const [{ build }, { default: react }, { default: tailwindcss }, { iconWeights }] =
+    await Promise.all([
+      import('vite'),
+      import('@vitejs/plugin-react'),
+      import('@tailwindcss/vite'),
+      import('../../scripts/icon-weights.mjs'),
+    ])
   const directory = mkdtempSync(join(tmpdir(), 'firenook-kit-'))
   await build({
     configFile: false,
@@ -49,7 +52,7 @@ export async function buildKitHarness(): Promise<KitBuild> {
     // them at, which a build of this folder cannot resolve and need not.
     logLevel: 'error',
     mode: 'production',
-    plugins: [react({ compiler: true }), tailwindcss()],
+    plugins: [react({ compiler: true }), tailwindcss(), iconWeights()],
     resolve: { alias: { '@': fileURLToPath(new URL('../../src', import.meta.url)) } },
     build: { target: 'es2023', outDir: directory, emptyOutDir: true, sourcemap: false },
   })

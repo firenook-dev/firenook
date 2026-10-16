@@ -67,8 +67,6 @@ export function defaultWidth(): number {
  */
 export const CODE_LABEL_AT = 350
 
-/** The gap the list leaves beside the panel when both are in the flow. */
-export const INSPECTOR_GAP = 12
 /** The list is the other half of the screen and has to stay worth having. */
 export const GRID_MIN = 360
 

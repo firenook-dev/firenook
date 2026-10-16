@@ -59,7 +59,8 @@ import type { Job } from '@/api/generated/Job'
 import { statusQuery } from '@/api/queries'
 import { CodeBlock } from '@/components/console/code-block'
 import { DataTable, type DataTableColumn } from '@/components/console/data-table'
-import { EmptyState, NoMatch, QueryError, connectDialects } from '@/components/console/empty-state'
+import { EMPTY_CONNECT, EmptyState, NoMatch, QueryError } from '@/components/console/empty-state'
+import { connectDialects } from '@/lib/connect'
 import { FacetList } from '@/components/console/facet-list'
 import { FeedList, useFeedPending } from '@/components/console/feed-list'
 import { Completion } from '@/components/console/completions'
@@ -1761,7 +1762,10 @@ function CodeCard() {
           />
         </Sample>
         <Sample label="The connect snippet, for this engine's host, ports and project">
-          <CodeBlock label="From your app" dialects={connectDialects(STATUS, 'auth')} />
+          <CodeBlock
+            label="From your app"
+            dialects={connectDialects(STATUS, { services: ['auth'], params: EMPTY_CONNECT })}
+          />
         </Sample>
       </Stack>
     </Kit>

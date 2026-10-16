@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { pad } from '@/lib/format'
 import {
   PLAN_LIMIT,
   ladderText,
@@ -9,9 +10,8 @@ import {
   planRows,
   secondsText,
 } from './retry-plan'
-import { testQueue } from './test-data'
+import { testQueue } from './fixtures.test-support'
 
-const pad = (value: number) => String(value).padStart(2, '0')
 const at = (iso: string) => {
   const date = new Date(iso)
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`

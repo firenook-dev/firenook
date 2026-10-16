@@ -37,11 +37,13 @@ import { SectionToolbar } from '@/components/console/toolbar'
 import { useCursorRows } from '@/components/console/use-cursor-rows'
 import { StatusDot } from '@/components/kit'
 import { useNow } from '@/lib/clock'
+import { copyToClipboard } from '@/lib/copy'
 import { formatNumber } from '@/lib/format'
+import { rowElement } from '@/components/console/confirm-popover'
 import { toast } from '@/lib/toasts'
 import { useShortcuts } from '@/lib/shortcuts'
 import { startDeleteTasks, startRunTasks } from '../api'
-import { errorText } from '@/messaging/confirm-popover'
+import { errorText } from '@/lib/error-text'
 import { taskList } from '../queries'
 import { readStarted } from '@/lib/live/use-live-topic'
 import { useQueueListener } from '../queue-live'
@@ -62,11 +64,6 @@ import { handlerName, type TaskActions } from './task-actions'
 import { TasksConnect } from './tasks-connect'
 
 const NOUN = { one: 'task', other: 'tasks' }
-
-/** The row element of a task in a table, for a popover to hang off. */
-export function rowElement(testId: string, key: string): Element | null {
-  return document.querySelector(`[data-testid="${testId}"] [data-key="${CSS.escape(key)}"]`)
-}
 
 function StateCell({ row }: { row: TasksTaskRow }) {
   // To the second only where a due time counts down in the words.
@@ -335,10 +332,7 @@ export function TasksView({
       icon: CopyIcon,
       shortcut: 'Mod+c',
       run: () => {
-        void navigator.clipboard.writeText(row.name).then(
-          () => toast({ key: 'tasks-copy', title: `Copied ${displayName(row)}` }),
-          () => toast({ key: 'tasks-copy', title: 'Could not copy', tone: 'danger' }),
-        )
+        void copyToClipboard(row.name, { what: displayName(row) })
       },
     },
     {

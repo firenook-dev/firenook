@@ -16,7 +16,7 @@ import { CopyButton } from '@/components/console/copy-button'
 import { EntityLink } from '@/components/console/entity-link'
 import { RelativeTime } from '@/components/console/relative-time'
 import { SectionBanner } from '@/components/console/section-banner'
-import { formatClock } from '@/lib/format'
+import { clockTime } from '@/lib/format'
 import { toast } from '@/lib/toasts'
 import { reloadCodebase, restartWorker } from '../api'
 
@@ -117,8 +117,8 @@ export function CodebaseBanners({ entry }: { entry: FunctionCodebaseEntry }) {
           {codebase.servingPrevious ? (
             <>
               <Code>{codebase.id}</Code> failed to reload
-              {error ? ` at ${formatClock(error.at, 'time').slice(0, 8)}` : ''}. The functions below
-              are from the previous load.
+              {error ? ` at ${clockTime(error.at, 'second')}` : ''}. The functions below are from
+              the previous load.
             </>
           ) : (
             <>

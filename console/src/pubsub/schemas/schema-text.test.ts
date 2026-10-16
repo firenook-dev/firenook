@@ -1,9 +1,8 @@
 // The Schemas page's text handling: definitions shown indented and compared
 // by what they say, the parser's reason placed in the text, the templates,
-// a topic's revision window in words, and the test panel's request.
+// and a topic's revision window in words.
 
 import { describe, expect, it } from 'vitest'
-import { revisionWindow } from './revisions-list'
 import {
   SCHEMA_TEMPLATES,
   checkLine,
@@ -13,7 +12,7 @@ import {
   prettyDefinition,
   sameDefinition,
 } from './schema-text'
-import { messageCheckBody } from './test-message'
+import { revisionWindow } from './used-by-list'
 
 const failed = (overrides: Partial<Parameters<typeof checkMarks>[1] & object> = {}) => ({
   ok: false,
@@ -99,20 +98,5 @@ describe('a topic’s revision window', () => {
       'up to bbbb2222',
     )
     expect(revisionWindow({ firstRevisionId: null, lastRevisionId: null })).toBe('any')
-  })
-})
-
-describe('the test panel’s request', () => {
-  it('names the revision chosen, and sends JSON or bytes', () => {
-    expect(messageCheckBody('projects/p/schemas/s', undefined, 'JSON', '{"a":1}')).toEqual({
-      schema: 'projects/p/schemas/s',
-      encoding: 'JSON',
-      data: { json: '{"a":1}' },
-    })
-    expect(messageCheckBody('projects/p/schemas/s', 'aaaa1111', 'BINARY', ' AAA= \n')).toEqual({
-      schema: 'projects/p/schemas/s@aaaa1111',
-      encoding: 'BINARY',
-      data: { base64: 'AAA=' },
-    })
   })
 })

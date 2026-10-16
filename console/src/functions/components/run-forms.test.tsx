@@ -2,9 +2,14 @@ import { describe, expect, it } from 'vitest'
 import type { BackendDefinition } from '../envelopes'
 import { composedUser } from './blocking-form'
 import { callableHeaders, recordedData } from './callable-form'
-import { documentPattern, eventInput, fixedChange, restFields, startingData } from './event-form'
-import { countdownText } from './schedule-form'
-import { optionsText } from './task-form'
+import {
+  documentPattern,
+  eventInput,
+  fixedChange,
+  publishBody,
+  restFields,
+  startingData,
+} from './event-form'
 
 const v1Write: BackendDefinition = {
   name: 'onOrderWritten',
@@ -58,6 +63,30 @@ describe('the Run forms', () => {
     })
   })
 
+  it("publish a function's message through Pub/Sub's own console publish", () => {
+    const topic = 'projects/p/topics/emails'
+    expect(
+      publishBody(topic, {
+        data: { to: 'ada' },
+        attributes: { kind: 'welcome' },
+        orderingKey: 'u1',
+      }),
+    ).toEqual({
+      topic,
+      messages: [
+        { data: { text: '{"to":"ada"}' }, attributes: { kind: 'welcome' }, orderingKey: 'u1' },
+      ],
+    })
+    expect(publishBody(topic, { data: 'plain' }).messages[0]).toEqual({
+      data: { text: 'plain' },
+      attributes: {},
+      orderingKey: null,
+    })
+    expect(publishBody(topic, { attributes: { only: 'this' } }).messages[0]?.data).toEqual({
+      text: '',
+    })
+  })
+
   it("send a callable's headers and read a recorded call's data back", () => {
     const draft = {
       kind: 'callable' as const,
@@ -75,15 +104,6 @@ describe('the Run forms', () => {
     ])
     expect(recordedData('{"data":{"text":"hi"}}')).toBe('{\n  "text": "hi"\n}')
     expect(recordedData('plain')).toBe('plain')
-  })
-
-  it('count down to a run and name what a queue sets', () => {
-    const now = Date.parse('2026-10-12T14:02:09.000Z')
-    expect(countdownText('2026-10-12T14:05:00.000Z', now)).toBe('in 2 min 51 s')
-    expect(countdownText('2026-10-12T14:02:09.400Z', now)).toBe('now')
-    expect(countdownText('2026-10-12T14:02:00.000Z', now)).toBe('9 s ago')
-    expect(optionsText({ maxAttempts: 3, maxBackoffSeconds: null })).toBe('maxAttempts 3')
-    expect(optionsText(null)).toBe('')
   })
 
   it('compose a sign-up as the Auth emulator holds the account', () => {

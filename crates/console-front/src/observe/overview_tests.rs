@@ -75,7 +75,7 @@ async fn get(router: Router, uri: &str) -> (StatusCode, Value) {
 }
 
 #[tokio::test]
-async fn the_state_lists_notices_the_newest_problems_the_hour_and_the_totals() {
+async fn the_state_lists_notices_the_newest_problems_their_count_and_the_hour() {
     let log = log();
     log.accept(line(LogLevel::Info, "fine"));
     log.accept(LogInput {
@@ -108,10 +108,7 @@ async fn the_state_lists_notices_the_newest_problems_the_hour_and_the_totals() {
     let minute = &state["hour"][59];
     assert_eq!(minute["error"], 1);
     assert_eq!(minute["warn"], 18);
-    assert_eq!(
-        state["logs"],
-        json!({ "entries": 20, "errors": 1, "warnings": 18, "problems": 10 })
-    );
+    assert_eq!(state["problemsLogged"], 10);
     // An older problem keeps only its first line, cut at 200 characters.
     let all = api(Some(&log)).state(now_millis());
     let failed = OverviewApi {
@@ -125,7 +122,7 @@ async fn the_state_lists_notices_the_newest_problems_the_hour_and_the_totals() {
     let shown = problem(entry);
     assert_eq!(shown.first_line.chars().count(), FIRST_LINE_CHARS);
     assert_eq!(shown.source, "functions[us-central1-hello]");
-    assert_eq!(failed.state(now_millis()).logs.errors, 1);
+    assert_eq!(failed.state(now_millis()).problems_logged, 10);
 }
 
 #[test]
@@ -160,7 +157,7 @@ async fn without_a_suite_log_the_state_still_answers() {
     let (status, state) = get(router(api(None)), "/overview").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(state["problems"], json!([]));
-    assert_eq!(state["logs"]["entries"], 0);
+    assert_eq!(state["problemsLogged"], 0);
     assert_eq!(state["hour"].as_array().expect("hour").len(), 60);
 }
 
@@ -234,24 +231,54 @@ async fn the_topic_sends_the_state_then_each_change_and_resumes_by_comparing() {
     };
     let mut stream = topic.open(&json!({}), None).expect("opened");
     let (generation, state) = next_state(&mut stream).await;
-    assert_eq!(state["logs"]["entries"], 0);
+    assert_eq!(state["problemsLogged"], 0);
     log.accept(line(LogLevel::Error, "boom"));
     let (later, state) = next_state(&mut stream).await;
     assert_ne!(later, generation);
-    assert_eq!(state["logs"]["errors"], 1);
+    assert_eq!(state["problemsLogged"], 1);
     // A subscriber that has this generation is sent nothing until it moves.
     let mut resumed = topic.open(&json!({}), Some(&later)).expect("opened");
     let quiet = tokio::time::timeout(Duration::from_millis(200), resumed.next()).await;
     assert!(quiet.is_err(), "nothing new to send");
     log.accept(line(LogLevel::Warn, "again"));
     let (_, state) = next_state(&mut resumed).await;
-    assert_eq!(state["logs"]["warnings"], 1);
+    assert_eq!(
+        state["problemsLogged"], 1,
+        "a warning is news, not a problem"
+    );
     let refused = topic
         .open(&json!({ "extra": true }), None)
         .err()
         .expect("refused");
     assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
     assert_eq!(topic.name(), "overview");
+}
+
+#[tokio::test]
+async fn a_flood_of_plain_output_is_not_news_and_a_warning_or_a_problem_is() {
+    let log = log();
+    let topic = OverviewTopic {
+        api: api(Some(&log)),
+        now: mid_minute,
+    };
+    let mut stream = topic.open(&json!({}), None).expect("opened");
+    let (first, _) = next_state(&mut stream).await;
+    for index in 0..2_000 {
+        log.accept(line(LogLevel::Info, &format!("fine {index}")));
+        log.accept(line(LogLevel::Debug, &format!("detail {index}")));
+    }
+    let quiet = tokio::time::timeout(Duration::from_millis(1_500), stream.next()).await;
+    assert!(quiet.is_err(), "4,000 lines of plain output sent a state");
+    assert_eq!(api(Some(&log)).generation(mid_minute()), first);
+    // A warning is drawn in the hour, so it is news.
+    log.accept(line(LogLevel::Warn, "slow"));
+    let (warned, _) = next_state(&mut stream).await;
+    assert_ne!(warned, first);
+    // So is a problem, which leads the list.
+    log.accept(line(LogLevel::Error, "boom"));
+    let (failed, state) = next_state(&mut stream).await;
+    assert_ne!(failed, warned);
+    assert_eq!(state["problems"][0]["firstLine"], "boom");
 }
 
 /// A tenth of a second before a whole minute (`1_700_000_040_000`).
@@ -273,5 +300,5 @@ async fn a_minute_turning_sends_the_state_again_with_no_new_line() {
     TURNING.store(1_700_000_040_100, std::sync::atomic::Ordering::SeqCst);
     let (second, state) = next_state(&mut stream).await;
     assert_ne!(first, second, "the hour's buckets moved on");
-    assert_eq!(state["logs"]["entries"], 0);
+    assert_eq!(state["problemsLogged"], 0);
 }

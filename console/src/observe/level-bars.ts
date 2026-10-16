@@ -7,7 +7,7 @@
 
 import type { LogLevelCounts } from '@/api/generated/observe/LogLevelCounts'
 import type { MiniBarTone } from '@/components/console/mini-bars'
-import { formatCount } from '@/lib/format'
+import { clockTime, formatCount } from '@/lib/format'
 
 /** The three series, bottom first (`MiniBars`' order). */
 export const LEVEL_SERIES: readonly { label: string; tone: MiniBarTone }[] = [
@@ -35,19 +35,10 @@ export function bucketTotal(bucket: LogLevelCounts): number {
   return bucket.debug + bucket.info + bucket.warn + bucket.error
 }
 
-const pad = (value: number) => String(value).padStart(2, '0')
-
-/** `12:05`, or `12:05:10` when a bucket is shorter than a minute; local time. */
-function clockAt(ms: number, seconds: boolean): string {
-  const date = new Date(ms)
-  const minutes = `${pad(date.getHours())}:${pad(date.getMinutes())}`
-  return seconds ? `${minutes}:${pad(date.getSeconds())}` : minutes
-}
-
 /** `12:05–12:06`: the span a bucket covers, in local time. */
 export function bucketSpan(startMs: number, bucketMs: number): string {
-  const seconds = bucketMs < 60_000 || startMs % 60_000 !== 0
-  return `${clockAt(startMs, seconds)}–${clockAt(startMs + bucketMs, seconds)}`
+  const precision = bucketMs < 60_000 || startMs % 60_000 !== 0 ? 'second' : 'minute'
+  return `${clockTime(startMs, precision)}–${clockTime(startMs + bucketMs, precision)}`
 }
 
 /** "12:05–12:06 · 412 lines · 3 errors · 18 warnings": one bucket's tooltip. */
@@ -56,6 +47,19 @@ export function bucketSentence(bucket: LogLevelCounts, span: string): string {
   const parts = [span, total === 0 ? 'No lines' : formatCount(total, LINE)]
   if (bucket.error > 0) parts.push(formatCount(bucket.error, ERROR))
   if (bucket.warn > 0) parts.push(formatCount(bucket.warn, WARNING))
+  return parts.join(' · ')
+}
+
+/**
+ * "12:05–12:06 · 3 errors · 18 warnings": a minute of the Overview's hour,
+ * which draws warnings and errors alone. Its state is not sent again for
+ * plain output, so the other lines are not counted here.
+ */
+export function problemSentence(bucket: LogLevelCounts, span: string): string {
+  const parts = [span]
+  if (bucket.error > 0) parts.push(formatCount(bucket.error, ERROR))
+  if (bucket.warn > 0) parts.push(formatCount(bucket.warn, WARNING))
+  if (parts.length === 1) parts.push('No warnings or errors')
   return parts.join(' · ')
 }
 

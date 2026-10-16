@@ -336,7 +336,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
     overview::OverviewState::export_all(config).expect("TypeScript bindings written");
     OverviewEngineDetails::export_all(config).expect("TypeScript bindings written");
     snapshots::OverviewSnapshotFile::export_all(config).expect("TypeScript bindings written");
-    snapshots::OverviewSnapshotRequest::export_all(config).expect("TypeScript bindings written");
     let directory = config.out_dir().join("observe");
     std::fs::create_dir_all(&directory).expect("generated/observe/ created");
     std::fs::write(directory.join("logKinds.ts"), log_kinds_module())

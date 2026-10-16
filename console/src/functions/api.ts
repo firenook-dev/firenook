@@ -14,21 +14,17 @@
 
 import { queryOptions } from '@tanstack/react-query'
 import { API_BASE, apiGet, apiSend } from '@/api/client'
-import type { FunctionBrokerResult } from '@/api/generated/compute/FunctionBrokerResult'
 import type { FunctionDetail } from '@/api/generated/compute/FunctionDetail'
-import type { FunctionEnqueueRequest } from '@/api/generated/compute/FunctionEnqueueRequest'
 import type { FunctionEnvEditRequest } from '@/api/generated/compute/FunctionEnvEditRequest'
 import type { FunctionEnvEditResult } from '@/api/generated/compute/FunctionEnvEditResult'
 import type { FunctionLoadLog } from '@/api/generated/compute/FunctionLoadLog'
 import type { FunctionMatchRequest } from '@/api/generated/compute/FunctionMatchRequest'
 import type { FunctionMatchResult } from '@/api/generated/compute/FunctionMatchResult'
-import type { FunctionPublishRequest } from '@/api/generated/compute/FunctionPublishRequest'
 import type { FunctionRestartResult } from '@/api/generated/compute/FunctionRestartResult'
 import type { FunctionRevealedValue } from '@/api/generated/compute/FunctionRevealedValue'
 import type { FunctionsSnapshot } from '@/api/generated/compute/FunctionsSnapshot'
 import type { InvocationView } from '@/api/generated/compute/InvocationView'
 import type { InvocationsResult } from '@/api/generated/compute/InvocationsResult'
-import { type TriggerService, fetchTriggers, triggersKey } from '@/lib/triggers'
 
 /** The engine keeps this many finished invocations (`MonitorLimits.invocations`). */
 export const INVOCATIONS_KEPT = 2_000
@@ -212,20 +208,6 @@ export const matchQuery = (project: string, request: FunctionMatchRequest) =>
     retry: false,
   })
 
-/** Who fires for a resource, under the key every section's trigger line shares. */
-export const triggersQuery = (
-  project: string,
-  service: TriggerService,
-  resource: string,
-  event?: string,
-) =>
-  queryOptions({
-    queryKey: triggersKey(project, service, resource, event),
-    queryFn: ({ signal }) => fetchTriggers(service, resource, event, signal),
-    staleTime: Number.POSITIVE_INFINITY,
-    retry: false,
-  })
-
 // ── Changes ───────────────────────────────────────────────────────────────
 
 /**
@@ -257,29 +239,4 @@ export function restartWorker(codebase: string): Promise<FunctionRestartResult> 
 /** Empties the engine's record of invocations; function stats reset with it. */
 export async function clearInvocations(): Promise<void> {
   await apiSend<undefined>('DELETE', '/functions/invocations', {})
-}
-
-/**
- * Publishes a message to a Pub/Sub function's topic for real: every
- * subscriber of the topic gets it. `unavailable` without Pub/Sub,
- * `conflict` while background triggers are paused.
- */
-export function publishMessage(
-  id: string,
-  request: FunctionPublishRequest,
-): Promise<FunctionBrokerResult> {
-  return apiSend<FunctionBrokerResult>('POST', `/functions/${enc(id)}/publish`, request)
-}
-
-/** Enqueues a task for a task queue function through Cloud Tasks, so retries and headers are the real ones. */
-export function enqueueTask(
-  id: string,
-  request: FunctionEnqueueRequest,
-): Promise<FunctionBrokerResult> {
-  return apiSend<FunctionBrokerResult>('POST', `/functions/${enc(id)}/enqueue`, request)
-}
-
-/** Runs a schedule now: the same publish the clock makes, or a direct dispatch without Pub/Sub. */
-export function runSchedule(id: string): Promise<FunctionBrokerResult> {
-  return apiSend<FunctionBrokerResult>('POST', `/functions/${enc(id)}/run`, {})
 }

@@ -16,6 +16,7 @@ use firenook_functions_runtime::{Monitor, MonitorLimits};
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 
+use super::filters::MESSAGE_FIELDS;
 use super::*;
 use crate::messaging::tests::{
     ORDERS, PROJECT, SCHEDULE_TOPIC, Suite, begin_dispatch, create_subscription, create_topic,
@@ -205,7 +206,7 @@ async fn pubsub_through_the_console() {
     assert_eq!(subscription["expirationTtlSeconds"], 86_400);
     assert_eq!(subscription["retry"]["maximumBackoffSeconds"], 60.5);
     assert_eq!(subscription["labels"]["team"], "billing");
-    // Pull, ack, nack, seek to now.
+    // The filter passed the eu message only: the backlog holds it alone.
     publish(&suite.pubsub, &invoices, "one");
     let message_with =
         |region: &str| json!({ "data": { "text": "x" }, "attributes": { "region": region } });
@@ -218,97 +219,38 @@ async fn pubsub_through_the_console() {
             ),
         )
         .await;
-    let (status, pulled) = suite
+    let (status, backlog) = suite
         .call(
-            Method::POST,
-            "/api/v1/pubsub/subscription/pull",
-            Some(json!({ "subscription": workers, "max": 10, "ackDeadlineSeconds": 60 })),
+            Method::GET,
+            &format!("/api/v1/pubsub/backlog?subscription={}", encoded(&workers)),
+            None,
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "{pulled}");
-    let received = pulled["received"].as_array().expect("received");
-    assert_eq!(received.len(), 1, "the filter passed the eu message only");
-    assert_eq!(received[0]["message"]["attributes"]["region"], "eu");
-    let ack_id = received[0]["ackId"].as_str().expect("ack id").to_owned();
-    let (status, _) = suite
+    assert_eq!(status, StatusCode::OK, "{backlog}");
+    let waiting = backlog["items"].as_array().expect("items");
+    assert_eq!(waiting.len(), 1, "the filter passed the eu message only");
+    assert_eq!(waiting[0]["attributes"]["region"], "eu");
+    // Purge: what waits is acknowledged, and kept as acked.
+    let (status, purged) = suite
         .call(
             Method::POST,
-            "/api/v1/pubsub/subscription/modify-deadline",
-            Some(json!({ "subscription": workers, "ackIds": [ack_id], "seconds": 0 })),
+            "/api/v1/pubsub/subscription/purge",
+            Some(json!({ "name": workers })),
         )
         .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    let (_, pulled) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/subscription/pull",
-            Some(json!({ "subscription": workers, "max": 1 })),
-        )
-        .await;
-    let ack_id = pulled["received"][0]["ackId"]
-        .as_str()
-        .expect("again")
-        .to_owned();
-    assert_eq!(pulled["received"][0]["deliveryAttempt"], 2);
-    let (status, _) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/subscription/ack",
-            Some(json!({ "subscription": workers, "ackIds": [ack_id] })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, sought) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/subscription/seek",
-            Some(json!({ "subscription": workers, "now": true })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{sought}");
-    assert_eq!(sought["available"], 0);
+    assert_eq!(status, StatusCode::OK, "{purged}");
+    assert_eq!(purged["available"], 0);
+    assert_eq!(purged["acked"], 1, "retainAcked keeps it");
     let (status, refused) = suite
         .call(
             Method::POST,
-            "/api/v1/pubsub/subscription/seek",
-            Some(json!({ "subscription": workers, "now": true, "snapshot": "x" })),
+            "/api/v1/pubsub/subscription/purge",
+            Some(json!({ "name": subscription_name("nope") })),
         )
         .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert_eq!(status, StatusCode::NOT_FOUND, "{refused}");
 
-    // A snapshot, a seek back to it.
-    let snapshot = format!("projects/{PROJECT}/snapshots/before");
-    let (status, created) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/snapshots",
-            Some(json!({ "name": snapshot, "subscription": workers })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::CREATED, "{created}");
-    assert_eq!(created["source"], workers);
-    let (_, snapshots) = suite
-        .call(Method::GET, "/api/v1/pubsub/snapshots", None)
-        .await;
-    assert_eq!(snapshots["total"]["count"], 1);
-    let (status, _) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/subscription/seek",
-            Some(json!({ "subscription": workers, "snapshot": snapshot })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK);
-    let (status, _) = suite
-        .call(
-            Method::DELETE,
-            "/api/v1/pubsub/snapshot",
-            Some(json!({ "name": snapshot })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-
-    // Schemas: create, commit, roll back, delete a revision, delete.
+    // Schemas: create, commit, delete.
     let schema = format!("projects/{PROJECT}/schemas/order");
     let (status, created) = suite
         .call(
@@ -319,10 +261,6 @@ async fn pubsub_through_the_console() {
         .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     assert_eq!(created["revisions"].as_array().map(Vec::len), Some(1));
-    let first_revision = created["revisions"][0]["id"]
-        .as_str()
-        .expect("revision")
-        .to_owned();
     let (_, committed) = suite
         .call(
             Method::POST,
@@ -331,32 +269,11 @@ async fn pubsub_through_the_console() {
         )
         .await;
     assert_eq!(committed["revisions"].as_array().map(Vec::len), Some(2));
-    let (_, rolled) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/schema/rollback",
-            Some(json!({ "name": schema, "revisionId": first_revision })),
-        )
-        .await;
-    assert_eq!(rolled["revisions"].as_array().map(Vec::len), Some(3));
-    let second = rolled["revisions"][1]["id"]
-        .as_str()
-        .expect("second")
-        .to_owned();
-    let (status, trimmed) = suite
-        .call(
-            Method::DELETE,
-            "/api/v1/pubsub/schema/revision",
-            Some(json!({ "name": schema, "revision": second })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{trimmed}");
-    assert_eq!(trimmed["revisions"].as_array().map(Vec::len), Some(2));
     let (_, schemas) = suite
         .call(Method::GET, "/api/v1/pubsub/schemas", None)
         .await;
     assert_eq!(schemas["items"][0]["kind"], "AVRO");
-    // Checks: definition, message, example, encode.
+    // Checks: definition, message, example.
     let (_, check) = suite
         .call(
             Method::POST,
@@ -380,7 +297,7 @@ async fn pubsub_through_the_console() {
         .call(
             Method::POST,
             "/api/v1/pubsub/schema/example",
-            Some(json!({ "schema": schema })),
+            Some(json!({ "definition": AVRO })),
         )
         .await;
     let example_json: Value =
@@ -395,19 +312,20 @@ async fn pubsub_through_the_console() {
         )
         .await;
     assert_eq!(status, StatusCode::CREATED);
-    let (_, encoded_avro) = suite
+    // The composer's Fill example: the bound revision's example.
+    let (_, example) = suite
         .call(
             Method::POST,
-            "/api/v1/pubsub/schema/encode",
-            Some(json!({ "topic": bound, "json": "{\"id\":\"o1\",\"total\":10.5}" })),
+            "/api/v1/pubsub/schema/example",
+            Some(json!({ "topic": bound })),
         )
         .await;
-    assert!(encoded_avro["base64"].is_string(), "{encoded_avro}");
+    assert!(example["json"].is_string(), "{example}");
     let (status, published) = suite
         .call(
             Method::POST,
             "/api/v1/pubsub/topic/publish",
-            Some(json!({ "topic": bound, "messages": [{ "data": { "avroJson": "{\"id\":\"o2\",\"total\":1.0}" } }] })),
+            Some(json!({ "topic": bound, "messages": [{ "data": { "avroJson": "{\"id\":\"o2\",\"total\":1.0,\"note\":null}" } }] })),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{published}");
@@ -500,6 +418,7 @@ async fn pubsub_through_the_console() {
         )
         .await;
     assert_eq!(detail["retentionSeconds"], 1_200);
+    assert_eq!(detail["invocations"], Value::Null, "no function listens");
     assert_eq!(detail["labels"]["team"], "billing");
     assert_eq!(detail["attributeKeys"], json!(["region"]));
     let (status, _) = suite
@@ -638,8 +557,8 @@ async fn request_bodies_have_their_limits_and_say_so() {
     let (status, _) = suite
         .call(
             Method::POST,
-            "/api/v1/pubsub/subscription/ack",
-            Some(json!({ "subscription": "x", "ackIds": [hundred.repeat(11)] })),
+            "/api/v1/pubsub/subscription/push-config",
+            Some(json!({ "subscription": "x", "endpoint": hundred.repeat(11) })),
         )
         .await;
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
@@ -825,17 +744,7 @@ async fn publish_jobs_run_on_the_job_registry() {
     let paced = topic_name("paced");
     create_topic(&suite.pubsub, &paced);
     create_subscription(&suite.pubsub, &subscription_name("paced-sub"), &paced);
-    // A preview answers at once and starts nothing.
     let draft = json!({ "data": { "text": "n{{i}}" } });
-    let (status, preview) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/messages:publish",
-            Some(json!({ "topic": paced, "messages": [draft], "repeat": 3, "template": true, "dryRun": true })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{preview}");
-    assert_eq!(preview["dataText"], "n1");
     // A burst: one job, counted to the end.
     let (status, job) = suite
         .call(
@@ -1039,34 +948,31 @@ async fn backlog_jobs_ack_and_release_by_query() {
 /// The test inventory's subscriber of `orders`.
 const ON_ORDER: &str = "us-central1-onOrderPlaced";
 
-/// The deliveries row of `event_id` in a deliveries page.
-fn delivery<'a>(page: &'a Value, event_id: &str) -> &'a Value {
-    page["items"]
+/// A message's delivery to a function by `event_id`, as its detail says
+/// (the inspector's Deliveries tab).
+async fn delivery(suite: &Suite, message: u64, event_id: &str) -> Value {
+    let (status, detail) = suite
+        .call(
+            Method::GET,
+            &format!(
+                "/api/v1/pubsub/message?topic={}&id={message}",
+                encoded(ORDERS)
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    detail["functions"]
         .as_array()
-        .expect("items")
+        .expect("functions")
         .iter()
         .find(|row| row["eventId"] == event_id)
-        .unwrap_or_else(|| panic!("a row for {event_id} in {page}"))
+        .cloned()
+        .unwrap_or_else(|| panic!("a delivery {event_id} in {detail}"))
 }
 
 #[tokio::test]
 async fn deliveries_join_the_fanout_with_the_invocation_record() {
-    // Without compute's record, deliveries are not answered.
-    let without = suite(None);
-    let (status, body) = without
-        .call(
-            Method::GET,
-            &format!("/api/v1/pubsub/deliveries?topic={}", encoded(ORDERS)),
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(
-        body["error"]["message"],
-        "Functions is not running in this engine, so there are no deliveries to functions."
-    );
-    without.stop.send(true).expect("stop");
-
     // Compute keeps two finished invocations here, with no floor per kind,
     // so a third lets the oldest go.
     let monitor = Monitor::new(MonitorLimits {
@@ -1075,19 +981,25 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
         ..MonitorLimits::default()
     });
     let mut suite = suite(Some(monitor.clone()));
-    let deliveries = format!("/api/v1/pubsub/deliveries?topic={}", encoded(ORDERS));
+    // The topic links every run its messages started in Functions › Invocations.
+    let (_, detail) = suite
+        .call(
+            Method::GET,
+            &format!("/api/v1/pubsub/topic?name={}", encoded(ORDERS)),
+            None,
+        )
+        .await;
+    assert_eq!(
+        detail["invocations"],
+        json!({ "kind": "functions.invocations", "key": format!("topic:{ORDERS}") })
+    );
     let id = publish(&suite.pubsub, ORDERS, "{\"order\":1}");
     let dispatch = suite.deliveries.recv().await.expect("dispatch");
     // Queued: handed over, no invocation recorded, the record kept everything.
-    let (status, page) = suite.call(Method::GET, &deliveries, None).await;
-    assert_eq!(status, StatusCode::OK, "{page}");
-    assert_eq!(page["counts"]["all"], 1);
-    assert_eq!(page["counts"]["queued"], 1);
-    let row = &page["items"][0];
+    let row = delivery(&suite, id, &dispatch.event_id).await;
     assert_eq!(row["messageId"], id.to_string());
     assert_eq!(row["functionId"], "us-central1-onOrderPlaced");
     assert_eq!(row["functionName"], "onOrderPlaced");
-    assert_eq!(row["eventId"], dispatch.event_id);
     assert_eq!(row["mark"], "queued");
     assert!(row["queueDepth"].is_number());
     assert_eq!(row["invocation"], Value::Null);
@@ -1103,15 +1015,12 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
     // Running, then delivered: compute recorded the request the dispatch
     // made, found by the event id the delivery queue sent.
     let first = begin_dispatch(&monitor, ON_ORDER, FunctionKind::Pubsub, &dispatch);
-    let (_, page) = suite.call(Method::GET, &deliveries, None).await;
-    let row = delivery(&page, &dispatch.event_id);
+    let row = delivery(&suite, id, &dispatch.event_id).await;
     assert_eq!(row["mark"], "running");
-    assert_eq!(page["counts"]["running"], 1);
     assert_eq!(row["invocation"]["key"], &*first.id);
     assert_eq!(row["queueDepth"], Value::Null);
     finish_invocation(&monitor, &first, 200, None);
-    let (_, page) = suite.call(Method::GET, &deliveries, None).await;
-    let row = delivery(&page, &dispatch.event_id);
+    let row = delivery(&suite, id, &dispatch.event_id).await;
     assert_eq!(row["mark"], "delivered");
     assert_eq!(row["status"], 200);
     assert_eq!(row["error"], Value::Null);
@@ -1121,7 +1030,6 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
     );
     assert!(row["startedAt"].is_string());
     assert!(row["durationMs"].is_number());
-    assert_eq!(page["counts"]["delivered"], 1);
     // The request shown is the one compute recorded, not a rebuilt one.
     let (status, body) = suite
         .call(
@@ -1139,20 +1047,6 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
         body["body"].as_str().map(str::as_bytes),
         Some(dispatch.body.as_slice())
     );
-    // A loaded row's outcome change comes back by event id.
-    let (status, batch) = suite
-        .call(
-            Method::POST,
-            &format!(
-                "/api/v1/pubsub/deliveries:batchGet?topic={}",
-                encoded(ORDERS)
-            ),
-            Some(json!({ "keys": [dispatch.event_id, "nope"] })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{batch}");
-    assert_eq!(batch["items"][0]["row"]["mark"], "delivered");
-    assert_eq!(batch["items"][1]["row"], Value::Null);
 
     // Failed: the handler threw; its status and the error's first line.
     let declined = publish(&suite.pubsub, ORDERS, "{\"order\":2}");
@@ -1164,26 +1058,29 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
         500,
         Some("Error: card declined\n    at handler (index.js:3:9)"),
     );
-    let (_, page) = suite.call(Method::GET, &deliveries, None).await;
-    let row = delivery(&page, &second.event_id);
+    let row = delivery(&suite, declined, &second.event_id).await;
     assert_eq!(row["messageId"], declined.to_string());
     assert_eq!(row["mark"], "failed");
     assert_eq!(row["status"], 500);
     assert_eq!(row["error"], "Error: card declined");
     assert_eq!(row["invocation"]["key"], &*token.id);
-    assert_eq!(page["counts"]["failed"], 1);
 
     // Background triggers paused: skipped, with the reason.
     suite.background.set_background_enabled(false);
     let paused = publish(&suite.pubsub, ORDERS, "{\"order\":3}");
-    let (_, page) = suite
-        .call(Method::GET, &format!("{deliveries}&outcome=skipped"), None)
+    let (_, detail) = suite
+        .call(
+            Method::GET,
+            &format!(
+                "/api/v1/pubsub/message?topic={}&id={paused}",
+                encoded(ORDERS)
+            ),
+            None,
+        )
         .await;
-    assert_eq!(page["counts"]["skipped"], 1);
-    assert_eq!(page["items"].as_array().map(Vec::len), Some(1));
-    assert_eq!(page["items"][0]["mark"], "skipped");
+    assert_eq!(detail["functions"][0]["mark"], "skipped");
     assert_eq!(
-        page["items"][0]["skippedReason"],
+        detail["functions"][0]["skippedReason"],
         "Background triggers were paused, so the event was dropped."
     );
     suite.background.set_background_enabled(true);
@@ -1200,27 +1097,25 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
     let resent = resent["eventId"].as_str().expect("event id").to_owned();
     let resent_dispatch = suite.deliveries.recv().await.expect("redelivery");
     assert_eq!(resent_dispatch.event_id, resent);
-    let (_, page) = suite.call(Method::GET, &deliveries, None).await;
-    assert_eq!(delivery(&page, &resent)["mark"], "queued");
-    assert_eq!(delivery(&page, &resent)["redelivery"], true);
-    assert_eq!(
-        page["counts"]["skipped"], 1,
-        "the publish's own stays skipped"
-    );
+    let row = delivery(&suite, paused, &resent).await;
+    assert_eq!(row["mark"], "queued");
+    assert_eq!(row["redelivery"], true);
 
     // No longer kept: the redelivery's invocation is the third finished
-    // one, so compute lets the first go. The first message's row cannot
-    // say how it went any more; the second's is still kept.
+    // one, so compute lets the first go. The first message's delivery
+    // cannot say how it went any more; the second's is still kept.
     let third = begin_dispatch(&monitor, ON_ORDER, FunctionKind::Pubsub, &resent_dispatch);
     finish_invocation(&monitor, &third, 200, None);
-    let (_, page) = suite.call(Method::GET, &deliveries, None).await;
-    let row = delivery(&page, &dispatch.event_id);
+    let row = delivery(&suite, id, &dispatch.event_id).await;
     assert_eq!(row["mark"], "not-kept");
     assert_eq!(row["invocation"], Value::Null);
     assert_eq!(row["status"], Value::Null);
     assert_eq!(row["queueDepth"], Value::Null);
-    assert_eq!(delivery(&page, &second.event_id)["mark"], "failed");
-    assert_eq!(delivery(&page, &resent)["mark"], "delivered");
+    assert_eq!(
+        delivery(&suite, declined, &second.event_id).await["mark"],
+        "failed"
+    );
+    assert_eq!(delivery(&suite, paused, &resent).await["mark"], "delivered");
     // Each delivery's own request: the run again carries its own event id.
     let (_, body) = suite
         .call(
@@ -1237,17 +1132,6 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
         body["body"].as_str().map(str::as_bytes),
         Some(resent_dispatch.body.as_slice())
     );
-    assert_eq!(page["counts"]["all"], 4);
-    assert_eq!(page["counts"]["delivered"], 1);
-    assert_eq!(
-        page["counts"]["failed"], 1,
-        "an unknown outcome is no failure"
-    );
-    let (_, page) = suite
-        .call(Method::GET, &format!("{deliveries}&outcome=not-kept"), None)
-        .await;
-    assert_eq!(page["items"].as_array().map(Vec::len), Some(1));
-    assert_eq!(page["items"][0]["eventId"], dispatch.event_id);
     // A redelivery of that first message made now is queued, not taken
     // for one compute let go: it was handed over after the eviction.
     let (status, again) = suite
@@ -1259,9 +1143,11 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
         .await;
     assert_eq!(status, StatusCode::OK, "{again}");
     let again = again["eventId"].as_str().expect("event id").to_owned();
-    let (_, page) = suite.call(Method::GET, &deliveries, None).await;
-    assert_eq!(delivery(&page, &again)["mark"], "queued");
-    assert_eq!(delivery(&page, &dispatch.event_id)["mark"], "not-kept");
+    assert_eq!(delivery(&suite, id, &again).await["mark"], "queued");
+    assert_eq!(
+        delivery(&suite, id, &dispatch.event_id).await["mark"],
+        "not-kept"
+    );
     // Its message row shows the newest delivery's mark for the function.
     let (_, page) = suite.call(Method::GET, &messages, None).await;
     let first_id = id.to_string();
@@ -1293,8 +1179,10 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
             .as_str()
             .is_some_and(|value| value.starts_with("application/cloudevents+json"))
     );
-    let (_, page) = suite.call(Method::GET, &deliveries, None).await;
-    assert_eq!(delivery(&page, &second.event_id)["mark"], "not-kept");
+    assert_eq!(
+        delivery(&suite, declined, &second.event_id).await["mark"],
+        "not-kept"
+    );
     suite.stop.send(true).expect("stop");
 }
 
@@ -1305,8 +1193,7 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
 async fn a_failure_the_sdk_caught_says_what_the_handler_logged() {
     let monitor = Monitor::new(MonitorLimits::default());
     let mut suite = suite(Some(monitor.clone()));
-    let deliveries = format!("/api/v1/pubsub/deliveries?topic={}", encoded(ORDERS));
-    publish(&suite.pubsub, ORDERS, "{\"order\":1}");
+    let first = publish(&suite.pubsub, ORDERS, "{\"order\":1}");
     let dispatch = suite.deliveries.recv().await.expect("dispatch");
     let token = begin_dispatch(&monitor, ON_ORDER, FunctionKind::Pubsub, &dispatch);
     let line = |level: &str, message: &str| {
@@ -1321,15 +1208,13 @@ async fn a_failure_the_sdk_caught_says_what_the_handler_logged() {
     ));
     monitor.log(&line("ERROR", "a second error"));
     finish_invocation(&monitor, &token, 500, None);
-    let (status, page) = suite.call(Method::GET, &deliveries, None).await;
-    assert_eq!(status, StatusCode::OK, "{page}");
-    let row = delivery(&page, &dispatch.event_id);
+    let row = delivery(&suite, first, &dispatch.event_id).await;
     assert_eq!(row["mark"], "failed");
     assert_eq!(row["status"], 500);
     assert_eq!(row["error"], "digest service unavailable");
 
     // A handler error compute recorded wins over any line.
-    publish(&suite.pubsub, ORDERS, "{\"order\":2}");
+    let second_id = publish(&suite.pubsub, ORDERS, "{\"order\":2}");
     let second = suite.deliveries.recv().await.expect("dispatch");
     let token = begin_dispatch(&monitor, ON_ORDER, FunctionKind::Pubsub, &second);
     monitor.log(
@@ -1337,11 +1222,13 @@ async fn a_failure_the_sdk_caught_says_what_the_handler_logged() {
             .with_execution(&*token.id),
     );
     finish_invocation(&monitor, &token, 500, Some("Error: thrown"));
-    let (_, page) = suite.call(Method::GET, &deliveries, None).await;
-    assert_eq!(delivery(&page, &second.event_id)["error"], "Error: thrown");
+    assert_eq!(
+        delivery(&suite, second_id, &second.event_id).await["error"],
+        "Error: thrown"
+    );
 
     // A success that logged an error is no failure, and has no error.
-    publish(&suite.pubsub, ORDERS, "{\"order\":3}");
+    let third_id = publish(&suite.pubsub, ORDERS, "{\"order\":3}");
     let third = suite.deliveries.recv().await.expect("dispatch");
     let token = begin_dispatch(&monitor, ON_ORDER, FunctionKind::Pubsub, &third);
     monitor.log(
@@ -1349,8 +1236,7 @@ async fn a_failure_the_sdk_caught_says_what_the_handler_logged() {
             .with_execution(&*token.id),
     );
     finish_invocation(&monitor, &token, 200, None);
-    let (_, page) = suite.call(Method::GET, &deliveries, None).await;
-    let row = delivery(&page, &third.event_id);
+    let row = delivery(&suite, third_id, &third.event_id).await;
     assert_eq!(row["mark"], "delivered");
     assert_eq!(row["error"], Value::Null);
     suite.stop.send(true).expect("stop");
@@ -1466,32 +1352,12 @@ async fn batch_gets_patch_rows() {
 // ------------------------------------------------------------ R-CF-16
 
 #[tokio::test]
-async fn lists_are_pages_with_meta() {
+async fn lists_are_pages() {
     let suite = suite(None);
-    for (uri, default_sort) in [
-        ("/api/v1/pubsub/messages/meta", "id:desc"),
-        ("/api/v1/pubsub/backlog/meta", "delivery:asc"),
-        ("/api/v1/pubsub/deliveries/meta", "publishedAt:desc"),
-        ("/api/v1/pubsub/snapshots/meta", "name:asc"),
-        ("/api/v1/pubsub/schemas/meta", "name:asc"),
-        ("/api/v1/pubsub/schedules/meta", "nextRunAt:asc"),
-    ] {
-        let (status, meta) = suite.call(Method::GET, uri, None).await;
-        assert_eq!(status, StatusCode::OK, "{uri}");
-        assert_eq!(meta["defaultSort"], default_sort, "{uri}");
-        assert_eq!(meta["sortable"], json!([]), "{uri}");
-    }
-    let (_, meta) = suite
-        .call(Method::GET, "/api/v1/pubsub/messages/meta", None)
-        .await;
-    let fields: Vec<&str> = meta["fields"]
-        .as_array()
-        .expect("fields")
-        .iter()
-        .filter_map(|field| field["key"].as_str())
-        .collect();
+    // The golden file declares the fields the engine validates with.
+    let infos = MESSAGE_FIELDS.infos();
+    let fields: Vec<&str> = infos.iter().map(|info| info.key.as_str()).collect();
     assert_eq!(fields, ["id", "key", "attributes", "has", "is"]);
-    // The golden file declares the same fields the engine validates with.
     let cases: Value = serde_json::from_str(MESSAGE_CASES).expect("cases");
     let declared: Vec<&str> = cases["fields"]
         .as_array()
@@ -1504,7 +1370,7 @@ async fn lists_are_pages_with_meta() {
         .as_array()
         .expect("fields")
         .iter()
-        .zip(MESSAGE_FIELDS.infos())
+        .zip(&infos)
     {
         assert_eq!(field["kind"], info.kind);
         assert_eq!(field["help"], info.help);
@@ -1513,7 +1379,6 @@ async fn lists_are_pages_with_meta() {
     // The bounded lists are one page with an exact total.
     for uri in [
         "/api/v1/pubsub/topics",
-        "/api/v1/pubsub/snapshots",
         "/api/v1/pubsub/schemas",
         "/api/v1/pubsub/schedules",
         "/api/v1/pubsub/rejected",

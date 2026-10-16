@@ -23,7 +23,6 @@ import { type ReactNode, createContext, use, useState } from 'react'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import type { ExportDestination } from '@/api/generated/ExportDestination'
 import type { Job } from '@/api/generated/Job'
-import type { MemoryReport } from '@/api/generated/MemoryReport'
 import type { Badge } from '@/api/generated/live/Badge'
 import type { LogEntry } from '@/api/generated/observe/LogEntry'
 import type { LogFacets } from '@/api/generated/observe/LogFacets'
@@ -65,7 +64,6 @@ import { SectionCard } from '@/overview/components/section-card'
 import { SnapshotTargets, snapshotServices } from '@/overview/components/snapshot-targets'
 import { LINK_CLASS } from '@/overview/components/text-link'
 import { absentGroups, absentSections, infrastructure, sectionCards } from '@/overview/model'
-import { overviewKeys } from '@/overview/queries'
 import type { SnapshotView } from '@/overview/snapshot'
 import { sectionEntry, testStatus } from '@/test/status'
 import { defineCards } from '../registry'
@@ -262,18 +260,6 @@ const ENGINE: OverviewEngineDetails = {
   },
 }
 
-const MEMORY: MemoryReport = {
-  budgetBytes: 64 * 1024 * 1024,
-  usedBytes: 7_340_032,
-  rings: [
-    { name: 'logs', entries: 4_282, bytes: 4_718_592 },
-    { name: 'logs.problems', entries: 10, bytes: 9_216 },
-    { name: 'logging', entries: 1_024, bytes: 1_572_864 },
-    { name: 'firestore.changes', entries: 312, bytes: 1_039_360 },
-    { name: 'jobs', entries: 0, bytes: 0 },
-  ],
-}
-
 /** What the card's router draws: the card, handed down through context. */
 const CardContent = createContext<ReactNode>(null)
 
@@ -282,11 +268,8 @@ function CardRoot() {
 }
 
 /**
- * The console's providers around a card: the engine's status and the
- * Overview's buffers already in the query client, a router for links and
- * search params, and tooltips. The buffers are written as answered far in
- * the future: their query is always stale on the page (it reads afresh
- * each time the row is shown), and here nothing may be asked.
+ * The console's providers around a card: the engine's status already in
+ * the query client, a router for links and search params, and tooltips.
  */
 function Kit({ status = STATUS, children }: { status?: ConsoleStatus; children: ReactNode }) {
   const [client] = useState(() => {
@@ -296,9 +279,6 @@ function Kit({ status = STATUS, children }: { status?: ConsoleStatus; children: 
       },
     })
     created.setQueryData(statusQuery.queryKey, status)
-    created.setQueryData(overviewKeys.memory(PROJECT), MEMORY, {
-      updatedAt: Date.parse('2100-01-01T00:00:00Z'),
-    })
     return created
   })
   const [router] = useState(() =>
@@ -563,13 +543,11 @@ const MENU: LogMenuActions = {
   downloadNdjson: noop,
   downloadText: noop,
   copyVisible: noop,
+  copyLink: noop,
   clearView: noop,
   showCleared: noop,
   setWrap: noop,
   setKeep: noop,
-  applySaved: noop,
-  save: noop,
-  forget: noop,
 }
 const EDGES: EdgeFacts = {
   evicted: false,
@@ -648,13 +626,6 @@ function LogsPageSample() {
               keep={false}
               cleared={false}
               canClear={undefined}
-              hasFilter
-              saved={[
-                {
-                  name: 'Checkout, warn and up',
-                  q: 'function:us-central1-checkout -level:info -level:debug',
-                },
-              ]}
               actions={MENU}
             />
           </ToolbarRow>
@@ -783,7 +754,7 @@ const OVERVIEW: OverviewState = {
     },
   ],
   hour: HISTOGRAM.buckets,
-  logs: { entries: 4_282, errors: 2, warnings: 35, problems: 10 },
+  problemsLogged: 10,
 }
 
 const RESET_JOB: Job = {
@@ -901,7 +872,7 @@ function OverviewSample() {
           <PartTitle>Data</PartTitle>
           <DataCards status={STATUS} snapshot={RESETTING} onDialog={noop} onReset={noop} />
         </section>
-        <EngineDetails status={STATUS} project={PROJECT} details={answered(ENGINE)} />
+        <EngineDetails status={STATUS} details={answered(ENGINE)} />
       </div>
     </div>
   )
@@ -1127,7 +1098,7 @@ defineCards([
     group: 'Patterns',
     name: 'Overview',
     subtitle:
-      'ShellBanners above a configuration notice, section cards (figures, a gauge problem, starting, no summary yet), not running with its fixes, recent problems, connect tabs, data cards with a running job, engine details with buffer memory',
+      'ShellBanners above a configuration notice, section cards (figures, a gauge problem, starting, no summary yet), not running with its fixes, recent problems, connect tabs, data cards with a running job, engine details',
     width: 1200,
     surface: 'canvas',
     render: () => <OverviewCard />,

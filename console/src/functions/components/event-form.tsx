@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ApiError, nativeFetch } from '@/api/client'
 import type { FunctionDetail } from '@/api/generated/compute/FunctionDetail'
 import type { InvocationSummary } from '@/api/generated/compute/InvocationSummary'
+import type { PubsubOutgoingMessage } from '@/api/generated/messaging/PubsubOutgoingMessage'
 import { statusQuery } from '@/api/queries'
 import { JsonField, parseJsonText } from '@/components/console/json-field'
 import { JsonView } from '@/components/console/json-view'
@@ -30,7 +31,8 @@ import { publishEvent } from '@/eventarc/api'
 import { commit, firestoreScope } from '@/firestore/rest'
 import type { RestValue } from '@/firestore/value'
 import { identityUsersQuery } from '@/lib/identity'
-import { invocationQuery, publishMessage } from '../api'
+import { publish as publishMessages } from '@/pubsub/api'
+import { invocationQuery } from '../api'
 import {
   type BackendDefinition,
   type EnvelopeOptions,
@@ -43,7 +45,6 @@ import {
   substituteParams,
   topicOf,
   triggerKind,
-  utf8Base64,
 } from '../envelopes'
 import { eventInvokeCommand } from '../invoke-command'
 import { sendTestEvent } from '../invoke-stream'
@@ -56,7 +57,6 @@ import {
   RunAnswer,
   RunError,
   RunFooter,
-  SavedMenu,
   useNextInvocation,
 } from './run-parts'
 import { Sentence } from './summary-strip'
@@ -145,6 +145,39 @@ function integersAsText(value: unknown): unknown {
   return value
 }
 
+/**
+ * A Pub/Sub function's message (`{data, attributes, orderingKey}`, data as
+ * text or JSON) as Pub/Sub's own console publish takes it: the path the
+ * Pub/Sub page's composer takes, so every subscriber of the topic gets it
+ * and a refusal is the console's, never counted as the app's.
+ */
+export function publishBody(
+  topic: string,
+  value: unknown,
+): { topic: string; messages: PubsubOutgoingMessage[] } {
+  const message = (value ?? {}) as {
+    data?: unknown
+    attributes?: Record<string, string>
+    orderingKey?: string
+  }
+  const text =
+    message.data === undefined
+      ? ''
+      : typeof message.data === 'string'
+        ? message.data
+        : JSON.stringify(message.data)
+  return {
+    topic,
+    messages: [
+      {
+        data: { text },
+        attributes: message.attributes ?? {},
+        orderingKey: message.orderingKey ?? null,
+      },
+    ],
+  }
+}
+
 interface Run {
   started?: InvocationSummary | undefined
   finished?: InvocationSummary | undefined
@@ -185,7 +218,8 @@ export function EventForm({
   const [run, setRun] = useState<Run | null>(null)
   const [real, setReal] = useState<{
     said: string
-    matches: (invocation: InvocationSummary) => boolean
+    /** The invocation the real thing makes; null when it makes none. */
+    matches: ((invocation: InvocationSummary) => boolean) | null
   } | null>(null)
   const awaited = useNextInvocation(summary.id, real?.matches ?? null)
   const file = useRef<HTMLInputElement>(null)
@@ -355,27 +389,18 @@ export function EventForm({
         }
       }
       if (kind === 'pubsub') {
-        const message = (value ?? {}) as {
-          data?: unknown
-          attributes?: Record<string, string>
-          orderingKey?: string
-        }
-        const text =
-          message.data === undefined
-            ? ''
-            : typeof message.data === 'string'
-              ? message.data
-              : JSON.stringify(message.data)
-        const result = await publishMessage(summary.id, {
-          data: text === '' ? '' : utf8Base64(text),
-          encoding: text === '' ? 'empty' : 'base64',
-          attributes: message.attributes ?? {},
-          orderingKey: message.orderingKey ?? null,
-        })
+        const topic = summary.trigger.topic ?? `projects/${project}/topics/${topicOf(definition)}`
+        const result = await publishMessages(publishBody(topic, value))
+        const messageId = result.messageIds[0] ?? ''
+        if (result.functionsSkipped > 0)
+          return {
+            said: `Published message \`${messageId}\` to ${lastSegment(topic)}. Background triggers are paused, so no function received it.`,
+            matches: null,
+          }
         return {
-          said: `Published message \`${result.messageId ?? ''}\` to ${result.topic ? lastSegment(result.topic) : topicOf(definition)}.`,
+          said: `Published message \`${messageId}\` to ${lastSegment(topic)}.`,
           matches: (invocation: InvocationSummary) =>
-            invocation.cause.type === 'pubsub' && invocation.cause.messageId === result.messageId,
+            invocation.cause.type === 'pubsub' && invocation.cause.messageId === messageId,
         }
       }
       const channel = definition.eventTrigger?.channel ?? ''
@@ -659,7 +684,7 @@ export function EventForm({
             {real && (
               <p className="m-0 text-[13px] text-kumo-default" data-testid="event-real-result">
                 <Sentence text={real.said} />{' '}
-                {awaited ? null : (
+                {awaited || !real.matches ? null : (
                   <span className="text-kumo-subtle">Waiting for the invocation it causes…</span>
                 )}
               </p>
@@ -670,18 +695,6 @@ export function EventForm({
       <RunFooter
         tools={
           <>
-            <SavedMenu
-              project={project}
-              functionId={summary.id}
-              kind="event"
-              current={() => ({
-                ...draft,
-                envelope: draft.edited
-                  ? draft.envelope
-                  : JSON.stringify(built?.body ?? {}, null, 2),
-              })}
-              onLoad={(test) => test.draft.kind === 'event' && setDraft(test.draft)}
-            />
             <CopyAsMenu
               dialects={[
                 draft.edited || 'problem' in input

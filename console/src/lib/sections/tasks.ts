@@ -1,9 +1,9 @@
 // Cloud Tasks' registry entry: one page (queues in the panel, the queue on
-// the right with its Tasks, Attempts, History and Configuration), its
-// badge, its ⌘K action, and where a queue or a task opens. Built: its
-// journeys (e2e/tasks.spec.ts) pass against the real engine.
+// the right with its Tasks, History and Configuration), its badge, where a
+// queue or a task opens, and the two links another section may build to a
+// queue (`tasksQueueLink`). Its ⌘K action is in `./tasks-actions.ts`.
 
-import { PlusIcon, QueueIcon } from '@phosphor-icons/react'
+import { QueueIcon } from '@phosphor-icons/react'
 import { queueSearch, taskSearch } from '@/messaging/links'
 import type { ConsoleSection, SectionLink } from '../services'
 
@@ -19,21 +19,11 @@ export const tasks: ConsoleSection = {
   services: ['tasks'],
   area: 'messaging',
   icon: QueueIcon,
-  built: true,
   summary:
-    'Queues with their configuration and live counters, every pending and running task with its attempts, responses and next retry, every attempt as it happens, finished tasks with their outcome, enqueue by hand, run now, pause, hold and purge.',
+    'Queues with their configuration and live counters, every pending and running task with its attempts, responses and next retry, finished tasks with their outcome, enqueue by hand, run now, pause, hold and purge.',
   // `tasks.jobs` (run and delete jobs) is the engine's automatic gauge.
   badges: ['tasks.failed'],
   projectScope: true,
-  actions: [
-    {
-      id: 'tasks.enqueue',
-      title: 'Enqueue a task',
-      keywords: 'cloud tasks queue onTaskDispatched',
-      icon: PlusIcon,
-      link: { to: '/tasks', search: { new: 'task' } },
-    },
-  ],
   searchLabels: { 'tasks.queue': 'Task queues', 'tasks.task': 'Tasks' },
   // The page's `q` filters one queue's tasks; with no queue in the link
   // there is nothing for it to filter, and the engine's hits already name
@@ -46,4 +36,20 @@ export const tasks: ConsoleSection = {
     // Key: the queue's parts and `|<task id>`, the console's decimal id.
     'tasks.task': (key) => open(taskSearch(key)),
   },
+}
+
+/**
+ * Another section's way into a queue it names (Functions' task form): its
+ * Configuration (`config`: retries, rate limits, the retry ladder) or the
+ * Enqueue dialog open on it (`enqueue`, the page's own `new=task`). `key`
+ * is the queue's `tasks.queue` key, `<project>|<location>|<queue id>`; a
+ * key that is not one opens the page.
+ */
+export function tasksQueueLink(key: string, where: 'config' | 'enqueue'): SectionLink {
+  const search = queueSearch(key)
+  if (search.queue === undefined) return { to: '/tasks' }
+  return {
+    to: '/tasks',
+    search: where === 'config' ? { ...search, view: 'config' } : { ...search, new: 'task' },
+  }
 }

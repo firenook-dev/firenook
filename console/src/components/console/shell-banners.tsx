@@ -15,7 +15,7 @@ import type { ForeignProject } from '@/api/generated/ForeignProject'
 import { statusQuery } from '@/api/queries'
 import { PanelTitle } from '@/components/kit'
 import { connectSnippet } from '@/lib/connect'
-import { formatCount } from '@/lib/format'
+import { clockOrDate, formatCount } from '@/lib/format'
 import { useLiveStatus } from '@/lib/live/channel'
 import { useConsoleProject } from '@/lib/project'
 import { type SectionId, sectionById, serviceLabel } from '@/lib/services'
@@ -62,17 +62,6 @@ const DROPPED_NOUNS: Record<string, { one: string; other: string }> = {
   schedule: { one: 'scheduled run', other: 'scheduled runs' },
 }
 
-const pad = (value: number) => String(value).padStart(2, '0')
-
-/** "14:02:11" today; with the local date in front on another day. */
-function pausedAt(iso: string, now: number): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return iso
-  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-  if (date.toDateString() === new Date(now).toDateString()) return time
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}`
-}
-
 /** "A", "A and B", "A, B and C". */
 function listed(parts: readonly string[]): string {
   if (parts.length < 2) return parts.join('')
@@ -88,7 +77,7 @@ function listed(parts: readonly string[]): string {
 export function triggersPausedText(triggers: BackgroundTriggers, now = Date.now()): string {
   const lead = 'Background triggers are paused, so events are dropped, not queued'
   if (!triggers.since) return `${lead}.`
-  const since = `${lead} — since ${pausedAt(triggers.since, now)}`
+  const since = `${lead} — since ${clockOrDate(triggers.since, now)}`
   const counts = triggers.dropped
     .filter((entry) => entry.count > 0)
     .map((entry) =>

@@ -37,7 +37,11 @@ jobs:
           - {runner: macos-15-intel, platform: darwin-x64}
           - {runner: windows-2025, platform: win32-x64, extension: .exe, target-directory: 'x86_64-pc-windows-msvc/'}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    # The release build plus the release-mode suite tests: about 14 minutes
+    # on the Intel macOS runner before the engine embedded its own console,
+    # past 28 since (Windows 21). The job reruns everything from a clean
+    # checkout, so the limit only has to catch a hang.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

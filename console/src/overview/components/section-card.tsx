@@ -142,13 +142,9 @@ export function SectionCard({
               data-badge={problem.id}
             >
               <WarningIcon size={12} weight="bold" className="shrink-0" aria-hidden />
-              {problem.link ? (
-                <TextLink link={problem.link} className="min-w-0 truncate text-kumo-warning">
-                  {problem.text}
-                </TextLink>
-              ) : (
-                <span className="min-w-0 truncate">{problem.text}</span>
-              )}
+              <TextLink link={problem.link} className="min-w-0 truncate text-kumo-warning">
+                {problem.text}
+              </TextLink>
             </li>
           ))}
         </ul>

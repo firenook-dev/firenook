@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { type FilterFieldSet, checkFilter } from '@/lib/filter'
 import cases from '@/logs/filter-cases.json'
 import { LOGS_LINK_KEYS, linkToLogs, logs } from './logs'
+import { logsActions } from './logs-actions'
 
 // The Logs fields as the engine declares them (the cases file mirrors
 // `LOG_FIELDS`, and the engine's own test pins it).
@@ -103,19 +104,15 @@ describe('the Logs registry entry', () => {
       expect(checkFilter(String(search(text).search?.q), LOG_FIELDS).ok, text).toBe(true)
   })
 
-  it('offers the Overview’s suite-wide actions as links, registered only here', () => {
-    const links = Object.fromEntries((logs.actions ?? []).map((action) => [action.id, action.link]))
+  it('offers its own views in ⌘K, and nothing of the suite’s', () => {
+    const links = Object.fromEntries(logsActions.map((action) => [action.id, action.link]))
     expect(links).toEqual({
       'logs.errors': { to: '/logs', search: { q: 'level:error' } },
       'logs.problems': { to: '/logs', search: { q: 'is:problem' } },
-      'overview.snapshot': { to: '/', search: { dialog: 'snapshot' } },
-      'overview.reset': { to: '/', search: { dialog: 'reset' } },
-      'overview.env': { to: '/', search: { connect: 'env' } },
     })
   })
 
-  it('is built: its journeys pass against a real engine (e2e/logs.spec.ts)', () => {
-    expect(logs.built).toBe(true)
+  it('is one page with no project scope', () => {
     expect(logs.pages).toBeUndefined()
     expect(logs.projectScope).toBeUndefined()
   })

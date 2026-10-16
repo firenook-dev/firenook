@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RULES } from './fixture'
+import { RULES } from './fixture.test-support'
 import { indentation, initialState, lex } from './scan'
 
 /** The kind of the token where the nth `needle` starts. */

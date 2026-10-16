@@ -2,8 +2,9 @@
 // directly, with the match blocks that govern it and what they allow; the
 // folders no rule covers, where every client request is denied; folders too
 // deep to analyse; the match blocks that reach no file at all (usually a
-// typo in a path); and the engine's warnings about the rules themselves.
-// Only an emulator can draw this: it holds both the rules and the files.
+// typo in a path). Only an emulator can draw this: it holds both the rules
+// and the files. The engine's warnings about the rules are the Problems
+// strip's.
 //
 // It follows the files: an upload into a folder no rule covers shows up
 // here as it lands (the `storage.objects` topic asks the map again, at most
@@ -11,10 +12,9 @@
 // built.
 
 import { Button, DropdownMenu, Text, Tooltip } from '@cloudflare/kumo'
-import { CaretDownIcon, MagicWandIcon, WarningIcon } from '@phosphor-icons/react'
+import { CaretDownIcon, MagicWandIcon } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import type { RulesDiagnostic } from '@/api/generated/RulesDiagnostic'
 import type { RulesOperation } from '@/api/generated/RulesOperation'
 import type { StorageFolderRules } from '@/api/generated/storage/StorageFolderRules'
 import { RequiresNotice } from '@/components/console/requires-notice'
@@ -23,9 +23,11 @@ import { searchIdentityUsers } from '@/lib/identity'
 import { createInvalidator } from '@/lib/live/use-live-topic'
 import { toast } from '@/lib/toasts'
 import type { RulesDraft } from '@/rules/draft'
+import { RulesMapPanel } from '@/rules/map-panel'
+import { STORAGE_ROOT, insertStarter } from '@/rules/starter'
 import { useStorageObjectsLive } from '../live'
 import { profileQuery, storageKeys, storageRulesCheckQuery } from '../queries'
-import { TEMPLATES, insertBlock, starterFromData, uncoveredRoots } from './starter'
+import { TEMPLATES, starterFromData, uncoveredRoots } from './starter'
 
 /** How often file changes may ask the map again, ms. */
 const MAP_REFRESH_MS = 1_000
@@ -64,7 +66,7 @@ export function FoldersPanel({
   /** The bucket the map is drawn for (the page's). */
   bucket: string
   draft: RulesDraft
-  /** The text the page last checked, which the map and warnings describe; none before the rules load. */
+  /** The text the page last checked, which the map describes; none before the rules load. */
   checked: string | undefined
   onReveal: (line: number) => void
 }) {
@@ -73,10 +75,6 @@ export function FoldersPanel({
     ...storageRulesCheckQuery(project, scope, checked ?? ''),
     enabled: checked !== undefined,
   })
-  const warnings = (check.data?.diagnostics ?? []).filter(
-    (diagnostic): diagnostic is RulesDiagnostic => diagnostic.severity === 'warning',
-  )
-  const errors = (check.data?.diagnostics ?? []).some((item) => item.severity === 'error')
   const map = check.data?.map ?? null
   const [writing, setWriting] = useState(false)
 
@@ -95,23 +93,8 @@ export function FoldersPanel({
     },
   })
 
-  const insert = (blocks: readonly string[], what: string) => {
-    let text = draft.source
-    let first: number | undefined
-    for (const block of blocks) {
-      const inserted = insertBlock(text, block)
-      text = inserted.text
-      first ??= inserted.line
-    }
-    draft.setSource(text)
-    if (first !== undefined) onReveal(first)
-    toast({
-      key: 'storage-rules-starter',
-      title: `${what} ${blocks.length === 1 ? 'is' : 'are'} in the editor`,
-      description: 'Read them, then Apply. Nothing is in force until you do.',
-      tone: 'success',
-    })
-  }
+  const insert = (blocks: readonly string[], title: string) =>
+    insertStarter(draft, blocks, STORAGE_ROOT, title, onReveal)
 
   const fromData = async (patterns: readonly string[]) => {
     if (patterns.length === 0) return
@@ -139,12 +122,12 @@ export function FoldersPanel({
       insert(
         blocks,
         patterns.length === 1
-          ? `Starter rules for ${patternText(patterns[0] ?? '')}`
-          : `Starter rules for ${patterns.length} folders`,
+          ? `Starter rules for ${patternText(patterns[0] ?? '')} are in the editor`
+          : `Starter rules for ${patterns.length} folders are in the editor`,
       )
     } catch (error) {
       toast({
-        key: 'storage-rules-starter',
+        key: 'rules-starter',
         title: 'No starter rules',
         description: (error as Error).message,
         tone: 'danger',
@@ -157,208 +140,112 @@ export function FoldersPanel({
   const roots = map ? uncoveredRoots(map.folders) : []
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="folders">
-      {readsFirestore(draft.source) && (
-        <RequiresNotice section="firestore" for="firestore.get() in these rules" />
-      )}
-      <div className="flex shrink-0 items-center gap-2 border-b border-kumo-line px-3 py-2">
-        <span
-          className="min-w-0 truncate font-mono text-[12px] text-kumo-subtle"
-          title={`gs://${bucket}`}
-        >
-          gs://{bucket}
-        </span>
-        <span className="ml-auto shrink-0">
-          <DropdownMenu>
-            <DropdownMenu.Trigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={<MagicWandIcon />}
-                  loading={writing}
-                  data-testid="rules-starter-menu"
-                >
-                  Add starter rules
-                  <CaretDownIcon size={12} className="text-kumo-subtle" />
-                </Button>
-              }
-            />
-            <DropdownMenu.Content align="end" className="w-80">
-              <DropdownMenu.Item
-                disabled={roots.length === 0}
-                onClick={() => void fromData(roots)}
-                data-testid="rules-starter-data"
-              >
-                <span className="grid gap-0.5">
-                  <span>From this bucket’s data</span>
-                  <span className="text-[12px] text-kumo-subtle">
-                    {roots.length === 0 ? (
-                      'Every folder with files is governed already.'
-                    ) : roots.length === 1 ? (
-                      <>
-                        A block for <span className="font-mono">{patternText(roots[0] ?? '')}</span>
-                        , which no rule covers, from what it holds.
-                      </>
-                    ) : (
-                      `A block for each of the ${roots.length} folders no rule covers, from what each holds.`
-                    )}
-                  </span>
-                </span>
-              </DropdownMenu.Item>
-              <DropdownMenu.Separator />
-              {TEMPLATES.map((template) => (
+    <RulesMapPanel
+      testId="folders"
+      check={check}
+      checked={checked}
+      notice={
+        readsFirestore(draft.source) && (
+          <RequiresNotice section="firestore" for="firestore.get() in these rules" />
+        )
+      }
+      header={
+        <div className="flex shrink-0 items-center gap-2 border-b border-kumo-line px-3 py-2">
+          <span
+            className="min-w-0 truncate font-mono text-[12px] text-kumo-subtle"
+            title={`gs://${bucket}`}
+          >
+            gs://{bucket}
+          </span>
+          <span className="ml-auto shrink-0">
+            <DropdownMenu>
+              <DropdownMenu.Trigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<MagicWandIcon />}
+                    loading={writing}
+                    data-testid="rules-starter-menu"
+                  >
+                    Add starter rules
+                    <CaretDownIcon size={12} className="text-kumo-subtle" />
+                  </Button>
+                }
+              />
+              <DropdownMenu.Content align="end" className="w-80">
                 <DropdownMenu.Item
-                  key={template.id}
-                  onClick={() => insert([template.block], template.title)}
-                  data-testid={`rules-starter-${template.id}`}
+                  disabled={roots.length === 0}
+                  onClick={() => void fromData(roots)}
+                  data-testid="rules-starter-data"
                 >
                   <span className="grid gap-0.5">
-                    <span className="flex items-baseline gap-2">
-                      {template.title}
-                      <span className="font-mono text-[11px] text-kumo-subtle">
-                        {template.path}
-                      </span>
+                    <span>From this bucket’s data</span>
+                    <span className="text-[12px] text-kumo-subtle">
+                      {roots.length === 0 ? (
+                        'Every folder with files is governed already.'
+                      ) : roots.length === 1 ? (
+                        <>
+                          A block for{' '}
+                          <span className="font-mono">{patternText(roots[0] ?? '')}</span>, which no
+                          rule covers, from what it holds.
+                        </>
+                      ) : (
+                        `A block for each of the ${roots.length} folders no rule covers, from what each holds.`
+                      )}
                     </span>
-                    <span className="text-[12px] text-kumo-subtle">{template.description}</span>
                   </span>
                 </DropdownMenu.Item>
-              ))}
-            </DropdownMenu.Content>
-          </DropdownMenu>
-        </span>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {warnings.length > 0 && (
-          <section
-            className="grid gap-2 border-b border-kumo-line px-3 py-3"
-            data-testid="rules-warnings"
-          >
-            <Text as="h3" size="xs" bold>
-              Worth a second look
-            </Text>
-            <ul className="grid gap-1.5">
-              {warnings.map((warning) => (
-                <li key={`${warning.line}:${warning.column}:${warning.code ?? ''}`}>
-                  <button
-                    type="button"
-                    onClick={() => onReveal(warning.line)}
-                    className="flex w-full items-start gap-2 rounded-md bg-kumo-warning-tint p-2 text-left ring ring-kumo-hairline hover:ink"
-                    data-testid="rules-warning"
-                    data-code={warning.code ?? undefined}
+                <DropdownMenu.Separator />
+                {TEMPLATES.map((template) => (
+                  <DropdownMenu.Item
+                    key={template.id}
+                    onClick={() => insert([template.block], `${template.title} is in the editor`)}
+                    data-testid={`rules-starter-${template.id}`}
                   >
-                    <WarningIcon size={14} className="mt-0.5 shrink-0 text-kumo-warning" />
                     <span className="grid gap-0.5">
-                      <span className="text-[13px] text-kumo-default">{warning.message}</span>
-                      <span className="font-mono text-[11px] text-kumo-subtle">
-                        line {warning.line}
+                      <span className="flex items-baseline gap-2">
+                        {template.title}
+                        <span className="font-mono text-[11px] text-kumo-subtle">
+                          {template.path}
+                        </span>
                       </span>
+                      <span className="text-[12px] text-kumo-subtle">{template.description}</span>
                     </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {(checked === undefined || check.isPending) && (
-          <div className="p-4">
-            <Text size="sm" variant="secondary">
-              Reading the rules…
-            </Text>
-          </div>
-        )}
-        {check.isError && (
-          <div className="p-4">
-            <Text size="sm" variant="secondary">
-              {check.error.message}
-            </Text>
-          </div>
-        )}
-        {errors && (
-          <div className="p-4">
-            <Text size="sm" variant="secondary">
-              Fix the errors in the editor to see which rules govern your files.
-            </Text>
-          </div>
-        )}
-        {check.data && !errors && !map && (
-          <div className="p-4" data-testid="rules-map-counting">
-            <Text size="sm" variant="secondary">
-              Counting what is under each folder. The map appears as soon as the folder index is
-              built; listing does not wait for it.
-            </Text>
-          </div>
-        )}
-
-        {map && (
-          <>
-            <section className="grid gap-2 px-3 py-3" data-testid="rules-map">
-              <div className="flex items-baseline gap-2">
-                <Text as="h3" size="xs" bold>
-                  Folders that hold files
-                </Text>
-                {map.grouped && (
-                  <Text as="span" size="xs" variant="secondary">
-                    Levels with more than 20 folders are grouped as *.
-                  </Text>
-                )}
-              </div>
-              {map.folders.length === 0 ? (
-                <Text size="sm" variant="secondary">
-                  gs://{bucket} holds no files yet.
-                </Text>
-              ) : (
-                <ul className="grid gap-1">
-                  {map.folders.map((folder) => (
-                    <FolderRow
-                      key={folder.pattern}
-                      folder={folder}
-                      writing={writing}
-                      onStarter={() => void fromData([folder.pattern])}
-                      onReveal={onReveal}
-                    />
-                  ))}
-                </ul>
-              )}
-            </section>
-            {map.unusedMatches.length > 0 && (
-              <section
-                className="grid gap-2 border-t border-kumo-line px-3 py-3"
-                data-testid="rules-unused"
-              >
-                <Text as="h3" size="xs" bold>
-                  Rules that reach no files
-                </Text>
-                <Text size="xs" variant="secondary">
-                  No file in gs://{bucket} matches these. A typo in a path, or a folder that is not
-                  there yet.
-                </Text>
-                <ul className="grid gap-0.5">
-                  {map.unusedMatches.map((unused) => (
-                    <li key={`${unused.line}:${unused.path}`}>
-                      <button
-                        type="button"
-                        onClick={() => onReveal(unused.line)}
-                        className="flex w-full items-baseline gap-2 rounded px-1.5 py-1 text-left hover:ink"
-                      >
-                        <span className="w-14 shrink-0 font-mono text-[11px] text-kumo-subtle">
-                          line {unused.line}
-                        </span>
-                        <span className="min-w-0 truncate font-mono text-[12px]">
-                          match {unused.path}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-          </>
-        )}
-      </div>
-    </div>
+                  </DropdownMenu.Item>
+                ))}
+              </DropdownMenu.Content>
+            </DropdownMenu>
+          </span>
+        </div>
+      }
+      map={map ? { rows: map.folders.length, unused: map.unusedMatches } : map}
+      title="Folders that hold files"
+      aside={
+        map?.grouped && (
+          <Text as="span" size="xs" variant="secondary">
+            Levels with more than 20 folders are grouped as *.
+          </Text>
+        )
+      }
+      holds="files"
+      unused={{
+        title: 'Rules that reach no files',
+        note: `No file in gs://${bucket} matches these. A typo in a path, or a folder that is not there yet.`,
+      }}
+      emptyText={`gs://${bucket} holds no files yet.`}
+      countingText="Counting what is under each folder. The map appears as soon as the folder index is built; listing does not wait for it."
+      onReveal={onReveal}
+      rows={map?.folders.map((folder) => (
+        <FolderRow
+          key={folder.pattern}
+          folder={folder}
+          writing={writing}
+          onStarter={() => void fromData([folder.pattern])}
+          onReveal={onReveal}
+        />
+      ))}
+    />
   )
 }
 

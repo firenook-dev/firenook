@@ -48,7 +48,6 @@ export interface TestsState<C extends TestCaseBase, R extends { outcome: RulesOu
   add: (test: Omit<C, 'id'>) => void
   update: (id: string, patch: Partial<Omit<C, 'id'>>) => void
   remove: (id: string) => void
-  replaceAll: (cases: C[]) => void
   setOutcomes: (source: string, outcomes: Record<string, TestOutcome<R>>) => void
   setRunning: (running: boolean, failure?: string) => void
 }
@@ -58,12 +57,16 @@ export type TestsStore<C extends TestCaseBase, R extends { outcome: RulesOutcome
   TestsState<C, R>
 >
 
-function read<C>(key: string, valid: (item: unknown) => boolean): C[] {
+function read<C>(
+  key: string,
+  valid: (item: unknown) => boolean,
+  revive: (item: C) => C = (item) => item,
+): C[] {
   try {
     const raw = localStorage.getItem(key)
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? (parsed.filter(valid) as C[]) : []
+    return Array.isArray(parsed) ? (parsed.filter(valid) as C[]).map(revive) : []
   } catch {
     return []
   }
@@ -79,10 +82,12 @@ function write(key: string, cases: unknown[]) {
 
 /**
  * A page's saved tests. `valid` says which stored items are cases (an item
- * left by another version of the page is dropped, not trusted).
+ * left by another version of the page is dropped, not trusted); `revive`
+ * brings a case an earlier version saved up to date.
  */
 export function createTestsStore<C extends TestCaseBase, R extends { outcome: RulesOutcome }>(
   valid: (item: unknown) => boolean,
+  revive?: (item: C) => C,
 ): TestsStore<C, R> {
   return createStore<TestsState<C, R>>((set, get) => {
     const save = (cases: C[]) => {
@@ -100,7 +105,7 @@ export function createTestsStore<C extends TestCaseBase, R extends { outcome: Ru
         if (get().key === key) return
         set({
           key,
-          cases: read<C>(key, valid),
+          cases: read<C>(key, valid, revive),
           outcomes: {},
           ranSource: undefined,
           failure: undefined,
@@ -110,7 +115,6 @@ export function createTestsStore<C extends TestCaseBase, R extends { outcome: Ru
       update: (id, patch) =>
         save(get().cases.map((test) => (test.id === id ? Object.assign({}, test, patch) : test))),
       remove: (id) => save(get().cases.filter((test) => test.id !== id)),
-      replaceAll: (cases) => save(cases),
       setOutcomes: (source, outcomes) => set({ outcomes, ranSource: source }),
       setRunning: (running, failure) => set({ running, failure }),
     }
@@ -213,4 +217,45 @@ export function useTestSummary<C extends TestCaseBase, R extends { outcome: Rule
   if (cases.length === 0 || ranSource !== source) return undefined
   const failing = cases.filter((test) => passes(test, outcomes[test.id]) === false).length
   return { total: cases.length, failing }
+}
+
+/** A page's saved tests, bound to how its cases run: what a rules page asks of them. */
+export interface RulesTests<C extends TestCaseBase, R extends { outcome: RulesOutcome }, X> {
+  store: TestsStore<C, R>
+  /** The saved tests' state, for a component. */
+  useTests: <T>(selector: (state: TestsState<C, R>) => T) => T
+  /** Run every saved case against `source`, now. */
+  run: (context: X, source: string) => Promise<void>
+  /** Keeps the cases of `context` loaded and run against the editor's text. */
+  useRunner: (context: X, source: string, ready: boolean) => void
+  /** How the saved cases fare against `source`; undefined until they have run on it. */
+  useSummary: (source: string) => { total: number; failing: number } | undefined
+}
+
+/**
+ * A rules page's saved tests: its store, kept per `key(context)` in this
+ * browser, and run through `runner(context)` — the page's request builder
+ * and its service's batch evaluation.
+ */
+export function createRulesTests<
+  C extends TestCaseBase,
+  Q,
+  R extends { outcome: RulesOutcome },
+  X,
+>(options: {
+  valid: (item: unknown) => item is C
+  revive?: (item: C) => C
+  key: (context: X) => string
+  runner: (context: X) => TestRunner<C, Q, R>
+}): RulesTests<C, R, X> {
+  const store = createTestsStore<C, R>(options.valid, options.revive)
+  const run = (context: X, source: string) => runTests(store, options.runner(context), source)
+  return {
+    store,
+    useTests: (selector) => useStore(store, selector),
+    run,
+    useRunner: (context, source, ready) =>
+      useTestRunner(store, options.key(context), source, ready, (text) => run(context, text)),
+    useSummary: (source) => useTestSummary(store, source),
+  }
 }

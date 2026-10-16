@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { type TaskForCode, quoteShell, taskAsCode } from './code'
-import { testDetail, testQueue } from './test-data'
+import { testDetail, testQueue } from './fixtures.test-support'
 
 const ORIGIN = 'http://127.0.0.1:9499'
 
@@ -20,7 +20,7 @@ function taskFor(detail = testDetail()): TaskForCode {
 
 describe('a task as code (U-14)', () => {
   it('writes the Admin SDK enqueue with its id, headers and data', () => {
-    expect(taskAsCode(taskFor(), 'admin-node', ORIGIN)).toBe(
+    expect(taskAsCode(taskFor(), 'node', ORIGIN)).toBe(
       [
         "import { initializeApp } from 'firebase-admin/app'",
         "import { getFunctions } from 'firebase-admin/functions'",
@@ -62,7 +62,7 @@ describe('a task as code (U-14)', () => {
         },
         headers: [{ name: 'Content-Type', value: 'application/json' }],
       },
-      'admin-node',
+      'node',
       ORIGIN,
     )
     expect(code).not.toContain('id:')
@@ -76,7 +76,7 @@ describe('a task as code (U-14)', () => {
   it('says the Admin SDK cannot send a raw body as it is', () => {
     const code = taskAsCode(
       taskFor(testDetail({ data: null, body: '{"plain":true}' })),
-      'admin-node',
+      'node',
       ORIGIN,
     )
     expect(code).toContain('use curl to send the body exactly as it is')
@@ -98,8 +98,6 @@ describe('a task as code (U-14)', () => {
     const detail = testDetail({
       headers: [{ name: 'x-note', value: "it's\nhere" }],
     })
-    expect(taskAsCode(taskFor(detail), 'admin-node', ORIGIN)).toContain(
-      "'x-note': 'it\\'s\\nhere',",
-    )
+    expect(taskAsCode(taskFor(detail), 'node', ORIGIN)).toContain("'x-note': 'it\\'s\\nhere',")
   })
 })

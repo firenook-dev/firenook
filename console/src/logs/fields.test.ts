@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { LogFacets } from '@/api/generated/observe/LogFacets'
 import { hideFacet, onlyFacet, toggleFacet } from '@/components/console/facet-list'
 import { checkFilter, printFilter } from '@/lib/filter'
-import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden'
+import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden.test-support'
 import { LOG_FIELDS, logFields } from './fields'
 import cases from './filter-cases.json'
 

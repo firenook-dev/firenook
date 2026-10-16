@@ -394,9 +394,9 @@ fn messaging_bindings_are_exported() {
     );
     assert!(read("TasksTaskRow.ts").contains("state: TasksTaskState"));
     // A flattened page keeps its root types, imported across directories.
-    let page = read("PubsubDeliveryPage.ts");
+    let page = read("PubsubRejectedList.ts");
     assert!(page.contains("from \"../Total\""), "{page}");
-    assert!(page.contains("items: Array<PubsubDeliveryRow>"), "{page}");
+    assert!(page.contains("items: Array<PubsubRejected>"), "{page}");
     assert!(read("PubsubFunctionTarget.ts").contains("from \"../EntityRef\""));
     let _ = std::fs::remove_dir_all(&out);
 }
@@ -777,7 +777,7 @@ async fn the_counters_topics_open_with_their_state() {
         "{frame}"
     );
 
-    // Cloud Tasks: every queue of the project, the official figures left out.
+    // Cloud Tasks: every queue of the project.
     let topics = tasks.topics(&context(&suite.stop));
     let mut opened = topic(&topics, "tasks.counters")
         .open(&json!({}), None)
@@ -787,10 +787,6 @@ async fn the_counters_topics_open_with_their_state() {
     let queues = frame["queues"].as_array().expect("queues");
     assert!(
         queues.iter().any(|queue| queue["key"] == PROCESS_ORDER),
-        "{frame}"
-    );
-    assert!(
-        queues.iter().all(|queue| queue["official"].is_null()),
         "{frame}"
     );
     let (_, list) = suite.call(Method::GET, "/api/v1/tasks/queues", None).await;
@@ -959,80 +955,6 @@ async fn too_many_changes_in_one_frame_are_a_reset() {
 }
 
 #[tokio::test]
-async fn the_attempts_feed_replays_what_a_reconnect_missed() {
-    let suite = suite(None);
-    let section = TasksSection::new({
-        let late = Late::pending("Cloud Tasks");
-        late.set(suite.tasks.clone());
-        late
-    });
-    let topics = section.topics(&context(&suite.stop));
-    let attempts = topic(&topics, "tasks.attempts");
-    let mut first = attempts
-        .open(&json!({ "queue": PROCESS_ORDER }), None)
-        .expect("open");
-    let enqueue = |name: &str| {
-        suite
-            .tasks
-            .enqueue_console(
-                PROCESS_ORDER,
-                firenook_tasks_front::ConsoleTask {
-                    data: Some("{}".to_owned()),
-                    id: Some(name.to_owned()),
-                    ..Default::default()
-                },
-            )
-            .expect("enqueue")
-    };
-    let one = enqueue("first-attempt");
-    let cursor = loop {
-        if let TopicEvent::Event {
-            name: "attempts",
-            cursor,
-            data,
-        } = next(&mut first).await
-        {
-            let data: Value = serde_json::from_str(&data).expect("data");
-            assert_eq!(data["items"][0]["taskId"], one.id.to_string());
-            assert_eq!(data["items"][0]["queue"], PROCESS_ORDER);
-            assert_eq!(data["items"][0]["attempt"]["attempt"], 1);
-            assert!(data["items"][0]["attempt"]["error"].is_string());
-            break cursor.expect("cursor").to_string();
-        }
-    };
-    drop(first);
-    let two = enqueue("missed-attempt");
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    let mut resumed = attempts
-        .open(
-            &json!({ "queue": PROCESS_ORDER, "task": two.id.to_string() }),
-            Some(&cursor),
-        )
-        .expect("open");
-    loop {
-        if let TopicEvent::Event {
-            name: "attempts",
-            data,
-            ..
-        } = next(&mut resumed).await
-        {
-            let data: Value = serde_json::from_str(&data).expect("data");
-            assert_eq!(data["items"][0]["taskId"], two.id.to_string());
-            break;
-        }
-    }
-    let error = attempts
-        .open(&json!({ "queue": PROCESS_ORDER, "task": "x" }), None)
-        .err()
-        .expect("refused");
-    assert_eq!(
-        error.detail().code,
-        crate::api_error::ErrorCode::InvalidArgument
-    );
-    suite.stop.send(true).expect("stop");
-}
-
-#[tokio::test]
 async fn the_queue_topic_names_rows_and_finished_tasks() {
     let suite = suite(None);
     let section = TasksSection::new({
@@ -1191,60 +1113,6 @@ async fn the_schedules_topic_follows_each_runs_outcome() {
             ..
         }
     ));
-    suite.stop.send(true).expect("stop");
-}
-
-#[tokio::test]
-async fn the_deliveries_topic_names_new_deliveries_and_outcome_changes() {
-    let monitor = Monitor::new(firenook_functions_runtime::MonitorLimits::default());
-    let mut suite = suite(Some(monitor.clone()));
-    let section = PubsubSection::new({
-        let late = Late::pending("Pub/Sub");
-        late.set(suite.pubsub.clone());
-        late
-    });
-    let topics = section.topics(&context(&suite.stop));
-    let mut stream = topic(&topics, "pubsub.deliveries")
-        .open(&json!({ "topic": ORDERS }), None)
-        .expect("open");
-    // A publish adds a delivery and names it.
-    publish(&suite.pubsub, ORDERS, "{}");
-    let dispatch = suite.deliveries.recv().await.expect("dispatch");
-    let (name, changed) = event(&next(&mut stream).await);
-    assert_eq!(name, "changed");
-    assert_eq!(changed["added"], 1, "{changed}");
-    assert_eq!(changed["keys"], json!([dispatch.event_id]));
-    // Compute's record of its invocation names it again.
-    let token = begin_dispatch(
-        &monitor,
-        "us-central1-onOrderPlaced",
-        FunctionKind::Pubsub,
-        &dispatch,
-    );
-    finish_invocation(&monitor, &token, 200, None);
-    let (name, changed) = event(&next(&mut stream).await);
-    assert_eq!(name, "changed");
-    assert_eq!(changed["added"], 0, "{changed}");
-    assert_eq!(changed["keys"], json!([dispatch.event_id]));
-    // Another topic's invocation is not this topic's change; the next
-    // event is the next publish.
-    let elsewhere = begin_invocation(
-        &monitor,
-        "us-central1-nightlyCleanup",
-        FunctionKind::Schedule,
-        InvocationCause::Schedule {
-            topic: SCHEDULE_TOPIC.to_owned(),
-            event_id: Some("tick".to_owned()),
-        },
-        [],
-        b"{}",
-    );
-    finish_invocation(&monitor, &elsewhere, 200, None);
-    tokio::time::sleep(Duration::from_millis(150)).await;
-    publish(&suite.pubsub, ORDERS, "{}");
-    let second = suite.deliveries.recv().await.expect("dispatch");
-    let (_, changed) = event(&next(&mut stream).await);
-    assert_eq!(changed["keys"], json!([second.event_id]), "{changed}");
     suite.stop.send(true).expect("stop");
 }
 

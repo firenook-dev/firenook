@@ -7,22 +7,13 @@
 import type { TasksLadderStep } from '@/api/generated/messaging/TasksLadderStep'
 import type { TasksPlannedAttempt } from '@/api/generated/messaging/TasksPlannedAttempt'
 import type { TasksQueueConfig } from '@/api/generated/messaging/TasksQueueConfig'
-import { formatNumber } from '@/lib/format'
+import { clockTime, formatNumber } from '@/lib/format'
 import { secondsText } from './states'
 
 export { secondsText } from './states'
 
 /** Rungs the engine plans at most (its `PLAN_LIMIT`). */
 export const PLAN_LIMIT = 50
-
-const pad = (value: number) => String(value).padStart(2, '0')
-
-/** `10:02:31`, local: a planned time needs no milliseconds. */
-export function clockTime(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return iso
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-}
 
 /** One rung of a task's plan, as the inspector lists it. */
 export interface PlanRow {
@@ -37,7 +28,7 @@ export interface PlanRow {
 export function planRows(plan: readonly TasksPlannedAttempt[]): PlanRow[] {
   return plan.map((planned) => ({
     attempt: planned.attempt,
-    at: clockTime(planned.earliestAt),
+    at: clockTime(planned.earliestAt, 'second'),
     backoff: planned.backoffSeconds > 0 ? `+${secondsText(planned.backoffSeconds)}` : '',
     last: planned.last,
   }))

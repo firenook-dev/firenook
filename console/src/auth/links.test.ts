@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { rulesPageSearch } from '@/rules/search'
 import type { AuthActivitySummary } from '@/api/generated/auth/AuthActivitySummary'
 import { parseViewAs } from '@/lib/identity'
 import { auth } from '@/lib/sections/auth'
+import { authActions } from '@/lib/sections/auth-actions'
 import {
   ACTION_PATH,
   activityLink,
-  callLink,
   callRef,
   consoleActionLink,
   firestoreAsUser,
@@ -15,9 +14,9 @@ import {
   messageRef,
   playgroundAsUser,
   rulesDecisionsLink,
-  rulesLineLink,
   userLink,
   userRef,
+  userTraceLinks,
 } from './links'
 
 const route = (kind: string, key: string) => auth.routes?.[kind]?.(key)
@@ -64,9 +63,8 @@ describe('where Authentication things open', () => {
     expect(route('auth.message', '312')).toEqual({ to: '/auth/inbox', search: { message: '312' } })
   })
 
-  it('names its kinds for ⌘K, and is shown now its journeys pass', () => {
+  it('names its kinds for ⌘K, its pages and its project scope', () => {
     expect(auth.searchLabels).toEqual({ 'auth.user': 'Users' })
-    expect(auth.built).toBe(true)
     expect(auth.projectScope).toBe(true)
     expect(auth.pages?.map((page) => page.to)).toEqual([
       '/auth',
@@ -75,11 +73,10 @@ describe('where Authentication things open', () => {
       '/auth/settings',
     ])
     expect(auth.pages?.[1]?.badges).toEqual(['auth.inbox'])
-    expect(auth.actions?.map((action) => action.link)).toEqual([
+    expect(authActions.map((action) => action.link)).toEqual([
       { to: '/auth', search: { new: 'user' } },
       { to: '/auth', search: { new: 'import' } },
       { to: '/auth', search: { new: 'sample' } },
-      { to: '/auth/activity', search: { panel: 'try' } },
       { to: '/auth/activity', search: { panel: 'inspect' } },
       { to: '/auth/settings', search: { new: 'tenant' } },
     ])
@@ -101,7 +98,7 @@ describe('Auth refs and links', () => {
       to: '/auth',
       search: { tenant: 'acme', user: 'a|b' },
     })
-    expect(callLink(7)).toEqual({ to: '/auth/activity', search: { entry: '7' } })
+    expect(route('auth.call', '7')).toEqual({ to: '/auth/activity', search: { entry: '7' } })
     expect(messageLink(9)).toEqual({ to: '/auth/inbox', search: { message: '9' } })
   })
 
@@ -115,6 +112,24 @@ describe('Auth refs and links', () => {
       search: { q: 'uid:u_1', tenant: 'acme' },
     })
     expect(activityLink({})).toEqual({ to: '/auth/activity' })
+  })
+
+  it('lead from a user to their calls, messages and rules decisions', () => {
+    expect(userTraceLinks({ tenant: undefined, uid: 'u_ada' })).toEqual({
+      calls: { to: '/auth/activity', search: { q: 'uid:u_ada', tenant: '(none)' } },
+      messages: { to: '/auth/inbox', search: { q: 'uid:u_ada', tenant: '(none)' } },
+      decisions: {
+        to: '/firestore/rules',
+        search: { db: undefined, panel: 'decisions', uid: 'u_ada' },
+      },
+    })
+    // A tenant's user, in another project, with a uid the grammar quotes.
+    const traced = userTraceLinks({ project: 'my-prod', tenant: 'acme', uid: 'a b' })
+    expect(traced.calls).toEqual({
+      to: '/auth/activity',
+      search: { q: 'uid:"a b"', tenant: 'acme', project: 'my-prod' },
+    })
+    expect(traced.messages.to).toBe('/auth/inbox')
   })
 })
 
@@ -136,33 +151,7 @@ describe('as this user, elsewhere', () => {
   })
 })
 
-describe('rules pages', () => {
-  it('a rules line in the shared schema, the default database left out', () => {
-    expect(rulesLineLink({ service: 'firestore', database: '(default)' }, 12)).toEqual({
-      to: '/firestore/rules',
-      search: { db: undefined, line: 12 },
-    })
-    expect(rulesLineLink({ service: 'firestore', database: 'orders' }, 3)).toEqual({
-      to: '/firestore/rules',
-      search: { db: 'orders', line: 3 },
-    })
-    expect(rulesLineLink({ service: 'storage', bucket: 'demo.appspot.com' }, 8)).toEqual({
-      to: '/storage/rules',
-      search: { bucket: 'demo.appspot.com', line: 8 },
-    })
-  })
-
-  it('a rules line the rules pages accept: their shared schema reads it back', () => {
-    const firestore = rulesPageSearch('db', { panel: ['decisions'] })
-    const storage = rulesPageSearch('bucket', { panel: ['decisions'] })
-    expect(
-      firestore.parse(rulesLineLink({ service: 'firestore', database: 'orders' }, 3).search),
-    ).toMatchObject({ db: 'orders', line: 3 })
-    expect(
-      storage.parse(rulesLineLink({ service: 'storage', bucket: 'b' }, 8).search),
-    ).toMatchObject({ bucket: 'b', line: 8 })
-  })
-
+describe('the rules pages', () => {
   it("a user's rules decisions", () => {
     expect(rulesDecisionsLink('u_ada')).toEqual({
       to: '/firestore/rules',

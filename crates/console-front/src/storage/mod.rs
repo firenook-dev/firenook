@@ -26,9 +26,8 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::routing::{get, post};
-use firenook_storage_front::{
-    BulkProgress, ChangeEvent, ConsoleRefusal, StorageConsoleApi, StorageRulesEvent,
-};
+use firenook_functions_runtime::Monitor;
+use firenook_storage_front::{BulkProgress, ConsoleRefusal, StorageConsoleApi, StorageRulesEvent};
 use firenook_suite_front::LoggingRuntime;
 use futures_util::future::BoxFuture;
 use futures_util::stream::{BoxStream, StreamExt as _};
@@ -61,6 +60,9 @@ pub struct StorageConsole {
     /// The suite's log, for the `storage.denied` lines the decision feed
     /// writes.
     pub logging: LoggingRuntime,
+    /// The Functions record, in a suite with Functions: Activity names the
+    /// invocations a file's events started.
+    pub monitor: Option<Monitor>,
     /// The feeds the section starts with its first context.
     feeds: OnceLock<Feeds>,
 }
@@ -74,8 +76,17 @@ impl StorageConsole {
             native,
             api,
             logging,
+            monitor: None,
             feeds: OnceLock::new(),
         }
+    }
+
+    /// The same console, reading the Functions record (`None` without
+    /// Functions).
+    #[must_use]
+    pub fn with_monitor(mut self, monitor: Option<Monitor>) -> Self {
+        self.monitor = monitor;
+        self
     }
 }
 
@@ -86,6 +97,8 @@ pub(crate) struct StorageRoutes {
     pub(crate) jobs: crate::jobs::JobRegistry,
     /// The decision feed; `None` without diagnostics.
     pub(crate) feed: Option<DecisionFeed>,
+    /// The Functions record; `None` without Functions.
+    pub(crate) monitor: Option<Monitor>,
 }
 
 /// The feeds a section builds once, from the first context it is given.
@@ -199,19 +212,15 @@ impl Section for StorageSection {
     }
 
     fn status_changes(&self) -> Option<BoxStream<'static, ()>> {
-        // The folder index finishing, and counts moving: at most one tick
-        // every 500 ms.
+        // The folder index finishing, and counts moving (every change the
+        // service announces moves one, and so does a window lost to lag):
+        // at most one tick every 500 ms.
         let receiver = self.0.api.subscribe();
         Some(
             futures_util::stream::unfold(receiver, |mut receiver| async move {
-                loop {
-                    match receiver.recv().await {
-                        Ok(ChangeEvent::IndexReady | ChangeEvent::Reset)
-                        | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => break,
-                        Ok(ChangeEvent::Committed { touches, .. }) if !touches.is_empty() => break,
-                        Ok(ChangeEvent::Committed { .. }) => {}
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
-                    }
+                if let Err(tokio::sync::broadcast::error::RecvError::Closed) = receiver.recv().await
+                {
+                    return None;
                 }
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 // What arrived meanwhile is in the counts the tick reads.
@@ -228,6 +237,7 @@ impl Section for StorageSection {
             api: self.0.api.clone(),
             jobs: context.jobs.clone(),
             feed: feeds.decisions.clone(),
+            monitor: self.0.monitor.clone(),
         };
         let api = Router::new()
             .route("/buckets", get(files::buckets))
@@ -257,16 +267,12 @@ impl Section for StorageSection {
             .route("/object/resend", post(files::resend))
             .route("/object/media", get(files::media))
             .route("/object/thumbnail", get(files::thumbnail))
-            .route("/object/archive", get(files::archive))
             .route("/object/activity", get(files::activity))
             .route("/object/events", get(files::events))
-            .route("/sessions", get(files::sessions))
-            .route("/session/discard", post(files::discard_session))
             .route("/rules", get(rules::read_rules).put(rules::write_rules))
             .route("/rules/check", post(rules::check_rules))
             .route("/rules/history", get(rules::rules_history))
             .route("/rules/evaluate", post(rules::evaluate))
-            .route("/rules/decisions", get(rules::decisions))
             .route("/rules/decisions/{id}", get(rules::decision))
             .route("/rules/impact", post(rules::impact))
             .route("/rules/coverage", get(rules::coverage))
@@ -403,11 +409,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
         files::StorageResendEventBody,
         files::StorageResendEvent,
         files::StorageResendResult,
-        files::StorageUploadSession,
-        files::StorageSessionState,
-        files::StorageDiscardSessionBody,
-        files::StorageArchive,
-        files::StorageArchiveEntry,
         files::StorageProfile,
         files::StorageContentTypeCount,
         files::StorageExportBody,

@@ -11,7 +11,6 @@ import type { ExtensionParamProblem } from '@/api/generated/compute/ExtensionPar
 import type { ExtensionReconfigureRequest } from '@/api/generated/compute/ExtensionReconfigureRequest'
 import type { ExtensionReconfigureResult } from '@/api/generated/compute/ExtensionReconfigureResult'
 import type { ExtensionRevealedValue } from '@/api/generated/compute/ExtensionRevealedValue'
-import type { ExtensionVendorResult } from '@/api/generated/compute/ExtensionVendorResult'
 import type { ExtensionsSnapshot } from '@/api/generated/compute/ExtensionsSnapshot'
 
 const enc = encodeURIComponent
@@ -138,12 +137,4 @@ export async function reconfigureInstance(
 /** Loads the instance again from its source and parameter files; a failed load answers `conflict`. */
 export function reloadInstance(id: string): Promise<ExtensionInstanceDetail> {
   return apiSend<ExtensionInstanceDetail>('POST', `/extensions/instances/${enc(id)}/reload`, {})
-}
-
-/**
- * Copies a registry extension's source into `extensions/.sources` (exactly
- * `firenook ext:vendor`) and reloads the instance from it.
- */
-export function vendorInstance(id: string): Promise<ExtensionVendorResult> {
-  return apiSend<ExtensionVendorResult>('POST', `/extensions/instances/${enc(id)}/vendor`, {})
 }

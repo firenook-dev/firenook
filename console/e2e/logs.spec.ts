@@ -434,6 +434,31 @@ test('downloads hold exactly what the filter shows', async ({ page, engine }) =>
   )
 })
 
+test('a view is a link: the menu copies its filter and window, and it opens the same view', async ({
+  page,
+  engine,
+}) => {
+  await timeOut(engine)
+  await openLogs(page, engine, { q: 'level:error', from: '-15m' })
+  await expect(logRow(page, TIMED_OUT).first()).toBeVisible()
+  // Paused: the link still opens the view live.
+  await page.getByTestId('logs-pause').click()
+  await expect.poll(() => new URL(page.url()).searchParams.get('paused')).toBe('true')
+  await page.getByTestId('log-menu').click()
+  await page.getByTestId('log-menu-copy-link').click()
+  await expect.poll(() => readClipboard(page)).toContain('/console/logs?')
+  const link = new URL(await readClipboard(page))
+  expect(link.origin).toBe(engine.origin)
+  expect(link.pathname).toBe('/console/logs')
+  expect(Object.fromEntries(link.searchParams)).toEqual({ q: 'level:error', from: '-15m' })
+
+  const other = await page.context().newPage()
+  await other.goto(link.href)
+  await expect(other.getByTestId('logs-filter-input')).toHaveValue('level:error')
+  await expect(logRow(other, TIMED_OUT).first()).toBeVisible()
+  await other.close()
+})
+
 test('a Google Emulator UI link opens the same view; foreign params are not read', async ({
   page,
   engine,

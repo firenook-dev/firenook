@@ -15,11 +15,12 @@ import {
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import type { Job } from '@/api/generated/Job'
 import { CopyField } from '@/components/console/copy-button'
+import { UNSTOPPABLE_JOBS } from '@/components/shell/jobs-watch'
 import { useNow } from '@/lib/clock'
-import { formatClock, formatDuration, formatNumber } from '@/lib/format'
+import { clockTime, formatDuration, formatNumber } from '@/lib/format'
 import { cancelJob } from '@/lib/jobs'
-import { SNAPSHOT_JOB } from '../api'
-import { holdsNothing, resettableSections } from '../model'
+import { CLEAR_JOB, EXPORT_JOB, SNAPSHOT_JOB } from '../api'
+import { holdsNothing, linkedReset, resettableSections } from '../model'
 import type { OverviewDialog } from '../search'
 import {
   type SnapshotView,
@@ -31,13 +32,10 @@ import {
 import type { ResetTarget } from './reset-dialog'
 import { LINK_CLASS } from './text-link'
 
-// The three dialogs load when one is first asked for: their checkboxes,
+// The two dialogs load when one is first asked for: their checkboxes,
 // radios and confirmation are not part of the Overview's first paint, and
 // the landing route is the one every visit starts on. Once loaded, each
 // stays mounted and is opened and shut by `open`, as every dialog is.
-const SnapshotDialog = lazy(() =>
-  import('./snapshot-dialog').then((module) => ({ default: module.SnapshotDialog })),
-)
 const SaveSnapshotDialog = lazy(() =>
   import('./save-snapshot-dialog').then((module) => ({ default: module.SaveSnapshotDialog })),
 )
@@ -58,6 +56,7 @@ export function DataSection({
   status,
   project,
   dialog,
+  section,
   reset,
   onDialog,
   onReset,
@@ -66,6 +65,8 @@ export function DataSection({
   project: string
   /** The dialog the address opens (`?dialog=`). */
   dialog: OverviewDialog | undefined
+  /** The section a `?dialog=reset` link names (`?section=`), when it names one. */
+  section: string | undefined
   /** The reset this page opened from a row (not in the address). */
   reset: ResetTarget | undefined
   onDialog: (dialog: OverviewDialog | undefined) => void
@@ -73,21 +74,16 @@ export function DataSection({
 }) {
   const snapshot = useSnapshotFlow(project)
   const resettable = resettableSections(status)
-  const snapshotAsked = useAsked(dialog === 'snapshot')
   const saveAsked = useAsked(dialog === 'save')
   const running = snapshot.running
-  // `?dialog=reset` names no section: the one there is, or all of them.
+  // `?dialog=reset` opens the section it names, else the one there is, or all of them.
   const resetTarget: ResetTarget | undefined =
-    reset ??
-    (dialog === 'reset'
-      ? resettable.length === 1 && resettable[0]
-        ? { kind: 'section', id: resettable[0].section.id }
-        : { kind: 'everything' }
-      : undefined)
+    reset ?? (dialog === 'reset' ? linkedReset(resettable, section) : undefined)
   const resetAsked = useAsked(resetTarget !== undefined)
 
   return (
     <section
+      id="overview-data"
       className="grid gap-3"
       aria-labelledby="overview-data-title"
       data-testid="overview-data-section"
@@ -98,22 +94,6 @@ export function DataSection({
       <DataCards status={status} snapshot={snapshot} onDialog={onDialog} onReset={onReset} />
 
       <Suspense fallback={null}>
-        {snapshotAsked && (
-          <SnapshotDialog
-            open={dialog === 'snapshot'}
-            onOpenChange={(open) => {
-              if (!open) {
-                onDialog(undefined)
-                snapshot.clearRefusal()
-              }
-            }}
-            status={status}
-            running={running}
-            starting={snapshot.starting}
-            refusal={snapshot.refusal}
-            onStart={snapshot.start}
-          />
-        )}
         {saveAsked && (
           <SaveSnapshotDialog
             open={dialog === 'save'}
@@ -276,16 +256,20 @@ export function DataCards({
             </Button>
           </div>
         )}
-        {running && running.kind !== SNAPSHOT_JOB && <JobLine job={running} />}
+        {running?.kind === CLEAR_JOB && <JobLine job={running} />}
       </article>
     </div>
   )
 }
 
-/** What the snapshot is doing now: preparing, ready to download, downloaded, refused or failed. */
+/**
+ * What the snapshot is doing now: preparing or saving on the engine's
+ * machine, ready to download, downloaded, refused or failed.
+ */
 function SnapshotState({ snapshot }: { snapshot: SnapshotView }) {
   const { running, job, ready, taken, refusal, file } = snapshot
-  if (running?.kind === SNAPSHOT_JOB) return <JobLine job={running} />
+  if (running?.kind === SNAPSHOT_JOB || running?.kind === EXPORT_JOB)
+    return <JobLine job={running} />
   if (refusal)
     return (
       <div
@@ -315,7 +299,7 @@ function SnapshotState({ snapshot }: { snapshot: SnapshotView }) {
               content="The engine keeps the newest snapshot for 10 minutes, or until it is downloaded."
               render={
                 <span className="text-kumo-subtle">
-                  until {formatClock(file.data.expiresAt, 'time').slice(0, 5)}
+                  until {clockTime(file.data.expiresAt, 'minute')}
                 </span>
               }
             />
@@ -348,14 +332,16 @@ function SnapshotState({ snapshot }: { snapshot: SnapshotView }) {
   return null
 }
 
-/** A suite job on its way: a spinner, what it has done so far, and Cancel. */
+/** A suite job on its way: a spinner, what it has done so far, and Cancel when it can stop. */
 function JobLine({ job }: { job: Job }) {
   const now = useNow('second')
   const elapsed = formatDuration(Math.max(0, now - Date.parse(job.startedAt)))
   const text =
     job.kind === SNAPSHOT_JOB
       ? `Preparing a snapshot… ${elapsed}`
-      : `${job.title}: ${formatNumber(job.done)}${job.total === null ? '' : ` of ${formatNumber(job.total)}`} deleted · ${elapsed}`
+      : job.kind === EXPORT_JOB
+        ? `${job.title}… ${elapsed}`
+        : `${job.title}: ${formatNumber(job.done)}${job.total === null ? '' : ` of ${formatNumber(job.total)}`} deleted · ${elapsed}`
   return (
     <div
       className="flex min-w-0 items-center gap-2 text-[12px] text-kumo-subtle"
@@ -363,15 +349,17 @@ function JobLine({ job }: { job: Job }) {
     >
       <Loader size="sm" />
       <span className="min-w-0 truncate">{text}</span>
-      <Button
-        variant="ghost"
-        size="xs"
-        onClick={() => void cancelJob(job.id)}
-        className="ml-auto"
-        data-testid="overview-job-cancel"
-      >
-        Cancel
-      </Button>
+      {!UNSTOPPABLE_JOBS.has(job.kind) && (
+        <Button
+          variant="ghost"
+          size="xs"
+          onClick={() => void cancelJob(job.id)}
+          className="ml-auto"
+          data-testid="overview-job-cancel"
+        >
+          Cancel
+        </Button>
+      )}
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { pad } from '@/lib/format'
 import {
   LEVEL_SERIES,
   bucketSentence,
@@ -7,6 +8,7 @@ import {
   hourBucketStart,
   levelBuckets,
   problemBuckets,
+  problemSentence,
 } from './level-bars'
 
 const counts = (debug: number, info: number, warn: number, error: number) => ({
@@ -16,7 +18,6 @@ const counts = (debug: number, info: number, warn: number, error: number) => ({
   error,
 })
 
-const pad = (value: number) => String(value).padStart(2, '0')
 const local = (ms: number) => {
   const date = new Date(ms)
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`
@@ -45,6 +46,15 @@ describe('the volume bars', () => {
       '12:05–12:06 · 1 line · 1 warning',
     )
     expect(bucketSentence(counts(0, 0, 0, 0), '12:05–12:06')).toBe('12:05–12:06 · No lines')
+  })
+
+  it('say a minute of the Overview’s hour in warnings and errors alone', () => {
+    expect(problemSentence(counts(0, 391, 18, 3), '12:05–12:06')).toBe(
+      '12:05–12:06 · 3 errors · 18 warnings',
+    )
+    expect(problemSentence(counts(4, 391, 0, 0), '12:05–12:06')).toBe(
+      '12:05–12:06 · No warnings or errors',
+    )
   })
 
   it('write a minute bucket in minutes and a shorter one in seconds', () => {

@@ -56,8 +56,8 @@ describe('how a file previews', () => {
     expect(previewKind(facts({ sniffed: sniff('application/x-elf', 'binary') }))).toBe('binary')
   })
 
-  it('lists zips and zip containers, and shows other archives as bytes', () => {
-    expect(previewKind(facts({ contentType: 'application/zip' }))).toBe('archive')
+  it('shows zips, zip containers and other archives as their bytes', () => {
+    expect(previewKind(facts({ contentType: 'application/zip' }))).toBe('binary')
     expect(
       previewKind(
         facts({
@@ -65,7 +65,7 @@ describe('how a file previews', () => {
           contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         }),
       ),
-    ).toBe('archive')
+    ).toBe('binary')
     expect(previewKind(facts({ contentType: 'application/gzip' }))).toBe('binary')
   })
 })

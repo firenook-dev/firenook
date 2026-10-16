@@ -1,24 +1,17 @@
 // Pub/Sub's Schemas page (S17, PS-50…PS-56): every schema of the project in
 // the panel; row one with the schema's name and what acts on all of it
-// (delete, a new one); row two with its tabs — Definition, Revisions, Used
-// by — and the test panel's toggle and Commit; then the definition in an
-// editor the engine's own parser checks as it is typed, an older revision
-// read-only in its place or diffed against it, and the test panel beside.
-// The counters topic's `resources` events keep the list current when a
-// schema is made or changed anywhere.
+// (delete, a new one); row two with its tabs — Definition, Used by — and
+// Commit; then the definition in an editor the engine's own parser checks
+// as it is typed. A message is checked against a schema where it is
+// written: the composer of a topic bound to it. The counters topic's
+// `resources` events keep the list current when a schema is made or
+// changed anywhere.
 
 import { Button, Tabs, Tooltip } from '@cloudflare/kumo'
-import {
-  BracketsCurlyIcon,
-  FloppyDiskIcon,
-  FlaskIcon,
-  PlusIcon,
-  TrashIcon,
-} from '@phosphor-icons/react'
+import { BracketsCurlyIcon, FloppyDiskIcon, PlusIcon, TrashIcon } from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ApiError } from '@/api/client'
-import type { PubsubSchemaRevision } from '@/api/generated/messaging/PubsubSchemaRevision'
 import type { PubsubSchemaSummary } from '@/api/generated/messaging/PubsubSchemaSummary'
 import { statusQuery } from '@/api/queries'
 import { CodeBlock } from '@/components/console/code-block'
@@ -44,29 +37,25 @@ import { useConsoleProject } from '@/lib/project'
 import { useRouteSearch } from '@/lib/search-params'
 import { describeKey, useShortcuts } from '@/lib/shortcuts'
 import { toast } from '@/lib/toasts'
-import { errorText } from '@/messaging/confirm-popover'
+import { errorText } from '@/lib/error-text'
 import { resourceFromSearch } from '@/messaging/links'
 import type { SchemasSearch } from '@/routes/pubsub_.schemas'
-import { commitSchema, deleteSchema, rollbackSchema } from '../api'
+import { commitSchema, deleteSchema } from '../api'
 import { usePubsubCounters } from '../live'
 import { searchValue, shortName } from '../names'
 import { pubsubKeys, schemaQuery, schemasQuery } from '../queries'
 import { CreateSchemaDialog } from './create-schema-dialog'
-import { RevisionsList, UsedByList } from './revisions-list'
 import { SchemaEditor, useDefinitionCheck } from './schema-editor'
 import { SCHEMA_FILTER_ID, SchemasPanel } from './schemas-panel'
 import { prettyDefinition, revisionLabel, sameDefinition } from './schema-text'
-import { TestMessage } from './test-message'
+import { UsedByList } from './used-by-list'
 
-type SchemaView = 'definition' | 'revisions' | 'used-by'
+type SchemaView = 'definition' | 'used-by'
 
 /** Every parameter that belongs to one schema: cleared when the schema changes. */
 const SCOPED = {
   schema: undefined,
-  revision: undefined,
-  diff: undefined,
   view: undefined,
-  panel: undefined,
 } satisfies Partial<SchemasSearch>
 
 /** `/` and `f`: the panel's filter, the panel shown first if it was hidden. */
@@ -121,11 +110,7 @@ export function SchemasPage() {
     { key: '/', label: 'Filter the schemas', run: focusFilter },
     { key: 'f', label: 'Filter the schemas', run: focusFilter },
   ])
-  useSchemasPalette({
-    schema: summary ? schema : undefined,
-    onCreate: create,
-    onTest: () => update({ panel: 'test' }),
-  })
+  useSchemasPalette({ onCreate: create })
 
   return (
     <SectionPage
@@ -494,38 +479,6 @@ function SchemaView({
         tone: 'danger',
       }),
   })
-  const rollback = useMutation({
-    mutationFn: (revision: PubsubSchemaRevision) =>
-      rollbackSchema({ name: schema, revisionId: revision.id }),
-    onSuccess: (answer, revision) => {
-      queryClient.setQueryData(pubsubKeys.schema(project, schema), answer)
-      void queryClient.invalidateQueries({ queryKey: pubsubKeys.schemas(project) })
-      const made = answer.revisions.at(-1)
-      update({ revision: undefined, diff: undefined, view: undefined }, { replace: true })
-      toast({
-        key: `pubsub-schema-${schema}`,
-        title: `Rolled back ${shortName(schema)}`,
-        description: `Revision ${made ? revisionLabel(made.id) : ''} has the definition of ${revisionLabel(revision.id)}.`,
-        tone: 'success',
-      })
-    },
-    onError: (error) =>
-      toast({
-        key: `pubsub-schema-${schema}`,
-        title: `Could not roll back ${shortName(schema)}`,
-        description: errorText(error),
-        tone: 'danger',
-      }),
-  })
-
-  const shown = search.revision
-    ? detail?.revisions.find((revision) => revision.id === search.revision)
-    : undefined
-  const diffed = search.diff
-    ? detail?.revisions.find((revision) => revision.id === search.diff)
-    : undefined
-  const closeRevision = () => update({ revision: undefined, diff: undefined }, { replace: true })
-  const testing = search.panel === 'test'
 
   useShortcuts({ id: 'pubsub-schema', label: 'Schema' }, [
     {
@@ -534,15 +487,6 @@ function SchemaView({
       allowInInputs: true,
       run: () => {
         if (committable && !commit.isPending) commit.mutate(draft.text)
-      },
-    },
-    {
-      key: 'Escape',
-      label: 'Close the test panel, then the revision',
-      when: () => testing || shown !== undefined || diffed !== undefined,
-      run: () => {
-        if (testing) update({ panel: undefined }, { replace: true })
-        else closeRevision()
       },
     },
   ])
@@ -577,17 +521,6 @@ function SchemaView({
           tabs={[
             { value: 'definition', label: 'Definition' },
             {
-              value: 'revisions',
-              label: (
-                <span>
-                  Revisions{' '}
-                  <span className="font-mono text-[11px] text-kumo-subtle">
-                    {formatNumber(detail?.revisions.length ?? 0)}
-                  </span>
-                </span>
-              ),
-            },
-            {
               value: 'used-by',
               label: (
                 <span>
@@ -601,22 +534,7 @@ function SchemaView({
           ]}
         />
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          <Tooltip
-            content="Check a message against this schema, or one of its revisions"
-            render={
-              <Button
-                variant={testing ? 'secondary' : 'ghost'}
-                size="sm"
-                icon={<FlaskIcon />}
-                aria-pressed={testing}
-                onClick={() => update({ panel: testing ? undefined : 'test' }, { replace: true })}
-                data-testid="pubsub-schema-test-toggle"
-              >
-                Test message
-              </Button>
-            }
-          />
-          {view === 'definition' && !shown && !diffed && (
+          {view === 'definition' && (
             <Tooltip
               content={
                 <span className="flex items-center gap-1.5">
@@ -651,24 +569,7 @@ function SchemaView({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {query.isError ? (
             <QueryError error={query.error} onRetry={() => void query.refetch()} section="pubsub" />
-          ) : !detail ? null : view === 'revisions' ? (
-            <RevisionsList
-              project={project}
-              detail={detail}
-              current={search.revision}
-              onView={(revision) =>
-                update({
-                  view: undefined,
-                  revision: revision === latest?.id ? undefined : revision,
-                  diff: undefined,
-                })
-              }
-              onDiff={(revision) =>
-                update({ view: undefined, diff: revision, revision: undefined })
-              }
-              onRollback={(revision) => rollback.mutate(revision)}
-            />
-          ) : view === 'used-by' ? (
+          ) : !detail ? null : view === 'used-by' ? (
             <UsedByList detail={detail} />
           ) : (
             <SchemaEditor
@@ -676,64 +577,32 @@ function SchemaView({
               detail={detail}
               draft={draft.text}
               onDraft={(text) => setDraft({ text, base: draft.base })}
-              revision={shown}
-              diff={diffed}
-              onCloseRevision={closeRevision}
-              onRollback={(revision) => rollback.mutate(revision)}
-              rolling={rollback.isPending}
             />
           )}
         </div>
-        {testing && detail && (
-          <TestMessage
-            project={project}
-            detail={detail}
-            onClose={() => update({ panel: undefined }, { replace: true })}
-          />
-        )}
       </SectionBody>
     </>
   )
 }
 
 /** What the page offers ⌘K while it is on screen. */
-function useSchemasPalette({
-  schema,
-  onCreate,
-  onTest,
-}: {
-  schema: string | undefined
-  onCreate: () => void
-  onTest: () => void
-}) {
+function useSchemasPalette({ onCreate }: { onCreate: () => void }) {
   const register = usePaletteProviders((state) => state.register)
   const unregister = usePaletteProviders((state) => state.unregister)
-  const actions = useRef({ schema, onCreate, onTest })
+  const actions = useRef({ onCreate })
   useLayoutEffect(() => {
-    actions.current = { schema, onCreate, onTest }
+    actions.current = { onCreate }
   })
   useEffect(() => {
     register('pubsub-schemas', (query) => {
-      const { schema: current, onCreate: create, onTest: test } = actions.current
       const items: PaletteItem[] = [
         {
           id: 'pubsub.schemas.new',
           title: 'New schema',
           keywords: 'create avro pubsub',
           icon: <PlusIcon size={16} />,
-          run: create,
+          run: () => actions.current.onCreate(),
         },
-        ...(current
-          ? [
-              {
-                id: 'pubsub.schemas.test',
-                title: `Test a message against ${shortName(current)}`,
-                keywords: 'check validate avro',
-                icon: <FlaskIcon size={16} />,
-                run: test,
-              },
-            ]
-          : []),
       ].filter((item) => matchesQuery(item, query))
       return items.length > 0 ? [{ label: 'Pub/Sub schemas', items }] : []
     })

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { type Plugin, defineConfig } from 'vite'
+import { iconWeights } from './scripts/icon-weights.mjs'
 
 /**
  * A gzip copy beside every script, stylesheet and SVG over 1 KB, which the
@@ -43,6 +44,7 @@ export default defineConfig({
     tanstackRouter({ target: 'react', autoCodeSplitting: true }),
     react({ compiler: true }),
     tailwindcss(),
+    iconWeights(),
     precompress(),
   ],
   resolve: {

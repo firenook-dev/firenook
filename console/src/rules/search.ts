@@ -17,8 +17,6 @@ import { zFlag } from '@/lib/search-params'
 /** Every operation a rules decision can be about. */
 export const RULES_METHODS = ['get', 'list', 'create', 'update', 'delete'] as const
 
-export type RulesPageMethod = (typeof RULES_METHODS)[number]
-
 /** The rules page's schema: its scope param, its panels, and everything the two pages share. */
 export function rulesPageSearch<
   const K extends 'db' | 'bucket',

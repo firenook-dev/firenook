@@ -51,14 +51,16 @@ import type { RowMenuItem } from '@/components/console/row-menu'
 import { TableFooter } from '@/components/console/table-footer'
 import { ToolbarRow } from '@/components/console/toolbar'
 import type { CursorPages } from '@/components/console/use-cursor-rows'
-import { FLASH_MS, useCursorRows } from '@/components/console/use-cursor-rows'
+import { useCursorRows } from '@/components/console/use-cursor-rows'
+import { FLASH_MS } from '@/components/kit'
+import { copyToClipboard } from '@/lib/copy'
 import { checkFilter } from '@/lib/filter'
 import { formatNumber } from '@/lib/format'
 import { useShortcuts } from '@/lib/shortcuts'
 import type { SubscriptionStatus } from '@/lib/live/channel'
 import { readStarted } from '@/lib/live/use-live-topic'
 import { toast } from '@/lib/toasts'
-import { compareIds, dedupeRows, idsAbove } from '@/messaging/rows'
+import { compareIds, dedupeRows, idsAbove } from '../rows'
 import { MESSAGE_FIELDS, MESSAGE_FILTER_PLACEHOLDER, messageFields } from '../filters'
 import { publishedStep, useTopicLive } from '../live'
 import { shortName } from '../names'
@@ -532,8 +534,7 @@ export function MessagesView({
     try {
       const message = await queryClient.fetchQuery(messageQuery(project, topic, row.id))
       const text = JSON.stringify(messageJson(message), null, 2)
-      await navigator.clipboard.writeText(text)
-      toast({ key: 'pubsub-copy', title: `Copied message ${row.id} as JSON` })
+      await copyToClipboard(text, { title: `Copied message ${row.id} as JSON` })
     } catch {
       toast({ key: 'pubsub-copy', title: 'Could not copy the message', tone: 'danger' })
     }
@@ -546,9 +547,7 @@ export function MessagesView({
         ),
       )
       const text = JSON.stringify(messages.map(messageJson), null, 2)
-      await navigator.clipboard.writeText(text)
-      toast({
-        key: 'pubsub-copy',
+      await copyToClipboard(text, {
         title: `Copied ${formatNumber(messages.length)} ${messages.length === 1 ? 'message' : 'messages'} as JSON`,
       })
     } catch {
@@ -591,10 +590,7 @@ export function MessagesView({
       label: 'Copy id',
       icon: CopyIcon,
       run: () => {
-        void navigator.clipboard
-          .writeText(row.id)
-          .then(() => toast({ key: 'pubsub-copy', title: `Copied ${row.id}` }))
-          .catch(() => toast({ key: 'pubsub-copy', title: 'Could not copy', tone: 'danger' }))
+        void copyToClipboard(row.id, { what: row.id })
       },
     },
     { id: 'copy-json', label: 'Copy as JSON', icon: CopyIcon, run: () => void copyAsJson(row) },

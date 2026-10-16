@@ -64,8 +64,8 @@ impl RequestRecorder {
     }
 
     /// Records one evaluation in the Requests feed and the decision
-    /// retention, and answers the id it gave the decision when either kept
-    /// it, so a refusal reported elsewhere can name the decision to open.
+    /// retention, and answers the id it gave the decision and what kept it,
+    /// so a refusal reported elsewhere can name the decision to open.
     pub(crate) fn record(
         &self,
         project: &str,
@@ -74,7 +74,7 @@ impl RequestRecorder {
         result: &EvaluationResult,
         trace: &EvaluationTrace,
         metadata: Metadata<'_>,
-    ) -> Option<String> {
+    ) -> RecordedEvent {
         let id = format!(
             "{}-{}",
             self.identity,
@@ -106,7 +106,28 @@ impl RequestRecorder {
             granular_allow_outcomes: Outcomes(trace),
             rules_context: Context { request, metadata },
         }) == RecordOutcome::Recorded;
-        (retained || recorded).then_some(id)
+        RecordedEvent {
+            id,
+            retained,
+            recorded,
+        }
+    }
+}
+
+/// What recording one evaluation came to.
+pub(crate) struct RecordedEvent {
+    /// The id the decision was given.
+    pub(crate) id: String,
+    /// Its context was retained for a re-run.
+    pub(crate) retained: bool,
+    /// Its Requests event was published.
+    pub(crate) recorded: bool,
+}
+
+impl RecordedEvent {
+    /// The id, when anything kept the decision under it.
+    pub(crate) fn kept(&self) -> Option<&str> {
+        (self.retained || self.recorded).then_some(self.id.as_str())
     }
 }
 

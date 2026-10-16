@@ -7,11 +7,8 @@
 
 use std::time::{Duration, SystemTime};
 
-use axum::Json;
 use axum::extract::State;
-use axum::response::{IntoResponse, Response};
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64;
+use axum::response::Response;
 use firenook_pubsub_front::OutgoingMessage;
 use firenook_pubsub_front::templates::{self, Draft};
 use futures_util::FutureExt as _;
@@ -19,10 +16,8 @@ use serde::Deserialize;
 
 use super::errors::pubsub_error;
 use super::filters::message_query;
-use super::types::{
-    PubsubBacklogJobBody, PubsubData, PubsubOutgoingMessage, PubsubPreview, PubsubPublishJobBody,
-};
-use super::{LARGE_BODY, PubsubApi, backlog_key, draft, preview};
+use super::types::{PubsubBacklogJobBody, PubsubData, PubsubOutgoingMessage, PubsubPublishJobBody};
+use super::{LARGE_BODY, PubsubApi, backlog_key, draft};
 use crate::api_error::ApiError;
 use crate::jobs::{BulkTarget, JobHandle, accepted};
 use crate::messaging::PubsubConsole;
@@ -157,15 +152,6 @@ fn publish_new(
             size_text(size)
         ))
         .with_fix("Lower the count, or publish with an interval."));
-    }
-    if body.dry_run {
-        return Ok(Json(preview(
-            &console,
-            &body.topic,
-            &body.messages[0],
-            body.template,
-        ))
-        .into_response());
     }
     let drafts: Vec<Draft> = body.messages.iter().map(draft).collect();
     let schema = console.runtime.broker().topic_schema(&body.topic);
@@ -306,48 +292,6 @@ fn again_ids(
     }
 }
 
-/// The first kept message of an `again` target, as the publish would send
-/// it.
-fn again_preview(
-    console: &PubsubConsole,
-    topic: &str,
-    ids: &[Result<u64, String>],
-) -> PubsubPreview {
-    let broker = console.runtime.broker();
-    let first = ids
-        .iter()
-        .filter_map(|id| id.as_ref().ok())
-        .find_map(|id| broker.history_message(topic, *id));
-    match first {
-        Some(message) => {
-            let text = String::from_utf8(message.message.data.clone()).ok();
-            PubsubPreview {
-                data_base64: text.is_none().then(|| BASE64.encode(&message.message.data)),
-                data_text: text,
-                attributes: message
-                    .message
-                    .attributes
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect(),
-                ordering_key: (!message.message.ordering_key.is_empty())
-                    .then(|| message.message.ordering_key.clone()),
-                problem: None,
-            }
-        }
-        None => PubsubPreview {
-            data_text: None,
-            data_base64: None,
-            attributes: std::collections::BTreeMap::new(),
-            ordering_key: None,
-            problem: Some(
-                "None of these messages is kept any more, so there is nothing to publish again."
-                    .to_owned(),
-            ),
-        },
-    }
-}
-
 fn publish_again(
     api: &PubsubApi,
     console: PubsubConsole,
@@ -355,9 +299,6 @@ fn publish_again(
     target: &BulkTarget,
 ) -> Result<Response, ApiError> {
     let ids = again_ids(&console, &body.topic, target)?;
-    if body.dry_run {
-        return Ok(Json(again_preview(&console, &body.topic, &ids)).into_response());
-    }
     let total = u64_of(ids.len());
     let title = format!(
         "Publishing {} to {} again{}",

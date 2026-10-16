@@ -6,13 +6,10 @@ import type { PubsubData } from "./PubsubData";
  */
 export type PubsubMessageCheckBody = { 
 /**
- * A schema name, optionally `name@revision`.
+ * A schema name, optionally `name@revision` (the composer names the
+ * topic's bound revision).
  */
-schema?: string | null, 
-/**
- * Or a definition not yet saved.
- */
-definition?: string | null, 
+schema: string, 
 /**
  * `JSON` or `BINARY`.
  */

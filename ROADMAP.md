@@ -744,11 +744,11 @@ served until every section has landed.
   A user opens onto every field the emulator stores — the password it
   keeps recoverably included — with the account actions the Admin SDK has;
   the claims editor checks what Firebase checks as it is typed, measures
-  the 1,000-character limit the way Firebase does, shows the ID token those
-  claims produce, and says on which line your rules read each claim. "Sign
-  in as" mints the token a real sign-in would — tenant, provider and second
-  factor, beforeSignIn on request — without signing in, and says what
-  still differs; Firestore's "view as" and every identity picker now take
+  the 1,000-character limit the way Firebase does, and shows the ID token
+  those claims produce. "Sign in as" mints the token a real sign-in would —
+  tenant, provider and second factor, beforeSignIn on request — without
+  signing in, and Inspect a token shows it with what still differs;
+  Firestore's "view as" and every identity picker now take
   their token from the engine the same way, re-mint it before it expires
   and drop it as soon as a change to the account would change it. Every link and code the
   emulator would have sent is in an inbox, live, with the action it stands
@@ -757,15 +757,13 @@ served until every section has landed.
   with its exact error, the name the SDK gives it, what to change, and what
   it caused: the blocking functions it ran (with their own messages), the
   triggers it queued, the codes it sent and the accounts it changed; a
-  call can be copied as curl or replayed, and any sign-in method — codes
-  and second factor included — can be tried from the console. A pasted
-  token is decoded and judged the way the rules, the emulator and the
-  Admin SDK would judge it. Tenants (with the id you choose), one account
+  call can be copied as curl or replayed. A pasted token is decoded and
+  judged the way the rules, the emulator and the Admin SDK would judge it. Tenants (with the id you choose), one account
   per email, email enumeration protection, blocking functions and the
   lifecycle listeners are on one settings page; bulk changes run as jobs
   you can preview and cancel, users import (streamed) and export in the
-  emulator's own format, and sample users fill a project in seconds and
-  leave as cleanly. Users are in ⌘K. Found and fixed on the way: the suite
+  emulator's own format, and sample users (up to 1,000 at a time) fill a
+  project in seconds and leave as cleanly. Users are in ⌘K. Found and fixed on the way: the suite
   gave Auth no origin, so a code requested through the console linked to
   the console's address; every mutating Auth request — every token refresh
   included — rewrote the whole state, pretty-printed, under the lock, which
@@ -784,25 +782,26 @@ served until every section has landed.
   filtered view counts them and offers Refresh instead of jumping. A list
   and a thumbnail grid, and previews that ask only for what they draw:
   images, video, audio, PDFs, text and code, JSON as text or a tree, CSV
-  as a table, HTML with scripts off, the entries of a zip, raw bytes. A
-  file opens onto its facts, the gs:// path, the download URL and REST
-  address an app connected to the emulator gets, its download tokens (made
-  and revoked from there), a metadata editor that sends only what changed
-  and says when the file changed underneath, its history — who changed it,
-  from the app or the console, and whether the event reached the Functions
-  emulator — the exact event bodies it sends, with Send again, and a
-  warning with a one-click fix when its contentType disagrees with its
-  bytes. Small text files edit in place. Uploads of files and whole folders
-  with progress, cancel, retry and a question when names are taken; new
-  folders, rename, move, copy, duplicate, metadata for many files at once,
-  delete and zip downloads at any size run as jobs that report progress
-  and can be cancelled, and the unfinished resumable uploads an app left
-  are listed with Discard. The whole page can act as any Auth user, an
-  anonymous client or a custom token: listings, previews and uploads then
-  meet the rules (uploads are judged before a byte is sent), a column says
-  what that identity may read and delete, and every refusal names the line
-  that refused it, with "See why" and "Try in the playground". ⌘K goes to
-  a pasted gs:// or download URL, a recent folder or file, any folder the
+  as a table, HTML with scripts off, and any other bytes, a zip among
+  them, as hex with what their first bytes say. A file opens onto its
+  facts, the gs:// path, the download URL and REST address an app
+  connected to the emulator gets, its download tokens (made and revoked
+  from there), a metadata editor that sends only what changed and says
+  when the file changed underneath, its history — who changed it, from the
+  app or the console, and whether the event reached the Functions emulator
+  and which invocations it started — the exact event bodies it sends, with
+  Send again, and a warning with a one-click fix when its contentType
+  disagrees with its bytes. Small text files edit in place. Uploads of
+  files and whole folders with progress, cancel, retry and a question when
+  names are taken; new folders, rename, move, copy, duplicate, metadata
+  for many files at once and delete run as jobs that report progress and
+  can be cancelled, and a folder or a selection downloads as one streamed
+  zip at any size. The whole page can act as any Auth user, an anonymous
+  client or a custom token: listings, previews and uploads then meet the
+  rules (uploads are judged before a byte is sent), a column says what
+  that identity may read and delete, and every refusal names the line that
+  refused it, with "See why" and "Try in the playground". ⌘K goes to a
+  pasted gs:// or download URL, a recent folder or file, any folder the
   tree has read and any bucket. Storage rules have their own page: an
   editor that knows Storage rules (the file an upload proposes,
   `firestore.get()`, the metadata keys the bucket's files carry), live
@@ -901,21 +900,23 @@ served until every section has landed.
   takes, exported as NDJSON or JSON and published again, ticked rows or a
   file at a time. Each message shows, for every subscription and function,
   what became of it: waiting, leased, acknowledged, dead-lettered, filtered
-  out, queued for a function, delivered, or failed with the handler's error;
-  a topic's Deliveries list every function's outcome with the exact request
-  it received, and a function can be run again with one message alone. A
-  composer publishes JSON, text, bytes or Avro with attributes and an
-  ordering key, up to a thousand at a time with templated ids, or on an
-  interval that keeps going when the tab is closed, and checks data against
-  the topic's schema as it is typed. A backlog can be read in the order the
-  next pull takes it, without leasing it, or pulled, acked, nacked and
-  extended; subscriptions replay to a time or a snapshot, push subscriptions
+  out, queued for a function, delivered, or failed with the handler's error,
+  with the exact request each function received, and a function can be run
+  again with one message alone; every run of a topic's functions is one
+  link away in Functions › Invocations. A composer publishes JSON, text,
+  bytes or Avro with attributes and an ordering key, up to a thousand at a
+  time with templated ids, or on an interval that keeps going when the tab
+  is closed, and checks data against the topic's schema as it is typed. A
+  backlog can be read in the order the next pull takes it, without leasing
+  it, its rows acknowledged or returned, and purged; push subscriptions
   show every outcome with its count, dead letters have their own list, and
   filters say where they fail to parse. A whole setup — topics,
   subscriptions, schemas — exports to a file and imports into another run
-  or project. Schemas have an editor with revisions, diffs, rollback and a
-  message tester. Scheduled functions show their next runs and their runs'
-  outcomes, run now, pause, and run in the time zone they declare. Found and
+  or project. Schemas have an editor the engine's parser checks as it is
+  typed, each commit a new revision, and the topics that use them. A
+  scheduled function's Schedule tab in Functions shows its expression in
+  words, its next runs and its runs' outcomes, runs it now, pauses it, and
+  the schedule runs in the time zone it declares. Found and
   fixed on the way: every published message and every acknowledged one was
   kept for the life of the process, and the acknowledged ones were visited
   by the 50 ms timer; every pull sorted the whole backlog; dead-lettered
@@ -925,10 +926,11 @@ served until every section has landed.
   the Pub/Sub timer outlived the suite.
 - [x] Cloud Tasks. Every queue with its configuration in force and where each
   value came from, live counters (pending, held, running, in backoff, slots
-  and a token bucket that refills on screen), every pending and running
-  task with its first and latest attempts, the handler's responses and the
-  next retry, with the emulator's `maxAttempts` + 1 said where the figure
-  shows, every attempt of a queue as it happens, and the last thousand
+  and, while the rate limit holds tasks back, a token bucket that refills
+  on screen), every pending and running task with its first and latest
+  attempts, the handler's responses and the next retry, with the emulator's
+  `maxAttempts` + 1 said where the figure shows, a queue's attempts as they
+  happen as its function's invocations in Functions, and the last thousand
   finished tasks with their outcome. Tasks can be enqueued by hand exactly
   as the Admin SDK sends them, run now, stopped, deleted (auto-named ones
   too, which the API cannot), re-enqueued from history; queues pause,
@@ -963,8 +965,8 @@ served until every section has landed.
   address, its live figures, its current problems, why a section is not
   running and the exact fix, the recent errors, failures and denials over
   the last hour, the code to connect an app on every platform with the host
-  it sees, the engine's own configuration and what the console's buffers
-  cost. The suite's own warnings — an app writing to another project id,
+  it sees, and the engine's own configuration and where its data lives. The
+  suite's own warnings — an app writing to another project id,
   background triggers left paused by a test harness — lead the page in the
   same words every page uses; configuration the terminal prints once (a
   project that is not a demo, a public listen address, emulators missing

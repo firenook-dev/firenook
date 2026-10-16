@@ -245,12 +245,11 @@ async fn publishing_records_the_event_with_what_each_subscription_did() {
         .post("/eventarc/events/zzzzzz-1/replay", json!({}))
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    // No route empties the record: it keeps the newest 1,000 events.
     let (status, _) = suite
         .send(Method::DELETE, "/eventarc/events", Some(json!({})))
         .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    let (_, cleared) = suite.get("/eventarc/events").await;
-    assert_eq!(cleared["page"]["total"]["count"], 0);
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
     // Firebase Alerts are not delivered by this engine yet: no route.
     let (status, _) = suite
         .post(
