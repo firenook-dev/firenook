@@ -425,13 +425,15 @@ test('J-TK-11 a dropped channel is said once, by the engine badge; what arrived 
   await expect(page.getByTestId('tasks-empty')).toBeVisible()
   const badge = badgeOf(page)
   await dropLive(page)
-  await expect(badge).toHaveText('reconnecting', { timeout: 3_000 })
+  await expect(badge).toHaveText('Reconnecting', { timeout: 3_000 })
   await expect(page.getByTestId('live-notice')).toHaveCount(0)
   expect(
     (await enqueueOverPort(engine, queue, { orderId: 'o_11' }, { id: 'missed-1' })).status,
   ).toBe(200)
   await restoreLive(page)
-  await expect(badge).toHaveText(/^engine /, { timeout: 15_000 })
+  await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live', {
+    timeout: 15_000,
+  })
   await expect(rowOf(page.getByTestId('task-table'), 'missed-1')).toBeVisible({ timeout: 10_000 })
 })
 

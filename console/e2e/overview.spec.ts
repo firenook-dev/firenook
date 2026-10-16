@@ -175,15 +175,15 @@ test('connect: a snippet per platform, with the host the app sees', async ({ pag
   const status = await statusOf(engine)
   const port = (name: string) => status.services.find((service) => service.name === name)?.port
   await page.goto(`${engine.origin}/console`)
-  const snippet = page.getByTestId('overview-connect-snippet')
+  const snippet = page.getByTestId('connect-snippet')
 
-  // The header's one action opens the dialog, on the web snippet.
-  await page.getByTestId('overview-connect-open').click()
-  await expect(page.getByTestId('overview-connect')).toBeVisible()
+  // The top bar's Connect opens the dialog, on the web snippet.
+  await page.getByTestId('top-bar-connect').click()
+  await expect(page.getByTestId('connect')).toBeVisible()
   await expect.poll(() => new URL(page.url()).searchParams.get('connect')).toBe('web')
   await expect(snippet).toContainText('connectFirestoreEmulator(getFirestore(app)')
 
-  await page.getByTestId('overview-connect-tabs').getByRole('tab', { name: 'Flutter' }).click()
+  await page.getByTestId('connect-tabs').getByRole('tab', { name: 'Flutter' }).click()
   await expect.poll(() => new URL(page.url()).searchParams.get('connect')).toBe('flutter')
   await expect(snippet).toContainText(
     `FirebaseFirestore.instance.useFirestoreEmulator('127.0.0.1', ${port('firestore')})`,
@@ -195,27 +195,24 @@ test('connect: a snippet per platform, with the host the app sees', async ({ pag
   await expect(snippet).toContainText(`projectId: '${engine.project}'`)
 
   // The Android emulator reaches this machine at 10.0.2.2.
-  await page.getByTestId('overview-host').getByRole('combobox').click()
+  await page.getByTestId('connect-host').getByRole('combobox').click()
   await page.getByRole('option', { name: /10\.0\.2\.2/ }).click()
   await expect(snippet).toContainText(`useFirestoreEmulator('10.0.2.2', ${port('firestore')})`)
   // An Android app says what the emulator's network needs.
-  await page.getByTestId('overview-connect-tabs').getByRole('tab', { name: 'Android' }).click()
+  await page.getByTestId('connect-tabs').getByRole('tab', { name: 'Android' }).click()
   await expect(snippet).toContainText(
     `Firebase.firestore.useEmulator("10.0.2.2", ${port('firestore')})`,
   )
   await expect(snippet).toContainText(
     '// The Android emulator reaches this machine at 10.0.2.2; allow cleartext traffic',
   )
-  await page.getByTestId('overview-host').getByRole('combobox').click()
+  await page.getByTestId('connect-host').getByRole('combobox').click()
   await page.getByRole('option', { name: /This machine/ }).click()
 
   // The environment block copies as lines a shell or a .env reads.
-  await page
-    .getByTestId('overview-connect-tabs')
-    .getByRole('tab', { name: 'Environment variables' })
-    .click()
+  await page.getByTestId('connect-tabs').getByRole('tab', { name: 'Environment variables' }).click()
   await expect.poll(() => new URL(page.url()).searchParams.get('connect')).toBe('env')
-  await page.getByTestId('overview-connect-snippet-copy').click()
+  await page.getByTestId('connect-snippet-copy').click()
   const copied = await readClipboard(page)
   expect(copied).toBe((await snippet.locator('pre, code').first().innerText()).trimEnd())
   const lines = copied.split('\n')
@@ -237,7 +234,7 @@ test('connect: a snippet per platform, with the host the app sees', async ({ pag
 
   // Closing it drops the platform from the address.
   await page.keyboard.press('Escape')
-  await expect(page.getByTestId('overview-connect')).toHaveCount(0)
+  await expect(page.getByTestId('connect')).toHaveCount(0)
   await expect.poll(() => new URL(page.url()).searchParams.get('connect')).toBeNull()
 })
 
@@ -260,17 +257,22 @@ test('links from other pages: a reset for one section, and a connect tab', async
   await expect(page.getByTestId('overview')).toBeVisible()
   await expect(dialog).toHaveCount(0)
 
-  // An empty state's "Connect" opens the dialog on its platform.
+  // A link names the platform, and opens it over whichever page it names.
   await page.goto(`${engine.origin}/console?connect=python`)
   const connect = page.getByRole('dialog', { name: 'Connect your app' })
   await expect(connect).toBeInViewport()
   await expect(connect.getByRole('tab', { name: 'Python', selected: true })).toBeVisible()
-  await expect(page.getByTestId('overview-connect-snippet')).toContainText('firebase_admin')
+  await expect(page.getByTestId('connect-snippet')).toContainText('firebase_admin')
+  await page.goto(`${engine.origin}/console/auth?connect=go`)
+  await expect(connect.getByRole('tab', { name: 'Go', selected: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(connect).toHaveCount(0)
+  await expect(page).toHaveURL(/\/console\/auth$/)
 })
 
 test('the Admin snippet runs as printed', async ({ page, engine }) => {
   await page.goto(`${engine.origin}/console?connect=node`)
-  const snippet = page.getByTestId('overview-connect-snippet')
+  const snippet = page.getByTestId('connect-snippet')
   await expect(snippet).toContainText("import { initializeApp } from 'firebase-admin/app'")
   const code = await snippet.locator('pre, code').first().innerText()
 

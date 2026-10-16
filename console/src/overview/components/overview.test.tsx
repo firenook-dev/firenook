@@ -12,7 +12,6 @@ import { sectionEntry, testStatus } from '@/test/status'
 import { sectionCards, sharedHost, suiteHealth } from '../model'
 import { createNoticeStore } from '../notices'
 import type { SnapshotView } from '../snapshot'
-import { ConnectBody } from './connect-dialog'
 import { DataCard } from './data-section'
 import { EngineDetails } from './engine-details'
 import { Notices } from './notices'
@@ -177,17 +176,11 @@ describe('a section tile', () => {
 })
 
 describe('the header', () => {
-  it('says the whole suite in one line, and opens "Connect your app"', async () => {
-    const user = userEvent.setup()
-    const onConnect = vi.fn()
+  it('says the whole suite in one line', async () => {
     const status = withDocuments(1)
     await renderInConsole(
       () => (
-        <OverviewHeader
-          status={status}
-          health={suiteHealth(sectionCards(status, new Map()))}
-          onConnect={onConnect}
-        />
+        <OverviewHeader status={status} health={suiteHealth(sectionCards(status, new Map()))} />
       ),
       { status },
     )
@@ -195,8 +188,6 @@ describe('the header', () => {
     expect(screen.getByTestId('overview-data')).toHaveTextContent(
       'In memory, gone when the engine stops',
     )
-    await user.click(screen.getByTestId('overview-connect-open'))
-    expect(onConnect).toHaveBeenCalledOnce()
   })
 })
 
@@ -357,60 +348,6 @@ it('says when the engine stopped keeping the recent problems current', async () 
     { status },
   )
   expect(screen.getByTestId('overview-live-notice')).toHaveAttribute('data-state', 'ended')
-})
-
-describe('connect your app', () => {
-  it('prints the web snippet for this engine, and hands a picked platform to the page', async () => {
-    const user = userEvent.setup()
-    const onParam = vi.fn()
-    const status = withDocuments(1)
-    await renderInConsole(
-      () => (
-        <ConnectBody
-          status={status}
-          engine={undefined}
-          host="127.0.0.1"
-          param={undefined}
-          onParam={onParam}
-        />
-      ),
-      { status },
-    )
-    const snippet = screen.getByTestId('overview-connect-snippet')
-    expect(snippet).toHaveTextContent(
-      "connectFirestoreEmulator(getFirestore(app), '127.0.0.1', 8080)",
-    )
-    expect(snippet).toHaveTextContent(
-      "initializeApp({ projectId: 'demo-overview', apiKey: 'demo-api-key' })",
-    )
-    expect(screen.getByRole('tab', { name: 'Web' })).toHaveAttribute('aria-selected', 'true')
-    await user.click(screen.getByRole('tab', { name: 'Flutter' }))
-    expect(onParam).toHaveBeenCalledWith('flutter')
-    // The list is a vertical tab list: ↓ moves to the next platform.
-    screen.getByRole('tab', { name: 'Web' }).focus()
-    await user.keyboard('{ArrowDown}')
-    expect(onParam).toHaveBeenLastCalledWith('flutter')
-  })
-
-  it('prints the platform the address names, with the engine’s bucket', async () => {
-    const status = withDocuments(1)
-    await renderInConsole(
-      () => (
-        <ConnectBody
-          status={status}
-          engine={undefined}
-          host="127.0.0.1"
-          param="env"
-          onParam={() => {}}
-        />
-      ),
-      { status },
-    )
-    const snippet = screen.getByTestId('overview-connect-snippet')
-    expect(snippet).toHaveTextContent('FIRESTORE_EMULATOR_HOST=127.0.0.1:8080')
-    expect(snippet).toHaveTextContent('FIREBASE_EMULATOR_HUB=127.0.0.1:4400')
-    expect(screen.getByTestId('overview-connect-note')).toHaveTextContent('emulators:exec')
-  })
 })
 
 /** A suite job three seconds in. */

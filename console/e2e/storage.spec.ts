@@ -1272,9 +1272,9 @@ test('the list follows the app live: one row, a burst, a delete, and a dropped c
 
   // The channel drops: the top bar says so, and only there.
   const badge = page.getByTestId('engine-badge')
-  await expect(badge).toHaveText(/^engine /)
+  await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live')
   await dropLive(page)
-  await expect(badge).toHaveText('reconnecting', { timeout: 3_000 })
+  await expect(badge).toHaveText('Reconnecting', { timeout: 3_000 })
   await expect(page.getByTestId('storage-live')).toHaveCount(0)
   expect(
     (
@@ -1289,7 +1289,9 @@ test('the list follows the app live: one row, a burst, a delete, and a dropped c
   ).toBe(200)
   await expect(row(page, 'live/00-while-dropped.png')).toHaveCount(0)
   await restoreLive(page)
-  await expect(badge).toHaveText(/^engine /, { timeout: 15_000 })
+  await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live', {
+    timeout: 15_000,
+  })
   // Replayed from where it left off: the row is read by name, nothing reloads.
   await expect(row(page, 'live/00-while-dropped.png')).toBeVisible()
   expect(batches.some((keys) => keys.includes('live/00-while-dropped.png'))).toBe(true)

@@ -53,7 +53,7 @@ dedicated.describe('with engines of their own', () => {
       const rows = page.getByTestId('grid-row')
       await expect(rows.first()).toBeVisible()
       const badge = badgeOf(page)
-      await expect(badge).toHaveText(/^engine /)
+      await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live')
       await rows.nth(0).getByRole('checkbox').click()
       await commit(first, [{ path: 'teams/t_second', fields: { name: text('Second') } }])
       await expect(rows).toHaveCount(2)
@@ -61,7 +61,7 @@ dedicated.describe('with engines of their own', () => {
       await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(2 + 1)
 
       const stopping = first.stop()
-      await expect(badge).toHaveText('engine stopped', { timeout: 1_000 })
+      await expect(badge).toHaveText('Engine stopped', { timeout: 1_000 })
       // Said in the top bar, never a modal over the page.
       await expect(page.getByRole('dialog')).toHaveCount(0)
       await expect(page.getByRole('alertdialog')).toHaveCount(0)
@@ -121,7 +121,7 @@ dedicated.describe('with engines of their own', () => {
       // Nobody has opened Firestore on this engine: its index is not built,
       // so a root collection is found without its count.
       await page.goto(`${engine.origin}/console/auth`)
-      await expect(badgeOf(page)).toHaveText(/^engine /)
+      await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live')
       await open()
       await palette.fill('prod')
       const collections = page.getByRole('group', { name: 'Collections' })
@@ -150,7 +150,7 @@ dedicated.describe('with engines of their own', () => {
       ).json()) as { documents: { name: string }[] }
       const path = listed.documents[0]!.name.split('/documents/')[1]!
       await page.goto(`${engine.origin}/console/auth`)
-      await expect(badgeOf(page)).toHaveText(/^engine /)
+      await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live')
       await open()
       await palette.fill(path)
       const document = page.getByRole('option', { name: new RegExp(path) }).first()
@@ -174,10 +174,10 @@ dedicated.describe('with engines of their own', () => {
       const engine = await dedicatedEngine('data', { seed: false })
       await page.goto(`${engine.origin}/console/firestore`)
       const badge = badgeOf(page)
-      await expect(badge).toHaveText(/^engine /)
+      await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live')
       const started = Date.now()
       const exited = engine.stop()
-      await expect(badge).toHaveText('engine stopped', { timeout: 1_000 })
+      await expect(badge).toHaveText('Engine stopped', { timeout: 1_000 })
       // The engine's own grace is 3 s; a SIGKILL would only come at 20 s.
       await Promise.race([
         exited,
@@ -190,12 +190,12 @@ dedicated.describe('with engines of their own', () => {
   )
 
   dedicated(
-    'the engine badge leads to the Overview’s engine facts, and ⌘K to saving a snapshot there',
+    'the version at the navigation’s foot leads to the Overview’s engine facts, and ⌘K to saving a snapshot there',
     async ({ page, dedicatedEngine }) => {
       const engine = await dedicatedEngine('data')
       const { data } = await statusOf(engine)
       await page.goto(`${engine.origin}/console/firestore`)
-      await page.getByTestId('engine-badge-button').click()
+      await page.getByTestId('nav-version').click()
       await expect(page).toHaveURL(/\/console\/?#engine$/)
       const details = page.getByTestId('overview-engine-details')
       await expect(details).toBeInViewport()
@@ -206,12 +206,23 @@ dedicated.describe('with engines of their own', () => {
       )
       await expect(page.getByTestId('engine-writes')).toContainText(data.durability)
 
-      // Scrolled away on the Overview, the badge brings the section back.
+      // Scrolled away on the Overview, the version brings the section back.
       const column = page.getByTestId('overview-scroll')
       const scrolled = () => column.evaluate((element) => element.scrollTop)
+      // The reveal scrolls smoothly; scrolling back while it runs would
+      // leave the column a frame short of the top, so it settles first.
+      let last = -1
+      await expect
+        .poll(async () => {
+          const now = await scrolled()
+          const still = now === last && now > 0
+          last = now
+          return still
+        })
+        .toBe(true)
       await column.evaluate((element) => element.scrollTo({ top: 0 }))
       await expect.poll(scrolled).toBe(0)
-      await page.getByTestId('engine-badge-button').click()
+      await page.getByTestId('nav-version').click()
       await expect.poll(scrolled).toBeGreaterThan(0)
       await expect(details).toBeInViewport()
 
@@ -238,7 +249,7 @@ dedicated.describe('with engines of their own', () => {
       const context = await browser.newContext()
       const first = await context.newPage()
       await first.goto(`${engine.origin}/console/firestore`)
-      await expect(badgeOf(first)).toHaveText(/^engine /)
+      await expect(first.getByTestId('top-bar')).toHaveAttribute('data-live', 'live')
       // A clear of the empty database: the job is over at once.
       const probe = await clearFirestore(first)
       expect(probe.status).toBe(202)
@@ -263,7 +274,7 @@ dedicated.describe('with engines of their own', () => {
 
       const second = await context.newPage()
       await second.goto(`${engine.origin}/console/firestore/rules`)
-      await expect(badgeOf(second)).toHaveText(/^engine /)
+      await expect(second.getByTestId('top-bar')).toHaveAttribute('data-live', 'live')
       const started = await clearFirestore(first)
       expect(started.status).toBe(202)
       const id = (started.body as { id: string }).id
@@ -300,9 +311,9 @@ dedicated.describe('with engines of their own', () => {
       await page.goto(`${before.origin}/console/firestore?path=products`)
       await expect(page.getByTestId('grid-row').first()).toBeVisible()
       const badge = badgeOf(page)
-      await expect(badge).toHaveText(/^engine /)
+      await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live')
       await before.stop()
-      await expect(badge).toHaveText('engine stopped')
+      await expect(badge).toHaveText('Engine stopped')
 
       const revision = `${ENGINE_REVISION.slice(0, 32)}00000000`
       const watch = firestoreReads(page)
@@ -316,7 +327,7 @@ dedicated.describe('with engines of their own', () => {
       const banner = page.getByTestId('banner-engine-updated')
       await expect(banner).toBeVisible({ timeout: 10_000 })
       await expect(banner).toContainText('The engine was updated. Reload to get its console.')
-      await expect(badge).toHaveText('engine updated')
+      await expect(badge).toHaveText('Engine updated')
       await page.waitForTimeout(1_000)
       // Not a restart: no toast, and nothing on screen is read again.
       await expect(page.getByText('The engine restarted')).toHaveCount(0)
@@ -325,8 +336,10 @@ dedicated.describe('with engines of their own', () => {
 
       await banner.getByRole('button', { name: 'Reload' }).click()
       await expect(page.getByTestId('banner-engine-updated')).toHaveCount(0)
-      await expect(badge).toHaveText(/^engine /)
-      await expect(badge).toHaveAttribute('title', new RegExp(revision.slice(0, 12)))
+      await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live')
+      await expect(badge).toHaveCount(0)
+      await page.getByTestId('nav-version').hover()
+      await expect(page.getByTestId('nav-version-build')).toContainText(revision.slice(0, 12))
       // The new console reads the new engine, which holds no products.
       await expect(page.getByTestId('empty-collection')).toBeVisible()
     },

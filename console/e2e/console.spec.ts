@@ -27,18 +27,45 @@ test('the overview shows what the engine runs, where, and what it does not', asy
   // The release the launcher declared, not the placeholder crate version:
   // the engine is built from a pinned commit and cannot know what it ships
   // as, so a wrong number here means the handoff is broken.
-  const badge = page.getByTestId('engine-badge')
-  await expect(badge).toHaveText(`engine ${RELEASE_VERSION}`)
-  await expect(badge).toHaveAttribute(
-    'title',
-    `Firenook ${RELEASE_VERSION}, engine source ${ENGINE_REVISION.slice(0, 12)}`,
-  )
+  // It is written small at the navigation's foot, in full in its tooltip.
+  const build = `Firenook ${RELEASE_VERSION}, engine source ${ENGINE_REVISION.slice(0, 12)}`
+  await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live')
+  const version = page.getByTestId('nav-version')
+  await expect(version).toHaveText(`v${RELEASE_VERSION}`)
+  await version.hover()
+  await expect(page.getByTestId('nav-version-build')).toHaveText(build)
   await expect(page.getByTestId('engine-version')).toHaveText(
     `${RELEASE_VERSION}·${ENGINE_REVISION.slice(0, 12)}`,
   )
   // The hub and the other ports no section owns are on the engine card, under "Show all".
   await page.getByTestId('overview-engine-all').click()
   await expect(page.getByTestId('overview-infrastructure')).toContainText('Hub')
+})
+
+test('the top bar: Connect over the page on screen, and help', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore`)
+  await page.getByTestId('top-bar-connect').click()
+  const connect = page.getByRole('dialog', { name: 'Connect your app' })
+  await expect(connect).toBeVisible()
+  await expect(page).toHaveURL(/\/console\/firestore\?connect=web$/)
+  await page.keyboard.press('Escape')
+  await expect(connect).toHaveCount(0)
+  await expect(page).toHaveURL(/\/console\/firestore$/)
+
+  // Help: the shortcuts, and the ways out, an issue already naming this engine.
+  await page.getByTestId('top-bar-help').click()
+  const repository = 'https://github.com/firenook-dev/firenook'
+  await expect(page.getByTestId('help-docs')).toHaveAttribute('href', `${repository}#readme`)
+  await expect(page.getByTestId('help-docs')).toHaveAttribute('target', '_blank')
+  // An unpublished build has no release page of its own: the list.
+  await expect(page.getByTestId('help-releases')).toHaveAttribute('href', `${repository}/releases`)
+  const issue = new URL((await page.getByTestId('help-issue').getAttribute('href')) ?? '')
+  expect(`${issue.origin}${issue.pathname}`).toBe(`${repository}/issues/new`)
+  expect(issue.searchParams.get('body')).toContain(
+    `Firenook ${RELEASE_VERSION}, engine source ${ENGINE_REVISION.slice(0, 12)}`,
+  )
+  await page.getByTestId('help-shortcuts').click()
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible()
 })
 
 test('the tab carries Firenook’s icon, and the console installs as an app', async ({ page }) => {

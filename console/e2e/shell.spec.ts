@@ -87,10 +87,12 @@ test('a dropped connection catches up on what it missed, and refetches only that
   await page.goto(`${engine.origin}/console/firestore?path=products`)
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
   const badge = badgeOf(page)
-  await expect(badge).toHaveText(/^engine /)
+  await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live')
+  // Live, the bar says nothing about it.
+  await expect(badge).toHaveCount(0)
 
   await dropLive(page)
-  await expect(badge).toHaveText('reconnecting', { timeout: 3_000 })
+  await expect(badge).toHaveText('Reconnecting', { timeout: 3_000 })
   // Sorted first, so the row is in the rows the grid draws.
   const missed = `0_missed_${Date.now()}`
   const teams = Array.from({ length: 20 }, (_, index) => `teams/t_missed_${index}`)
@@ -102,7 +104,10 @@ test('a dropped connection catches up on what it missed, and refetches only that
     )
     const watch = firestoreReads(page)
     await restoreLive(page)
-    await expect(badge).toHaveText(/^engine /, { timeout: 15_000 })
+    await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live', {
+      timeout: 15_000,
+    })
+    await expect(badge).toHaveCount(0)
     // The gap fix: the commit made while away is replayed, so the row is
     // there without a reload.
     await expect(page.locator(`tr[data-path="products/${missed}"]`)).toBeVisible()
@@ -372,7 +377,6 @@ test('an app that writes to another project is named, shown and taught the fix',
   const banner = page.getByTestId('banner-foreign-project')
   await expect(banner).toBeVisible({ timeout: 5_000 })
   await expect(banner).toContainText('my-prod')
-  await expect(page.getByTestId('engine-badge-foreign')).toBeVisible()
 
   await page.getByTestId('foreign-show').click()
   await expect(page).toHaveURL(/project=my-prod/)

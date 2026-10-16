@@ -238,16 +238,16 @@ export function SettingsPage() {
           <Card id="connect" title="Connect your app" plain>
             <p className="m-0 text-[14px] text-kumo-subtle" data-testid="settings-connect-note">
               The snippets that point an app at this Auth emulator, for the web, Flutter, Apple,
-              Android, the Admin SDKs and environment variables, are on the{' '}
+              Android, the Admin SDKs and environment variables, are under{' '}
               <Link
-                to="/"
-                search={{ connect: 'web' }}
+                to="."
+                search={(previous) => ({ ...previous, connect: 'web' as const })}
                 className={TEXT_LINK}
-                data-testid="settings-connect-overview"
+                data-testid="settings-connect-open"
               >
-                Overview ↗
-              </Link>
-              , with this engine&apos;s host and ports.
+                Connect
+              </Link>{' '}
+              in the top bar, with this engine&apos;s host and ports.
             </p>
           </Card>
           <Card id="production" title="Production settings the emulator does not apply" plain>

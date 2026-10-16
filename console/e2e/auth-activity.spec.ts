@@ -302,13 +302,15 @@ test('A7 a dropped channel is the engine badge’s to say, and the calls catch u
   await expect(feedRows(page).first()).toBeVisible()
   const badge = page.getByTestId('engine-badge')
   await dropLive(page)
-  await expect(badge).toHaveText('reconnecting', { timeout: 5_000 })
+  await expect(badge).toHaveText('Reconnecting', { timeout: 5_000 })
   // This page says nothing of its own about it.
   await expect(page.getByTestId('activity-row-one')).not.toContainText(/live|reconnect/i)
   for (let call = 0; call < 3; call += 1)
     await signIn(engine, { email, password: `password-${call}` })
   await restoreLive(page)
-  await expect(badge).toHaveText(/^engine /, { timeout: 15_000 })
+  await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live', {
+    timeout: 15_000,
+  })
   await expect(feedRows(page).filter({ hasText: email })).toHaveCount(3)
 })
 

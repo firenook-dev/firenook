@@ -423,10 +423,10 @@ test('a dropped live channel says so once, in the engine badge, and replays what
   const row = page.getByTestId('grid-row').filter({ hasText: 't_real' })
   await expect(row).toBeVisible()
   const badge = page.getByTestId('engine-badge')
-  await expect(badge).toHaveText(/^engine /)
+  await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live')
 
   await dropLive(page)
-  await expect(badge).toHaveText('reconnecting', { timeout: 3_000 })
+  await expect(badge).toHaveText('Reconnecting', { timeout: 3_000 })
   await badge.hover()
   await expect(page.locator('.kumo-tooltip-popup')).toContainText(
     'so what is on screen may be out of date',
@@ -435,7 +435,7 @@ test('a dropped live channel says so once, in the engine badge, and replays what
   // there and nowhere else: the toolbar keeps quiet.
   await expect(page.getByTestId('live-state')).toHaveCount(0)
   // Gone long enough, it says the engine stopped.
-  await expect(badge).toHaveText('engine stopped', { timeout: 5_000 })
+  await expect(badge).toHaveText('Engine stopped', { timeout: 5_000 })
 
   // A write while the channel is down: nobody hears it now, and the
   // channel replays it when it is back, so the grid catches up without a
@@ -459,7 +459,9 @@ test('a dropped live channel says so once, in the engine badge, and replays what
   await expect(row).not.toContainText(seats)
 
   await restoreLive(page)
-  await expect(badge).toHaveText(/^engine /, { timeout: 15_000 })
+  await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live', {
+    timeout: 15_000,
+  })
   await expect(row).toContainText(seats, { timeout: 5_000 })
 })
 

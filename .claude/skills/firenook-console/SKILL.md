@@ -47,8 +47,9 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 - **One bar across the whole window, then the columns under it** (since
   2026-10-17, after the Supabase dashboard's shape): the top bar is 48 px,
   full width — Firenook's logo (a link to the Overview), a slash, the
-  project id (copyable), and at its end the engine badge, the search field
-  (⌘K) and the theme. The logo is `FirenookLogo` (`components/kit`), the
+  project id (copyable) and **Connect** ("Connect your app", `src/connect/`),
+  and at its end the live badge (only when the channel has trouble), help
+  ("?"), the search field (⌘K) and the theme. The logo is `FirenookLogo` (`components/kit`), the
   brand's flat horizontal file with its paths unchanged and its viewBox
   cropped to the artwork; the wordmark takes `--color-firenook-wordmark`
   (charcoal, white in dark). It is 24 px tall in `px`, not rem: the root is
@@ -56,9 +57,26 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
   expanded and collapsed icon columns (they differ by 4 px), so collapsing
   the navigation moves nothing in the bar. The navigation carries no brand
   of its own. The favicons, app icons and `site.webmanifest` are the
-  brand's set in `console/public`, linked from `index.html` through
-  `%BASE_URL%` (a bare `/favicon.svg` would miss the `/console/` base);
+  brand's set in `console/public`, linked from `index.html` from the root
+  (`/favicon.svg`): Vite puts the `/console/` base in front, in development
+  and in the build alike, while `%BASE_URL%` got it twice in development;
   `console.spec.ts` fetches each from the engine.
+- **The bar says only what every page needs.** A live channel says
+  nothing (the user asked why a steady "Live" pill was there at all); the
+  live badge appears only with trouble ("Reconnecting", "Engine stopped",
+  "Too many console tabs", "Engine unreachable", "Engine updated":
+  `live-badge.tsx`), as a chip shaped like the search field (`LIVE_BADGE`),
+  never a round pill. The channel's state is the bar's `data-live` either
+  way, which the journeys wait on. The engine's version is written small at
+  the navigation's foot beside the collapse control (`NavVersion`,
+  `engineVersionShort`: `v0.2.0-next.2`, a local build's `.g<commit>` left
+  to the tooltip), hidden while collapsed, and links to `/#engine`. Help is a
+  menu (`help-menu.tsx`, lazy; `help-button.tsx` stands in until it
+  arrives, since Kumo's menu is not in the first route): the shortcuts,
+  then the documentation, this release's notes and a new issue with the
+  version filled in (`lib/project-links.ts`). No account, project switcher
+  or notifications: a local emulator has one project and no users, and the
+  sidebar's badges and the shell banners already carry what needs a look.
 - Primary navigation is Kumo's `Sidebar`, expanded or collapsed
   (`useLayout.navOpen`, localStorage), always `peekable`: collapsed, the
   labels slide out over the page on hover, as on kumo-ui.com. The foot of
@@ -95,7 +113,7 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 - The content column has no padding of its own. Document-like pages wrap
   themselves in `<Page>` (`page.tsx`, the reading gutter); workbenches fill
   it edge to edge with their own toolbar and borders.
-- The top bar's engine badge says the live channel's state and is a link to
+- The navigation's version (and the live badge, when it shows) is a link to
   the Overview's engine section (`/#engine`, `components/shell/overview-parts.ts`):
   the engine's facts (version, where the data lives, how writes reach the
   disk, folders, switches) are drawn once, there. Its popover, with its own
@@ -114,8 +132,8 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
   budget" is never by itself a reason to refuse something a route loads
   lazily. Check the manifest before claiming it; the rules editor carried
   that wrong claim in a header comment for months. The Overview's dialogs
-  (save, reset, Connect your app) load when first asked for, and its reset
-  menu right after the first paint (the same button stands in until it
+  (save, reset) and the top bar's Connect load when first asked for, and
+  the reset and help menus right after the first paint (the same button stands in until it
   has), which keeps the dropdown, dialog, radio, checkbox and
   danger-confirm chunks off the landing route.
 - Every script, stylesheet and SVG over 1 KB gets a gzip copy at build time
@@ -607,7 +625,7 @@ defaults never in the URL):
 | `pubsub.rejected`, `pubsub.dead-lettered` | counter | attention | Pub/Sub › Topics |
 | `tasks.failed` | counter | danger | Cloud Tasks |
 | `logs.errors` | counter | attention | Logs |
-| `shell.foreign` | gauge | danger | the shell banner and the engine badge's dot |
+| `shell.foreign` | gauge | danger | the shell banner |
 
 **Entity kinds** (`EntityRef`, keys split at the first `|`):
 `firestore.collection` `<db>|<pattern>` · `firestore.document` `<db>|<path>` ·
@@ -719,8 +737,11 @@ stream, loaded by glob). A few behaviours worth knowing:
   hover); a fact's age is `RelativeTime`. Never slice a formatted time.
 - "Connect your app" has one tab list, `CONNECT_TABS` in
   `lib/connect-tabs.ts` (each tab's `?connect=` value, generator target,
-  label and title; data only, because the Overview's route schema reads
-  it in the first route). `connectSnippet(target, …)` writes one snippet;
+  label and title; data only, because the root route's schema reads it in
+  the first route). The dialog is the top bar's (`src/connect/`): `?connect=`
+  is every page's (`connect/search.ts`, on the root route), so a link or
+  ⌘K opens it over the page on screen, and closing it drops the parameter
+  and leaves the page as it was (`navigateConnect`, `to: '.'`). `connectSnippet(target, …)` writes one snippet;
   `connectDialects(status, { services, params? })` in `lib/connect.ts`
   gives a `CodeBlock` its tabs from that list (an empty section shows
   `EMPTY_CONNECT`: web, node, python, go).
@@ -2066,8 +2087,8 @@ is almost always "what happened to *this*?".
 
 **What is left in its place:** the console has **one live connection per
 browser** (`src/lib/live`), so a dropped channel is said **once, by the
-engine badge in the top bar** (amber "reconnecting", red "engine stopped"
-the moment the engine says it is stopping, amber "too many console tabs"),
+live badge in the top bar** (amber "Reconnecting", red "Engine stopped"
+the moment the engine says it is stopping, amber "Too many console tabs"),
 with a tooltip saying what is on screen may be out of date. The grid is
 kept current by that channel, so a dropped channel is a grid that looks
 fresh and is not — the one thing a dev tool must not do quietly. While it
@@ -3490,17 +3511,16 @@ ones are the palette's Suite group, `suiteItems` in `command-palette.tsx`). Jour
   leave a running suite job alone while the Overview is on screen. Every
   other page and tab follows it in the toast; how it ended is toasted
   everywhere.
-- **The Overview's links.** Other pages lead here with `/?connect=<tab>`
-  (the Connect dialog on that platform; closing it drops the parameter, and
-  the header's button opens it on `web`), `/?dialog=reset&section=<id>` (that
+- **The Overview's links.** Other pages lead here with `/?dialog=reset&section=<id>` (that
   section's reset, nothing while it cannot be reset), `/?dialog=save`, and
   the hashes `#engine` and `#data` (`useRevealHash`, which reveals in the
   column, never `scrollIntoView`, and again on each ask while the page is
   open, since a link to the address shown changes nothing the router sees).
   `#engine` also opens the engine card whole, as "Show all" does.
   ⌘K's Suite group (`suiteItems`) holds the suite-wide actions once, from
-  any page; the Overview's own palette adds "Connect your app" and the
-  snippet copies.
+  any page, "Connect your app" among them; Connect adds a row per
+  platform's snippet copy once something is typed (`connect/palette.tsx`).
+  (`?connect=<tab>` is every page's, not the Overview's: the top bar's.)
 - **The `overview` topic ignores plain output.** Its generation is the
   problems and warnings logged and the minute, and it follows the log's
   `notable_changes` watch (warnings, errors, problems), not every line: an
@@ -3528,9 +3548,10 @@ ones are the palette's Suite group, `suiteItems` in `command-palette.tsx`). Jour
   2026-10-16 after the page was found cluttered (nine cards each carrying
   an address and up to six links, an infrastructure row, a not-running
   list, a code block and a fourteen-row engine table, all at one weight).
-  The header says the whole suite in one line (`suiteHealth`) and holds the
-  page's one action, Connect your app (a dialog: platforms down the side
-  by who runs the code). Services are a tile per section in a fixed grid
+  The header says the whole suite in one line (`suiteHealth`); Connect your
+  app, once the header's button, is the top bar's on every page since
+  2026-10-17 (a dialog: platforms down the side by who runs the code).
+  Services are a tile per section in a fixed grid
   (`@container` columns: three whenever the column is 768 px or wider);
   the whole tile is the link (a stretched title link, the port's copy
   above it), running is the green dot alone, and a section the engine does
@@ -3542,8 +3563,8 @@ ones are the palette's Suite group, `suiteItems` in `command-palette.tsx`). Jour
   section holds) beside the engine card, which holds the five facts asked
   most at rest and the rest under "Show all": the other ports, the files,
   the switches. Paths there lose their middle (`shortPath`), never their
-  end. The project and the engine's version are the top bar's, not said
-  again. A part that is not the answer to one of those questions does not
+  end. The project, the engine's state and Connect are the top bar's, and
+  the version the navigation's foot; none is said again. A part that is not the answer to one of those questions does not
   go back on the page.
 - **Import `@/observe/live` for its effect.** `import '@/observe/live'`, never
   `import type` alone: the `declareTopic` calls would not run and `overview`

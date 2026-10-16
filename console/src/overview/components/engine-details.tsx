@@ -6,8 +6,9 @@
 // official logging and requests sockets), the files it read, and the
 // switches it was started with. Configuration comes from `/overview/engine`
 // (fixed for the engine's run), data facts from the status the shell
-// already holds. The top bar's engine badge leads here (`/#engine`), and
-// opens it whole.
+// already holds. The engine's version at the navigation's foot leads here
+// (`/#engine`), as does the top bar's live badge when it shows, and opens
+// it whole.
 
 import { Button, Tooltip } from '@cloudflare/kumo'
 import { ArrowSquareOutIcon, CaretDownIcon, CaretUpIcon } from '@phosphor-icons/react'
@@ -36,8 +37,8 @@ function useOpenedWhole(): [boolean, (open: boolean) => void] {
   const [all, setAll] = useState(() => window.location.hash === '#engine')
   useEffect(
     () =>
-      useOverviewAsks.subscribe((state) => {
-        if (state.part === 'engine') setAll(true)
+      useOverviewAsks.subscribe((state, previous) => {
+        if (state.asks !== previous.asks && state.part === 'engine') setAll(true)
       }),
     [],
   )

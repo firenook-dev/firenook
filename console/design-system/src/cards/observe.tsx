@@ -52,7 +52,7 @@ import { LOGS_PLACEHOLDER, logFields } from '@/logs/fields'
 import { type LogItem, edgeItem, groupLines, itemKey } from '@/logs/rows'
 import { bucketSentence, bucketSpan, levelBuckets } from '@/observe/level-bars'
 import { LevelStrip } from '@/observe/level-strip'
-import { ConnectBody } from '@/overview/components/connect-dialog'
+import { ConnectBody } from '@/connect/connect-dialog'
 import { DataCard } from '@/overview/components/data-section'
 import { EngineDetails } from '@/overview/components/engine-details'
 import { Notices } from '@/overview/components/notices'
@@ -841,7 +841,7 @@ function OverviewSample() {
       <ShellBanners />
       <div className="mx-auto grid w-full max-w-[1200px] gap-10 p-6 pb-10">
         <div className="grid gap-4">
-          <OverviewHeader status={STATUS} health={suiteHealth(cards)} onConnect={noop} />
+          <OverviewHeader status={STATUS} health={suiteHealth(cards)} />
           <Notices notices={OVERVIEW.notices} instance={STATUS.instance} />
         </div>
         <section className="grid gap-3">

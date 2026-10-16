@@ -30,7 +30,9 @@ import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import type { SearchResults } from '@/api/generated/SearchResults'
 import { statusQuery } from '@/api/queries'
 import { Kbd, PanelIcon } from '@/components/kit'
+import { navigateConnect } from '@/connect/navigation'
 import { describeTheme, useTheme } from '@/lib/color-mode'
+import { type ConnectParam, DEFAULT_CONNECT } from '@/lib/connect-tabs'
 import { panelShown, useLayout } from '@/lib/layout'
 import { linkTo } from '@/lib/links'
 import { SECTION_ACTIONS } from '@/lib/palette-actions'
@@ -171,6 +173,8 @@ export function engineGroups(
 /** What the suite's ⌘K rows do; the palette wires them to the router, the engine and the snapshot. */
 export interface SuiteActions {
   go: (link: SectionLink) => () => void
+  /** Opens "Connect your app" over the page on screen, on a platform's tab. */
+  connect: (param?: ConnectParam) => void
   /** Opens a part of the Overview (its data cards, its engine section). */
   openPart: (part: OverviewPart) => void
   /** Starts the Data card's snapshot download. */
@@ -183,9 +187,10 @@ export interface SuiteActions {
  * ⌘K's Suite group: what acts on the whole emulator rather than one
  * section, from any page. Background triggers while Functions runs; a
  * snapshot to download while a service a snapshot holds runs; saving one
- * on the engine's machine; a reset while a section can be reset; the
- * environment block for an app; the engine's details. Each is offered
- * once, here: the Overview's own palette adds only what is about its page.
+ * on the engine's machine; a reset while a section can be reset; "Connect
+ * your app" and its environment block, over the page on screen; the
+ * engine's details. Each is offered once, here (Connect adds a row per
+ * platform's snippet once something is typed: `connect/palette.tsx`).
  */
 export function suiteItems(status: ConsoleStatus, actions: SuiteActions): PaletteItem[] {
   const items: PaletteItem[] = []
@@ -232,12 +237,20 @@ export function suiteItems(status: ConsoleStatus, actions: SuiteActions): Palett
     })
   items.push(
     {
+      id: 'suite:connect',
+      title: 'Connect your app',
+      description: 'The code that points an app at this engine, for every platform',
+      keywords: 'connect snippet emulator sdk setup',
+      icon: <PlugsConnectedIcon size={16} />,
+      run: () => actions.connect(),
+    },
+    {
       id: 'suite:env',
       title: 'Environment variables for your app',
       description: 'The variables the Admin SDKs and gcloud clients read to find the emulators',
       keywords: 'environment variables env connect admin sdk emulator host',
       icon: <PlugsConnectedIcon size={16} />,
-      run: actions.go({ to: '/', search: { connect: 'env' } }),
+      run: () => actions.connect('env'),
     },
     {
       id: 'suite:engine',
@@ -369,6 +382,7 @@ export function CommandPalette() {
       status.data
         ? suiteItems(status.data, {
             go,
+            connect: (param) => navigateConnect(navigate, param ?? DEFAULT_CONNECT),
             openPart: (part) => openOverviewPart(navigate, part),
             download: () =>
               void startSnapshot(client).then((started) => {

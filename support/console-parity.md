@@ -50,7 +50,7 @@ The frame around every page (`components/App/*`).
 | Feature (Google UI 1.15) | Where in the console | Owner | Status |
 | --- | --- | --- | --- |
 | A top bar with a tab for every page | The sidebar, its badges for what needs a look, and ⌘K | foundation | [x] |
-| "Emulator Suite Disconnected" modal, polling `/api/config` every 2 s | The top bar's engine badge says "engine stopped" or "reconnecting" from the one live connection, and opens the Overview's engine section; nothing blocks the page; a restart is recovered without a reload, and an engine whose binary changed asks for one reload | foundation | [x] |
+| "Emulator Suite Disconnected" modal, polling `/api/config` every 2 s | The top bar's live badge appears with "Engine stopped" or "Reconnecting" from the one live connection (and says nothing while live), and opens the Overview's engine section; nothing blocks the page; a restart is recovered without a reload, and an engine whose binary changed asks for one reload | foundation | [x] |
 
 ## Authentication
 

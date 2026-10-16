@@ -1,14 +1,14 @@
-// "Connect your app", the Overview's one action: the code that points an app
-// at this engine, for every platform, with the ports in use, the project id
-// and the host the app sees — printed by the console's one generator
-// (`lib/connect.ts`), so it is the same text every page prints. A dialog,
-// because it is wanted once per app and is the longest thing the page
-// could hold; the platforms down its side, grouped by who runs the code.
+// "Connect your app", the top bar's dialog on every page: the code that
+// points an app at this engine, for every platform, with the ports in use,
+// the project id and the host the app sees — printed by the console's one
+// generator (`lib/connect.ts`), so it is the same text every page prints.
+// A dialog, because it is wanted once per app and is longer than any page
+// should hold; the platforms down its side, grouped by who runs the code.
 // A demo project's snippets are complete and run as printed; another
 // project keeps the app's own configuration. The host picker offers the
 // engine's connect host, the address this page was opened at, the Android
 // emulator's 10.0.2.2, or one typed, and the choice is kept per browser.
-// The address names the platform (`/?connect=python`), so a link or ⌘K
+// The address names the platform (`?connect=python`), so a link or ⌘K
 // opens it on that one; closing it drops the parameter.
 
 import { Button, Dialog, Input, Select, cn } from '@cloudflare/kumo'
@@ -18,8 +18,8 @@ import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import type { OverviewEngineDetails } from '@/api/generated/observe/OverviewEngineDetails'
 import { CodeBlock } from '@/components/console/code-block'
 import { connectSnippet, hostLiteral } from '@/lib/connect'
-import { useConnectHost } from '../host'
 import { CONNECT_TABS, type ConnectParam, type ConnectTab, connectTab } from '@/lib/connect-tabs'
+import { useConnectHost } from './host'
 
 /** The platforms down the dialog's side, by who runs the code. */
 const GROUPS: readonly { label: string; params: readonly ConnectParam[] }[] = [
@@ -67,14 +67,14 @@ export function ConnectDialog({
   status: ConsoleStatus
   engine: OverviewEngineDetails | undefined
   param: ConnectParam | undefined
-  /** A platform was picked here; the page keeps it in the address. */
+  /** A platform was picked here; the address keeps it. */
   onParam: (param: ConnectParam) => void
 }) {
   const host = useConnectHost(status)
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog className="flex max-h-[min(88vh,760px)] flex-col p-0 sm:w-[min(1000px,calc(100vw-4rem))]">
-        <div className="contents" data-testid="overview-connect">
+        <div className="contents" data-testid="connect">
           <div className="flex min-w-0 items-start justify-between gap-4 px-6 pt-5 pb-4">
             <div className="grid min-w-0 gap-1">
               <Dialog.Title className="text-lg font-semibold">Connect your app</Dialog.Title>
@@ -147,12 +147,9 @@ export function ConnectBody({
                     ? 'go'
                     : 'js'
           }
-          testId="overview-connect-snippet"
+          testId="connect-snippet"
         />
-        <p
-          className="max-w-[72ch] text-[13px] text-kumo-subtle"
-          data-testid="overview-connect-note"
-        >
+        <p className="max-w-[72ch] text-[13px] text-kumo-subtle" data-testid="connect-note">
           {snippetNote(tab, demo)}
         </p>
       </div>
@@ -199,7 +196,7 @@ function Platforms({
       aria-label="Platform"
       className="grid content-start gap-4 overflow-auto border-r border-kumo-line bg-kumo-elevated px-3 py-4"
       onKeyDown={onKeyDown}
-      data-testid="overview-connect-tabs"
+      data-testid="connect-tabs"
     >
       {GROUPS.map((group) => (
         <div key={group.label} className="grid gap-0.5">
@@ -271,7 +268,7 @@ function HostPicker({ host }: { host: ReturnType<typeof useConnectHost> }) {
           spellCheck={false}
           autoComplete="off"
           className="w-52 font-mono"
-          data-testid="overview-host-input"
+          data-testid="connect-host-input"
         />
         <Button
           type="submit"
@@ -296,7 +293,7 @@ function HostPicker({ host }: { host: ReturnType<typeof useConnectHost> }) {
     )
   }
   return (
-    <div className="min-w-0" data-testid="overview-host">
+    <div className="min-w-0" data-testid="connect-host">
       <Select
         size="xs"
         value={host.host}

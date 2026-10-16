@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { EngineInfo } from '@/api/generated/EngineInfo'
-import { engineBuild, engineVersion } from './engine'
+import { engineBuild, engineVersion, engineVersionShort } from './engine'
 
 const RELEASED: EngineInfo = {
   name: 'Firenook',
@@ -35,5 +35,14 @@ describe('how the console names the engine', () => {
   it('waits rather than guessing before the status answers', () => {
     expect(engineVersion(undefined)).toBe('…')
     expect(engineBuild(undefined)).toBeUndefined()
+  })
+
+  it('writes the version short for the sidebar, a local build’s commit left out', () => {
+    expect(engineVersionShort(RELEASED)).toBe('v0.2.0-next.2')
+    expect(engineVersionShort({ ...RELEASED, version: '0.2.0-local.gfd8c2e181cf7' })).toBe(
+      'v0.2.0-local',
+    )
+    expect(engineVersionShort({ ...RELEASED, version: null })).toBe('unreleased build')
+    expect(engineVersionShort(undefined)).toBe('…')
   })
 })

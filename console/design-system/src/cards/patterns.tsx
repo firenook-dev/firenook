@@ -41,8 +41,10 @@ import {
   TrashIcon,
   WarningIcon,
   XIcon,
+  PlugsConnectedIcon,
 } from '@phosphor-icons/react'
 import { FirenookLogo } from '@/components/kit'
+import { HelpButton } from '@/components/shell/help-button'
 import type { CSSProperties, ReactNode } from 'react'
 import { AREA_LABELS, SECTIONS, type ServiceArea } from '@/lib/services'
 import { defineCards } from '../registry'
@@ -156,10 +158,16 @@ function Shell() {
                 demo-shop-local
               </InlineCopyText>
             </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<PlugsConnectedIcon size={14} />}
+              className="h-8 rounded-lg px-2.5 text-[13px]"
+            >
+              Connect
+            </Button>
             <div className="ml-auto flex items-center gap-2">
-              <Badge variant="success" appearance="dot">
-                engine 0.2.0
-              </Badge>
+              <HelpButton />
               <span className="flex h-8 w-56 items-center gap-2 rounded-lg bg-kumo-base px-2.5 text-[13px] text-kumo-subtle ring ring-kumo-line">
                 <MagnifyingGlassIcon size={14} />
                 Search…
@@ -202,6 +210,9 @@ function Shell() {
                 </Sidebar.Content>
                 <Sidebar.Footer>
                   <Sidebar.Trigger />
+                  <span className="ml-auto truncate font-mono text-[11px] text-kumo-subtle">
+                    v0.2.0
+                  </span>
                 </Sidebar.Footer>
               </Sidebar>
             </Sidebar.Provider>

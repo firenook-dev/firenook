@@ -73,7 +73,7 @@ dedicated.describe('with engines of their own', () => {
       const started = Date.now()
       await engine.stop()
       expect(Date.now() - started).toBeLessThan(5_000)
-      await expect(page.getByTestId('engine-badge')).toHaveText('engine stopped', {
+      await expect(page.getByTestId('engine-badge')).toHaveText('Engine stopped', {
         timeout: 10_000,
       })
       live.dispose()
