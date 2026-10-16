@@ -54,7 +54,7 @@ pub(crate) fn encode_write_response(response: &WriteResponse) -> Result<JsonValu
 
 fn encode_response(response: &impl serde::Serialize) -> Result<JsonValue, BackendError> {
     let mut value = serde_json::to_value(response).map_err(|error| internal_json(&error))?;
-    normalize_timestamp_offsets(&mut value);
+    firenook_grpc_front::utc_as_z(&mut value);
     Ok(value)
 }
 
@@ -125,27 +125,6 @@ fn normalize_value_special_doubles(
             | value::ValueType::PipelineValue(_),
         )
         | None => {}
-    }
-}
-
-fn normalize_timestamp_offsets(value: &mut JsonValue) {
-    match value {
-        JsonValue::Array(values) => values.iter_mut().for_each(normalize_timestamp_offsets),
-        JsonValue::Object(fields) => {
-            for (name, value) in fields {
-                if matches!(
-                    name.as_str(),
-                    "timestampValue" | "createTime" | "updateTime" | "readTime" | "commitTime"
-                ) && let Some(timestamp) = value.as_str()
-                    && let Some(utc) = timestamp.strip_suffix("+00:00")
-                {
-                    *value = JsonValue::String(format!("{utc}Z"));
-                } else {
-                    normalize_timestamp_offsets(value);
-                }
-            }
-        }
-        JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) | JsonValue::String(_) => {}
     }
 }
 

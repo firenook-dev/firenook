@@ -358,6 +358,7 @@ pub fn set_account_info_impl(
         let initial = truthy_str(&user, "initialEmail")
             .unwrap_or_default()
             .to_owned();
+        let id = rt.next_message_id();
         let record = create_oob_record(
             scope,
             &initial,
@@ -366,8 +367,14 @@ pub fn set_account_info_impl(
             "recoverEmail",
             None,
             None,
+            crate::observe::MessageMeta {
+                id,
+                delivery: crate::observe::Delivery::Sent,
+                continue_url: None,
+                uid: Some(local_id.clone()),
+            },
         );
-        log_oob_message(rt, &record);
+        log_oob_message(rt, scope, &record, id);
     }
     let mut response = JsonMap::new();
     response.insert(

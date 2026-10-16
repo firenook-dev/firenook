@@ -13,25 +13,63 @@ use std::collections::BTreeMap;
 use std::fmt::{self, Display};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant, SystemTime};
 
 use firenook_functions_bridge::{FunctionsInventory, TriggerRegistry};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 use tokio::sync::{RwLock, watch};
+use tokio_util::sync::CancellationToken;
 
+pub mod console;
 pub mod discovery;
 pub mod dotenv;
+pub mod env_files;
 pub mod log;
 pub mod manifest;
+pub mod monitor;
 pub mod registry;
 mod server;
-mod watcher;
+pub mod watcher;
 pub mod worker;
 
-pub use log::{LogEvent, LogSink};
-pub use manifest::Definition;
+pub use console::{ConsoleError, ConsoleHandle};
+pub use log::{LogEvent, LogSink, LogStream};
+pub use manifest::{DeclaredParam, Definition, NotLoaded};
+pub use monitor::{LiveSink, Monitor, MonitorLimits};
 pub use registry::BlockingConfig;
+
+/// What the suite's log sink receives from the runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogDelivery {
+    /// Every event as the monitor saw it: the true level, the `stream` a
+    /// worker line would have gone to, console-only end lines. The sink
+    /// prints through [`LogEvent::terminal_level`] and
+    /// [`LogEvent::terminal_lines`].
+    Attributed,
+    /// The events the runtime handed the suite before attribution
+    /// ([`LogEvent::compatible_events`]): a sink written for those keeps
+    /// printing and recording exactly what it did.
+    Compatible,
+}
+
+/// How the runtime runs beside the console.
+#[derive(Debug, Clone)]
+pub struct RuntimeOptions {
+    /// The record the runtime feeds; the console reads the same one.
+    pub monitor: Monitor,
+    pub log_delivery: LogDelivery,
+}
+
+impl Default for RuntimeOptions {
+    fn default() -> Self {
+        Self {
+            monitor: Monitor::new(MonitorLimits::default()),
+            log_delivery: LogDelivery::Compatible,
+        }
+    }
+}
 
 /// The gcloud configuration directory every worker sees.
 fn demo_gcloud_dir(state_dir: &Path) -> PathBuf {
@@ -208,26 +246,112 @@ struct Loaded {
     user_env: BTreeMap<String, String>,
     secrets: BTreeMap<String, String>,
     error: Option<String>,
+    /// The dotenv files read, in precedence order.
+    env_files: Vec<String>,
+    /// Key → the dotenv file that set it.
+    env_sources: BTreeMap<String, String>,
+    /// File → hash of its bytes at load (`.secret.local` included), to tell
+    /// a later change from a touch.
+    env_hashes: BTreeMap<String, [u8; 32]>,
+    /// The manifest's declared params.
+    params: Vec<DeclaredParam>,
+    /// Per function id, the options it declares that the emulator does not
+    /// apply.
+    declared: BTreeMap<String, Map<String, Value>>,
+    /// Endpoints the manifest declares that the emulator dropped.
+    dropped_endpoints: Vec<NotLoaded>,
 }
 
 /// A backend the runtime serves: a user codebase or an Extension instance.
 struct Backend {
     id: String,
-    directory: PathBuf,
-    config_dir: PathBuf,
+    /// The instance id of an Extension backend (fixed for its label).
+    instance: Option<String>,
+    /// What an Extension reconfigure or vendor swaps: its backend and the
+    /// directories (vendoring moves them). Held for a clone, never across
+    /// an await.
+    source: std::sync::RwLock<BackendSource>,
     ignore: Vec<String>,
-    extension: Option<ExtensionBackend>,
     loaded: RwLock<Loaded>,
     slot: worker::WorkerSlot,
     inspect_port: Option<u16>,
+    /// A stale-sources re-check is waiting.
+    recheck_pending: Arc<AtomicBool>,
+    /// One console change (env edit, extension swap) at a time.
+    edit: tokio::sync::Mutex<()>,
+    /// The env files the console just wrote, by name, with the hash they
+    /// now hold (`None`: removed), so the env watcher ignores them.
+    self_writes: std::sync::Mutex<BTreeMap<String, Option<[u8; 32]>>>,
+    /// Requests on their way to the worker at once ([`WORKER_IN_FLIGHT`]).
+    in_flight: Arc<tokio::sync::Semaphore>,
+}
+
+/// The most requests the runtime sends one worker at the same time; more
+/// wait their turn. A burst (a seeder uploading a thousand objects, each
+/// firing a finalize trigger) otherwise opened a connection per event at
+/// once, past what the worker's listen queue takes (macOS holds 128), and
+/// the refused ones were recorded as crashed invocations. Kept well above
+/// any real app's concurrency, so a function calling another on the same
+/// worker never waits on itself.
+pub(crate) const WORKER_IN_FLIGHT: usize = 100;
+
+/// A backend's swappable part.
+#[derive(Debug, Clone)]
+struct BackendSource {
+    extension: Option<ExtensionBackend>,
+    directory: PathBuf,
+    config_dir: PathBuf,
 }
 
 impl Backend {
     fn label(&self) -> String {
-        self.extension.as_ref().map_or_else(
+        self.instance.as_ref().map_or_else(
             || "functions".to_owned(),
-            |extension| format!("extensions[{}]", extension.instance_id),
+            |instance| format!("extensions[{instance}]"),
         )
+    }
+
+    fn is_extension(&self) -> bool {
+        self.instance.is_some()
+    }
+
+    fn read_source(&self) -> std::sync::RwLockReadGuard<'_, BackendSource> {
+        self.source
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn directory(&self) -> PathBuf {
+        self.read_source().directory.clone()
+    }
+
+    fn config_dir(&self) -> PathBuf {
+        self.read_source().config_dir.clone()
+    }
+
+    fn extension(&self) -> Option<ExtensionBackend> {
+        self.read_source().extension.clone()
+    }
+
+    fn replace_source(&self, source: BackendSource) {
+        *self
+            .source
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = source;
+    }
+
+    /// Remembers files the console wrote (by file name, with the hash they
+    /// now hold), so the env watcher does not report them.
+    fn note_self_writes(&self, files: impl IntoIterator<Item = (PathBuf, Option<[u8; 32]>)>) {
+        let mut writes = self
+            .self_writes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for (path, hash) in files {
+            if let Some(name) = path.file_name() {
+                writes.insert(name.to_string_lossy().into_owned(), hash);
+            }
+        }
     }
 }
 
@@ -240,6 +364,9 @@ struct RuntimeState {
     client: reqwest::Client,
     updates: watch::Sender<u64>,
     debug_mode: bool,
+    monitor: Monitor,
+    /// Cancelled when the runtime shuts down; ends its background tasks.
+    stopping: CancellationToken,
 }
 
 /// Readiness receipt printed by the suite (compatible with the previous
@@ -265,12 +392,46 @@ pub struct FunctionsRuntime {
 
 impl FunctionsRuntime {
     /// Discovers every backend, registers triggers, starts workers and the
-    /// source watchers.
+    /// source watchers, recording into a monitor of its own and handing the
+    /// sink the events it always received.
     pub async fn start(
         config: RuntimeConfig,
         triggers: TriggerRegistry,
         log: LogSink,
     ) -> Result<Self, RuntimeError> {
+        Self::start_with(config, triggers, log, RuntimeOptions::default()).await
+    }
+
+    /// [`FunctionsRuntime::start`] feeding the given monitor, with the given
+    /// log delivery.
+    pub async fn start_with(
+        config: RuntimeConfig,
+        triggers: TriggerRegistry,
+        log: LogSink,
+        options: RuntimeOptions,
+    ) -> Result<Self, RuntimeError> {
+        let monitor = options.monitor;
+        let log = {
+            let monitor = monitor.clone();
+            let suite = log;
+            let delivery = options.log_delivery;
+            // Every event reaches the monitor first (which names the
+            // function a worker line came from), then the suite's sink.
+            LogSink::new(move |mut event: LogEvent| {
+                let function = monitor.log(&event);
+                if event.function.is_none() {
+                    event.function = function;
+                }
+                match delivery {
+                    LogDelivery::Attributed => suite.record(event),
+                    LogDelivery::Compatible => {
+                        for compatible in event.compatible_events() {
+                            suite.record(compatible);
+                        }
+                    }
+                }
+            })
+        };
         let script = worker::materialize_script(&config.state_dir, WORKER_SOURCE)?;
         materialize_demo_credentials(&config.state_dir)?;
         let debug_mode = config.inspect.is_some();
@@ -297,13 +458,25 @@ impl FunctionsRuntime {
             };
             backends.push(Arc::new(Backend {
                 id: extension.instance_id.clone(),
-                directory: extension.functions_dir.clone(),
-                config_dir: extension.functions_dir.clone(),
+                instance: Some(extension.instance_id.clone()),
+                source: std::sync::RwLock::new(BackendSource {
+                    extension: Some(extension.clone()),
+                    directory: extension.functions_dir.clone(),
+                    config_dir: extension.functions_dir.clone(),
+                }),
                 ignore: Vec::new(),
-                extension: Some(extension.clone()),
                 loaded: RwLock::new(Loaded::default()),
-                slot: worker::WorkerSlot::new(spec, log.clone()),
+                slot: worker::WorkerSlot::new(
+                    spec,
+                    log.clone(),
+                    monitor.clone(),
+                    extension.instance_id.clone(),
+                ),
                 inspect_port,
+                recheck_pending: Arc::new(AtomicBool::new(false)),
+                edit: tokio::sync::Mutex::new(()),
+                self_writes: std::sync::Mutex::new(BTreeMap::new()),
+                in_flight: Arc::new(tokio::sync::Semaphore::new(WORKER_IN_FLIGHT)),
             }));
             order.push((backends.len() - 1, true));
         }
@@ -322,16 +495,28 @@ impl FunctionsRuntime {
             };
             backends.push(Arc::new(Backend {
                 id: codebase.id.clone(),
-                directory: codebase.source_dir.clone(),
-                config_dir: codebase
-                    .config_dir
-                    .clone()
-                    .unwrap_or_else(|| codebase.source_dir.clone()),
+                instance: None,
+                source: std::sync::RwLock::new(BackendSource {
+                    extension: None,
+                    directory: codebase.source_dir.clone(),
+                    config_dir: codebase
+                        .config_dir
+                        .clone()
+                        .unwrap_or_else(|| codebase.source_dir.clone()),
+                }),
                 ignore: codebase.ignore.clone(),
-                extension: None,
                 loaded: RwLock::new(Loaded::default()),
-                slot: worker::WorkerSlot::new(spec, log.clone()),
+                slot: worker::WorkerSlot::new(
+                    spec,
+                    log.clone(),
+                    monitor.clone(),
+                    codebase.id.clone(),
+                ),
                 inspect_port,
+                recheck_pending: Arc::new(AtomicBool::new(false)),
+                edit: tokio::sync::Mutex::new(()),
+                self_writes: std::sync::Mutex::new(BTreeMap::new()),
+                in_flight: Arc::new(tokio::sync::Semaphore::new(WORKER_IN_FLIGHT)),
             }));
             order.push((backends.len() - 1, false));
         }
@@ -355,7 +540,34 @@ impl FunctionsRuntime {
             client,
             updates,
             debug_mode,
+            monitor,
+            stopping: CancellationToken::new(),
         });
+        for backend in &state.backends {
+            state
+                .monitor
+                .codebase_registered(monitor::CodebaseRegistration {
+                    id: backend.id.clone(),
+                    kind: if backend.is_extension() {
+                        monitor::FunctionCodebaseKind::Extension
+                    } else {
+                        monitor::FunctionCodebaseKind::User
+                    },
+                    directory: state.relative(&backend.directory()),
+                    runtime: backend.extension().map_or_else(
+                        || {
+                            state
+                                .config
+                                .codebases
+                                .iter()
+                                .find(|codebase| codebase.id == backend.id)
+                                .and_then(|codebase| codebase.runtime.clone())
+                        },
+                        |extension| Some(extension.runtime),
+                    ),
+                    inspect_port: backend.inspect_port,
+                });
+        }
         for backend in &state.backends {
             if let Some(port) = backend.inspect_port {
                 state.log.info(format!(
@@ -370,9 +582,9 @@ impl FunctionsRuntime {
             }
             state.log.info(format!(
                 "Watching \"{}\" for Cloud Functions...",
-                backend.directory.display()
+                backend.directory().display()
             ));
-            state.load_backend(backend, true).await;
+            let _ = state.load_backend(backend, true).await;
         }
         // Start every worker now so the first invocation does not pay the
         // module load; failures are logged and retried on demand.
@@ -389,14 +601,18 @@ impl FunctionsRuntime {
                     }
                     drop(loaded);
                     if let Err(error) = backend.slot.warm(WORKER_READY_TIMEOUT).await {
-                        state.log.record(LogEvent::new(
-                            "ERROR",
-                            &backend.label(),
-                            format!(
-                                "Failed to start functions in {}: {error}",
-                                backend.directory.display()
-                            ),
-                        ));
+                        state.log.record(
+                            LogEvent::new(
+                                "ERROR",
+                                &backend.label(),
+                                format!(
+                                    "Failed to start functions in {}: {error}",
+                                    backend.directory().display()
+                                ),
+                            )
+                            .with_codebase(backend.id.clone())
+                            .with_kind("worker.failed"),
+                        );
                     }
                 })
             })
@@ -404,26 +620,34 @@ impl FunctionsRuntime {
         for warm in warms {
             let _ = warm.await;
         }
+        state.monitor.set_phase(monitor::FunctionsPhase::Running);
         let mut watchers = Vec::new();
         for backend in &state.backends {
-            if backend.extension.is_some() {
+            if backend.is_extension() {
                 continue;
             }
+            let directory = backend.directory();
             let state_for_reload = Arc::clone(&state);
             let backend_id = backend.id.clone();
-            match watcher::SourceWatcher::start(&backend.directory, &backend.ignore, move || {
-                let state = Arc::clone(&state_for_reload);
-                let backend_id = backend_id.clone();
-                tokio::spawn(async move {
-                    state.reload_backend(&backend_id).await;
-                });
-            }) {
+            match watcher::SourceWatcher::start(
+                &directory,
+                watcher::WatchMode::Recursive,
+                watcher::source_filter(&directory, &backend.ignore),
+                move |_| {
+                    let state = Arc::clone(&state_for_reload);
+                    let backend_id = backend_id.clone();
+                    tokio::spawn(async move {
+                        state.reload_backend(&backend_id).await;
+                    });
+                },
+            ) {
                 Ok(watcher) => watchers.push(watcher),
                 Err(error) => state.log.warn(format!(
                     "source watching disabled for {}: {error}",
-                    backend.directory.display()
+                    directory.display()
                 )),
             }
+            watchers.extend(state.watch_env_files(backend));
         }
         Ok(Self { state, watchers })
     }
@@ -472,8 +696,15 @@ impl FunctionsRuntime {
         self.state.set_background_enabled(enabled).await;
     }
 
+    /// The record this runtime feeds.
+    #[must_use]
+    pub fn monitor(&self) -> &Monitor {
+        &self.state.monitor
+    }
+
     /// Stops the watchers and every worker.
     pub async fn shutdown(self) {
+        self.state.stopping.cancel();
         for watcher in self.watchers {
             watcher.stop();
         }
@@ -504,6 +735,131 @@ impl std::fmt::Debug for BlockingHandle {
 impl RuntimeState {
     fn functions_origin(&self) -> String {
         self.config.origin()
+    }
+
+    fn backend(&self, id: &str) -> Option<Arc<Backend>> {
+        self.backends
+            .iter()
+            .find(|backend| backend.id == id)
+            .cloned()
+    }
+
+    /// The dotenv files of a codebase's chain, and `.secret.local`.
+    fn env_chain(&self) -> Vec<String> {
+        let mut names = vec![
+            ".env".to_owned(),
+            format!(".env.{}", self.config.project_id),
+            ".env.local".to_owned(),
+            ".secret.local".to_owned(),
+        ];
+        if let Some(alias) = &self.config.project_alias {
+            names.push(format!(".env.{alias}"));
+        }
+        names
+    }
+
+    /// Watches a user codebase's env files (its config directory, and its
+    /// source directory for `.secret.local`): a real change flags the
+    /// codebase `envChanged`; it never reloads (the official CLI does not).
+    fn watch_env_files(self: &Arc<Self>, backend: &Arc<Backend>) -> Vec<watcher::SourceWatcher> {
+        let config_dir = backend.config_dir();
+        let directory = backend.directory();
+        let mut places: Vec<(PathBuf, Vec<String>)> = Vec::new();
+        let chain = self.env_chain();
+        if config_dir == directory {
+            places.push((config_dir, chain));
+        } else {
+            places.push((
+                config_dir,
+                chain
+                    .iter()
+                    .filter(|name| name.as_str() != ".secret.local")
+                    .cloned()
+                    .collect(),
+            ));
+            places.push((directory, vec![".secret.local".to_owned()]));
+        }
+        let mut watchers = Vec::new();
+        for (place, names) in places {
+            let state = Arc::clone(self);
+            let owner = Arc::clone(backend);
+            let started = watcher::SourceWatcher::start(
+                &place,
+                watcher::WatchMode::NonRecursive,
+                move |path| {
+                    path.file_name().is_some_and(|name| {
+                        names.iter().any(|candidate| name == candidate.as_str())
+                    })
+                },
+                move |paths| {
+                    let state = Arc::clone(&state);
+                    let backend = Arc::clone(&owner);
+                    tokio::spawn(async move {
+                        state.env_changed(&backend, paths).await;
+                    });
+                },
+            );
+            match started {
+                Ok(watcher) => watchers.push(watcher),
+                Err(error) => self.log.warn(format!(
+                    "env file watching disabled for {}: {error}",
+                    place.display()
+                )),
+            }
+        }
+        watchers
+    }
+
+    /// Flags a codebase whose env files changed since its last load (a touch
+    /// with the same bytes, or the console's own write, is not a change).
+    async fn env_changed(&self, backend: &Backend, paths: Vec<PathBuf>) {
+        let loaded = backend.loaded.read().await;
+        for path in paths {
+            let Some(name) = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+            else {
+                continue;
+            };
+            let current = tokio::fs::read(&path)
+                .await
+                .ok()
+                .map(|bytes| dotenv::content_hash(&bytes));
+            if current == loaded.env_hashes.get(&name).copied() {
+                continue;
+            }
+            let own = backend
+                .self_writes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(&name)
+                .copied();
+            if own == Some(current) {
+                continue;
+            }
+            self.monitor.codebase_stale(
+                &backend.id,
+                Some(monitor::FunctionStale::EnvChanged {
+                    file: name,
+                    changed_at: monitor::format_timestamp(SystemTime::now()),
+                }),
+            );
+        }
+    }
+
+    /// A path as the console shows it: relative to the project when inside it.
+    fn relative(&self, path: &Path) -> String {
+        path.strip_prefix(&self.config.project_dir).map_or_else(
+            |_| path.display().to_string(),
+            |relative| {
+                let text = relative.display().to_string();
+                if text.is_empty() {
+                    ".".to_owned()
+                } else {
+                    text
+                }
+            },
+        )
     }
 
     fn system_envs(&self) -> BTreeMap<String, String> {
@@ -575,10 +931,10 @@ impl RuntimeState {
         let mut env = self.system_envs();
         env.extend(self.emulator_envs());
         env.insert("FIREBASE_CONFIG".to_owned(), self.firebase_config());
-        if let Some(extension) = &backend.extension {
+        if let Some(extension) = &backend.read_source().extension {
             env.extend(extension.env.clone());
         }
-        if let Ok(config) = std::fs::read_to_string(backend.directory.join(".runtimeconfig.json"))
+        if let Ok(config) = std::fs::read_to_string(backend.directory().join(".runtimeconfig.json"))
             && let Ok(value) = serde_json::from_str::<Value>(&config)
             && value.as_object().is_some_and(|map| !map.is_empty())
         {
@@ -622,7 +978,7 @@ impl RuntimeState {
         env.extend(self.system_envs());
         env.extend(self.emulator_envs());
         env.insert("FIREBASE_CONFIG".to_owned(), self.firebase_config());
-        if let Some(extension) = &backend.extension {
+        if let Some(extension) = &backend.read_source().extension {
             env.extend(extension.env.clone());
             env.extend(extension.secret_values.clone());
         }
@@ -634,43 +990,70 @@ impl RuntimeState {
         env
     }
 
-    /// Discovers one backend and registers its definitions.
-    async fn load_backend(&self, backend: &Arc<Backend>, initial: bool) {
+    /// Discovers one backend and registers its definitions. Returns the load
+    /// error when the load failed (a failed reload keeps the previous
+    /// registrations).
+    async fn load_backend(&self, backend: &Arc<Backend>, initial: bool) -> Result<(), String> {
+        self.monitor.codebase_loading(&backend.id);
+        let began = Instant::now();
         let loaded = self.discover(backend).await;
         let definitions = loaded.definitions.clone();
-        {
+        let previous = {
             let mut current = backend.loaded.write().await;
-            if loaded.error.is_some() && !initial {
+            if let Some(error) = &loaded.error
+                && !initial
+            {
                 // A failed reload keeps the previous registrations (the
                 // official emulator logs and returns); only the error is new.
                 current.error.clone_from(&loaded.error);
-                return;
+                let function_count = count_u32(current.definitions.len());
+                drop(current);
+                self.monitor.codebase_loaded(
+                    &backend.id,
+                    monitor::LoadReport {
+                        function_count,
+                        error: Some(monitor::load_error(
+                            error,
+                            &self.config.project_dir,
+                            SystemTime::now(),
+                        )),
+                        kept_previous: true,
+                        elapsed: began.elapsed(),
+                        ..monitor::LoadReport::default()
+                    },
+                );
+                return Err(error.clone());
             }
-            *current = loaded.clone();
-        }
+            std::mem::replace(&mut *current, loaded.clone()).definitions
+        };
         if let Some(error) = &loaded.error {
-            self.log.record(LogEvent::new(
-                "ERROR",
-                &backend.label(),
-                format!("Failed to load function definition from source: FirebaseError: {error}"),
-            ));
+            self.log.record(
+                LogEvent::new(
+                    "ERROR",
+                    &backend.label(),
+                    format!(
+                        "Failed to load function definition from source: FirebaseError: {error}"
+                    ),
+                )
+                .with_codebase(backend.id.clone()),
+            );
         }
         if !definitions.is_empty() {
             let names: Vec<&str> = definitions.iter().map(Definition::entry_point).collect();
-            self.log.record(LogEvent::new(
-                "INFO",
-                &backend.label(),
-                format!(
-                    "Loaded functions definitions from source: {}.",
-                    names.join(", ")
-                ),
-            ));
+            self.log.record(
+                LogEvent::new(
+                    "INFO",
+                    &backend.label(),
+                    format!(
+                        "Loaded functions definitions from source: {}.",
+                        names.join(", ")
+                    ),
+                )
+                .with_codebase(backend.id.clone()),
+            );
         }
         let origin = self.functions_origin();
-        let extension_instance = backend
-            .extension
-            .as_ref()
-            .map(|extension| extension.instance_id.clone());
+        let extension_instance = backend.instance.clone();
         {
             let mut registry = self.registry.write().await;
             let keep: Vec<String> = definitions
@@ -701,7 +1084,7 @@ impl RuntimeState {
                 node: self.config.node.clone(),
                 script: worker::materialize_script(&self.config.state_dir, WORKER_SOURCE)
                     .unwrap_or_else(|_| self.config.state_dir.join("functions-worker.mjs")),
-                source_dir: backend.directory.clone(),
+                source_dir: backend.directory(),
                 environment,
                 inspect: backend
                     .inspect_port
@@ -709,23 +1092,92 @@ impl RuntimeState {
                 label: backend.label(),
             })
             .await;
+        self.monitor.codebase_loaded(
+            &backend.id,
+            monitor::LoadReport {
+                function_count: count_u32(definitions.len()),
+                env_files: loaded.env_files.clone(),
+                not_loaded: loaded
+                    .dropped_endpoints
+                    .iter()
+                    .map(|entry| monitor::FunctionNotLoaded {
+                        id: entry.id.clone(),
+                        event_type: entry.event_type.clone(),
+                        reason: entry.reason.clone(),
+                    })
+                    .collect(),
+                error: loaded.error.as_deref().map(|error| {
+                    monitor::load_error(error, &self.config.project_dir, SystemTime::now())
+                }),
+                kept_previous: false,
+                diff: registry_diff(&previous, &definitions),
+                elapsed: began.elapsed(),
+            },
+        );
+        if let Some(error) = loaded.error {
+            return Err(error);
+        }
+        backend
+            .self_writes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+        self.check_sources(backend);
+        Ok(())
+    }
+
+    /// The TypeScript stale check: when the sources under `src/` are newer
+    /// than the compiled entry after a load, one re-check 3 s later (so the
+    /// `tsc --watch` that follows a save clears it first) flags the codebase.
+    fn check_sources(&self, backend: &Backend) {
+        let directory = backend.directory();
+        if backend.is_extension() || !directory.join("tsconfig.json").is_file() {
+            return;
+        }
+        if backend.recheck_pending.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let monitor = self.monitor.clone();
+        let codebase = backend.id.clone();
+        let stopping = self.stopping.clone();
+        let pending = Arc::clone(&backend.recheck_pending);
+        tokio::spawn(async move {
+            let check = || {
+                let directory = directory.clone();
+                tokio::task::spawn_blocking(move || sources_newer(&directory))
+            };
+            if check().await.ok().flatten().is_some() {
+                let waited = tokio::select! {
+                    () = tokio::time::sleep(STALE_RECHECK) => true,
+                    () = stopping.cancelled() => false,
+                };
+                if waited && let Some(changed) = check().await.ok().flatten() {
+                    monitor.codebase_stale(
+                        &codebase,
+                        Some(monitor::FunctionStale::SourcesNewer {
+                            changed_at: monitor::format_timestamp(changed),
+                        }),
+                    );
+                }
+            }
+            pending.store(false, Ordering::SeqCst);
+        });
     }
 
     async fn discover(&self, backend: &Backend) -> Loaded {
-        if let Some(extension) = &backend.extension {
+        if let Some(extension) = backend.extension() {
             return Loaded {
                 definitions: extension
                     .definitions
                     .iter()
                     .flat_map(|definition| definition.by_region(&extension.secret_env))
                     .collect(),
-                user_env: BTreeMap::new(),
-                secrets: BTreeMap::new(),
-                error: None,
+                ..Loaded::default()
             };
         }
-        let (user_env, env_files) = match dotenv::load_user_envs(
-            &backend.config_dir,
+        let directory = backend.directory();
+        let env = match dotenv::load_user_envs_with_sources(
+            &backend.config_dir(),
             &self.config.project_id,
             self.config.project_alias.as_deref(),
             true,
@@ -738,73 +1190,91 @@ impl RuntimeState {
                 };
             }
         };
-        if !env_files.is_empty() {
-            self.log.info(format!(
-                "Loaded environment variables from {}.",
-                env_files.join(", ")
-            ));
+        if !env.files.is_empty() {
+            self.log.record(
+                LogEvent::new(
+                    "INFO",
+                    "functions",
+                    format!(
+                        "Loaded environment variables from {}.",
+                        env.files.join(", ")
+                    ),
+                )
+                .with_codebase(backend.id.clone()),
+            );
         }
-        let secrets = match dotenv::load_local_secrets(&backend.directory.join(".secret.local")) {
+        let user_env = env.envs;
+        let mut env_hashes = env.hashes;
+        let secret_path = directory.join(".secret.local");
+        if let Ok(bytes) = std::fs::read(&secret_path) {
+            env_hashes.insert(".secret.local".to_owned(), dotenv::content_hash(&bytes));
+        }
+        let secrets = match dotenv::load_local_secrets(&secret_path) {
             Ok(secrets) => secrets,
             Err(error) => {
-                self.log
-                    .record(LogEvent::new("ERROR", "functions", error.0));
+                self.log.record(
+                    LogEvent::new("ERROR", "functions", error.0).with_codebase(backend.id.clone()),
+                );
                 BTreeMap::new()
             }
         };
-        let manifest = match discovery::static_manifest(&backend.directory) {
+        let base = Loaded {
+            env_files: env.files,
+            env_sources: env.sources,
+            env_hashes,
+            ..Loaded::default()
+        };
+        let manifest = match discovery::static_manifest(&directory) {
             Ok(Some(manifest)) => Ok(manifest),
             Ok(None) => {
-                let Some(sdk_root) =
-                    discovery::find_sdk_root(&backend.directory, &self.config.project_dir)
+                let Some(sdk_root) = discovery::find_sdk_root(&directory, &self.config.project_dir)
                 else {
                     return Loaded {
                         user_env,
                         secrets,
                         error: Some(format!(
                             "Failed to find location of Firebase Functions SDK for {}. Install firebase-functions in the codebase.",
-                            backend.directory.display()
+                            directory.display()
                         )),
-                        ..Loaded::default()
+                        ..base
                     };
                 };
                 let environment = self.discovery_environment(backend);
-                discovery::discover_from_sdk(
-                    &self.config.node,
-                    &sdk_root,
-                    &backend.directory,
-                    &environment,
-                )
-                .await
+                discovery::discover_from_sdk(&self.config.node, &sdk_root, &directory, &environment)
+                    .await
             }
             Err(error) => Err(error),
         };
         match manifest {
-            Ok(manifest) => match manifest::definitions_from_manifest(
+            Ok(manifest) => match manifest::convert_manifest(
                 &manifest,
                 &self.config.project_id,
                 &self.config.default_bucket,
                 &backend.id,
                 &user_env,
             ) {
-                Ok(definitions) => Loaded {
-                    definitions,
+                Ok(conversion) => Loaded {
+                    definitions: conversion.definitions,
                     user_env,
                     secrets,
                     error: None,
+                    params: conversion.params,
+                    declared: conversion.declared,
+                    dropped_endpoints: conversion.not_loaded,
+                    ..base
                 },
                 Err(error) => Loaded {
                     user_env,
                     secrets,
                     error: Some(format!("Failed to parse build specification: {error}")),
-                    ..Loaded::default()
+                    ..base
                 },
             },
             Err(error) => Loaded {
                 user_env,
                 secrets,
                 error: Some(error.0),
-                ..Loaded::default()
+                ..base
             },
         }
     }
@@ -822,10 +1292,10 @@ impl RuntimeState {
             "functions",
             format!(
                 "File change detected in {}, reloading triggers",
-                backend.directory.display()
+                backend.directory().display()
             ),
         ));
-        self.load_backend(backend, false).await;
+        let _ = self.load_backend(backend, false).await;
         self.updates.send_modify(|counter| *counter += 1);
     }
 
@@ -871,9 +1341,9 @@ impl RuntimeState {
             let mut entry = Map::new();
             entry.insert(
                 "directory".to_owned(),
-                Value::String(backend.directory.display().to_string()),
+                Value::String(backend.directory().display().to_string()),
             );
-            if let Some(extension) = &backend.extension {
+            if let Some(extension) = backend.extension() {
                 let mut env: Map<String, Value> = extension
                     .env
                     .iter()
@@ -989,6 +1459,99 @@ impl RuntimeState {
             functions_port: self.config.functions_port,
         })
     }
+}
+
+/// How long the stale-sources check waits before it looks again.
+const STALE_RECHECK: Duration = Duration::from_secs(3);
+/// The most entries the stale-sources walk visits.
+const STALE_WALK_LIMIT: usize = 5_000;
+
+fn count_u32(count: usize) -> u32 {
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+/// What a reload changed, by function id: added, removed, and changed by
+/// definition JSON.
+fn registry_diff(previous: &[Definition], current: &[Definition]) -> monitor::FunctionRegistryDiff {
+    let before: BTreeMap<String, &Definition> = previous
+        .iter()
+        .map(|definition| (definition.id(), definition))
+        .collect();
+    let after: BTreeMap<String, &Definition> = current
+        .iter()
+        .map(|definition| (definition.id(), definition))
+        .collect();
+    monitor::FunctionRegistryDiff {
+        added: after
+            .keys()
+            .filter(|id| !before.contains_key(*id))
+            .cloned()
+            .collect(),
+        removed: before
+            .keys()
+            .filter(|id| !after.contains_key(*id))
+            .cloned()
+            .collect(),
+        changed: after
+            .iter()
+            .filter(|(id, definition)| {
+                before
+                    .get(*id)
+                    .is_some_and(|old| old.json() != definition.json())
+            })
+            .map(|(id, _)| id.clone())
+            .collect(),
+    }
+}
+
+/// When the newest file under `src/` is newer than the compiled entry
+/// (`package.json` `main`, else `index.js`), its modification time. A
+/// bounded walk that skips `node_modules` and dotfiles.
+fn sources_newer(directory: &Path) -> Option<SystemTime> {
+    let main = std::fs::read(directory.join("package.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|package| {
+            package
+                .get("main")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "index.js".to_owned());
+    let entry = std::fs::metadata(directory.join(main))
+        .and_then(|metadata| metadata.modified())
+        .ok()?;
+    let mut newest: Option<SystemTime> = None;
+    let mut pending = vec![directory.join("src")];
+    let mut visited = 0;
+    while let Some(next) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&next) else {
+            continue;
+        };
+        for item in entries.flatten() {
+            visited += 1;
+            if visited > STALE_WALK_LIMIT {
+                break;
+            }
+            let name = item.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || name == "node_modules" {
+                continue;
+            }
+            let Ok(metadata) = item.metadata() else {
+                continue;
+            };
+            if metadata.is_dir() {
+                pending.push(item.path());
+            } else if let Ok(modified) = metadata.modified() {
+                newest = Some(newest.map_or(modified, |current| current.max(modified)));
+            }
+        }
+        if visited > STALE_WALK_LIMIT {
+            break;
+        }
+    }
+    newest.filter(|newest| *newest > entry)
 }
 
 /// Lowercase hex SHA-256 of `bytes`.

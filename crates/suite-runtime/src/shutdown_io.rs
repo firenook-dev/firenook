@@ -1,5 +1,6 @@
-//! End long-lived Firestore connections when the suite has finished draining.
-//! Stopping the accept loop alone leaves WebChannel/gRPC responses open forever.
+//! End connections the suite's drain is still waiting on. Stopping the accept
+//! loop alone leaves WebChannel/gRPC responses open forever, and leaves an
+//! HTTP connection that is mid-request open for the life of the process.
 
 use std::io;
 use std::pin::Pin;
@@ -45,6 +46,43 @@ impl ShutdownIo {
         } else {
             Ok(())
         }
+    }
+}
+
+/// Hands `axum` every accepted connection wrapped in [`ShutdownIo`], so a
+/// listener's graceful drain can be brought to an end.
+///
+/// `axum`'s graceful shutdown stops the accept loop and then waits for the
+/// connections already accepted. It closes the ones sitting idle between
+/// requests, but a connection that has begun a request and not finished
+/// sending it is not idle, so the wait never ends. One such client used to
+/// hold the whole suite: it printed that it was stopping and then never
+/// exited.
+pub(super) struct ClosingListener<L> {
+    inner: L,
+    closing: watch::Receiver<bool>,
+}
+
+impl<L> ClosingListener<L> {
+    pub(super) fn new(inner: L, closing: watch::Receiver<bool>) -> Self {
+        Self { inner, closing }
+    }
+}
+
+impl<L> axum::serve::Listener for ClosingListener<L>
+where
+    L: axum::serve::Listener<Io = TcpStream>,
+{
+    type Io = ShutdownIo;
+    type Addr = L::Addr;
+
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        let (socket, address) = self.inner.accept().await;
+        (ShutdownIo::new(socket, self.closing.clone()), address)
+    }
+
+    fn local_addr(&self) -> io::Result<Self::Addr> {
+        self.inner.local_addr()
     }
 }
 

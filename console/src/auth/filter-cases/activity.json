@@ -1,0 +1,384 @@
+{
+  "note": "The Authentication Activity list's filter (crates/console-front/src/auth/filter.rs ACTIVITY_FIELDS, console/src/auth/fields.ts). The engine filters the list and the auth.activity topic with it; the browser parses only to paint tokens and errors.",
+  "regex": false,
+  "fields": [
+    {
+      "key": "is",
+      "kind": "enum",
+      "help": "What the call did",
+      "values": ["error", "new-user"]
+    },
+    {
+      "key": "kind",
+      "kind": "enum",
+      "help": "What kind of call",
+      "values": ["sign-in", "sign-up", "refresh", "code", "account", "config", "lookup", "other"]
+    },
+    {
+      "key": "caller",
+      "kind": "enum",
+      "help": "Who called",
+      "values": ["app", "admin", "console", "link", "picker", "emulator"]
+    },
+    {
+      "key": "op",
+      "kind": "text",
+      "help": "The operation, like signInWithPassword"
+    },
+    {
+      "key": "provider",
+      "aliases": ["p"],
+      "kind": "exact",
+      "help": "Sign-in provider"
+    },
+    {
+      "key": "uid",
+      "aliases": ["id"],
+      "kind": "exact",
+      "help": "Account id"
+    },
+    {
+      "key": "has",
+      "kind": "enum",
+      "help": "What the call caused",
+      "values": ["blocking", "trigger", "message", "change", "config"]
+    },
+    {
+      "key": "status",
+      "kind": "number",
+      "help": "HTTP status"
+    },
+    {
+      "key": "took",
+      "kind": "duration",
+      "help": "How long the call took"
+    },
+    {
+      "key": "at",
+      "kind": "time",
+      "help": "When the call was made"
+    }
+  ],
+  "cases": [
+    {
+      "name": "empty",
+      "text": "",
+      "ok": {}
+    },
+    {
+      "name": "word",
+      "text": "ada",
+      "ok": {
+        "words": [
+          {
+            "from": 0,
+            "negated": false,
+            "text": "ada",
+            "to": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "errors",
+      "text": "is:error",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "is",
+            "negated": false,
+            "op": "eq",
+            "to": 8,
+            "value": "error"
+          }
+        ]
+      }
+    },
+    {
+      "name": "new-users",
+      "text": "is:new-user",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "is",
+            "negated": false,
+            "op": "eq",
+            "to": 11,
+            "value": "new-user"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kind-any-of",
+      "text": "kind:sign-in kind:sign-up",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "kind",
+            "negated": false,
+            "op": "eq",
+            "to": 12,
+            "value": "sign-in"
+          },
+          {
+            "from": 13,
+            "key": "kind",
+            "negated": false,
+            "op": "eq",
+            "to": 25,
+            "value": "sign-up"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kind-excluded",
+      "text": "-kind:refresh",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "kind",
+            "negated": true,
+            "op": "eq",
+            "to": 13,
+            "value": "refresh"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kind-unknown",
+      "text": "kind:login",
+      "error": {
+        "from": 0,
+        "to": 10,
+        "message": "\"kind:\" is one of sign-in, sign-up, refresh, code, account, config, lookup, other."
+      }
+    },
+    {
+      "name": "caller-admin",
+      "text": "caller:admin",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "caller",
+            "negated": false,
+            "op": "eq",
+            "to": 12,
+            "value": "admin"
+          }
+        ]
+      }
+    },
+    {
+      "name": "caller-console",
+      "text": "caller:console",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "caller",
+            "negated": false,
+            "op": "eq",
+            "to": 14,
+            "value": "console"
+          }
+        ]
+      }
+    },
+    {
+      "name": "caller-unknown",
+      "text": "caller:robot",
+      "error": {
+        "from": 0,
+        "to": 12,
+        "message": "\"caller:\" is one of app, admin, console, link, picker, emulator."
+      }
+    },
+    {
+      "name": "operation",
+      "text": "op:signInWithPassword",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "op",
+            "negated": false,
+            "op": "eq",
+            "to": 21,
+            "value": "signInWithPassword"
+          }
+        ]
+      }
+    },
+    {
+      "name": "provider",
+      "text": "provider:password",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "provider",
+            "negated": false,
+            "op": "eq",
+            "to": 17,
+            "value": "password"
+          }
+        ]
+      }
+    },
+    {
+      "name": "uid",
+      "text": "uid:u_ada",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "uid",
+            "negated": false,
+            "op": "eq",
+            "to": 9,
+            "value": "u_ada"
+          }
+        ]
+      }
+    },
+    {
+      "name": "has-blocking",
+      "text": "has:blocking",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "has",
+            "negated": false,
+            "op": "eq",
+            "to": 12,
+            "value": "blocking"
+          }
+        ]
+      }
+    },
+    {
+      "name": "has-any-of",
+      "text": "has:trigger has:message",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "has",
+            "negated": false,
+            "op": "eq",
+            "to": 11,
+            "value": "trigger"
+          },
+          {
+            "from": 12,
+            "key": "has",
+            "negated": false,
+            "op": "eq",
+            "to": 23,
+            "value": "message"
+          }
+        ]
+      }
+    },
+    {
+      "name": "status-range",
+      "text": "status:>=400",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "status",
+            "negated": false,
+            "op": "ge",
+            "to": 12,
+            "value": "400"
+          }
+        ]
+      }
+    },
+    {
+      "name": "status-not-number",
+      "text": "status:abc",
+      "error": {
+        "from": 0,
+        "to": 10,
+        "message": "\"status:\" needs a number, like 42 or 2.5."
+      }
+    },
+    {
+      "name": "took",
+      "text": "took:>100ms",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "took",
+            "negated": false,
+            "op": "gt",
+            "to": 11,
+            "value": "100ms"
+          }
+        ]
+      }
+    },
+    {
+      "name": "took-not-duration",
+      "text": "took:fast",
+      "error": {
+        "from": 0,
+        "to": 9,
+        "message": "\"took:\" needs a duration, like 250ms, 2s or 1.5m."
+      }
+    },
+    {
+      "name": "at-relative",
+      "text": "at:>-5m",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "at",
+            "negated": false,
+            "op": "gt",
+            "to": 7,
+            "value": "-5m"
+          }
+        ]
+      }
+    },
+    {
+      "name": "at-day",
+      "text": "at:2026-10-12",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "at",
+            "negated": false,
+            "op": "eq",
+            "to": 13,
+            "value": "2026-10-12"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown-key",
+      "text": "foo:bar",
+      "error": {
+        "from": 0,
+        "to": 7,
+        "message": "Unknown filter \"foo:\". Use is, kind, caller, op, provider, uid, has, status, took or at; quote it to search for the text."
+      }
+    }
+  ]
+}

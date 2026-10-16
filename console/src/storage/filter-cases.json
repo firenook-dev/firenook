@@ -1,0 +1,235 @@
+{
+  "note": "Storage's filter cases (crates/console-front/src/storage/filter_fields.rs, console/src/storage/filter.ts), in the format of console/src/lib/filter-cases.json: both sides parse and validate every text against Storage's fields and must give exactly this result or this error, message and UTF-16 span included.",
+  "regex": false,
+  "fields": [
+    {
+      "key": "name",
+      "kind": "text",
+      "help": "Name below the folder"
+    },
+    {
+      "key": "type",
+      "aliases": ["contenttype"],
+      "kind": "exact",
+      "help": "Content type, like type:image/*"
+    },
+    {
+      "key": "size",
+      "kind": "bytes",
+      "help": "Size, like size:>5MB"
+    },
+    {
+      "key": "updated",
+      "kind": "time",
+      "help": "Last changed, like updated:>-1h"
+    },
+    {
+      "key": "created",
+      "kind": "time",
+      "help": "Created, like created:<2026-10-01"
+    },
+    {
+      "key": "meta",
+      "kind": "path",
+      "help": "Custom metadata, like meta.ownerUid:u_9f3k2",
+      "prefixes": ["meta."]
+    },
+    {
+      "key": "has",
+      "kind": "enum",
+      "help": "Has a field: has:token, -has:type",
+      "values": ["token", "type", "metadata", "encoding", "cache"]
+    }
+  ],
+  "cases": [
+    {
+      "name": "a-word",
+      "text": "photo",
+      "ok": {
+        "words": [{ "text": "photo", "negated": false, "from": 0, "to": 5 }]
+      }
+    },
+    {
+      "name": "a-word-not-ascii",
+      "text": "ÉTÉ",
+      "ok": {
+        "words": [{ "text": "ÉTÉ", "negated": false, "from": 0, "to": 3 }]
+      },
+      "note": "The engine lowercases it and matches été.png."
+    },
+    {
+      "name": "type-by-prefix",
+      "text": "type:image/*",
+      "ok": {
+        "terms": [
+          { "key": "type", "op": "eq", "value": "image/*", "negated": false, "from": 0, "to": 12 }
+        ]
+      }
+    },
+    {
+      "name": "type-alias",
+      "text": "contentType:application/json",
+      "ok": {
+        "terms": [
+          {
+            "key": "type",
+            "op": "eq",
+            "value": "application/json",
+            "negated": false,
+            "from": 0,
+            "to": 28
+          }
+        ]
+      }
+    },
+    {
+      "name": "size-range",
+      "text": "size:>5MB",
+      "ok": {
+        "terms": [
+          { "key": "size", "op": "gt", "value": "5MB", "negated": false, "from": 0, "to": 9 }
+        ]
+      }
+    },
+    {
+      "name": "updated-relative",
+      "text": "updated:>-1h",
+      "ok": {
+        "terms": [
+          { "key": "updated", "op": "gt", "value": "-1h", "negated": false, "from": 0, "to": 12 }
+        ]
+      }
+    },
+    {
+      "name": "created-date",
+      "text": "created:<2026-10-01",
+      "ok": {
+        "terms": [
+          {
+            "key": "created",
+            "op": "lt",
+            "value": "2026-10-01",
+            "negated": false,
+            "from": 0,
+            "to": 19
+          }
+        ]
+      }
+    },
+    {
+      "name": "meta-keeps-the-keys-case",
+      "text": "meta.ownerUid:u_9f3k2",
+      "ok": {
+        "terms": [
+          {
+            "key": "meta.ownerUid",
+            "op": "eq",
+            "value": "u_9f3k2",
+            "negated": false,
+            "from": 0,
+            "to": 21
+          }
+        ]
+      }
+    },
+    {
+      "name": "meta-prefix-any-case",
+      "text": "META.ownerUid:x",
+      "ok": {
+        "terms": [
+          {
+            "key": "meta.ownerUid",
+            "op": "eq",
+            "value": "x",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      }
+    },
+    {
+      "name": "has-token",
+      "text": "has:token",
+      "ok": {
+        "terms": [
+          { "key": "has", "op": "eq", "value": "token", "negated": false, "from": 0, "to": 9 }
+        ]
+      }
+    },
+    {
+      "name": "negated-repeats",
+      "text": "-has:type -has:cache",
+      "ok": {
+        "terms": [
+          { "key": "has", "op": "eq", "value": "type", "negated": true, "from": 0, "to": 9 },
+          { "key": "has", "op": "eq", "value": "cache", "negated": true, "from": 10, "to": 20 }
+        ]
+      },
+      "note": "Each negated term excludes on its own."
+    },
+    {
+      "name": "words-and-terms",
+      "text": "avatar type:image/png size:<=512",
+      "ok": {
+        "terms": [
+          {
+            "key": "type",
+            "op": "eq",
+            "value": "image/png",
+            "negated": false,
+            "from": 7,
+            "to": 21
+          },
+          { "key": "size", "op": "le", "value": "512", "negated": false, "from": 22, "to": 32 }
+        ],
+        "words": [{ "text": "avatar", "negated": false, "from": 0, "to": 6 }]
+      }
+    },
+    {
+      "name": "unknown-key",
+      "text": "foo:bar",
+      "error": {
+        "from": 0,
+        "to": 7,
+        "message": "Unknown filter \"foo:\". Use name, type, size, updated, created, has or meta.…; quote it to search for the text."
+      }
+    },
+    {
+      "name": "has-unknown-value",
+      "text": "has:everything",
+      "error": {
+        "from": 0,
+        "to": 14,
+        "message": "\"has:\" is one of token, type, metadata, encoding, cache."
+      }
+    },
+    {
+      "name": "size-not-a-size",
+      "text": "size:big",
+      "error": {
+        "from": 0,
+        "to": 8,
+        "message": "\"size:\" needs a size, like 512, 10KB or 2MB."
+      }
+    },
+    {
+      "name": "type-is-not-ordered",
+      "text": "type:>x",
+      "error": {
+        "from": 0,
+        "to": 7,
+        "message": "\">\" works on times, numbers, sizes and durations only."
+      }
+    },
+    {
+      "name": "meta-needs-a-key",
+      "text": "meta.:x",
+      "error": {
+        "from": 0,
+        "to": 7,
+        "message": "\"meta.\" needs a field name after it, like meta.userId:u_1."
+      }
+    }
+  ]
+}

@@ -1,0 +1,651 @@
+{
+  "note": "The invocation filter golden cases (crates/console-front/src/compute/filters.rs INVOCATION_FIELDS, console/src/functions/filters.ts invocationFields). Both sides parse and validate every text against these fields and must give exactly this result or this error, message and UTF-16 span included. The engine applies the same filter to GET /functions/invocations and the functions.events topic.",
+  "regex": false,
+  "fields": [
+    {
+      "key": "function",
+      "aliases": ["fn"],
+      "kind": "exact",
+      "help": "Function id, like us-central1-api"
+    },
+    {
+      "key": "codebase",
+      "kind": "exact",
+      "help": "Codebase or extension instance"
+    },
+    {
+      "key": "kind",
+      "kind": "enum",
+      "help": "How the function is triggered",
+      "values": [
+        "http",
+        "callable",
+        "firestore",
+        "storage",
+        "auth",
+        "pubsub",
+        "schedule",
+        "eventarc",
+        "tasks",
+        "blocking",
+        "alerts",
+        "database",
+        "other"
+      ]
+    },
+    {
+      "key": "topic",
+      "kind": "exact",
+      "help": "Pub/Sub or schedule topic, by name or full name"
+    },
+    {
+      "key": "queue",
+      "kind": "exact",
+      "help": "Cloud Tasks queue key, like demo-project-us-central1-resize"
+    },
+    {
+      "key": "outcome",
+      "kind": "enum",
+      "help": "Succeeded, failed, skipped or still running",
+      "values": ["succeeded", "failed", "skipped", "running"]
+    },
+    {
+      "key": "origin",
+      "kind": "enum",
+      "help": "Who made the call",
+      "values": ["console", "replay", "emulator", "client"]
+    },
+    {
+      "key": "status",
+      "kind": "number",
+      "help": "HTTP status the function answered with"
+    },
+    {
+      "key": "took",
+      "kind": "duration",
+      "help": "How long it ran, like >200ms"
+    },
+    {
+      "key": "at",
+      "kind": "time",
+      "help": "When it started"
+    },
+    {
+      "key": "is",
+      "kind": "enum",
+      "help": "A cold start or a replay",
+      "values": ["cold", "replay"]
+    }
+  ],
+  "cases": [
+    {
+      "name": "empty",
+      "text": "",
+      "ok": {}
+    },
+    {
+      "name": "a word",
+      "text": "boom",
+      "ok": {
+        "words": [
+          {
+            "text": "boom",
+            "negated": false,
+            "from": 0,
+            "to": 4
+          }
+        ]
+      }
+    },
+    {
+      "name": "a quoted phrase",
+      "text": "\"POST /orders\"",
+      "ok": {
+        "words": [
+          {
+            "text": "POST /orders",
+            "negated": false,
+            "from": 0,
+            "to": 14
+          }
+        ]
+      }
+    },
+    {
+      "name": "a negated word",
+      "text": "-timeout",
+      "ok": {
+        "words": [
+          {
+            "text": "timeout",
+            "negated": true,
+            "from": 0,
+            "to": 8
+          }
+        ]
+      }
+    },
+    {
+      "name": "function exact",
+      "text": "function:us-central1-api",
+      "ok": {
+        "terms": [
+          {
+            "key": "function",
+            "op": "eq",
+            "value": "us-central1-api",
+            "negated": false,
+            "from": 0,
+            "to": 24
+          }
+        ]
+      }
+    },
+    {
+      "name": "fn is function",
+      "text": "fn:us-central1-api",
+      "ok": {
+        "terms": [
+          {
+            "key": "function",
+            "op": "eq",
+            "value": "us-central1-api",
+            "negated": false,
+            "from": 0,
+            "to": 18
+          }
+        ]
+      }
+    },
+    {
+      "name": "function by prefix",
+      "text": "function:us-central1-*",
+      "ok": {
+        "terms": [
+          {
+            "key": "function",
+            "op": "eq",
+            "value": "us-central1-*",
+            "negated": false,
+            "from": 0,
+            "to": 22
+          }
+        ]
+      }
+    },
+    {
+      "name": "codebase",
+      "text": "codebase:jobs",
+      "ok": {
+        "terms": [
+          {
+            "key": "codebase",
+            "op": "eq",
+            "value": "jobs",
+            "negated": false,
+            "from": 0,
+            "to": 13
+          }
+        ]
+      }
+    },
+    {
+      "name": "kind",
+      "text": "kind:firestore",
+      "ok": {
+        "terms": [
+          {
+            "key": "kind",
+            "op": "eq",
+            "value": "firestore",
+            "negated": false,
+            "from": 0,
+            "to": 14
+          }
+        ]
+      }
+    },
+    {
+      "name": "kind is case-insensitive",
+      "text": "kind:HTTP",
+      "ok": {
+        "terms": [
+          {
+            "key": "kind",
+            "op": "eq",
+            "value": "http",
+            "negated": false,
+            "from": 0,
+            "to": 9
+          }
+        ]
+      }
+    },
+    {
+      "name": "kind unknown",
+      "text": "kind:lambda",
+      "error": {
+        "message": "\"kind:\" is one of http, callable, firestore, storage, auth, pubsub, schedule, eventarc, tasks, blocking, alerts, database, other.",
+        "from": 0,
+        "to": 11
+      }
+    },
+    {
+      "name": "topic by name",
+      "text": "topic:emails",
+      "ok": {
+        "terms": [
+          {
+            "key": "topic",
+            "op": "eq",
+            "value": "emails",
+            "negated": false,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "topic by full name",
+      "text": "topic:projects/demo/topics/emails",
+      "ok": {
+        "terms": [
+          {
+            "key": "topic",
+            "op": "eq",
+            "value": "projects/demo/topics/emails",
+            "negated": false,
+            "from": 0,
+            "to": 33
+          }
+        ]
+      }
+    },
+    {
+      "name": "queue",
+      "text": "queue:demo-us-central1-resize",
+      "ok": {
+        "terms": [
+          {
+            "key": "queue",
+            "op": "eq",
+            "value": "demo-us-central1-resize",
+            "negated": false,
+            "from": 0,
+            "to": 29
+          }
+        ]
+      }
+    },
+    {
+      "name": "queue with its key's own prefix",
+      "text": "queue:queue:demo-us-central1-resize",
+      "ok": {
+        "terms": [
+          {
+            "key": "queue",
+            "op": "eq",
+            "value": "queue:demo-us-central1-resize",
+            "negated": false,
+            "from": 0,
+            "to": 35
+          }
+        ]
+      }
+    },
+    {
+      "name": "outcome failed",
+      "text": "outcome:failed",
+      "ok": {
+        "terms": [
+          {
+            "key": "outcome",
+            "op": "eq",
+            "value": "failed",
+            "negated": false,
+            "from": 0,
+            "to": 14
+          }
+        ]
+      }
+    },
+    {
+      "name": "outcome running",
+      "text": "outcome:running",
+      "ok": {
+        "terms": [
+          {
+            "key": "outcome",
+            "op": "eq",
+            "value": "running",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      }
+    },
+    {
+      "name": "outcome unknown",
+      "text": "outcome:error",
+      "error": {
+        "message": "\"outcome:\" is one of succeeded, failed, skipped, running.",
+        "from": 0,
+        "to": 13
+      }
+    },
+    {
+      "name": "outcome negated",
+      "text": "-outcome:succeeded",
+      "ok": {
+        "terms": [
+          {
+            "key": "outcome",
+            "op": "eq",
+            "value": "succeeded",
+            "negated": true,
+            "from": 0,
+            "to": 18
+          }
+        ]
+      }
+    },
+    {
+      "name": "origin",
+      "text": "origin:client",
+      "ok": {
+        "terms": [
+          {
+            "key": "origin",
+            "op": "eq",
+            "value": "client",
+            "negated": false,
+            "from": 0,
+            "to": 13
+          }
+        ]
+      }
+    },
+    {
+      "name": "origin unknown",
+      "text": "origin:browser",
+      "error": {
+        "message": "\"origin:\" is one of console, replay, emulator, client.",
+        "from": 0,
+        "to": 14
+      }
+    },
+    {
+      "name": "status",
+      "text": "status:500",
+      "ok": {
+        "terms": [
+          {
+            "key": "status",
+            "op": "eq",
+            "value": "500",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "status at least",
+      "text": "status:>=400",
+      "ok": {
+        "terms": [
+          {
+            "key": "status",
+            "op": "ge",
+            "value": "400",
+            "negated": false,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "status not a number",
+      "text": "status:five",
+      "error": {
+        "message": "\"status:\" needs a number, like 42 or 2.5.",
+        "from": 0,
+        "to": 11
+      }
+    },
+    {
+      "name": "took over",
+      "text": "took:>200ms",
+      "ok": {
+        "terms": [
+          {
+            "key": "took",
+            "op": "gt",
+            "value": "200ms",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ]
+      }
+    },
+    {
+      "name": "took seconds",
+      "text": "took:<=1.5s",
+      "ok": {
+        "terms": [
+          {
+            "key": "took",
+            "op": "le",
+            "value": "1.5s",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ]
+      }
+    },
+    {
+      "name": "took not a duration",
+      "text": "took:slow",
+      "error": {
+        "message": "\"took:\" needs a duration, like 250ms, 2s or 1.5m.",
+        "from": 0,
+        "to": 9
+      }
+    },
+    {
+      "name": "at a date",
+      "text": "at:2026-10-12",
+      "ok": {
+        "terms": [
+          {
+            "key": "at",
+            "op": "eq",
+            "value": "2026-10-12",
+            "negated": false,
+            "from": 0,
+            "to": 13
+          }
+        ]
+      }
+    },
+    {
+      "name": "at relative",
+      "text": "at:>-15m",
+      "ok": {
+        "terms": [
+          {
+            "key": "at",
+            "op": "gt",
+            "value": "-15m",
+            "negated": false,
+            "from": 0,
+            "to": 8
+          }
+        ]
+      }
+    },
+    {
+      "name": "at not a time",
+      "text": "at:yesterdayish",
+      "error": {
+        "message": "\"at:\" needs a time, like 2026-10-01, -2h or today.",
+        "from": 0,
+        "to": 15
+      }
+    },
+    {
+      "name": "is cold",
+      "text": "is:cold",
+      "ok": {
+        "terms": [
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "cold",
+            "negated": false,
+            "from": 0,
+            "to": 7
+          }
+        ]
+      }
+    },
+    {
+      "name": "is replay",
+      "text": "is:replay",
+      "ok": {
+        "terms": [
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "replay",
+            "negated": false,
+            "from": 0,
+            "to": 9
+          }
+        ]
+      }
+    },
+    {
+      "name": "is unknown",
+      "text": "is:warm",
+      "error": {
+        "message": "\"is:\" is one of cold, replay.",
+        "from": 0,
+        "to": 7
+      }
+    },
+    {
+      "name": "an unknown key",
+      "text": "region:us-central1",
+      "error": {
+        "message": "Unknown filter \"region:\". Use function, codebase, kind, topic, queue, outcome, origin, status, took, at or is; quote it to search for the text.",
+        "from": 0,
+        "to": 18
+      }
+    },
+    {
+      "name": "a key without a value",
+      "text": "function:",
+      "error": {
+        "message": "\"function:\" needs a value.",
+        "from": 0,
+        "to": 9
+      }
+    },
+    {
+      "name": "an operator on an exact field",
+      "text": "function:>a",
+      "error": {
+        "message": "\">\" works on times, numbers, sizes and durations only.",
+        "from": 0,
+        "to": 11
+      }
+    },
+    {
+      "name": "everything at once",
+      "text": "fn:us-central1-api outcome:failed origin:client took:>200ms is:cold \"boom\"",
+      "ok": {
+        "terms": [
+          {
+            "key": "function",
+            "op": "eq",
+            "value": "us-central1-api",
+            "negated": false,
+            "from": 0,
+            "to": 18
+          },
+          {
+            "key": "outcome",
+            "op": "eq",
+            "value": "failed",
+            "negated": false,
+            "from": 19,
+            "to": 33
+          },
+          {
+            "key": "origin",
+            "op": "eq",
+            "value": "client",
+            "negated": false,
+            "from": 34,
+            "to": 47
+          },
+          {
+            "key": "took",
+            "op": "gt",
+            "value": "200ms",
+            "negated": false,
+            "from": 48,
+            "to": 59
+          },
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "cold",
+            "negated": false,
+            "from": 60,
+            "to": 67
+          }
+        ],
+        "words": [
+          {
+            "text": "boom",
+            "negated": false,
+            "from": 68,
+            "to": 74
+          }
+        ]
+      }
+    },
+    {
+      "name": "repeated keys",
+      "text": "kind:http kind:callable",
+      "ok": {
+        "terms": [
+          {
+            "key": "kind",
+            "op": "eq",
+            "value": "http",
+            "negated": false,
+            "from": 0,
+            "to": 9
+          },
+          {
+            "key": "kind",
+            "op": "eq",
+            "value": "callable",
+            "negated": false,
+            "from": 10,
+            "to": 23
+          }
+        ]
+      }
+    }
+  ]
+}

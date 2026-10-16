@@ -16,6 +16,8 @@
 !.env.sample
 .firenook/
 *.log
+# Golden debug-log captures the suite-front tests compare against.
+!crates/suite-front/tests/golden/*.log
 .DS_Store
 *.swp
 *.tmp
@@ -24,3 +26,12 @@
 /console/test-results/
 /console/playwright-report/
 /crates/console-front/bindings/
+/console/.design-system/
+/console/.ds-sync/
+/console/ds-bundle/
+/console/.design-sync/.cache/
+/console/.design-sync/learnings/
+/console/.design-sync/node_modules
+/console/design-system/kit/dist/
+/console/design-system/kit/docs/
+/console/.design-sync/*.log

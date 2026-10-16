@@ -8,7 +8,8 @@ use crate::error::{ApiError, ensure};
 use crate::state::apply_mask;
 use crate::util::truthy;
 
-fn tenant_from_request(body: &JsonMap<String, JsonValue>) -> JsonMap<String, JsonValue> {
+/// `tenantFromRequest`: the tenant configuration a create request asks for.
+pub(crate) fn tenant_from_request(body: &JsonMap<String, JsonValue>) -> JsonMap<String, JsonValue> {
     let mut mfa = body
         .get("mfaConfig")
         .and_then(JsonValue::as_object)

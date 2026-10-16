@@ -10,6 +10,7 @@ use firenook_core_store::{
     compare_resource_paths, field_index_holds,
 };
 
+use crate::indexes::IndexScope;
 use crate::{DatabaseEdition, compare_values};
 
 #[cfg(test)]
@@ -19,6 +20,10 @@ mod ordered_disk_tests;
 #[cfg(test)]
 #[path = "field_index_tests.rs"]
 mod field_index_tests;
+
+#[cfg(test)]
+#[path = "plan_tests.rs"]
+mod plan_tests;
 
 /// A document field or the special document-name field.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -39,6 +44,15 @@ impl FieldPath {
             return Err(QueryError::InvalidFieldPath);
         }
         Ok(Self::Field(segments))
+    }
+
+    /// Whether a segment can be written without backticks.
+    fn is_bare(segment: &str) -> bool {
+        let mut characters = segment.chars();
+        characters
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+            && characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
     }
 
     /// Parses the protobuf field-path syntax, including quoted segments.
@@ -123,6 +137,38 @@ fn is_simple_field_segment(segment: &str) -> bool {
 }
 
 /// Documents selected before filters are evaluated.
+/// The protobuf field-path syntax, the inverse of
+/// [`FieldPath::parse_wire`]: a segment that is not a plain identifier is
+/// backtick-quoted, so a path with a dot or a space in it survives the round
+/// trip instead of becoming two segments.
+impl Display for FieldPath {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DocumentId => formatter.write_str("__name__"),
+            Self::Field(segments) => {
+                for (index, segment) in segments.iter().enumerate() {
+                    if index > 0 {
+                        formatter.write_str(".")?;
+                    }
+                    if Self::is_bare(segment) {
+                        formatter.write_str(segment)?;
+                    } else {
+                        formatter.write_str("`")?;
+                        for character in segment.chars() {
+                            if character == '`' || character == '\\' {
+                                formatter.write_str("\\")?;
+                            }
+                            write!(formatter, "{character}")?;
+                        }
+                        formatter.write_str("`")?;
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryScope {
     /// Direct children of one relative collection path.
@@ -652,6 +698,39 @@ impl IncrementalQuery {
 /// queries sort keys/ordering values and reload each result from the same
 /// snapshot. Limited, nearest and memory queries keep the bounded sorting path.
 /// Streaming transports can release large result payloads one at a time.
+/// How a query's results are produced. [`QueryStrategy::of`] is the only
+/// place that decides, so [`execute_iter`] and [`plan`] cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryStrategy {
+    /// Candidates are filtered and limited as they are read, decoding only
+    /// the fields a filter or an order inspects.
+    Streaming,
+    /// Disk keys are sorted by their order values before any payload is
+    /// decoded, so an unlimited ordered query retains nothing extra.
+    OrderedDisk,
+    /// The whole result set is materialized and sorted in memory.
+    Buffered,
+}
+
+impl QueryStrategy {
+    fn of(snapshot: &Snapshot, query: &Query, orders: &[Order]) -> Self {
+        if query.nearest.is_none()
+            && !matches!(query.limit, Some(Limit::Last(_)))
+            && orders
+                == [Order {
+                    path: FieldPath::DocumentId,
+                    direction: Direction::Ascending,
+                }]
+        {
+            return Self::Streaming;
+        }
+        if snapshot.is_disk_backed() && query.limit.is_none() && query.nearest.is_none() {
+            return Self::OrderedDisk;
+        }
+        Self::Buffered
+    }
+}
+
 pub fn execute_iter(
     snapshot: &Snapshot,
     database: &DatabaseName,
@@ -662,15 +741,8 @@ pub fn execute_iter(
     validate_cursor(query.start.as_ref(), &orders)?;
     validate_cursor(query.end.as_ref(), &orders)?;
 
-    if query.nearest.is_none()
-        && !matches!(query.limit, Some(Limit::Last(_)))
-        && orders.as_slice()
-            == [Order {
-                path: FieldPath::DocumentId,
-                direction: Direction::Ascending,
-            }]
-    {
-        return Ok(QueryDocumentIterator {
+    match QueryStrategy::of(snapshot, query, &orders) {
+        QueryStrategy::Streaming => Ok(QueryDocumentIterator {
             inner: QueryDocumentIteratorInner::Streaming(Box::new(
                 StreamingQueryDocumentIterator {
                     candidates: scoped_documents(snapshot, database, query),
@@ -683,20 +755,108 @@ pub fn execute_iter(
                     remaining_offset: query.offset,
                 },
             )),
-        });
-    }
-
-    if snapshot.is_disk_backed() && query.limit.is_none() && query.nearest.is_none() {
-        return Ok(ordered_disk_iterator(
+        }),
+        QueryStrategy::OrderedDisk => Ok(ordered_disk_iterator(
             snapshot, database, query, edition, &orders,
-        ));
+        )),
+        QueryStrategy::Buffered => execute_buffered(snapshot, database, query, edition, &orders)
+            .map(|documents| QueryDocumentIterator {
+                inner: QueryDocumentIteratorInner::Buffered(documents.into_iter()),
+            }),
     }
+}
 
-    execute_buffered(snapshot, database, query, edition, &orders).map(|documents| {
-        QueryDocumentIterator {
-            inner: QueryDocumentIteratorInner::Buffered(documents.into_iter()),
-        }
+/// Where a query's candidate documents come from before any filter runs.
+/// This is what decides whether a query touches a handful of documents or
+/// the whole collection, so it is the first thing to look at when one is
+/// slow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueryCandidates {
+    /// `__name__` is pinned by `==` or `in`, so the named documents are read
+    /// directly and nothing is scanned.
+    DocumentNames { names: usize },
+    /// An equality field index narrows the collection to the documents whose
+    /// listed fields match.
+    EqualityIndex { fields: Vec<String> },
+    /// Every document of the collection is read.
+    CollectionScan,
+    /// Every document of the collection group is read, optionally under one
+    /// ancestor.
+    CollectionGroupScan { ancestor: Option<String> },
+}
+
+/// How a query would be answered, without answering it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryPlan {
+    /// The collection path, or the collection id of a group query.
+    pub target: String,
+    /// Whether the query spans one collection or a collection group.
+    pub scope: IndexScope,
+    pub candidates: QueryCandidates,
+    pub strategy: QueryStrategy,
+    /// The order the results come back in, `__name__` included as the
+    /// engine appends it.
+    pub orders: Vec<Order>,
+}
+
+/// Describes how `query` would run against `snapshot`.
+///
+/// Every decision is taken by the same code the execution takes it with, so
+/// a plan cannot describe a query the engine would answer differently.
+pub fn plan(
+    snapshot: &Snapshot,
+    database: &DatabaseName,
+    query: &Query,
+) -> Result<QueryPlan, QueryError> {
+    let orders = normalized_orders(query)?;
+    validate_cursor(query.start.as_ref(), &orders)?;
+    validate_cursor(query.end.as_ref(), &orders)?;
+    let (target, scope) = match &query.scope {
+        QueryScope::Collection(path) => (path.clone(), IndexScope::Collection),
+        QueryScope::CollectionGroup(id) => (id.clone(), IndexScope::CollectionGroup),
+    };
+    Ok(QueryPlan {
+        target,
+        scope,
+        candidates: candidate_source(snapshot, database, query),
+        strategy: QueryStrategy::of(snapshot, query, &orders),
+        orders,
     })
+}
+
+/// The branch `scoped_documents` takes, named. Kept beside it so the two
+/// move together.
+fn candidate_source(
+    snapshot: &Snapshot,
+    database: &DatabaseName,
+    query: &Query,
+) -> QueryCandidates {
+    if let Some(keys) = named_candidates(query, database) {
+        return QueryCandidates::DocumentNames { names: keys.len() };
+    }
+    if let QueryScope::Collection(collection_path) = &query.scope {
+        let lookups = equality_lookups(query);
+        if !lookups.is_empty() {
+            let equalities = lookups
+                .iter()
+                .map(|(field, values)| FieldEquality { field, values })
+                .collect::<Vec<_>>();
+            if snapshot
+                .iter_collection_equal(database, collection_path, &equalities)
+                .is_some()
+            {
+                return QueryCandidates::EqualityIndex {
+                    fields: lookups.into_iter().map(|(field, _)| field).collect(),
+                };
+            }
+        }
+    }
+    match &query.scope {
+        QueryScope::Collection(_) => QueryCandidates::CollectionScan,
+        QueryScope::CollectionGroup(_) => QueryCandidates::CollectionGroupScan {
+            ancestor: query.ancestor.clone(),
+        },
+    }
 }
 
 /// Owned result iterator returned by [`execute_iter`].
@@ -708,6 +868,19 @@ enum QueryDocumentIteratorInner {
     Streaming(Box<StreamingQueryDocumentIterator>),
     OrderedDisk(Box<OrderedDiskQueryDocumentIterator>),
     Buffered(std::vec::IntoIter<QueryDocument>),
+}
+
+impl QueryDocumentIterator {
+    /// How these results are being produced. Reading it from the iterator
+    /// that actually ran is what lets a test hold [`plan`] to the truth.
+    #[must_use]
+    pub fn strategy(&self) -> QueryStrategy {
+        match &self.inner {
+            QueryDocumentIteratorInner::Streaming(_) => QueryStrategy::Streaming,
+            QueryDocumentIteratorInner::OrderedDisk(_) => QueryStrategy::OrderedDisk,
+            QueryDocumentIteratorInner::Buffered(_) => QueryStrategy::Buffered,
+        }
+    }
 }
 
 impl Iterator for QueryDocumentIterator {

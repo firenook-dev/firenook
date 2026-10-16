@@ -1,11 +1,13 @@
 /*
  * Order matters: Kumo's stylesheet registers its theme tokens before Tailwind
- * compiles, and the @source line lets Tailwind see the classes inside Kumo's
- * compiled components.
+ * compiles, the @source line lets Tailwind see the classes inside Kumo's
+ * compiled components, and Firenook's theme comes last so its tokens win.
  */
 @source "../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
 @import '@cloudflare/kumo/styles/tailwind';
 @import 'tailwindcss';
+@import './fonts.css';
+@import './theme.css';
 
 html,
 body,
@@ -15,4 +17,85 @@ body,
 
 body {
   margin: 0;
+}
+
+/* A row the live channel just touched settles from the success tint (or the
+   danger tint for a delete) back to the surface; no colour transitions on
+   hover, but a change that just happened deserves a moment.
+
+   The tint is laid over the cell's ground rather than painted as it. Both
+   tints are translucent (the success one is 57% in light), and a pinned
+   cell's ground is what keeps the fields scrolling under it out of sight:
+   animating the ground itself made the id cell see-through for the length
+   of the flash, with the value beneath showing in it. A registered colour
+   property is what lets a gradient layer animate at all. */
+@property --row-flash {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: transparent;
+}
+@keyframes row-flash {
+  from {
+    --row-flash: var(--color-kumo-success-tint);
+  }
+  to {
+    --row-flash: transparent;
+  }
+}
+@keyframes row-flash-deleted {
+  from {
+    --row-flash: var(--color-kumo-danger-tint);
+  }
+  to {
+    --row-flash: transparent;
+  }
+}
+.row-flash > td,
+.row-flash-deleted > td {
+  background-image: linear-gradient(var(--row-flash), var(--row-flash));
+}
+.row-flash > td {
+  animation: row-flash 1.6s ease-out;
+}
+.row-flash-deleted > td {
+  animation: row-flash-deleted 1.6s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .row-flash > td,
+  .row-flash-deleted > td {
+    animation: none;
+    --row-flash: var(--color-kumo-tint);
+  }
+}
+
+/* Kumo's InlineCopyText — the project id, a document's id and path, a
+   service's address — swaps its copy mark for a tick on the spot. The tick
+   rises in, the way Kumo's ClipboardText and the console's own copy
+   buttons (`CopyGlyph`) move it, so every copy in the console answers
+   alike. Keyed on the state Kumo exposes: the button is named "Copied"
+   while the tick shows. */
+@keyframes copied-in {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  [data-kumo-component='InlineCopyText'][aria-label='Copied'] > svg {
+    animation: copied-in 200ms ease-out;
+  }
+}
+
+/* Toasts float above the bottom band of the page instead of on it. Kumo's
+   viewport sits 2rem from the corner, which is on the inspector's footer
+   (Duplicate, Delete, Save) and the table's footer: a "Saved" toast came up
+   under the pointer that had just pressed Save, and a resting pointer keeps
+   a toast open, so the footer stayed covered for as long as the hand did
+   not move. 4.5rem clears the 3rem footer with the corner's own gap above
+   it. Unlayered, so it wins over the utility class without !important;
+   keyed on the region's name, which is all the viewport exposes, and only
+   for the page's own stack (portalled to the body): a Toasty given a
+   container of its own keeps Kumo's place inside it. */
+body > [data-base-ui-portal] > [role='region'][aria-label='Notifications'] {
+  bottom: 4.5rem;
 }

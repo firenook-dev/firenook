@@ -17,9 +17,15 @@ import { Route as FirestoreRouteImport } from './routes/firestore'
 import { Route as FunctionsRouteImport } from './routes/functions'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as PubsubRouteImport } from './routes/pubsub'
-import { Route as RequestsRouteImport } from './routes/requests'
 import { Route as StorageRouteImport } from './routes/storage'
 import { Route as TasksRouteImport } from './routes/tasks'
+import { Route as AuthActivityRouteImport } from './routes/auth_.activity'
+import { Route as AuthInboxRouteImport } from './routes/auth_.inbox'
+import { Route as AuthSettingsRouteImport } from './routes/auth_.settings'
+import { Route as FirestoreRulesRouteImport } from './routes/firestore_.rules'
+import { Route as FunctionsInvocationsRouteImport } from './routes/functions_.invocations'
+import { Route as PubsubSchemasRouteImport } from './routes/pubsub_.schemas'
+import { Route as StorageRulesRouteImport } from './routes/storage_.rules'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -61,11 +67,6 @@ const PubsubRoute = PubsubRouteImport.update({
   path: '/pubsub',
   getParentRoute: () => rootRouteImport,
 } as any)
-const RequestsRoute = RequestsRouteImport.update({
-  id: '/requests',
-  path: '/requests',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const StorageRoute = StorageRouteImport.update({
   id: '/storage',
   path: '/storage',
@@ -74,6 +75,41 @@ const StorageRoute = StorageRouteImport.update({
 const TasksRoute = TasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthActivityRoute = AuthActivityRouteImport.update({
+  id: '/auth_/activity',
+  path: '/auth/activity',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthInboxRoute = AuthInboxRouteImport.update({
+  id: '/auth_/inbox',
+  path: '/auth/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthSettingsRoute = AuthSettingsRouteImport.update({
+  id: '/auth_/settings',
+  path: '/auth/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FirestoreRulesRoute = FirestoreRulesRouteImport.update({
+  id: '/firestore_/rules',
+  path: '/firestore/rules',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FunctionsInvocationsRoute = FunctionsInvocationsRouteImport.update({
+  id: '/functions_/invocations',
+  path: '/functions/invocations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PubsubSchemasRoute = PubsubSchemasRouteImport.update({
+  id: '/pubsub_/schemas',
+  path: '/pubsub/schemas',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StorageRulesRoute = StorageRulesRouteImport.update({
+  id: '/storage_/rules',
+  path: '/storage/rules',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -86,9 +122,15 @@ export interface FileRoutesByFullPath {
   '/functions': typeof FunctionsRoute
   '/logs': typeof LogsRoute
   '/pubsub': typeof PubsubRoute
-  '/requests': typeof RequestsRoute
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
+  '/auth/activity': typeof AuthActivityRoute
+  '/auth/inbox': typeof AuthInboxRoute
+  '/auth/settings': typeof AuthSettingsRoute
+  '/firestore/rules': typeof FirestoreRulesRoute
+  '/functions/invocations': typeof FunctionsInvocationsRoute
+  '/pubsub/schemas': typeof PubsubSchemasRoute
+  '/storage/rules': typeof StorageRulesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -99,9 +141,15 @@ export interface FileRoutesByTo {
   '/functions': typeof FunctionsRoute
   '/logs': typeof LogsRoute
   '/pubsub': typeof PubsubRoute
-  '/requests': typeof RequestsRoute
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
+  '/auth/activity': typeof AuthActivityRoute
+  '/auth/inbox': typeof AuthInboxRoute
+  '/auth/settings': typeof AuthSettingsRoute
+  '/firestore/rules': typeof FirestoreRulesRoute
+  '/functions/invocations': typeof FunctionsInvocationsRoute
+  '/pubsub/schemas': typeof PubsubSchemasRoute
+  '/storage/rules': typeof StorageRulesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -113,9 +161,15 @@ export interface FileRoutesById {
   '/functions': typeof FunctionsRoute
   '/logs': typeof LogsRoute
   '/pubsub': typeof PubsubRoute
-  '/requests': typeof RequestsRoute
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
+  '/auth_/activity': typeof AuthActivityRoute
+  '/auth_/inbox': typeof AuthInboxRoute
+  '/auth_/settings': typeof AuthSettingsRoute
+  '/firestore_/rules': typeof FirestoreRulesRoute
+  '/functions_/invocations': typeof FunctionsInvocationsRoute
+  '/pubsub_/schemas': typeof PubsubSchemasRoute
+  '/storage_/rules': typeof StorageRulesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -128,9 +182,15 @@ export interface FileRouteTypes {
     | '/functions'
     | '/logs'
     | '/pubsub'
-    | '/requests'
     | '/storage'
     | '/tasks'
+    | '/auth/activity'
+    | '/auth/inbox'
+    | '/auth/settings'
+    | '/firestore/rules'
+    | '/functions/invocations'
+    | '/pubsub/schemas'
+    | '/storage/rules'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -141,9 +201,15 @@ export interface FileRouteTypes {
     | '/functions'
     | '/logs'
     | '/pubsub'
-    | '/requests'
     | '/storage'
     | '/tasks'
+    | '/auth/activity'
+    | '/auth/inbox'
+    | '/auth/settings'
+    | '/firestore/rules'
+    | '/functions/invocations'
+    | '/pubsub/schemas'
+    | '/storage/rules'
   id:
     | '__root__'
     | '/'
@@ -154,9 +220,15 @@ export interface FileRouteTypes {
     | '/functions'
     | '/logs'
     | '/pubsub'
-    | '/requests'
     | '/storage'
     | '/tasks'
+    | '/auth_/activity'
+    | '/auth_/inbox'
+    | '/auth_/settings'
+    | '/firestore_/rules'
+    | '/functions_/invocations'
+    | '/pubsub_/schemas'
+    | '/storage_/rules'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -168,9 +240,15 @@ export interface RootRouteChildren {
   FunctionsRoute: typeof FunctionsRoute
   LogsRoute: typeof LogsRoute
   PubsubRoute: typeof PubsubRoute
-  RequestsRoute: typeof RequestsRoute
   StorageRoute: typeof StorageRoute
   TasksRoute: typeof TasksRoute
+  AuthActivityRoute: typeof AuthActivityRoute
+  AuthInboxRoute: typeof AuthInboxRoute
+  AuthSettingsRoute: typeof AuthSettingsRoute
+  FirestoreRulesRoute: typeof FirestoreRulesRoute
+  FunctionsInvocationsRoute: typeof FunctionsInvocationsRoute
+  PubsubSchemasRoute: typeof PubsubSchemasRoute
+  StorageRulesRoute: typeof StorageRulesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -231,13 +309,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PubsubRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/requests': {
-      id: '/requests'
-      path: '/requests'
-      fullPath: '/requests'
-      preLoaderRoute: typeof RequestsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/storage': {
       id: '/storage'
       path: '/storage'
@@ -252,6 +323,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TasksRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth_/activity': {
+      id: '/auth_/activity'
+      path: '/auth/activity'
+      fullPath: '/auth/activity'
+      preLoaderRoute: typeof AuthActivityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth_/inbox': {
+      id: '/auth_/inbox'
+      path: '/auth/inbox'
+      fullPath: '/auth/inbox'
+      preLoaderRoute: typeof AuthInboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth_/settings': {
+      id: '/auth_/settings'
+      path: '/auth/settings'
+      fullPath: '/auth/settings'
+      preLoaderRoute: typeof AuthSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/firestore_/rules': {
+      id: '/firestore_/rules'
+      path: '/firestore/rules'
+      fullPath: '/firestore/rules'
+      preLoaderRoute: typeof FirestoreRulesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/functions_/invocations': {
+      id: '/functions_/invocations'
+      path: '/functions/invocations'
+      fullPath: '/functions/invocations'
+      preLoaderRoute: typeof FunctionsInvocationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pubsub_/schemas': {
+      id: '/pubsub_/schemas'
+      path: '/pubsub/schemas'
+      fullPath: '/pubsub/schemas'
+      preLoaderRoute: typeof PubsubSchemasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/storage_/rules': {
+      id: '/storage_/rules'
+      path: '/storage/rules'
+      fullPath: '/storage/rules'
+      preLoaderRoute: typeof StorageRulesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -264,9 +384,15 @@ const rootRouteChildren: RootRouteChildren = {
   FunctionsRoute: FunctionsRoute,
   LogsRoute: LogsRoute,
   PubsubRoute: PubsubRoute,
-  RequestsRoute: RequestsRoute,
   StorageRoute: StorageRoute,
   TasksRoute: TasksRoute,
+  AuthActivityRoute: AuthActivityRoute,
+  AuthInboxRoute: AuthInboxRoute,
+  AuthSettingsRoute: AuthSettingsRoute,
+  FirestoreRulesRoute: FirestoreRulesRoute,
+  FunctionsInvocationsRoute: FunctionsInvocationsRoute,
+  PubsubSchemasRoute: PubsubSchemasRoute,
+  StorageRulesRoute: StorageRulesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

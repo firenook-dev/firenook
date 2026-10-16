@@ -23,7 +23,9 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD};
-use firenook_functions_bridge::{DispatchQueue, DispatchRequest, TriggerRegistry};
+#[cfg(test)]
+use firenook_functions_bridge::DispatchRequest;
+use firenook_functions_bridge::{DispatchQueue, DroppedService, TriggerRegistry};
 use futures_util::{StreamExt as _, TryStreamExt as _};
 use md5::{Digest as _, Md5};
 use serde::{Deserialize, Serialize};
@@ -33,17 +35,101 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::io::{AsyncWriteExt as _, BufReader};
 
+mod bulk;
+mod changes;
+mod console;
+mod console_write;
+mod decisions;
 mod download;
+mod dry_run;
+mod events;
+mod filter;
+mod folder_index;
+mod listing;
+mod log;
 mod metadata;
 mod rules;
-use download::file_response;
-pub use rules::{
-    BucketRules, FirestoreDocuments, NativeRulesConfig, NoFirestoreDocuments, RulesFile,
-    RulesSource,
+mod rules_manager;
+mod search;
+mod sessions;
+mod sniff;
+mod staging;
+mod tasks;
+mod thumbnails;
+mod view_cache;
+mod write;
+mod zip_stream;
+pub use bulk::{
+    BULK_BATCH, BulkPreview, BulkProgress, BulkRequest, BulkSource, BulkVerb, ConflictPolicy,
+    Destination, MetadataPatch, QUEUE_LIMIT,
 };
-use rules::{NativeRules, Operation, Verdict};
+pub use changes::{
+    Actor, ChangeContext, ChangeEvent, EventDelivery, ObjectChangeKind, ObjectChangeRecord,
+};
+use changes::{ChangeFeed, via_console};
+pub use console::{
+    BucketInfo, Buckets, ConsoleError, ConsoleListQuery, EXISTS_NAMES, INDEX_WAIT, Identity,
+    ListResult, ListTotals, ObjectView, PROFILE_OBJECTS, Profile, StorageConsoleApi,
+    StorageSummaryCounts,
+};
+pub use console_write::{
+    ConsoleUpload, EventBodies, EventPayloads, METADATA_HEADER_BYTES, ResendEvent,
+    parse_metadata_header,
+};
+pub use decisions::{DecisionLog, RE_RUNNABLE_BYTES, RE_RUNNABLE_DECISIONS, StorageDecisionRecord};
+use decisions::{RulesCheck, judge};
+pub use download::MediaMode;
+use download::file_response;
+pub use dry_run::{
+    DOCUMENT_ACCESS_LIMIT, DecisionAllow, DryRunRequest, DryRunResult, ProposedObject,
+    RecordedObject, RulesAuth, RulesObjectView,
+};
+pub use filter::{FilterClause, FilterPredicate, HasField, MetaCompare, StorageFilter};
+pub use firenook_rules_runtime::coverage::CoverageError;
+pub use firenook_rules_runtime::{DecisionOutcome, InstalledVersion, LoadError, RulesOrigin};
+use folder_index::{FolderIndex, IndexControl};
+pub use folder_index::{
+    FolderIndexError, FolderShape, FolderStats, SHAPE_DEPTH, SHAPE_GROUP, SHAPE_PATTERNS,
+};
+#[cfg(test)]
+use listing::ObjectListPage;
+use listing::list_objects;
+pub use listing::{
+    FileEntry, FolderEntry, ListCursor, ListEntry, ListKind, ListOrder, Phase, SortColumn,
+};
+use log::LogHandle;
+pub use log::{LogSink, StorageLogLevel, StorageLogLine};
+pub use rules::{
+    BucketRules, FirestoreDocuments, InstalledRules, NativeRulesConfig, NoFirestoreDocuments,
+    Operation, RulesFile, RulesFiles, RulesMode, RulesScope, RulesSource, StorageRulesEvent,
+};
+use rules::{NativeRules, Verdict};
+pub use rules_manager::{
+    ACCESS_NAMES, ACCESS_OPERATIONS, AccessRow, AccessVerdict, ConsoleRefusal, DecisionDetail,
+    FolderRules, Impact, ImpactFlip, StorageRulesHandle, StorageRulesMap,
+};
+pub use search::{SearchFound, SearchKind, SearchOutcome};
+pub use sniff::{SniffFamily, Sniffed};
+pub use staging::InFlight;
+use staging::{StagedFile, StagingGauge, staging_path};
+use tasks::ConsoleTasks;
+pub use thumbnails::{
+    THUMBNAIL_SOURCE_BYTES, THUMBNAIL_SOURCE_PIXELS, THUMBNAIL_WIDTHS, Thumbnail,
+};
+pub use write::TokenOp;
+pub use zip_stream::{EXPORT_BYTES, EXPORT_OBJECTS, ExportSource, ExportTicketInfo, TICKET_LIFE};
+#[cfg(test)]
+mod changes_tests;
+#[cfg(test)]
+mod console_read_tests;
+#[cfg(test)]
+mod console_scale_tests;
+#[cfg(test)]
+mod console_write_tests;
 #[cfg(test)]
 mod encoding_tests;
+#[cfg(test)]
+mod listing_reference;
 #[cfg(test)]
 mod missing_object_tests;
 #[cfg(test)]
@@ -52,6 +138,13 @@ mod pagination_tests;
 mod persistence_tests;
 #[cfg(test)]
 mod rules_replay_tests;
+#[cfg(test)]
+mod rules_tests;
+#[cfg(test)]
+mod staging_tests;
+
+/// Makes every resent event's ids unique within the process.
+static RESEND_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Storage service construction settings.
 #[derive(Debug, Clone)]
@@ -69,6 +162,38 @@ pub struct StorageConfig {
 }
 
 pub use metadata::StorageDurability;
+
+/// What the suite knows about Storage's surroundings that a `firebase.json`
+/// Storage section does not say.
+#[derive(Debug, Clone)]
+pub struct StorageOptions {
+    /// The suite runs the Functions emulator. Without it no Storage event is
+    /// queued at all, as the official emulator sends none then.
+    pub functions: bool,
+    /// The bucket `getStorage()` uses when given none; the project's
+    /// `<project>.appspot.com` when not said.
+    pub default_bucket: Option<String>,
+    /// The rules files `firebase.json` names (none for a demo project's
+    /// open default); `None` when not said, which leaves the rules mode to
+    /// the shape of the configured sources and no file to save to.
+    pub rules_files: Option<RulesFiles>,
+    /// Record every rules decision, its re-runnable context and coverage
+    /// (the suite's diagnostics, on by default there).
+    pub diagnostics: bool,
+}
+
+impl Default for StorageOptions {
+    /// Today's behaviour for a caller that says nothing: events are queued,
+    /// nothing is recorded.
+    fn default() -> Self {
+        Self {
+            functions: true,
+            default_bucket: None,
+            rules_files: None,
+            diagnostics: false,
+        }
+    }
+}
 
 /// Shared Storage state and HTTP application.
 pub struct StorageRuntime {
@@ -91,30 +216,88 @@ impl StorageRuntime {
         queue: DispatchQueue,
         background: TriggerRegistry,
     ) -> Result<Self, StorageError> {
-        validate_config(&config)?;
+        Self::start_with(config, StorageOptions::default(), queue, background).await
+    }
+
+    /// [`Self::start`] with what the suite knows about Storage's
+    /// surroundings.
+    pub async fn start_with(
+        config: StorageConfig,
+        options: StorageOptions,
+        queue: DispatchQueue,
+        background: TriggerRegistry,
+    ) -> Result<Self, StorageError> {
+        // The directories off the runtime's threads; the rest of opening is
+        // reading the metadata store, as `open` does.
         tokio::fs::create_dir_all(config.data_dir.join("objects"))
             .await
             .map_err(|error| StorageError(format!("failed to create Storage root: {error}")))?;
-        tokio::fs::create_dir_all(config.data_dir.join("uploads"))
-            .await
+        Self::open(config, options, queue, background)
+    }
+
+    /// [`Self::start_with`], without awaiting: opening is local disk work.
+    /// Call it from within a Tokio runtime (its background tasks start
+    /// there).
+    pub fn open(
+        config: StorageConfig,
+        options: StorageOptions,
+        queue: DispatchQueue,
+        background: TriggerRegistry,
+    ) -> Result<Self, StorageError> {
+        validate_config(&config)?;
+        std::fs::create_dir_all(config.data_dir.join("objects"))
+            .map_err(|error| StorageError(format!("failed to create Storage root: {error}")))?;
+        std::fs::create_dir_all(config.data_dir.join("uploads"))
             .map_err(|error| StorageError(format!("failed to create upload root: {error}")))?;
-        let (metadata, data) = metadata::MetadataStore::open(&config.data_dir, config.durability)?;
-        let rules = config.rules.as_ref().map(NativeRules::start).transpose()?;
+        let (metadata, mut data) =
+            metadata::MetadataStore::open(&config.data_dir, config.durability)?;
+        // Sessions an older engine recorded carry no times: their idle time
+        // counts from now.
+        sessions::stamp_unknown(&mut data, now_millis());
+        // Nothing is uploading yet, so a staged file no session names is
+        // what a crash mid-upload left behind.
+        let (orphans, orphan_bytes) = staging::remove_orphans(&config.data_dir, &data);
+        if orphans > 0 {
+            eprintln!(
+                "firenook storage: removed {orphans} staged upload {} left by an earlier run ({})",
+                if orphans == 1 { "file" } else { "files" },
+                staging::format_bytes(orphan_bytes)
+            );
+        }
+        let rules = config
+            .rules
+            .as_ref()
+            .map(|rules| NativeRules::start(rules, options.rules_files.as_ref()))
+            .transpose()?;
+        let decisions = (options.diagnostics && rules.is_some())
+            .then(|| Arc::new(decisions::DecisionLog::default()));
         let state = StorageState {
             started_at: now_rfc3339(),
             metadata: Arc::new(metadata),
             config: Arc::new(config),
+            options: Arc::new(options),
+            feed: Arc::clone(&data.feed),
             inner: Arc::new(Mutex::new(data)),
             mutation: Arc::new(tokio::sync::Mutex::new(())),
             rules,
+            decisions,
             queue,
             background,
+            staging: Arc::new(StagingGauge::default()),
+            log: LogHandle::default(),
+            tasks: Arc::new(ConsoleTasks::default()),
+            index: Arc::new(IndexControl::default()),
+            shapes: Arc::default(),
+            views: Arc::default(),
+            thumbnails: Arc::new(thumbnails::ThumbnailCache::new()),
+            exports: Arc::default(),
         };
         let mut write_behind = None;
         if let StorageDurability::WriteBehind { interval } = config_durability(&state) {
             // A weak handle: the flusher never keeps the metadata database
             // open after the runtime's last owner drops it.
             let metadata = Arc::downgrade(&state.metadata);
+            let log = state.log.clone();
             let (stop, mut stop_signal) = tokio::sync::watch::channel(false);
             let task = tokio::spawn(async move {
                 let mut ticker = tokio::time::interval(interval);
@@ -129,12 +312,17 @@ impl StorageRuntime {
                     };
                     let flushed = tokio::task::spawn_blocking(move || store.flush()).await;
                     if let Ok(Err(error)) = flushed {
-                        eprintln!("firenook Storage: write-behind flush failed: {error}");
+                        log.emit(
+                            StorageLogLevel::Error,
+                            log::FLUSH,
+                            format!("write-behind flush failed: {error}"),
+                        );
                     }
                 }
             });
             write_behind = Some((stop, task));
         }
+        sessions::spawn_sweep(&state);
         let application = routes(state.clone());
         Ok(Self {
             application,
@@ -155,6 +343,19 @@ impl StorageRuntime {
     /// Cloneable Axum application.
     pub fn application(&self) -> Router {
         self.application.clone()
+    }
+
+    /// Where rules runtime errors and failed flushes go from now on, instead
+    /// of standard error.
+    pub fn set_log_sink(&self, sink: LogSink) {
+        self.state.log.set(sink);
+    }
+
+    /// The handle the console's routes, topics and search call: a cheap
+    /// clone of this runtime's state.
+    #[must_use]
+    pub fn console(&self) -> StorageConsoleApi {
+        StorageConsoleApi::new(self.state.clone())
     }
 
     /// Validates committed blob presence/size before publishing native metadata.
@@ -206,9 +407,17 @@ impl StorageRuntime {
         export_directory(&self.state, root).await
     }
 
-    /// Stops the write-behind flusher (waiting for an in-flight flush) and
-    /// makes every acknowledged mutation durable.
+    /// Stops the console's tasks (the folder index walk, and every long task
+    /// a console started) and waits for each to end. Idempotent; the suite
+    /// calls it after its jobs stop and before trigger delivery stops.
+    pub async fn stop_console_tasks(&self) {
+        self.state.tasks.stop().await;
+    }
+
+    /// Stops the console's tasks and the write-behind flusher (waiting for
+    /// an in-flight flush) and makes every acknowledged mutation durable.
     pub async fn shutdown(mut self) -> Result<(), StorageError> {
+        self.stop_console_tasks().await;
         if let Some((stop, task)) = self.flusher.take() {
             let _ = stop.send(true);
             // The task exits at its next select; an in-flight blocking flush
@@ -216,6 +425,15 @@ impl StorageRuntime {
             let _ = task.await;
         }
         self.flush().await
+    }
+}
+
+impl Drop for StorageRuntime {
+    /// A runtime dropped without [`StorageRuntime::shutdown`] still ends
+    /// the console's tasks (the session sweep would otherwise keep the
+    /// service's state, its metadata database included, alive).
+    fn drop(&mut self) {
+        self.state.tasks.signal_stop();
     }
 }
 
@@ -259,11 +477,32 @@ struct StorageState {
     started_at: String,
     metadata: Arc<metadata::MetadataStore>,
     config: Arc<StorageConfig>,
+    options: Arc<StorageOptions>,
+    /// The change broadcast and activity ring the object map writes under
+    /// `inner`; read here without it.
+    feed: Arc<ChangeFeed>,
     inner: Arc<Mutex<StorageData>>,
     mutation: Arc<tokio::sync::Mutex<()>>,
     rules: Option<NativeRules>,
+    /// Every rules decision, kept while diagnostics are on.
+    decisions: Option<Arc<DecisionLog>>,
     queue: DispatchQueue,
     background: TriggerRegistry,
+    /// Bytes staged by uploads in progress, per bucket.
+    staging: Arc<StagingGauge>,
+    log: LogHandle,
+    /// The console's long tasks, stopped and awaited before the final flush.
+    tasks: Arc<ConsoleTasks>,
+    /// The folder index walk's wake-up and failures.
+    index: Arc<IndexControl>,
+    /// Folder shapes the rules map last walked, per bucket.
+    shapes: Arc<Mutex<std::collections::HashMap<String, rules_manager::CachedShapes>>>,
+    /// Sorted and filtered views of folders.
+    views: Arc<view_cache::ViewCache>,
+    /// Thumbnails made, by generation.
+    thumbnails: Arc<thumbnails::ThumbnailCache>,
+    /// Selections waiting for their `.zip` download.
+    exports: Arc<zip_stream::ExportTickets>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -274,6 +513,18 @@ struct StorageData {
     uploads: BTreeMap<String, UploadSession>,
     #[serde(default)]
     next_id: u64,
+    /// Orders every change in this process; never persisted, never goes
+    /// back (a reset moves it on).
+    #[serde(skip)]
+    revision: u64,
+    #[serde(skip)]
+    feed: Arc<ChangeFeed>,
+    /// Counts and sizes under every folder; `None` until a console asks.
+    #[serde(skip)]
+    folders: Option<FolderIndex>,
+    /// A bulk batch in progress: its changes are announced together.
+    #[serde(skip)]
+    batch: Option<changes::Batch>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -332,6 +583,17 @@ struct UploadSession {
     /// later command is a bad request, as in the official emulator.
     #[serde(default)]
     cancelled: bool,
+    /// The size the client declared for the whole upload, when it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    total: Option<u64>,
+    /// When the session started, Unix milliseconds (0: recorded by an older
+    /// engine, read as the time the service opened).
+    #[serde(default)]
+    started_at_ms: i64,
+    /// Its last activity, Unix milliseconds; a session idle for seven days
+    /// is swept.
+    #[serde(default)]
+    updated_at_ms: i64,
 }
 
 fn routes(state: StorageState) -> Router {
@@ -384,7 +646,27 @@ async fn readiness() -> Json<JsonValue> {
 
 // Inventory for the local UI: configured buckets and buckets with native objects.
 // This does not implement the cloud bucket-management/lifecycle API.
-async fn list_buckets(State(state): State<StorageState>) -> Json<JsonValue> {
+async fn list_buckets(State(state): State<StorageState>, headers: HeaderMap) -> Json<JsonValue> {
+    let origin = request_origin(&headers, &state.config.origin);
+    let names = known_buckets(&state, &lock(&state.inner));
+    let items: Vec<_> = names
+        .into_iter()
+        .map(|name| {
+            json!({
+                "kind":"storage#bucket", "name":name, "id":name,
+                "selfLink":format!("{origin}/v1/b/{}", percent_encode(&name)),
+                "timeCreated":state.started_at, "updated":state.started_at,
+                "projectNumber":"000000000000", "metageneration":"1", "location":"US",
+                "storageClass":"STANDARD", "etag":"====", "locationType":"multi-region"
+            })
+        })
+        .collect();
+    Json(json!({"kind":"storage#buckets", "items":items}))
+}
+
+/// Configured buckets and every bucket holding objects, by name; the
+/// project's default bucket when there is none.
+fn known_buckets(state: &StorageState, data: &StorageData) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     if let Some(NativeRulesConfig {
         source: RulesSource::PerBucket(buckets),
@@ -393,28 +675,11 @@ async fn list_buckets(State(state): State<StorageState>) -> Json<JsonValue> {
     {
         names.extend(buckets.iter().map(|rules| rules.bucket.clone()));
     }
-    names.extend(
-        lock(&state.inner)
-            .objects
-            .values()
-            .map(|object| object.bucket.clone()),
-    );
+    names.extend(listing::bucket_names(&data.objects).map(str::to_owned));
     if names.is_empty() {
         names.insert(format!("{}.appspot.com", state.config.project));
     }
-    let items: Vec<_> = names
-        .into_iter()
-        .map(|name| {
-            json!({
-                "kind":"storage#bucket", "name":name, "id":name,
-                "selfLink":format!("{}/v1/b/{}", state.config.origin, percent_encode(&name)),
-                "timeCreated":state.started_at, "updated":state.started_at,
-                "projectNumber":"000000000000", "metageneration":"1", "location":"US",
-                "storageClass":"STANDARD", "etag":"====", "locationType":"multi-region"
-            })
-        })
-        .collect();
-    Json(json!({"kind":"storage#buckets", "items":items}))
+    names
 }
 
 async fn not_found() -> StorageApiError {
@@ -551,7 +816,15 @@ async fn v0_upload(
     body: Body,
 ) -> Result<Response, StorageApiError> {
     let query = query_fields(query.as_deref());
-    ensure_ruleset(&state, &bucket)?;
+    ensure_ruleset(
+        &state,
+        &bucket,
+        Some((
+            Operation::Create,
+            query.get("name").map_or("", String::as_str),
+        )),
+        &headers,
+    )?;
     if headers.contains_key("x-goog-upload-command") {
         return firebase_resumable(&state, &bucket, &query, &headers, body).await;
     }
@@ -560,7 +833,7 @@ async fn v0_upload(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| bad_request("Missing object name"))?
         .clone();
-    let upload = firebase_upload(&state, &headers, body).await?;
+    let upload = firebase_upload(&state, &bucket, &headers, body).await?;
     let object = commit_staging(
         &state,
         CommitSpec {
@@ -571,6 +844,8 @@ async fn v0_upload(
             object_metadata: &upload.object_metadata,
             authorization: authorization_header(&headers),
             firebase: true,
+            console: via_console(&headers),
+            keep_tokens: false,
         },
         upload.uploaded,
     )
@@ -586,7 +861,7 @@ async fn v0_object(
 ) -> Result<Response, StorageApiError> {
     let object = decoded_object(&object);
     let query = query_fields(query.as_deref());
-    ensure_ruleset(&state, &bucket)?;
+    ensure_ruleset(&state, &bucket, Some((Operation::Get, &object)), &headers)?;
     // Rules run before the existence check: a missing object is 403 when the
     // rules deny or error and 404 when they allow.
     let stored = get_object(&state, &bucket, &object).ok();
@@ -598,12 +873,15 @@ async fn v0_object(
     if !token_matches {
         authorize(
             &state,
-            &bucket,
-            &object,
-            Operation::Get,
-            stored.as_ref(),
-            None,
-            authorization_header(&headers),
+            &RulesCheck {
+                bucket: &bucket,
+                name: &object,
+                operation: Operation::Get,
+                before: stored.as_ref(),
+                after: None,
+                authorization: authorization_header(&headers),
+                console: via_console(&headers),
+            },
         )?;
     }
     let Some(stored) = stored else {
@@ -680,7 +958,7 @@ async fn firebase_resumable(
         {
             session.cancelled = true;
             let mut data = lock(&state.inner);
-            data.uploads.insert(id.clone(), session.clone());
+            data.put_session(session.clone());
             persist_change(state, &data, metadata::Change::Upload(id))?;
         }
         let _ = tokio::fs::remove_file(state.config.data_dir.join(&session.staging_file)).await;
@@ -690,13 +968,14 @@ async fn firebase_resumable(
         session.received = session.received.saturating_add(
             append_body(
                 state,
+                bucket,
                 state.config.data_dir.join(&session.staging_file),
                 body,
             )
             .await?,
         );
         let mut data = lock(&state.inner);
-        data.uploads.insert(id.clone(), session.clone());
+        data.put_session(session.clone());
         persist_change(state, &data, metadata::Change::Upload(id))?;
     }
     if !command.contains("finalize") {
@@ -719,8 +998,13 @@ async fn firebase_resumable(
             object_metadata: &session.object_metadata,
             authorization: session.authorization.as_deref(),
             firebase: true,
+            console: via_console(headers),
+            keep_tokens: false,
         },
-        summarize_file(state.config.data_dir.join(&session.staging_file)).await?,
+        summarize_file(StagedFile::session(
+            state.config.data_dir.join(&session.staging_file),
+        ))
+        .await?,
     )
     .await
     {
@@ -728,7 +1012,7 @@ async fn firebase_resumable(
         Err(error) if error.status == StatusCode::FORBIDDEN => {
             session.denied = true;
             let mut data = lock(&state.inner);
-            data.uploads.insert(id.clone(), session);
+            data.put_session(session);
             persist_change(state, &data, metadata::Change::Upload(id))?;
             return Err(error);
         }
@@ -736,7 +1020,7 @@ async fn firebase_resumable(
     };
     {
         let mut data = lock(&state.inner);
-        data.uploads.remove(id);
+        data.remove_session(id);
         persist_change(state, &data, metadata::Change::Upload(id))?;
     }
     Ok((
@@ -786,8 +1070,8 @@ async fn v0_list(
     headers: HeaderMap,
 ) -> Result<Json<JsonValue>, StorageApiError> {
     let query = query_fields(query.as_deref());
-    ensure_ruleset(&state, &bucket)?;
     let prefix = query.get("prefix").map_or("", String::as_str);
+    ensure_ruleset(&state, &bucket, Some((Operation::List, prefix)), &headers)?;
     if !prefix.is_empty() && !prefix.ends_with('/') {
         return Err(bad_request(
             "The prefix parameter is required to be empty or ends with a single / character.",
@@ -795,12 +1079,15 @@ async fn v0_list(
     }
     authorize(
         &state,
-        &bucket,
-        prefix,
-        Operation::List,
-        None,
-        None,
-        authorization_header(&headers),
+        &RulesCheck {
+            bucket: &bucket,
+            name: prefix,
+            operation: Operation::List,
+            before: None,
+            after: None,
+            authorization: authorization_header(&headers),
+            console: via_console(&headers),
+        },
     )?;
     let delimiter = query.get("delimiter").map(String::as_str);
     let page_token = query.get("pageToken").map(String::as_str);
@@ -834,16 +1121,9 @@ async fn v0_patch(
     headers: HeaderMap,
     Json(request): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, StorageApiError> {
-    ensure_ruleset(&state, &bucket)?;
-    let object = update_metadata(
-        &state,
-        &bucket,
-        &decoded_object(&object),
-        &headers,
-        &request,
-        true,
-    )
-    .await?;
+    let name = decoded_object(&object);
+    ensure_ruleset(&state, &bucket, Some((Operation::Update, &name)), &headers)?;
+    let object = update_metadata(&state, &bucket, &name, &headers, &request, true).await?;
     Ok(Json(firebase_metadata(&object)))
 }
 
@@ -855,7 +1135,7 @@ async fn v0_token_action(
 ) -> Result<Json<JsonValue>, StorageApiError> {
     let object_name = decoded_object(&object);
     let query = query_fields(query.as_deref());
-    ensure_ruleset(&state, &bucket)?;
+    ensure_ruleset(&state, &bucket, None, &headers)?;
     // Download-token routes are admin-only in the official emulator, whatever
     // the rules say (storage-rules-v1 bypass-owner-and-download-tokens).
     if !is_owner(&headers) {
@@ -864,31 +1144,28 @@ async fn v0_token_action(
             "Missing admin credentials.",
         ));
     }
-    let _guard = state.mutation.lock().await;
-    let mut object = get_object(&state, &bucket, &object_name)
+    let guard = state.mutation.lock().await;
+    let object = get_object(&state, &bucket, &object_name)
         .map_err(|_| StorageApiError::plain(StatusCode::NOT_FOUND, "Not Found"))?;
-    if query.get("create_token").map(String::as_str) == Some("true") {
-        let token = next_token(&state, &bucket, &object_name);
-        object.download_tokens.push(token);
+    let op = if query.get("create_token").map(String::as_str) == Some("true") {
+        write::TokenOp::Create
     } else if let Some(token) = query.get("delete_token") {
-        object.download_tokens.retain(|value| value != token);
+        write::TokenOp::Revoke(token.clone())
     } else {
         return Err(bad_request("Unknown token action"));
-    }
-    object.metageneration = object.metageneration.saturating_add(1);
-    object.updated = now_rfc3339();
-    object.etag = etag(object.generation, object.metageneration);
-    {
-        let mut data = lock(&state.inner);
-        data.objects
-            .insert(object_key(&bucket, &object_name), object.clone());
-        persist_change(
-            &state,
-            &data,
-            metadata::Change::Object(&object_key(&bucket, &object_name)),
-        )?;
-    }
-    state.dispatch(StorageEvent::Metadata, &object);
+    };
+    let mut pending = write::Pending::default();
+    let object = write::token_locked(
+        &state,
+        &guard,
+        &mut pending,
+        object,
+        &op,
+        &ChangeContext::from_authorization(authorization_header(&headers), via_console(&headers)),
+    );
+    pending.commit(&state).await?;
+    drop(guard);
+    pending.dispatch(&state);
     Ok(Json(firebase_metadata(&object)))
 }
 
@@ -897,8 +1174,9 @@ async fn v0_delete(
     Path((bucket, object)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, StorageApiError> {
-    ensure_ruleset(&state, &bucket)?;
-    delete_object(&state, &bucket, &decoded_object(&object), &headers, true).await?;
+    let name = decoded_object(&object);
+    ensure_ruleset(&state, &bucket, Some((Operation::Delete, &name)), &headers)?;
+    delete_object(&state, &bucket, &name, &headers, true).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -936,10 +1214,7 @@ async fn gcs_multipart_upload(
         .map(String::as_str)
         .or_else(|| multipart.metadata.get("name").and_then(JsonValue::as_str))
         .ok_or_else(|| bad_request("Missing object name"))?;
-    let path = staging_path(state, "upload");
-    let mut file = tokio::fs::File::create(&path).await.map_err(io_error)?;
-    file.write_all(multipart.data).await.map_err(io_error)?;
-    settle_written_file(state, &mut file, &path).await?;
+    let staged = write_staged(state, bucket, multipart.data).await?;
     let object = commit_staging(
         state,
         CommitSpec {
@@ -955,11 +1230,17 @@ async fn gcs_multipart_upload(
             object_metadata: &multipart.metadata,
             authorization: authorization_header(headers),
             firebase: false,
+            console: via_console(headers),
+            keep_tokens: false,
         },
-        summarize_file(path).await?,
+        summarize_file(staged).await?,
     )
     .await?;
-    Ok(Json(gcs_metadata(state, &object)).into_response())
+    Ok(Json(gcs_metadata(
+        &request_origin(headers, &state.config.origin),
+        &object,
+    ))
+    .into_response())
 }
 
 async fn gcs_resumable_start(
@@ -1006,22 +1287,32 @@ async fn gcs_resumable_start(
             &data.next_id.to_string(),
         ]);
         let staging_file = format!("uploads/{id}.part");
-        data.uploads.insert(
-            id.clone(),
-            UploadSession {
-                id: id.clone(),
-                bucket: bucket.to_owned(),
-                name: name.clone(),
-                content_type: object_content_type,
-                metadata,
-                object_metadata: request.clone(),
-                received: 0,
-                staging_file: staging_file.clone(),
-                authorization: authorization_header(headers).map(str::to_owned),
-                denied: false,
-                cancelled: false,
-            },
-        );
+        data.put_session(UploadSession {
+            id: id.clone(),
+            bucket: bucket.to_owned(),
+            name: name.clone(),
+            content_type: object_content_type,
+            metadata,
+            object_metadata: request.clone(),
+            received: 0,
+            staging_file: staging_file.clone(),
+            authorization: authorization_header(headers).map(str::to_owned),
+            denied: false,
+            cancelled: false,
+            total: [
+                "x-upload-content-length",
+                "x-goog-upload-header-content-length",
+            ]
+            .iter()
+            .find_map(|header| {
+                headers
+                    .get(*header)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.trim().parse().ok())
+            }),
+            started_at_ms: 0,
+            updated_at_ms: 0,
+        });
         persist_change(state, &data, metadata::Change::Upload(&id))?;
         (id, staging_file)
     };
@@ -1030,7 +1321,7 @@ async fn gcs_resumable_start(
         .map_err(io_error)?;
     let location = format!(
         "{}/upload/storage/v1/b/{}/o?name={}&uploadType=resumable&upload_id={}",
-        state.config.origin.trim_end_matches('/'),
+        request_origin(headers, &state.config.origin),
         percent_encode(bucket),
         percent_encode(&name),
         percent_encode(&id)
@@ -1049,7 +1340,7 @@ async fn gcs_media_upload(
         .get("name")
         .filter(|value| !value.is_empty())
         .ok_or_else(|| bad_request("Missing object name"))?;
-    let uploaded = stream_to_staging(state, body).await?;
+    let uploaded = stream_to_staging(state, bucket, body).await?;
     let object = commit_staging(
         state,
         CommitSpec {
@@ -1060,11 +1351,17 @@ async fn gcs_media_upload(
             object_metadata: &JsonValue::Null,
             authorization: authorization_header(headers),
             firebase: false,
+            console: via_console(headers),
+            keep_tokens: false,
         },
         uploaded,
     )
     .await?;
-    Ok(Json(gcs_metadata(state, &object)).into_response())
+    Ok(Json(gcs_metadata(
+        &request_origin(headers, &state.config.origin),
+        &object,
+    ))
+    .into_response())
 }
 
 async fn gcs_resumable_chunk(
@@ -1101,27 +1398,36 @@ async fn gcs_resumable_chunk(
     }
     let appended = append_body(
         &state,
+        &bucket,
         state.config.data_dir.join(&session.staging_file),
         body,
     )
     .await?;
     session.received = session.received.saturating_add(appended);
+    if let Some(declared) = range.and_then(|value| value.total) {
+        session.total = Some(declared);
+    }
     let total = range
         .and_then(|value| value.total)
         .unwrap_or(session.received);
     if session.received < total {
         let mut data = lock(&state.inner);
-        data.uploads.insert(id.clone(), session.clone());
+        data.put_session(session.clone());
         persist_change(&state, &data, metadata::Change::Upload(&id))?;
         let range = format!("bytes=0-{}", session.received.saturating_sub(1));
         return Ok((StatusCode::PERMANENT_REDIRECT, [(header::RANGE, range)]).into_response());
     }
-    let uploaded = summarize_file(state.config.data_dir.join(&session.staging_file)).await?;
+    let mut uploaded = summarize_file(StagedFile::session(
+        state.config.data_dir.join(&session.staging_file),
+    ))
+    .await?;
     {
         let mut data = lock(&state.inner);
-        data.uploads.remove(&id);
+        data.remove_session(&id);
         persist_change(&state, &data, metadata::Change::Upload(&id))?;
     }
+    // No session names the bytes now: they go unless the commit takes them.
+    uploaded.staged = uploaded.staged.orphaned();
     let object = commit_staging(
         &state,
         CommitSpec {
@@ -1132,19 +1438,26 @@ async fn gcs_resumable_chunk(
             object_metadata: &session.object_metadata,
             authorization: session.authorization.as_deref(),
             firebase: false,
+            console: via_console(&headers),
+            keep_tokens: false,
         },
         uploaded,
     )
     .await?;
-    Ok(Json(gcs_metadata(&state, &object)).into_response())
+    Ok(Json(gcs_metadata(
+        &request_origin(&headers, &state.config.origin),
+        &object,
+    ))
+    .into_response())
 }
 
 async fn gcs_list(
     State(state): State<StorageState>,
     Path(bucket): Path<String>,
     RawQuery(query): RawQuery,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Json<JsonValue>, StorageApiError> {
+    let origin = request_origin(&headers, &state.config.origin);
     let query = query_fields(query.as_deref());
     let prefix = query.get("prefix").map_or("", String::as_str);
     let delimiter = query.get("delimiter").map(String::as_str);
@@ -1158,7 +1471,7 @@ async fn gcs_list(
     let items = page
         .items
         .into_iter()
-        .map(|object| gcs_metadata(&state, object))
+        .map(|object| gcs_metadata(&origin, object))
         .collect::<Vec<_>>();
     let mut response = JsonMap::from_iter([(
         "kind".to_owned(),
@@ -1177,71 +1490,6 @@ async fn gcs_list(
         response.insert("items".to_owned(), JsonValue::Array(items));
     }
     Ok(Json(JsonValue::Object(response)))
-}
-
-struct ObjectListPage<'a> {
-    items: Vec<&'a StoredObject>,
-    prefixes: Vec<String>,
-    next_page_token: Option<String>,
-}
-
-fn list_objects<'a>(
-    data: &'a StorageData,
-    bucket: &str,
-    prefix: &str,
-    delimiter: Option<&str>,
-    page_token: Option<&str>,
-    maximum: usize,
-) -> ObjectListPage<'a> {
-    let first_key = object_key(bucket, prefix);
-    let scoped = || {
-        data.objects
-            .range(first_key.clone()..)
-            .map(|(_, object)| object)
-            .take_while(|object| object.bucket == bucket && object.name.starts_with(prefix))
-    };
-    let item_prefix = |object: &StoredObject| {
-        delimiter.and_then(|delimiter| {
-            object.name[prefix.len()..].find(delimiter).map(|index| {
-                let end = prefix.len() + index + delimiter.len();
-                object.name[..end].to_owned()
-            })
-        })
-    };
-
-    let mut prefixes = BTreeSet::new();
-    let mut token_present = page_token.is_none();
-    for object in scoped() {
-        if let Some(group) = item_prefix(object) {
-            prefixes.insert(group);
-        } else if page_token == Some(object.name.as_str()) {
-            token_present = true;
-        }
-    }
-
-    let mut started = page_token.is_none() || !token_present;
-    let mut items = Vec::with_capacity(maximum.min(1_000));
-    let mut next_page_token = None;
-    for object in scoped().filter(|object| item_prefix(object).is_none()) {
-        if !started {
-            if page_token == Some(object.name.as_str()) {
-                started = true;
-            } else {
-                continue;
-            }
-        }
-        if items.len() == maximum {
-            next_page_token = Some(object.name.clone());
-            break;
-        }
-        items.push(object);
-    }
-
-    ObjectListPage {
-        items,
-        prefixes: prefixes.into_iter().collect(),
-        next_page_token,
-    }
 }
 
 async fn gcs_metadata_or_copy(
@@ -1271,7 +1519,11 @@ async fn gcs_metadata_or_copy(
     if media {
         file_response(&state, &stored, &headers).await
     } else {
-        Ok(Json(gcs_metadata(&state, &stored)).into_response())
+        Ok(Json(gcs_metadata(
+            &request_origin(&headers, &state.config.origin),
+            &stored,
+        ))
+        .into_response())
     }
 }
 
@@ -1307,7 +1559,10 @@ async fn gcs_patch(
         false,
     )
     .await?;
-    Ok(Json(gcs_metadata(&state, &object)))
+    Ok(Json(gcs_metadata(
+        &request_origin(&headers, &state.config.origin),
+        &object,
+    )))
 }
 
 async fn gcs_delete(
@@ -1344,12 +1599,16 @@ async fn gcs_alias_copy(
     let destination_bucket = destination.0;
     let destination_name = destination.1;
     let source_path = state.config.data_dir.join(&source.data_file);
-    let temporary = staging_path(&state, "copy");
-    tokio::fs::copy(source_path, &temporary)
+    let mut staged = StagedFile::new(
+        staging_path(&state.config, "copy"),
+        state.staging.bucket(&destination_bucket),
+    );
+    tokio::fs::copy(source_path, staged.path())
         .await
         .map_err(io_error)?;
+    staged.add(source.size);
     let uploaded = Uploaded {
-        path: temporary,
+        staged,
         size: source.size,
         md5_hash: source.md5_hash.clone(),
         crc32c: source.crc32c,
@@ -1375,11 +1634,16 @@ async fn gcs_alias_copy(
             object_metadata: &copy_metadata,
             authorization: authorization_header(&headers),
             firebase: false,
+            console: via_console(&headers),
+            keep_tokens: false,
         },
         uploaded,
     )
     .await?;
-    Ok(Json(gcs_metadata(&state, &object)))
+    Ok(Json(gcs_metadata(
+        &request_origin(&headers, &state.config.origin),
+        &object,
+    )))
 }
 
 async fn internal_export(
@@ -1412,10 +1676,11 @@ async fn internal_reset(
                     .map(|upload| upload.staging_file.clone()),
             )
             .collect::<Vec<_>>();
-        *data = StorageData::default();
+        data.clear();
         persist_state(&state, &data)?;
         files
     };
+    state.views.clear();
     for file in files {
         let _ = tokio::fs::remove_file(state.config.data_dir.join(file)).await;
     }
@@ -1430,51 +1695,48 @@ async fn update_metadata(
     request: &JsonValue,
     enforce_rules: bool,
 ) -> Result<StoredObject, StorageApiError> {
-    let _guard = state.mutation.lock().await;
+    let guard = state.mutation.lock().await;
     let stored = get_object(state, bucket, name);
     if enforce_rules {
         // `request.resource` is the merged object with the metageneration
         // and update time it would have; a missing object is checked with
         // both resources null and is 404 only when the rules allow.
-        let proposed = stored.as_ref().ok().map(|before| {
-            let mut proposed = before.clone();
-            apply_metadata(&mut proposed, request);
-            proposed.metageneration = proposed.metageneration.saturating_add(1);
-            proposed.updated = now_rfc3339();
-            proposed
-        });
+        let proposed = stored
+            .as_ref()
+            .ok()
+            .map(|before| write::proposed_metadata(before, request));
         authorize(
             state,
-            bucket,
-            name,
-            Operation::Update,
-            stored.as_ref().ok(),
-            proposed.as_ref(),
-            authorization_header(headers),
+            &RulesCheck {
+                bucket,
+                name,
+                operation: Operation::Update,
+                before: stored.as_ref().ok(),
+                after: proposed.as_ref(),
+                authorization: authorization_header(headers),
+                console: via_console(headers),
+            },
         )?;
     }
-    let mut object = stored.map_err(|error| {
+    let object = stored.map_err(|error| {
         if enforce_rules {
             StorageApiError::plain(StatusCode::NOT_FOUND, "Not Found")
         } else {
             error
         }
     })?;
-    apply_metadata(&mut object, request);
-    object.metageneration = object.metageneration.saturating_add(1);
-    object.updated = now_rfc3339();
-    object.etag = etag(object.generation, object.metageneration);
-    {
-        let mut data = lock(&state.inner);
-        data.objects
-            .insert(object_key(bucket, name), object.clone());
-        persist_change(
-            state,
-            &data,
-            metadata::Change::Object(&object_key(bucket, name)),
-        )?;
-    }
-    state.dispatch(StorageEvent::Metadata, &object);
+    let mut pending = write::Pending::default();
+    let object = write::update_metadata_locked(
+        state,
+        &guard,
+        &mut pending,
+        object,
+        request,
+        &ChangeContext::from_authorization(authorization_header(headers), via_console(headers)),
+    );
+    pending.commit(state).await?;
+    drop(guard);
+    pending.dispatch(state);
     Ok(object)
 }
 
@@ -1485,17 +1747,20 @@ async fn delete_object(
     headers: &HeaderMap,
     enforce_rules: bool,
 ) -> Result<(), StorageApiError> {
-    let _guard = state.mutation.lock().await;
+    let guard = state.mutation.lock().await;
     let stored = get_object(state, bucket, name);
     if enforce_rules {
         authorize(
             state,
-            bucket,
-            name,
-            Operation::Delete,
-            stored.as_ref().ok(),
-            None,
-            authorization_header(headers),
+            &RulesCheck {
+                bucket,
+                name,
+                operation: Operation::Delete,
+                before: stored.as_ref().ok(),
+                after: None,
+                authorization: authorization_header(headers),
+                console: via_console(headers),
+            },
         )?;
     }
     let object = stored.map_err(|error| {
@@ -1505,24 +1770,23 @@ async fn delete_object(
             error
         }
     })?;
-    {
-        let mut data = lock(&state.inner);
-        data.objects.remove(&object_key(bucket, name));
-        persist_change(
-            state,
-            &data,
-            metadata::Change::Object(&object_key(bucket, name)),
-        )?;
-    }
-    tokio::fs::remove_file(state.config.data_dir.join(&object.data_file))
-        .await
-        .map_err(io_error)?;
-    state.dispatch(StorageEvent::Delete, &object);
+    let mut pending = write::Pending::default();
+    write::delete_locked(
+        state,
+        &guard,
+        &mut pending,
+        object,
+        &ChangeContext::from_authorization(authorization_header(headers), via_console(headers)),
+    );
+    pending.commit(state).await?;
+    drop(guard);
+    pending.dispatch(state);
     Ok(())
 }
 
 struct Uploaded {
-    path: PathBuf,
+    /// The staged bytes, removed if the upload never commits.
+    staged: StagedFile,
     size: u64,
     md5_hash: String,
     crc32c: u32,
@@ -1537,6 +1801,7 @@ struct FirebaseUpload {
 
 async fn firebase_upload(
     state: &StorageState,
+    bucket: &str,
     headers: &HeaderMap,
     body: Body,
 ) -> Result<FirebaseUpload, StorageApiError> {
@@ -1546,7 +1811,7 @@ async fn firebase_upload(
         // ignores the request Content-Type (storage-rules-v1
         // request-resource-create-media content-type-defaulted).
         return Ok(FirebaseUpload {
-            uploaded: stream_to_staging(state, body).await?,
+            uploaded: stream_to_staging(state, bucket, body).await?,
             content_type: "application/octet-stream".to_owned(),
             metadata: BTreeMap::new(),
             object_metadata: JsonValue::Null,
@@ -1554,10 +1819,7 @@ async fn firebase_upload(
     };
     let bytes = collect_limited(body, 64 * 1024 * 1024).await?;
     let multipart = parse_related_multipart(&bytes, &boundary)?;
-    let path = staging_path(state, "upload");
-    let mut file = tokio::fs::File::create(&path).await.map_err(io_error)?;
-    file.write_all(multipart.data).await.map_err(io_error)?;
-    settle_written_file(state, &mut file, &path).await?;
+    let staged = write_staged(state, bucket, multipart.data).await?;
     let content_type = multipart
         .metadata
         .get("contentType")
@@ -1566,7 +1828,7 @@ async fn firebase_upload(
         .unwrap_or("application/octet-stream")
         .to_owned();
     Ok(FirebaseUpload {
-        uploaded: summarize_file(path).await?,
+        uploaded: summarize_file(staged).await?,
         content_type,
         metadata: string_metadata(multipart.metadata.get("metadata")),
         object_metadata: multipart.metadata,
@@ -1649,9 +1911,21 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .flatten()
 }
 
-async fn stream_to_staging(state: &StorageState, body: Body) -> Result<Uploaded, StorageApiError> {
-    let path = staging_path(state, "upload");
-    let mut file = tokio::fs::File::create(&path).await.map_err(io_error)?;
+/// Streams a request body to a fresh staged file of `bucket`. A body that
+/// fails midway (the client aborted) leaves nothing behind: the staged file
+/// is dropped with the error.
+async fn stream_to_staging(
+    state: &StorageState,
+    bucket: &str,
+    body: Body,
+) -> Result<Uploaded, StorageApiError> {
+    let mut staged = StagedFile::new(
+        staging_path(&state.config, "upload"),
+        state.staging.bucket(bucket),
+    );
+    let mut file = tokio::fs::File::create(staged.path())
+        .await
+        .map_err(io_error)?;
     let mut stream = body.into_data_stream();
     let mut md5 = Md5::new();
     let mut crc = 0;
@@ -1661,19 +1935,45 @@ async fn stream_to_staging(state: &StorageState, body: Body) -> Result<Uploaded,
         file.write_all(&chunk).await.map_err(io_error)?;
         md5.update(&chunk);
         crc = crc32c::crc32c_append(crc, &chunk);
-        size = size.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+        let length = u64::try_from(chunk.len()).unwrap_or(u64::MAX);
+        size = size.saturating_add(length);
+        staged.add(length);
     }
+    let path = staged.path().to_path_buf();
     settle_written_file(state, &mut file, &path).await?;
     Ok(Uploaded {
-        path,
+        staged,
         size,
         md5_hash: BASE64.encode(md5.finalize()),
         crc32c: crc,
     })
 }
 
+/// Writes bytes already in memory (a multipart body) to a fresh staged file.
+async fn write_staged(
+    state: &StorageState,
+    bucket: &str,
+    bytes: &[u8],
+) -> Result<StagedFile, StorageApiError> {
+    let mut staged = StagedFile::new(
+        staging_path(&state.config, "upload"),
+        state.staging.bucket(bucket),
+    );
+    let path = staged.path().to_path_buf();
+    let mut file = tokio::fs::File::create(&path).await.map_err(io_error)?;
+    file.write_all(bytes).await.map_err(io_error)?;
+    staged.add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+    settle_written_file(state, &mut file, &path).await?;
+    Ok(staged)
+}
+
+/// Appends one resumable chunk to the session's staged file. A chunk that
+/// fails midway is cut off again, so the file keeps the length the session
+/// reports and a retry appends at that offset; the session's bytes stay, as
+/// the upload may resume.
 async fn append_body(
     state: &StorageState,
+    bucket: &str,
     path: PathBuf,
     body: Body,
 ) -> Result<u64, StorageApiError> {
@@ -1682,19 +1982,38 @@ async fn append_body(
         .open(&path)
         .await
         .map_err(io_error)?;
+    let before = file.metadata().await.map_err(io_error)?.len();
+    let mut counted = state.staging.chunk(bucket);
     let mut stream = body.into_data_stream();
     let mut size = 0_u64;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| bad_request(format!("Invalid upload body: {error}")))?;
-        file.write_all(&chunk).await.map_err(io_error)?;
-        size = size.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+    let appended: Result<(), StorageApiError> = async {
+        while let Some(chunk) = stream.next().await {
+            let chunk =
+                chunk.map_err(|error| bad_request(format!("Invalid upload body: {error}")))?;
+            file.write_all(&chunk).await.map_err(io_error)?;
+            let length = u64::try_from(chunk.len()).unwrap_or(u64::MAX);
+            size = size.saturating_add(length);
+            counted.add(length);
+        }
+        Ok(())
+    }
+    .await;
+    if let Err(error) = appended {
+        // Best effort: if even the truncation fails, the session's
+        // `received` still names the offset a retry must start from.
+        let _ = file.set_len(before).await;
+        return Err(error);
     }
     settle_written_file(state, &mut file, &path).await?;
     Ok(size)
 }
 
-async fn summarize_file(path: PathBuf) -> Result<Uploaded, StorageApiError> {
-    let file = tokio::fs::File::open(&path).await.map_err(io_error)?;
+/// Hashes a staged file written elsewhere (a multipart body, a resumable
+/// session's chunks).
+async fn summarize_file(staged: StagedFile) -> Result<Uploaded, StorageApiError> {
+    let file = tokio::fs::File::open(staged.path())
+        .await
+        .map_err(io_error)?;
     let mut reader = BufReader::new(file);
     let mut md5 = Md5::new();
     let mut crc = 0;
@@ -1713,7 +2032,7 @@ async fn summarize_file(path: PathBuf) -> Result<Uploaded, StorageApiError> {
         size = size.saturating_add(u64::try_from(read).unwrap_or(u64::MAX));
     }
     Ok(Uploaded {
-        path,
+        staged,
         size,
         md5_hash: BASE64.encode(md5.finalize()),
         crc32c: crc,
@@ -1762,6 +2081,11 @@ struct CommitSpec<'a> {
     /// Authorization header value evaluated by the rules.
     authorization: Option<&'a str>,
     firebase: bool,
+    /// The request came from the console (`x-firenook-console`).
+    console: bool,
+    /// A replacement keeps the replaced object's download tokens instead of
+    /// minting one (the console's edit in place, Admin only).
+    keep_tokens: bool,
 }
 
 async fn commit_staging(
@@ -1769,103 +2093,41 @@ async fn commit_staging(
     spec: CommitSpec<'_>,
     uploaded: Uploaded,
 ) -> Result<StoredObject, StorageApiError> {
-    let _guard = state.mutation.lock().await;
-    let before = lock(&state.inner)
-        .objects
-        .get(&object_key(spec.bucket, spec.name))
-        .cloned();
-    let now = now_rfc3339();
-    let (generation, token) = {
-        let mut data = lock(&state.inner);
-        data.next_id = data.next_id.saturating_add(1);
-        let generation = generation(&mut data);
-        let token = spec.firebase.then(|| {
-            uuid_shaped(&Sha256::digest(
-                stable_id(&[
-                    &state.config.project,
-                    spec.bucket,
-                    spec.name,
-                    "download",
-                    &data.next_id.to_string(),
-                ])
-                .as_bytes(),
-            ))
-        });
-        (generation, token)
-    };
-    let data_file = format!("objects/{}", stable_id(&[spec.bucket, spec.name]));
-    let mut object = StoredObject {
-        name: spec.name.to_owned(),
-        bucket: spec.bucket.to_owned(),
-        generation,
-        metageneration: 1,
-        content_type: Some(spec.content_type.to_owned()),
-        storage_class: "STANDARD".to_owned(),
-        content_disposition: None,
-        content_encoding: None,
-        content_language: None,
-        cache_control: None,
-        download_tokens: token.into_iter().collect(),
-        custom_metadata: spec.metadata,
-        time_created: now.clone(),
-        updated: now,
-        size: uploaded.size,
-        md5_hash: uploaded.md5_hash,
-        crc32c: uploaded.crc32c,
-        etag: etag(generation, 1),
-        data_file: data_file.clone(),
-    };
-    apply_metadata(&mut object, spec.object_metadata);
-    if let Some(previous) = &before {
-        object.time_created.clone_from(&previous.time_created);
-    }
+    let guard = state.mutation.lock().await;
+    let commit = write::prepare_commit(state, &guard, &spec, &uploaded);
     // Every upload is `create`, with `resource` set when the object exists
     // (storage-rules-v1 upload-over-existing). The rules see the object
     // before the Firebase presentation defaults are applied.
     if spec.firebase
         && let Err(error) = authorize(
             state,
-            spec.bucket,
-            spec.name,
-            Operation::Create,
-            before.as_ref(),
-            Some(&object),
-            spec.authorization,
+            &RulesCheck {
+                bucket: spec.bucket,
+                name: spec.name,
+                operation: Operation::Create,
+                before: commit.before.as_ref(),
+                after: Some(&commit.object),
+                authorization: spec.authorization,
+                console: spec.console,
+            },
         )
     {
-        let _ = tokio::fs::remove_file(uploaded.path).await;
+        uploaded.staged.discard();
         return Err(error.upload_final());
     }
-    // The official emulator dispatches finalize before defaulting the
-    // disposition on the (shared) stored record, so the finalize event lacks
-    // it while later events and responses carry "inline".
-    let disposition_defaulted = spec.firebase && object.content_disposition.is_none();
-    if disposition_defaulted {
-        object.content_disposition = Some("inline".to_owned());
-    }
-    let final_path = state.config.data_dir.join(&data_file);
-    tokio::fs::rename(&uploaded.path, &final_path)
-        .await
-        .map_err(io_error)?;
-    // The bytes were recorded under the staging path; sync the published one.
-    state.metadata.note_unsynced_file(final_path.clone());
-    {
-        let mut data = lock(&state.inner);
-        data.objects
-            .insert(object_key(spec.bucket, spec.name), object.clone());
-        persist_change(
-            state,
-            &data,
-            metadata::Change::Object(&object_key(spec.bucket, spec.name)),
-        )?;
-    }
-    if disposition_defaulted {
-        let mut event_object = object.clone();
-        event_object.content_disposition = None;
-        state.dispatch(StorageEvent::Finalize, &event_object);
-    } else {
-        state.dispatch(StorageEvent::Finalize, &object);
-    }
+    let mut pending = write::Pending::default();
+    let object = write::commit_locked(
+        state,
+        &guard,
+        &mut pending,
+        commit,
+        uploaded,
+        &ChangeContext::from_authorization(spec.authorization, spec.console),
+    )
+    .await?;
+    pending.commit(state).await?;
+    drop(guard);
+    pending.dispatch(state);
     Ok(object)
 }
 
@@ -1883,45 +2145,80 @@ fn get_object(
 
 /// Refuses every request on a bucket without a loaded ruleset, owner
 /// included, exactly as the official emulator does before any other check.
-fn ensure_ruleset(state: &StorageState, bucket: &str) -> Result<(), StorageApiError> {
+/// A client request refused here is recorded as a decision (`request`
+/// names its operation and object) while diagnostics are on.
+fn ensure_ruleset(
+    state: &StorageState,
+    bucket: &str,
+    request: Option<(Operation, &str)>,
+    headers: &HeaderMap,
+) -> Result<(), StorageApiError> {
     match &state.rules {
-        Some(rules) if !rules.has_ruleset(bucket) => Err(StorageApiError::json(
-            StatusCode::FORBIDDEN,
-            "Permission denied. Storage Emulator has no loaded ruleset.",
-        )),
+        Some(rules) if !rules.has_ruleset(bucket) => {
+            if let Some((operation, name)) = request
+                && !is_owner(headers)
+            {
+                judge(
+                    rules,
+                    state.decisions.as_deref(),
+                    &RulesCheck {
+                        bucket,
+                        name,
+                        operation,
+                        before: None,
+                        after: None,
+                        authorization: authorization_header(headers),
+                        console: via_console(headers),
+                    },
+                );
+            }
+            Err(StorageApiError::json(
+                StatusCode::FORBIDDEN,
+                decisions::NO_RULESET_MESSAGE,
+            ))
+        }
         _ => Ok(()),
     }
 }
 
 /// Evaluates one Firebase (v0) operation. Owner credentials and open mode
 /// skip the rules; a denial or runtime error is 403 with the official
-/// message for the operation's permission class.
+/// message for the operation's permission class. Answers the decision
+/// recorded for an allowed request, while diagnostics are on.
 fn authorize(
     state: &StorageState,
-    bucket: &str,
-    name: &str,
-    operation: Operation,
-    before: Option<&StoredObject>,
-    after: Option<&StoredObject>,
-    authorization: Option<&str>,
-) -> Result<(), StorageApiError> {
+    check: &RulesCheck<'_>,
+) -> Result<Option<String>, StorageApiError> {
     let Some(rules) = &state.rules else {
-        return Ok(());
+        return Ok(None);
     };
-    if authorization.is_some_and(|value| value == "Bearer owner" || value == "Firebase owner") {
-        return Ok(());
+    if check
+        .authorization
+        .is_some_and(|value| value == "Bearer owner" || value == "Firebase owner")
+    {
+        return Ok(None);
     }
-    match rules.verify(bucket, name, operation, before, after, authorization) {
-        Verdict::Allowed => Ok(()),
+    let judged = judge(rules, state.decisions.as_deref(), check);
+    match judged.verdict {
+        Verdict::Allowed => Ok(judged.decision),
         Verdict::Denied(error) => {
             if let Some(error) = error {
-                eprintln!("firenook Storage rules: {error}");
+                state.log.emit(
+                    StorageLogLevel::Warn,
+                    log::RULES,
+                    format!(
+                        "{} on gs://{}/{} failed in the rules: {error}",
+                        check.operation.method(),
+                        check.bucket,
+                        check.name
+                    ),
+                );
             }
-            Err(permission_denied(operation.permission()))
+            Err(permission_denied(check.operation.permission()))
         }
         Verdict::NoRuleset => Err(StorageApiError::json(
             StatusCode::FORBIDDEN,
-            "Permission denied. Storage Emulator has no loaded ruleset.",
+            decisions::NO_RULESET_MESSAGE,
         )),
     }
 }
@@ -1982,7 +2279,7 @@ async fn internal_set_rules(
         )
             .into_response()),
         Err(error) => {
-            eprintln!("firenook Storage rules: {error}");
+            state.log.emit(StorageLogLevel::Error, log::RULES, error.0);
             Ok((
                 StatusCode::BAD_REQUEST,
                 Json(json!({
@@ -2002,77 +2299,52 @@ enum StorageEvent {
 }
 
 impl StorageState {
-    fn dispatch(&self, event: StorageEvent, object: &StoredObject) {
-        if !self.background.background_enabled() {
-            return;
+    /// The bucket `getStorage()` uses when given none.
+    fn default_bucket(&self) -> String {
+        self.options
+            .default_bucket
+            .clone()
+            .unwrap_or_else(|| format!("{}.appspot.com", self.config.project))
+    }
+
+    /// Dispatches the event of the change committed at `revision` and
+    /// records on its activity record what became of it, and the ids it was
+    /// sent with.
+    fn dispatch_change(&self, revision: u64, event: StorageEvent, object: &StoredObject) {
+        let (delivery, event_ids) = self.dispatch_with(event, object, None);
+        self.feed.settle(revision, delivery, event_ids);
+    }
+
+    /// Queues the v1 and v2 trigger requests of one Storage event, and says
+    /// what happened, with the event's two ids once it was sent: nothing at
+    /// all without Functions in the suite (as the official emulator),
+    /// nothing while background triggers are paused. A `nonce` gives the
+    /// event new ids, so a delivery runtime that drops ids it has seen
+    /// delivers it again.
+    fn dispatch_with(
+        &self,
+        event: StorageEvent,
+        object: &StoredObject,
+        nonce: Option<&str>,
+    ) -> (EventDelivery, Vec<String>) {
+        if !self.options.functions {
+            return (EventDelivery::NoFunctions, Vec::new());
         }
-        let (legacy, cloud) = match event {
-            StorageEvent::Finalize => (
-                "google.storage.object.finalize",
-                "google.cloud.storage.object.v1.finalized",
-            ),
-            StorageEvent::Metadata => (
-                "google.storage.object.metadataUpdate",
-                "google.cloud.storage.object.v1.metadataUpdated",
-            ),
-            StorageEvent::Delete => (
-                "google.storage.object.delete",
-                "google.cloud.storage.object.v1.deleted",
-            ),
-        };
-        let data = event_metadata(self, object);
-        let timestamp = now_rfc3339();
-        let source = format!(
-            "//storage.googleapis.com/projects/_/buckets/{}/objects/{}",
-            object.bucket, object.name
-        );
-        for (generation, body, content_type) in [
-            (
-                "v1",
-                json!({
-                    "eventId": decimal_id(&stable_id(&[&self.config.project, &object.bucket, &object.name, legacy, &object.generation.to_string(), &object.metageneration.to_string()])),
-                    "timestamp": timestamp,
-                    "eventType": legacy,
-                    "resource": {
-                        "service": "storage.googleapis.com",
-                        "name": format!("projects/_/buckets/{}/objects/{}", object.bucket, object.name),
-                        "type": "storage#object"
-                    },
-                    "data": data
-                }),
-                "application/json",
-            ),
-            (
-                "v2",
-                json!({
-                    "specversion": "1.0",
-                    "id": uuid_shaped(&Sha256::digest(stable_id(&[&self.config.project, &object.bucket, &object.name, cloud, &object.generation.to_string(), &object.metageneration.to_string()]).as_bytes())),
-                    "type": cloud,
-                    "source": source,
-                    "time": timestamp,
-                    "data": data
-                }),
-                "application/cloudevents+json; charset=UTF-8",
-            ),
-        ] {
-            let event_id = stable_id(&[
-                &self.config.project,
-                &object.bucket,
-                &object.name,
-                legacy,
-                generation,
-                &object.generation.to_string(),
-                &object.metageneration.to_string(),
-            ]);
-            let _ = self.queue.enqueue(DispatchRequest {
-                path: format!(
-                    "/functions/projects/{}/trigger_multicast",
-                    self.config.project
-                ),
-                headers: BTreeMap::from([("content-type".to_owned(), content_type.to_owned())]),
-                body: serde_json::to_vec(&body).expect("JSON serialization cannot fail"),
-                event_id,
-            });
+        if !self.background.background_enabled() {
+            self.background.note_dropped(DroppedService::Storage);
+            return (EventDelivery::Paused, Vec::new());
+        }
+        let bodies = events::bodies(self, event, object, nonce);
+        let mut failed = false;
+        for request in bodies.requests(self, object) {
+            if self.queue.enqueue(request).is_err() {
+                failed = true;
+            }
+        }
+        if failed {
+            (EventDelivery::Failed, Vec::new())
+        } else {
+            (EventDelivery::Sent, bodies.ids())
         }
     }
 }
@@ -2087,7 +2359,47 @@ fn firebase_metadata(object: &StoredObject) -> JsonValue {
     value
 }
 
-fn gcs_metadata(state: &StorageState, object: &StoredObject) -> JsonValue {
+/// The origin a response's URLs point at: the forwarded host, scheme and
+/// prefix when the console's mount sent them (`x-forwarded-host`,
+/// `x-forwarded-proto`, `x-forwarded-prefix`), else the configured origin.
+/// A direct client of the Storage port sends no such headers and sees the
+/// configured origin; one that sends them itself changes only the URLs in
+/// its own answers.
+fn request_origin(headers: &HeaderMap, configured: &str) -> String {
+    let header = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    };
+    let Some(host) = header("x-forwarded-host").filter(|host| {
+        host.len() <= 255
+            && host.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric()
+                    || matches!(byte, b'.' | b'-' | b'_' | b':' | b'[' | b']')
+            })
+    }) else {
+        return configured.trim_end_matches('/').to_owned();
+    };
+    let scheme = match header("x-forwarded-proto") {
+        Some("https") => "https",
+        _ => "http",
+    };
+    let prefix = header("x-forwarded-prefix")
+        .filter(|prefix| {
+            prefix.starts_with('/')
+                && prefix.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'-' | b'_')
+                })
+        })
+        .map_or("", |prefix| prefix.trim_end_matches('/'));
+    format!("{scheme}://{host}{prefix}")
+}
+
+/// Object metadata as the JSON API writes it, with its links under `origin`
+/// (`request_origin`, or the configured origin for an event).
+fn gcs_metadata(origin: &str, object: &StoredObject) -> JsonValue {
     let mut value = base_metadata(object, true);
     value["crc32c"] = json!(BASE64.encode(object.crc32c.to_be_bytes()));
     value["timeStorageClassUpdated"] = json!(object.time_created);
@@ -2096,7 +2408,7 @@ fn gcs_metadata(state: &StorageState, object: &StoredObject) -> JsonValue {
         object.bucket, object.name, object.generation
     ));
     let encoded = percent_encode(&object.name);
-    let origin = state.config.origin.trim_end_matches('/');
+    let origin = origin.trim_end_matches('/');
     value["selfLink"] = json!(format!(
         "{origin}/storage/v1/b/{}/o/{encoded}",
         percent_encode(&object.bucket)
@@ -2113,7 +2425,9 @@ fn gcs_metadata(state: &StorageState, object: &StoredObject) -> JsonValue {
 }
 
 fn event_metadata(state: &StorageState, object: &StoredObject) -> JsonValue {
-    let mut value = gcs_metadata(state, object);
+    // A function's event is not an answer to a request: its links name the
+    // configured origin, as before.
+    let mut value = gcs_metadata(&state.config.origin, object);
     let mut metadata = object.custom_metadata.clone();
     if !object.download_tokens.is_empty() {
         metadata.insert(
@@ -2253,9 +2567,9 @@ async fn import_directory(state: &StorageState, root: &FilePath) -> Result<usize
         .await?;
     let count = imported.len();
     let mut data = lock(&state.inner);
+    let system = ChangeContext::system();
     for object in imported {
-        data.objects
-            .insert(object_key(&object.bucket, &object.name), object);
+        data.put(object, &system);
     }
     state.metadata.replace(&data)?;
     write_json_atomic(&state.config.data_dir.join("metadata.json"), &*data)?;
@@ -2483,20 +2797,6 @@ fn stable_id(parts: &[&str]) -> String {
         digest.update([0]);
     }
     URL_SAFE_NO_PAD.encode(digest.finalize())
-}
-
-fn staging_path(state: &StorageState, kind: &str) -> PathBuf {
-    let id = stable_id(&[
-        &state.config.project,
-        kind,
-        &std::process::id().to_string(),
-        &OffsetDateTime::now_utc().unix_timestamp_nanos().to_string(),
-    ]);
-    state
-        .config
-        .data_dir
-        .join("uploads")
-        .join(format!("{id}.part"))
 }
 
 fn validate_config(config: &StorageConfig) -> Result<(), StorageError> {
@@ -2822,6 +3122,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn object_events_name_their_object_and_paused_ones_are_counted() {
+        use firenook_functions_bridge::{DroppedService, cause};
+        let root = test_root("event-cause");
+        let registry = TriggerRegistry::default();
+        let (observer, mut dispatches) = TriggerObserver::channel(registry.clone());
+        let runtime = StorageRuntime::start(
+            StorageConfig {
+                project: PROJECT.to_owned(),
+                durability: StorageDurability::default(),
+                origin: "http://127.0.0.1:21002".to_owned(),
+                data_dir: root.clone(),
+                rules: None,
+            },
+            observer.queue(),
+            registry.clone(),
+        )
+        .await
+        .expect("Storage runtime");
+        let upload = |name: &'static str| {
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/v0/b/{DEFAULT_BUCKET}/o?name={name}"))
+                .header(header::CONTENT_TYPE, "text/plain")
+                .body(Body::from("event cause"))
+                .expect("upload")
+        };
+        let response = runtime
+            .application()
+            .oneshot(upload("users%2Fada%20lovelace%2F%E7%81%AB.txt"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        for id_field in ["eventId", "id"] {
+            let dispatch = dispatches.try_recv().expect("storage dispatch");
+            let event: JsonValue = serde_json::from_slice(&dispatch.body).expect("event");
+            assert_eq!(dispatch.headers[cause::BUCKET], DEFAULT_BUCKET);
+            assert_eq!(
+                dispatch.headers[cause::OBJECT],
+                "users/ada%20lovelace/%E7%81%AB.txt"
+            );
+            assert_eq!(
+                cause::decode(&dispatch.headers[cause::OBJECT]),
+                "users/ada lovelace/火.txt"
+            );
+            assert_eq!(dispatch.headers[cause::EVENT_ID], event[id_field]);
+        }
+
+        registry.set_background_enabled(false);
+        let response = runtime
+            .application()
+            .oneshot(upload("paused.txt"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            dispatches.try_recv().is_err(),
+            "nothing is sent while paused"
+        );
+        // One event, though it would have been sent in two envelopes.
+        assert_eq!(registry.dropped().counts, [(DroppedService::Storage, 1)]);
+        runtime.shutdown().await.expect("shutdown");
+        std::fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    #[tokio::test]
     async fn firebase_v0_streams_unicode_tokens_metadata_and_events() {
         let (runtime, mut dispatches, root) = runtime("v0", None).await;
         let bytes = "Firebase v0 says 火🔥\n";
@@ -2955,6 +3320,143 @@ mod tests {
         assert!(reopened.checkpoint_native_state().is_err());
         reopened.shutdown().await.expect("clean stop");
         std::fs::remove_dir_all(root).expect("remove owned test state");
+    }
+
+    #[tokio::test]
+    async fn urls_follow_the_console_mount_that_forwarded_the_request() {
+        const MOUNT: &str = "/console/api/v1/storage/native";
+        let (runtime, _dispatches, _root) = runtime("forwarded", None).await;
+        let forwarded = |builder: axum::http::request::Builder| {
+            builder
+                .header("x-forwarded-host", "localhost:4000")
+                .header("x-forwarded-proto", "http")
+                .header("x-forwarded-prefix", MOUNT)
+        };
+        let start = runtime
+            .application()
+            .oneshot(
+                forwarded(Request::builder().method(Method::POST).uri(format!(
+                    "/upload/storage/v1/b/{ASSETS_BUCKET}/o?uploadType=resumable&name=notes.txt"
+                )))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .expect("start"),
+            )
+            .await
+            .expect("start response");
+        assert_eq!(start.status(), StatusCode::OK);
+        let location = start.headers()[header::LOCATION]
+            .to_str()
+            .expect("header")
+            .to_owned();
+        let through_mount = format!("http://localhost:4000{MOUNT}/upload/storage/v1/b/");
+        assert!(location.starts_with(&through_mount), "{location}");
+        // The upload continues through the mount: the path under it is the
+        // Storage application's own.
+        let path = location.trim_start_matches(&format!("http://localhost:4000{MOUNT}"));
+        let finish = runtime
+            .application()
+            .oneshot(
+                forwarded(Request::builder().method(Method::PUT).uri(path))
+                    .header(header::CONTENT_RANGE, "bytes 0-4/5")
+                    .body(Body::from("hello"))
+                    .expect("finish"),
+            )
+            .await
+            .expect("finish response");
+        assert_eq!(finish.status(), StatusCode::OK);
+        let object = json(finish).await;
+        let base = format!("http://localhost:4000{MOUNT}");
+        assert!(
+            object["selfLink"]
+                .as_str()
+                .is_some_and(|link| link.starts_with(&base)),
+            "{object}"
+        );
+        assert!(
+            object["mediaLink"]
+                .as_str()
+                .is_some_and(|link| link.starts_with(&base)),
+            "{object}"
+        );
+        // A direct client sees the configured origin, as before.
+        let direct = runtime
+            .application()
+            .oneshot(request(
+                Method::GET,
+                &format!("/storage/v1/b/{ASSETS_BUCKET}/o"),
+                Body::empty(),
+            ))
+            .await
+            .expect("list response");
+        let listed = json(direct).await;
+        assert!(
+            listed["items"][0]["selfLink"]
+                .as_str()
+                .is_some_and(|link| link.starts_with("http://127.0.0.1:21002/storage/v1/b/")),
+            "{listed}"
+        );
+        let buckets = runtime
+            .application()
+            .oneshot(
+                forwarded(Request::builder().method(Method::GET).uri("/b"))
+                    .body(Body::empty())
+                    .expect("buckets"),
+            )
+            .await
+            .expect("buckets response");
+        let buckets = json(buckets).await;
+        assert!(
+            buckets["items"][0]["selfLink"]
+                .as_str()
+                .is_some_and(|link| link.starts_with(&format!("{base}/v1/b/"))),
+            "{buckets}"
+        );
+    }
+
+    #[test]
+    fn a_forwarded_origin_is_used_only_when_it_is_a_plain_address() {
+        let headers = |pairs: &[(&'static str, &'static str)]| {
+            let mut map = HeaderMap::new();
+            for (name, value) in pairs {
+                map.insert(*name, HeaderValue::from_static(value));
+            }
+            map
+        };
+        let configured = "http://127.0.0.1:9199/";
+        assert_eq!(
+            request_origin(&headers(&[]), configured),
+            "http://127.0.0.1:9199"
+        );
+        assert_eq!(
+            request_origin(
+                &headers(&[
+                    ("x-forwarded-host", "console.example.test"),
+                    ("x-forwarded-proto", "https"),
+                    ("x-forwarded-prefix", "/console/api/v1/storage/native/"),
+                ]),
+                configured
+            ),
+            "https://console.example.test/console/api/v1/storage/native"
+        );
+        assert_eq!(
+            request_origin(
+                &headers(&[("x-forwarded-host", "evil.example/x?")]),
+                configured
+            ),
+            "http://127.0.0.1:9199"
+        );
+        assert_eq!(
+            request_origin(
+                &headers(&[
+                    ("x-forwarded-host", "localhost:4000"),
+                    ("x-forwarded-proto", "gopher"),
+                    ("x-forwarded-prefix", "no-slash"),
+                ]),
+                configured
+            ),
+            "http://localhost:4000"
+        );
     }
 
     #[tokio::test]

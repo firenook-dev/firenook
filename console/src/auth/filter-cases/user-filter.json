@@ -1,0 +1,514 @@
+{
+  "note": "What each valid case of users.json means to the engine's user index: the UserFilter (crates/auth-front/src/console/filter.rs) the console layer translates it into, as JSON, with relative times resolved against `now` (rounded to the minute in the engine). A day is the whole day: created:2026-10-01 is that day, > after it, <= until its end; an instant (RFC 3339, now, -7d) is a point. A claim value is a JSON scalar when it reads as one, text otherwise. Read only by the Rust test.",
+  "now": "2026-10-12T10:30:00Z",
+  "cases": [
+    {
+      "name": "empty",
+      "text": "",
+      "filter": {}
+    },
+    {
+      "name": "one-word",
+      "text": "ada",
+      "filter": {
+        "words": [
+          {
+            "value": "ada"
+          }
+        ]
+      }
+    },
+    {
+      "name": "negated-word",
+      "text": "-ada",
+      "filter": {
+        "words": [
+          {
+            "negated": true,
+            "value": "ada"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quoted-phrase",
+      "text": "\"ada lovelace\"",
+      "filter": {
+        "words": [
+          {
+            "value": "ada lovelace"
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-disabled",
+      "text": "is:disabled",
+      "filter": {
+        "is": {
+          "anyOf": ["disabled"]
+        }
+      }
+    },
+    {
+      "name": "not-disabled",
+      "text": "-is:disabled",
+      "filter": {
+        "is": {
+          "noneOf": ["disabled"]
+        }
+      }
+    },
+    {
+      "name": "is-any-of",
+      "text": "is:verified is:anonymous",
+      "filter": {
+        "is": {
+          "anyOf": ["verified", "anonymous"]
+        }
+      }
+    },
+    {
+      "name": "is-custom-token",
+      "text": "is:custom-token",
+      "filter": {
+        "is": {
+          "anyOf": ["custom-token"]
+        }
+      }
+    },
+    {
+      "name": "is-sample",
+      "text": "is:sample",
+      "filter": {
+        "is": {
+          "anyOf": ["sample"]
+        }
+      }
+    },
+    {
+      "name": "has-email",
+      "text": "has:email",
+      "filter": {
+        "has": {
+          "anyOf": ["email"]
+        }
+      }
+    },
+    {
+      "name": "has-phone",
+      "text": "has:phone",
+      "filter": {
+        "has": {
+          "anyOf": ["phone"]
+        }
+      }
+    },
+    {
+      "name": "has-password",
+      "text": "has:password",
+      "filter": {
+        "has": {
+          "anyOf": ["password"]
+        }
+      }
+    },
+    {
+      "name": "has-mfa",
+      "text": "has:mfa",
+      "filter": {
+        "has": {
+          "anyOf": ["mfa"]
+        }
+      }
+    },
+    {
+      "name": "has-claims",
+      "text": "has:claims",
+      "filter": {
+        "has": {
+          "anyOf": ["claims"]
+        }
+      }
+    },
+    {
+      "name": "has-photo",
+      "text": "has:photo",
+      "filter": {
+        "has": {
+          "anyOf": ["photo"]
+        }
+      }
+    },
+    {
+      "name": "has-name",
+      "text": "has:name",
+      "filter": {
+        "has": {
+          "anyOf": ["name"]
+        }
+      }
+    },
+    {
+      "name": "never-signed-in",
+      "text": "-has:sign-in",
+      "filter": {
+        "has": {
+          "noneOf": ["sign-in"]
+        }
+      }
+    },
+    {
+      "name": "provider",
+      "text": "provider:google.com",
+      "filter": {
+        "provider": {
+          "anyOf": [
+            {
+              "exact": "google.com"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "provider-alias",
+      "text": "p:password",
+      "filter": {
+        "provider": {
+          "anyOf": [
+            {
+              "exact": "password"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "provider-any-of",
+      "text": "provider:google.com provider:github.com",
+      "filter": {
+        "provider": {
+          "anyOf": [
+            {
+              "exact": "google.com"
+            },
+            {
+              "exact": "github.com"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "provider-excluded-twice",
+      "text": "-provider:anonymous -provider:password",
+      "filter": {
+        "provider": {
+          "noneOf": [
+            {
+              "exact": "anonymous"
+            },
+            {
+              "exact": "password"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "provider-prefix",
+      "text": "provider:saml.*",
+      "filter": {
+        "provider": {
+          "anyOf": [
+            {
+              "prefix": "saml."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "claim-key",
+      "text": "claim:role",
+      "filter": {
+        "claim": {
+          "anyOf": [
+            {
+              "key": "role"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "claim-bool",
+      "text": "claim:admin=true",
+      "filter": {
+        "claim": {
+          "anyOf": [
+            {
+              "key": "admin",
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "claim-text",
+      "text": "claim:plan=pro",
+      "filter": {
+        "claim": {
+          "anyOf": [
+            {
+              "key": "plan",
+              "value": "pro"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "claim-quoted-json-string",
+      "text": "claim:\"flag=\\\"true\\\"\"",
+      "filter": {
+        "claim": {
+          "anyOf": [
+            {
+              "key": "flag",
+              "value": "true"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "claim-number",
+      "text": "claim:level=3",
+      "filter": {
+        "claim": {
+          "anyOf": [
+            {
+              "key": "level",
+              "value": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "claim-excluded",
+      "text": "-claim:role",
+      "filter": {
+        "claim": {
+          "noneOf": [
+            {
+              "key": "role"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "claim-without-key",
+      "text": "claim:=x",
+      "error": {
+        "from": 0,
+        "to": 8,
+        "message": "\"claim:\" is a claim key, or key=value, like claim:role=admin."
+      }
+    },
+    {
+      "name": "created-relative",
+      "text": "created:>-7d",
+      "filter": {
+        "created": [
+          {
+            "from": 1791196200001
+          }
+        ]
+      }
+    },
+    {
+      "name": "created-day",
+      "text": "created:2026-10-01",
+      "filter": {
+        "created": [
+          {
+            "from": 1790812800000,
+            "until": 1790899200000
+          }
+        ]
+      }
+    },
+    {
+      "name": "created-range",
+      "text": "created:>=2026-10-01 created:<2026-11-01",
+      "filter": {
+        "created": [
+          {
+            "from": 1790812800000
+          },
+          {
+            "until": 1793491200000
+          }
+        ]
+      }
+    },
+    {
+      "name": "created-until-today",
+      "text": "created:<=today",
+      "filter": {
+        "created": [
+          {
+            "until": 1791849600000
+          }
+        ]
+      }
+    },
+    {
+      "name": "created-after-instant",
+      "text": "created:>2026-10-01T12:00:00Z",
+      "filter": {
+        "created": [
+          {
+            "from": 1790856000001
+          }
+        ]
+      }
+    },
+    {
+      "name": "signed-in-before",
+      "text": "signed-in:<2026-10-01",
+      "filter": {
+        "signedIn": [
+          {
+            "until": 1790812800000
+          }
+        ]
+      }
+    },
+    {
+      "name": "signed-in-alias",
+      "text": "last-sign-in:>-1h",
+      "filter": {
+        "signedIn": [
+          {
+            "from": 1791797400001
+          }
+        ]
+      }
+    },
+    {
+      "name": "uid-prefix",
+      "text": "uid:sample-*",
+      "filter": {
+        "uid": {
+          "anyOf": [
+            {
+              "prefix": "sample-"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "uid-alias",
+      "text": "id:u_ada",
+      "filter": {
+        "uid": {
+          "anyOf": [
+            {
+              "exact": "u_ada"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "email",
+      "text": "email:example.test",
+      "filter": {
+        "email": [
+          {
+            "value": "example.test"
+          }
+        ]
+      }
+    },
+    {
+      "name": "email-case",
+      "text": "email:Ada@Example.Test",
+      "filter": {
+        "email": [
+          {
+            "value": "Ada@Example.Test"
+          }
+        ]
+      }
+    },
+    {
+      "name": "phone-quoted",
+      "text": "phone:\"+1 (555) 0100\"",
+      "filter": {
+        "phone": [
+          {
+            "value": "+1 (555) 0100"
+          }
+        ]
+      }
+    },
+    {
+      "name": "name-quoted",
+      "text": "name:\"Ada Lovelace\"",
+      "filter": {
+        "name": [
+          {
+            "value": "Ada Lovelace"
+          }
+        ]
+      }
+    },
+    {
+      "name": "spec-example",
+      "text": "is:disabled provider:google.com claim:role=admin created:>-7d -provider:anonymous ada",
+      "filter": {
+        "claim": {
+          "anyOf": [
+            {
+              "key": "role",
+              "value": "admin"
+            }
+          ]
+        },
+        "created": [
+          {
+            "from": 1791196200001
+          }
+        ],
+        "is": {
+          "anyOf": ["disabled"]
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "exact": "google.com"
+            }
+          ],
+          "noneOf": [
+            {
+              "exact": "anonymous"
+            }
+          ]
+        },
+        "words": [
+          {
+            "value": "ada"
+          }
+        ]
+      }
+    }
+  ]
+}

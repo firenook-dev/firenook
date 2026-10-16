@@ -72,9 +72,14 @@ pub(super) async fn documents(
             .next_page_token
             .clone_from(&result.documents.last().unwrap().name);
     }
-    Ok(Json(
-        serde_json::to_value(result).map_err(|e| RestError::internal(e.to_string()))?,
-    ))
+    // This response is serialized from the protobuf message, which writes a
+    // UTC timestamp as `+00:00`; every hand-encoded response here writes
+    // `Z`, and so does Google. A client must not see the same instant
+    // spelled two ways depending on which endpoint answered.
+    let mut listed =
+        serde_json::to_value(result).map_err(|e| RestError::internal(e.to_string()))?;
+    firenook_grpc_front::utc_as_z(&mut listed);
+    Ok(Json(listed))
 }
 
 pub(super) async fn root_ids(
@@ -144,9 +149,9 @@ async fn ids(
             .next_page_token
             .clone_from(result.collection_ids.last().unwrap());
     }
-    Ok(Json(
-        serde_json::to_value(result).map_err(|e| RestError::internal(e.to_string()))?,
-    ))
+    let mut ids = serde_json::to_value(result).map_err(|e| RestError::internal(e.to_string()))?;
+    firenook_grpc_front::utc_as_z(&mut ids);
+    Ok(Json(ids))
 }
 
 fn page_size(requested: i32) -> usize {

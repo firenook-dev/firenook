@@ -377,3 +377,67 @@ async fn shutdown_interrupts_a_blocked_send_without_waiting_for_the_deadline() {
     assert!(!task.await.unwrap());
     assert!(started.elapsed() < SEND_DEADLINE);
 }
+
+#[derive(Default)]
+struct ConsoleLines(std::sync::Mutex<Vec<crate::LogInput>>);
+
+impl crate::ConsoleSink for ConsoleLines {
+    fn accept(&self, input: crate::LogInput) {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(input);
+    }
+}
+
+impl ConsoleLines {
+    fn take(&self) -> Vec<crate::LogInput> {
+        std::mem::take(
+            &mut *self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn omission_reports_reach_the_console_log_at_most_once_a_minute() {
+    let logging = crate::LoggingRuntime::new();
+    let console = std::sync::Arc::new(ConsoleLines::default());
+    logging.set_console_sink(console.clone());
+    let history = RequestHistory::default();
+    assert_eq!(history.record(&json!([])), RecordOutcome::Invalid);
+    let (shutdown, receiver) = watch::channel(false);
+    let _application = requests_router_with_log(Some(history.clone()), receiver, &logging);
+    tokio::time::sleep(Duration::from_millis(1_500)).await;
+    let first = console.take();
+    assert_eq!(first.len(), 1, "one report for the first loss");
+    assert_eq!(first[0].kind, Some(crate::kinds::DIAGNOSTICS_OMITTED));
+    assert_eq!(first[0].level, crate::LogLevel::Warn);
+    assert_eq!(first[0].service, "firestore");
+    assert_eq!(first[0].audience, crate::Audience::Console);
+    assert!(
+        first[0]
+            .message
+            .starts_with("Requests diagnostics: 1 omitted events (0 busy, 0 oversized, 1 invalid; 1 since the last report)"),
+        "{}",
+        first[0].message
+    );
+    let payload = first[0].payload.as_ref().expect("counts");
+    assert_eq!(payload["omittedEvents"], 1);
+    assert_eq!(payload["invalid"], 1);
+    assert_eq!(payload["sinceLastReport"], 1);
+    assert!(logging.is_empty(), "the official feed never carried these");
+    // Another loss inside the minute waits for the minute to pass.
+    assert_eq!(history.record(&json!([])), RecordOutcome::Invalid);
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    assert_eq!(console.take().len(), 0);
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    let second = console.take();
+    assert_eq!(second.len(), 1);
+    let payload = second[0].payload.as_ref().expect("counts");
+    assert_eq!(payload["omittedEvents"], 2);
+    assert_eq!(payload["sinceLastReport"], 1);
+    shutdown.send(true).unwrap();
+}

@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use crate::{AtomicContext, request_event};
 use firenook_rules_engine::{
-    CoverageNode, CoverageObserver, ExpressionKey, ExpressionValue, Ruleset, SourcePosition,
+    CoverageNode, CoverageObserver, DocumentAccess, EvaluationRequest, EvaluationResult,
+    EvaluationTrace, ExpressionKey, ExpressionValue, Ruleset, SourcePosition,
 };
 use request_event::coverage_value::{Observed, Position};
 use serde::Serialize;
@@ -171,6 +172,16 @@ impl CoverageStore {
         scope: &str,
         rules: &Arc<Ruleset>,
     ) -> Result<Vec<u8>, CoverageError> {
+        self.report_named(scope, rules, "firestore.rules")
+    }
+
+    /// The official report for `scope`, naming its source `file_name`.
+    pub(crate) fn report_named(
+        &self,
+        scope: &str,
+        rules: &Arc<Ruleset>,
+        file_name: &str,
+    ) -> Result<Vec<u8>, CoverageError> {
         let mut state = self.state.try_lock().map_err(|_| CoverageError::Busy)?;
         let index = state.ensure(scope, rules)?;
         let entry = &state.entries[index];
@@ -180,7 +191,7 @@ impl CoverageStore {
             &CoverageDocument {
                 rules: Rules {
                     files: [File {
-                        name: "firestore.rules",
+                        name: file_name,
                         content: entry.rules.source(),
                     }],
                 },
@@ -202,6 +213,63 @@ impl CoverageStore {
         )
         .map_err(|_| CoverageError::Serialization)?;
         Ok(writer.bytes)
+    }
+}
+
+/// Bounded, nonblocking per-expression coverage for another service's rules
+/// (Storage keeps one): the same store, budgets and report as the Firestore
+/// runtime's, observed through plain sessions — no transaction, no writes.
+#[derive(Clone, Default)]
+pub struct CoverageRecorder {
+    store: Arc<CoverageStore>,
+}
+
+impl CoverageRecorder {
+    /// An empty recorder with the runtime's bounds: 16 MiB, four scopes.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Evaluates once, observed when the store is free; when another
+    /// evaluation holds it, the operation is evaluated with a trace only and
+    /// counted as omitted, so a request never waits for coverage.
+    pub fn evaluate<A: DocumentAccess + ?Sized>(
+        &self,
+        scope: &str,
+        rules: &Arc<Ruleset>,
+        request: &EvaluationRequest,
+        access: &A,
+    ) -> (EvaluationResult, EvaluationTrace) {
+        let session = self.store.session(
+            scope,
+            rules,
+            AtomicContext {
+                in_read_write_transaction: false,
+                writes: None,
+            },
+        );
+        match session {
+            Some(mut observer) => rules.evaluate_with_coverage(request, access, &mut observer),
+            None => rules.evaluate_with_trace(request, access),
+        }
+    }
+
+    /// The official coverage report for `scope` (what [`Self::evaluate`]
+    /// observed since `rules` were installed there), naming its source
+    /// `file_name`.
+    ///
+    /// # Errors
+    /// [`CoverageError::Busy`] while an evaluation holds the store,
+    /// [`CoverageError::Capacity`] or [`CoverageError::Serialization`] when
+    /// the report cannot be kept or written within its bounds.
+    pub fn report(
+        &self,
+        scope: &str,
+        rules: &Arc<Ruleset>,
+        file_name: &str,
+    ) -> Result<Vec<u8>, CoverageError> {
+        self.store.report_named(scope, rules, file_name)
     }
 }
 

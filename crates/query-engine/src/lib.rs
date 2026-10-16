@@ -17,14 +17,14 @@ mod indexes;
 mod query;
 
 pub use indexes::{
-    IndexCatalog, IndexConfigError, IndexDirection, IndexMode, IndexRequirement,
+    IndexAdvice, IndexCatalog, IndexConfigError, IndexDirection, IndexMode, IndexRequirement,
     IndexRequirementField, IndexScope,
 };
 pub use query::{
     Aggregation, Cursor, Direction, DistanceMeasure, FieldFilter, FieldOperator, FieldPath, Filter,
-    IncrementalQuery, Limit, Nearest, Order, OrderKey, PartitionCursor, Query, QueryDocument,
-    QueryDocumentIterator, QueryError, QueryScope, aggregate, count, execute, execute_iter,
-    partition,
+    IncrementalQuery, Limit, Nearest, Order, OrderKey, PartitionCursor, Query, QueryCandidates,
+    QueryDocument, QueryDocumentIterator, QueryError, QueryPlan, QueryScope, QueryStrategy,
+    aggregate, count, execute, execute_iter, partition, plan,
 };
 
 const STANDARD_INDEXED_VALUE_BYTES: usize = 1_500;

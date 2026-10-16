@@ -16,7 +16,10 @@ use crate::model::{
     AtomicEvaluationResult, Auth, DocumentAccess, EvaluationRequest, EvaluationResult, LatLng,
     Query, RequestOperation, Resource, RulesDuration, RulesService, RuntimeError, Timestamp, Value,
 };
-use crate::{AllowDecision, CoverageObserver, EvaluationTrace, ExpressionKey, ExpressionValue};
+use crate::{
+    AllowDecision, ConstraintOperator, CoverageObserver, EvaluationTrace, ExpressionKey,
+    ExpressionValue, FieldConstraint, QueryComparison, QueryProof,
+};
 
 #[path = "query_constraints.rs"]
 mod query_constraints;
@@ -293,6 +296,41 @@ struct Evaluator<'a, 'observer, A: DocumentAccess + ?Sized> {
     query_branch: Option<Vec<crate::FieldConstraint>>,
     trace: Option<&'a mut EvaluationTrace>,
     observer: Option<&'a mut (dyn CoverageObserver + 'observer)>,
+    provenance: QueryProvenance,
+}
+
+/// Which document field a list-query proof value was read from, kept only
+/// when the observer explains queries. It never influences a value.
+#[derive(Default)]
+struct QueryProvenance {
+    /// The observer asked for list-query proof details.
+    explains: bool,
+    /// The field the innermost `field()` access just read, handed to the
+    /// observation of the expression that performed the access.
+    pending: Option<QueryField>,
+    /// The field the most recently completed expression read, so a
+    /// comparison knows which operand stood for a document field even when
+    /// the query's equality filter already made it a concrete value.
+    last: Option<QueryField>,
+}
+
+impl QueryProvenance {
+    fn note(&mut self, field: &[String], predicates: &[FieldConstraint]) {
+        if self.explains {
+            self.pending = Some(QueryField {
+                field: field.to_vec(),
+                predicates: predicates.to_vec(),
+            });
+        }
+    }
+}
+
+/// A document field read during a list-query proof, with the predicates of
+/// the branch under proof. Diagnostic provenance only.
+#[derive(Clone, Debug)]
+struct QueryField {
+    field: Vec<String>,
+    predicates: Vec<FieldConstraint>,
 }
 
 impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
@@ -303,6 +341,12 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         trace: Option<&'a mut EvaluationTrace>,
         observer: Option<&'a mut (dyn CoverageObserver + 'observer)>,
     ) -> Self {
+        let provenance = QueryProvenance {
+            explains: observer
+                .as_deref()
+                .is_some_and(CoverageObserver::explains_queries),
+            ..QueryProvenance::default()
+        };
         Self {
             request,
             access,
@@ -316,6 +360,7 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             query_branch: None,
             trace,
             observer,
+            provenance,
         }
     }
 
@@ -430,6 +475,8 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 end: expression.span.end,
             });
         }
+        // Always `None` unless the observer explains queries.
+        let query_field = self.provenance.pending.take();
         if !matches!(
             expression.kind,
             ExprKind::Null
@@ -444,12 +491,21 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                     end: expression.span.end,
                 },
                 &result,
+                query_field.as_ref(),
             );
+        }
+        if self.provenance.explains {
+            self.provenance.last = query_field;
         }
         result
     }
 
-    fn observe(&mut self, key: ExpressionKey, result: &Result<EvalValue, RuntimeError>) {
+    fn observe(
+        &mut self,
+        key: ExpressionKey,
+        result: &Result<EvalValue, RuntimeError>,
+        query_field: Option<&QueryField>,
+    ) {
         let Some(observer) = self.observer.as_deref_mut() else {
             return;
         };
@@ -470,6 +526,26 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 _ => ExpressionValue::Symbolic,
             },
         };
+        if self.provenance.explains && self.query_branch.is_some() {
+            let proof = match (result, query_field) {
+                (_, Some(read)) => Some(QueryProof::Field {
+                    field: &read.field,
+                    constraints: &read.predicates,
+                }),
+                (Ok(EvalValue::Constraint(constraint)), None) => Some(QueryProof::Field {
+                    field: &constraint.field,
+                    constraints: &constraint.predicates,
+                }),
+                (Ok(EvalValue::QueryResource), None) => Some(QueryProof::Resource),
+                (Ok(EvalValue::QueryData), None) => Some(QueryProof::Data),
+                (Ok(EvalValue::Unknown), None) => Some(QueryProof::Unknown),
+                _ => None,
+            };
+            if let Some(proof) = proof {
+                observer.observe_query(key, value, proof);
+                return;
+            }
+        }
         observer.observe(key, value);
     }
 
@@ -546,7 +622,17 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 operator,
                 left,
                 right,
-            } => self.eval_binary(*operator, left, right, environment, functions),
+            } => self.eval_binary(
+                *operator,
+                left,
+                right,
+                ExpressionKey {
+                    start: expression.span.start,
+                    end: expression.span.end,
+                },
+                environment,
+                functions,
+            ),
             ExprKind::Is { value, expected } => {
                 let value = self.eval_expr(value, environment, functions)?;
                 if value.is_symbolic() {
@@ -603,18 +689,22 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         Ok(EvalValue::Data(Value::Path(path)))
     }
 
-    fn field(&self, base: EvalValue, name: &str) -> Result<EvalValue, RuntimeError> {
+    fn field(&mut self, base: EvalValue, name: &str) -> Result<EvalValue, RuntimeError> {
         match base {
             EvalValue::QueryResource => Ok(match name {
                 "data" => EvalValue::QueryData,
                 _ => EvalValue::Unknown,
             }),
-            EvalValue::QueryData => Ok(query_constraints::field_value(
-                vec![name.to_owned()],
-                self.query_branch.as_deref().unwrap_or_default(),
-            )),
+            EvalValue::QueryData => {
+                let predicates = self.query_branch.as_deref().unwrap_or_default();
+                let field = vec![name.to_owned()];
+                self.provenance.note(&field, predicates);
+                Ok(query_constraints::field_value(field, predicates))
+            }
             EvalValue::Constraint(mut constraint) => {
                 constraint.field.push(name.to_owned());
+                self.provenance
+                    .note(&constraint.field, &constraint.predicates);
                 Ok(query_constraints::field_value(
                     constraint.field,
                     &constraint.predicates,
@@ -787,6 +877,7 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                     end: function.result.span.end,
                 },
                 &result,
+                None,
             );
         }
         result
@@ -936,6 +1027,7 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         operator: BinaryOperator,
         left: &'program Expr,
         right: &'program Expr,
+        key: ExpressionKey,
         environment: &mut BTreeMap<String, EvalValue>,
         functions: &BTreeMap<String, &'program Function>,
     ) -> Result<EvalValue, RuntimeError> {
@@ -988,9 +1080,81 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             };
         }
         let left = self.eval_expr(left, environment, functions)?;
+        let left_field = self.provenance.last.take();
         let right = self.eval_expr(right, environment, functions)?;
+        let right_field = self.provenance.last.take();
+        if self.provenance.explains
+            && self.query_branch.is_some()
+            && let Some((field, operator_needed, value)) =
+                query_comparison(operator, &left, left_field, &right, right_field)
+        {
+            let result = eval_binary_values(operator, left, right);
+            let proven = match &result {
+                Ok(EvalValue::Data(Value::Bool(false))) => Some(Some(false)),
+                Ok(EvalValue::Unknown) => Some(None),
+                _ => None,
+            };
+            if let (Some(proven), Some(observer)) = (proven, self.observer.as_deref_mut()) {
+                observer.observe_query_comparison(QueryComparison {
+                    key,
+                    field: &field.field,
+                    operator: operator_needed,
+                    value: &value,
+                    constraints: &field.predicates,
+                    proven,
+                });
+            }
+            return result;
+        }
         eval_binary_values(operator, left, right)
     }
+}
+
+/// The filter a query would need for a comparison between one document field
+/// and a concrete value, oriented with the field on the left. `None` for any
+/// other comparison: two fields, two concrete values, or a non-comparison.
+fn query_comparison(
+    operator: BinaryOperator,
+    left: &EvalValue,
+    left_field: Option<QueryField>,
+    right: &EvalValue,
+    right_field: Option<QueryField>,
+) -> Option<(QueryField, ConstraintOperator, Value)> {
+    let read = |value: &EvalValue, field: Option<QueryField>| {
+        field.or_else(|| match value {
+            EvalValue::Constraint(constraint) => Some(QueryField {
+                field: constraint.field.clone(),
+                predicates: constraint.predicates.clone(),
+            }),
+            _ => None,
+        })
+    };
+    let (field, value, reversed) = match (read(left, left_field), read(right, right_field)) {
+        (Some(field), None) => (field, right, false),
+        (None, Some(field)) => (field, left, true),
+        _ => return None,
+    };
+    let EvalValue::Data(value) = value else {
+        return None;
+    };
+    let needed = match (operator, reversed) {
+        (BinaryOperator::Equal, _) => ConstraintOperator::Equal,
+        (BinaryOperator::NotEqual, _) => ConstraintOperator::NotEqual,
+        (BinaryOperator::Less, false) | (BinaryOperator::Greater, true) => ConstraintOperator::Less,
+        (BinaryOperator::LessEqual, false) | (BinaryOperator::GreaterEqual, true) => {
+            ConstraintOperator::LessEqual
+        }
+        (BinaryOperator::Greater, false) | (BinaryOperator::Less, true) => {
+            ConstraintOperator::Greater
+        }
+        (BinaryOperator::GreaterEqual, false) | (BinaryOperator::LessEqual, true) => {
+            ConstraintOperator::GreaterEqual
+        }
+        (BinaryOperator::In, false) => ConstraintOperator::In,
+        (BinaryOperator::In, true) => ConstraintOperator::ArrayContains,
+        _ => return None,
+    };
+    Some((field, needed, value.clone()))
 }
 
 fn query_boolean(value: EvalValue) -> Result<EvalValue, RuntimeError> {
@@ -1039,7 +1203,10 @@ fn storage_document_value(resource: Resource) -> Value {
     Value::Map(map)
 }
 
-fn match_pattern(pattern: &[PatternSegment], path: &str) -> Option<BTreeMap<String, Value>> {
+pub(crate) fn match_pattern(
+    pattern: &[PatternSegment],
+    path: &str,
+) -> Option<BTreeMap<String, Value>> {
     let path = path.trim_matches('/');
     let segments = if path.is_empty() {
         Vec::new()

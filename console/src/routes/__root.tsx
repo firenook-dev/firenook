@@ -4,6 +4,8 @@ import { Outlet, createRootRouteWithContext } from '@tanstack/react-router'
 import { CompassIcon } from '@phosphor-icons/react'
 import { lazy } from 'react'
 import { AppShell } from '@/components/shell/app-shell'
+import { Page } from '@/components/shell/page'
+import { RouteError } from '@/components/shell/route-error'
 
 export interface RouterContext {
   queryClient: QueryClient
@@ -16,6 +18,7 @@ const Devtools = import.meta.env.DEV
 export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
   notFoundComponent: NotFound,
+  errorComponent: RouteError,
 })
 
 function RootLayout() {
@@ -29,11 +32,13 @@ function RootLayout() {
 
 function NotFound() {
   return (
-    <Empty
-      icon={<CompassIcon size={48} className="text-kumo-inactive" />}
-      title="Nothing at this address"
-      description="The console has no page here."
-      contents={<Link href="/console">Back to the overview</Link>}
-    />
+    <Page>
+      <Empty
+        icon={<CompassIcon size={48} className="text-kumo-inactive" />}
+        title="Nothing at this address"
+        description="The console has no page here."
+        contents={<Link href="/console">Back to the overview</Link>}
+      />
+    </Page>
   )
 }

@@ -25,8 +25,8 @@ async fn suite_listener_assembly_shares_real_evaluations_and_closes_idle_debug_c
             addresses.insert(name, listener.local_addr().unwrap());
             listeners.insert(name, listener);
         }
-        let applications = applications(enabled);
         let (shutdown, _) = watch::channel(false);
+        let applications = applications(enabled, &shutdown);
         let (failed, mut failures) = mpsc::unbounded_channel();
         let config = test_config();
         let logging = LoggingRuntime::new();
@@ -35,6 +35,7 @@ async fn suite_listener_assembly_shares_real_evaluations_and_closes_idle_debug_c
             &mut ListenerSet(listeners),
             applications,
             &logging,
+            &firenook_console_front::ForeignProjects::default(),
             &shutdown,
             &failed,
         )
@@ -112,7 +113,7 @@ async fn suite_listener_assembly_shares_real_evaluations_and_closes_idle_debug_c
     }
 }
 
-fn applications(enabled: bool) -> StaticApplications {
+fn applications(enabled: bool, shutdown: &watch::Sender<bool>) -> StaticApplications {
     let runtime = if enabled {
         RulesRuntime::with_request_history(RequestHistory::default())
     } else {
@@ -129,7 +130,7 @@ fn applications(enabled: bool) -> StaticApplications {
     );
     StaticApplications {
         firestore: Some(tonic::service::Routes::from(rest)),
-        request_history: history,
+        requests: Some(requests_router(history, shutdown.subscribe())),
         // Unrelated services are inert shells in this listener-assembly test.
         auth: Some(Router::new()),
         storage: Some(Router::new()),
@@ -139,10 +140,11 @@ fn applications(enabled: bool) -> StaticApplications {
     }
 }
 
-fn test_config() -> SuiteConfig {
+pub(super) fn test_config() -> SuiteConfig {
     let root = std::env::temp_dir();
     SuiteConfig {
         host: "127.0.0.1".into(),
+        allowed_hosts: Vec::new(),
         project_id: "demo-diagnostics".into(),
         services: ServiceSelection::ALL,
         ui_enabled: true,
@@ -178,5 +180,6 @@ fn test_config() -> SuiteConfig {
             tasks: 11,
         },
         minimum_functions: 0,
+        launch: None,
     }
 }

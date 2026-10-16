@@ -1,0 +1,5 @@
+/* The console's stylesheet, and every class the console's sources use: the
+   harness is built from its own folder, which Tailwind would scan alone. */
+@import '../../src/styles.css';
+@source '../../src';
+@source './';

@@ -303,7 +303,10 @@ async fn replays_every_recorded_emulator_program() {
         content: "rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /{allPaths=**} {\n      allow read, write: if true;\n    }\n  }\n}\n".to_owned(),
     }
     };
-    let runtime = StorageRuntime::start(
+    // Diagnostics on: recording every decision must change no response, and
+    // every recorded decision must re-run, and replay as a dry run, to the
+    // verdict it recorded.
+    let runtime = StorageRuntime::start_with(
         StorageConfig {
             project: project.to_owned(),
             durability: StorageDurability::default(),
@@ -314,11 +317,18 @@ async fn replays_every_recorded_emulator_program() {
                 documents: documents.clone(),
             }),
         },
+        StorageOptions {
+            diagnostics: true,
+            ..StorageOptions::default()
+        },
         observer.queue(),
         registry,
     )
     .await
     .expect("Storage runtime");
+    let rules = runtime.console().rules().expect("rules");
+    let mut decisions = rules.decisions().expect("diagnostics").subscribe();
+    let mut checked = 0_usize;
 
     let mut replayed = 0_usize;
     let mut diverged = 0_usize;
@@ -437,6 +447,24 @@ async fn replays_every_recorded_emulator_program() {
                     );
                 }
             }
+            while let Ok(record) = decisions.try_recv() {
+                let detail = rules
+                    .detail(&record.id)
+                    .unwrap_or_else(|| panic!("{program_id}/{step_id}: {} is kept", record.id));
+                assert_eq!(
+                    detail.result.outcome, record.outcome,
+                    "{program_id}/{step_id}: the re-run of {record:?}"
+                );
+                let dry = rules
+                    .evaluate(std::slice::from_ref(&detail.request), None)
+                    .expect("no draft");
+                assert_eq!(
+                    dry[0].outcome, record.outcome,
+                    "{program_id}/{step_id}: the dry run of {:?}",
+                    detail.request
+                );
+                checked += 1;
+            }
             previous.insert(step_id.to_owned(), actual);
             replayed += 1;
         }
@@ -449,6 +477,10 @@ async fn replays_every_recorded_emulator_program() {
         diverged,
         DIVERGENCES.len(),
         "every listed divergence must be exercised"
+    );
+    assert!(
+        checked > 100,
+        "{checked} recorded decisions re-ran and replayed"
     );
 
     // The crash the official runtime suffers on an empty path segment: Firenook

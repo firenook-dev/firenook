@@ -27,6 +27,7 @@ firenook-rules-runtime = { path = "../rules-runtime" }
 firenook-storage-front = { path = "../storage-front" }
 firenook-suite-front = { path = "../suite-front" }
 firenook-webchannel-front = { path = "../webchannel-front" }
+notify = "8"
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -37,6 +38,9 @@ tokio = { workspace = true, features = ["fs", "io-util", "process", "signal"] }
 tokio-stream = { workspace = true, features = ["net", "sync"] }
 tonic.workspace = true
 zip.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
 
 [dev-dependencies]
 tower = { version = "0.5.3", features = ["util"] }

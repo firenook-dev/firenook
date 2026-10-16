@@ -6,9 +6,9 @@ use serde_json::{Map as JsonMap, Value as JsonValue, json};
 use super::{
     Ctx, insert_opt, is_mfa_enabled, mfa_pending, validate_custom_claims, verify_phone_number,
 };
-use crate::Runtime;
 use crate::blocking::{BlockingContext, OauthTokens};
 use crate::error::{ApiError, ensure, require};
+use crate::observe::{Delivery, MessageMeta, SmsPurpose, sms_message_text};
 use crate::state::{
     BlockingEvent, PROVIDER_CUSTOM, PROVIDER_PASSWORD, PROVIDER_PHONE, ProviderInfo,
     SIGNIN_METHOD_EMAIL_LINK, UpdateOptions, UserRecord,
@@ -20,6 +20,7 @@ use crate::util::{
     OrderedJson, canonicalize_email, coerce_primitive_to_string, decode_jwt, is_valid_email,
     is_valid_phone, now_millis, now_seconds, str_field, stringify_ordered, truthy, truthy_str,
 };
+use crate::{AuthMessageRef, Runtime};
 use base64::Engine as _;
 
 fn local_id_of(user: &UserRecord) -> String {
@@ -393,10 +394,21 @@ pub fn send_verification_code(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiE
             user.is_none_or(|user| user.get("mfaInfo").and_then(JsonValue::as_array).is_none_or(Vec::is_empty)),
             "UNSUPPORTED_FIRST_FACTOR : A phone number cannot be set as a first factor on an SMS based MFA user."
         );
-        let verification = scope.project().create_verification_code(phone);
-        rt.log(
+        let id = rt.next_message_id();
+        let verification = scope.project().create_verification_code(
+            phone,
+            SmsPurpose::SignIn,
+            MessageMeta { id, delivery: Delivery::Sent, continue_url: None, uid: None },
+        );
+        rt.log_message(
             "BULLET",
-            &format!("To verify the phone number {}, use the code {}.", verification.phone_number, verification.code),
+            &sms_message_text(SmsPurpose::SignIn, &verification.phone_number, &verification.code),
+            &AuthMessageRef {
+                id,
+                project: scope.project_id.clone(),
+                tenant: scope.tenant_id.clone(),
+                uid: user_id(scope.project_ref().get_user_by_phone_number(phone).as_ref()),
+            },
         );
         Ok(json!({ "sessionInfo": verification.session_info }))
     })
@@ -1323,4 +1335,9 @@ pub async fn sign_in_with_idp(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiE
         tokens.apply(&mut response);
         Ok(JsonValue::Object(response))
     })
+}
+
+/// The uid of an account, when there is one.
+fn user_id(user: Option<&UserRecord>) -> Option<String> {
+    user.and_then(crate::observe::uid_of)
 }

@@ -1,10 +1,34 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { SectionPlaceholder } from '@/components/section-placeholder'
-import { SECTIONS } from '@/lib/services'
+import { z } from 'zod'
+import { SectionFrame } from '@/components/console/section-gate'
+import { FirestoreWorkbench } from '@/firestore/components/workbench'
 
-const section = SECTIONS.find((candidate) => candidate.to === '/firestore')
-if (!section) throw new Error('The firestore section is missing from the registry')
+// Every view of the workbench is a link: the path, the query, who it is
+// viewed as, the open document and its tab all live here.
+const searchSchema = z.object({
+  db: z.string().optional(),
+  path: z.string().optional(),
+  q: z.string().optional(),
+  group: z.boolean().optional(),
+  as: z.string().optional(),
+  doc: z.string().optional(),
+  tab: z.enum(['fields', 'json']).optional(),
+  // Another project the app used, shown instead of the emulator's own
+  // (the shell's foreign-project banner links here with it).
+  project: z.string().optional(),
+})
+
+export type FirestoreSearch = z.infer<typeof searchSchema>
 
 export const Route = createFileRoute('/firestore')({
-  component: () => <SectionPlaceholder section={section} />,
+  validateSearch: searchSchema,
+  component: FirestorePage,
 })
+
+function FirestorePage() {
+  return (
+    <SectionFrame section="firestore">
+      <FirestoreWorkbench />
+    </SectionFrame>
+  )
+}

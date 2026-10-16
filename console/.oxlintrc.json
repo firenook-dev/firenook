@@ -12,10 +12,19 @@
   },
   "rules": {
     "react/react-in-jsx-scope": "off",
-    "no-console": "warn"
+    "no-console": "warn",
+    "no-underscore-dangle": ["off"],
+    "no-restricted-globals": [
+      "error",
+      {
+        "name": "EventSource",
+        "message": "Subscribe to a topic with useLiveTopic (src/lib/live); the console holds one live connection per browser."
+      }
+    ]
   },
   "ignorePatterns": [
     "dist/",
+    ".design-system/",
     "node_modules/",
     "src/routeTree.gen.ts",
     "src/api/generated/",
@@ -24,7 +33,13 @@
   ],
   "overrides": [
     {
-      "files": ["scripts/**", "e2e/**"],
+      "files": ["src/lib/live/**"],
+      "rules": {
+        "no-restricted-globals": "off"
+      }
+    },
+    {
+      "files": ["scripts/**", "e2e/**", "design-system/kit/scripts/**"],
       "rules": {
         "no-console": "off",
         "no-await-in-loop": "off"

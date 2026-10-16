@@ -8,12 +8,15 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::{self, Display, Formatter};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use firenook_core_store::{Change, CommitObservation, CommitObserver, Document, DocumentKey};
+use firenook_core_store::{
+    Change, CommitObservation, CommitObserver, CommitOrigin, Document, DocumentKey,
+};
 use firenook_grpc_front::google::firestore::v1 as firestore_proto;
 use prost::Message as _;
 use serde_json::{Value as JsonValue, json};
@@ -39,10 +42,200 @@ pub const DELIVERY_HANDLED: &str = "handled";
 const EMULATED_LOCATION: &str = "us-central1";
 const FIRESTORE_EVENT_DATA_SCHEMA: &str = "https://github.com/googleapis/google-cloudevents/blob/main/proto/google/events/cloud/firestore/v1/data.proto";
 
+/// The headers a background event's sender adds to its dispatch so the
+/// Functions runtime can say what caused an invocation without parsing the
+/// event body. Every `x-firenook-*` header is a control header: the runtime
+/// strips the whole family before the worker or user code sees the request.
+///
+/// Values are written with [`encode`](cause::encode): visible ASCII stays as
+/// it is and every other byte (`%`, spaces, line breaks, non-ASCII) is
+/// percent-encoded, so a document path or an object name of any shape is a
+/// valid header value; [`decode`](cause::decode) reads it back.
+pub mod cause {
+    /// Every cause header starts with this.
+    pub const PREFIX: &str = "x-firenook-cause-";
+    /// A Firestore document path, relative to its database's documents.
+    pub const DOCUMENT: &str = "x-firenook-cause-document";
+    /// A Firestore database id, such as `(default)`.
+    pub const DATABASE: &str = "x-firenook-cause-database";
+    /// A Firestore change: `created`, `updated` or `deleted`.
+    pub const CHANGE: &str = "x-firenook-cause-change";
+    /// A Pub/Sub topic's full resource name, `projects/<p>/topics/<t>`.
+    pub const TOPIC: &str = "x-firenook-cause-topic";
+    /// A Pub/Sub message id.
+    pub const MESSAGE: &str = "x-firenook-cause-message";
+    /// An Auth user's uid.
+    pub const UID: &str = "x-firenook-cause-uid";
+    /// An Auth user's email, when the user has one.
+    pub const EMAIL: &str = "x-firenook-cause-email";
+    /// An Auth user's tenant, for a tenant's user.
+    pub const TENANT: &str = "x-firenook-cause-tenant";
+    /// A Storage bucket.
+    pub const BUCKET: &str = "x-firenook-cause-bucket";
+    /// A Storage object name.
+    pub const OBJECT: &str = "x-firenook-cause-object";
+    /// The Auth emulator's id for a blocking call.
+    pub const AUTH_CALL: &str = "x-firenook-cause-auth-call";
+    /// The event's own id: the `CloudEvent` `id` or the legacy envelope's
+    /// `eventId`, which other records join an invocation by.
+    pub const EVENT_ID: &str = "x-firenook-event-id";
+
+    /// `value` as a header value: visible ASCII but `%` unchanged, every
+    /// other byte as `%XX`.
+    #[must_use]
+    pub fn encode(value: &str) -> String {
+        const HEX: &[u8; 16] = b"0123456789ABCDEF";
+        let mut encoded = String::with_capacity(value.len());
+        for &byte in value.as_bytes() {
+            if (0x21..=0x7e).contains(&byte) && byte != b'%' {
+                encoded.push(char::from(byte));
+            } else {
+                encoded.push('%');
+                encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+                encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+            }
+        }
+        encoded
+    }
+
+    /// A header value written by [`encode`], read back. A `%` not followed
+    /// by two hex digits is kept as it is; bytes that are not UTF-8 become
+    /// the replacement character.
+    #[must_use]
+    pub fn decode(value: &str) -> String {
+        fn hex(byte: u8) -> Option<u8> {
+            char::from(byte)
+                .to_digit(16)
+                .and_then(|digit| u8::try_from(digit).ok())
+        }
+        let bytes = value.as_bytes();
+        let mut decoded = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] == b'%'
+                && let (Some(high), Some(low)) = (
+                    bytes.get(index + 1).copied().and_then(hex),
+                    bytes.get(index + 2).copied().and_then(hex),
+                )
+            {
+                decoded.push(high << 4 | low);
+                index += 3;
+            } else {
+                decoded.push(bytes[index]);
+                index += 1;
+            }
+        }
+        String::from_utf8_lossy(&decoded).into_owned()
+    }
+}
+
 /// Shared trigger inventory populated by the Functions workload host.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct TriggerRegistry {
     inner: Arc<Mutex<RegistryState>>,
+    /// Background delivery as last set, for whoever watches it (the
+    /// console shows a pause the moment a test harness makes it).
+    background: Arc<tokio::sync::watch::Sender<bool>>,
+    /// Events that reached no function while delivery was paused.
+    dropped: Arc<DroppedCounters>,
+}
+
+impl Default for TriggerRegistry {
+    fn default() -> Self {
+        Self {
+            inner: Arc::default(),
+            background: Arc::new(tokio::sync::watch::Sender::new(true)),
+            dropped: Arc::default(),
+        }
+    }
+}
+
+/// A source of background events that can be dropped while delivery is
+/// paused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DroppedService {
+    /// A Firestore change some trigger would have matched.
+    Firestore,
+    /// An Auth lifecycle event.
+    Auth,
+    /// A Storage object event.
+    Storage,
+    /// A Pub/Sub message for a topic with function targets.
+    Pubsub,
+    /// A scheduled function's tick.
+    Schedule,
+}
+
+impl DroppedService {
+    /// Every service, in the order counts are reported.
+    pub const ALL: [Self; 5] = [
+        Self::Firestore,
+        Self::Auth,
+        Self::Storage,
+        Self::Pubsub,
+        Self::Schedule,
+    ];
+
+    /// `firestore`, `auth`, `storage`, `pubsub`, `schedule`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Firestore => "firestore",
+            Self::Auth => "auth",
+            Self::Storage => "storage",
+            Self::Pubsub => "pubsub",
+            Self::Schedule => "schedule",
+        }
+    }
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Firestore => 0,
+            Self::Auth => 1,
+            Self::Storage => 2,
+            Self::Pubsub => 3,
+            Self::Schedule => 4,
+        }
+    }
+}
+
+/// Events that reached no function since delivery was paused.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DroppedEvents {
+    /// When delivery was paused; `None` while it is enabled.
+    pub since: Option<OffsetDateTime>,
+    /// Each service that dropped something, with how many, in
+    /// [`DroppedService::ALL`] order.
+    pub counts: Vec<(DroppedService, u64)>,
+}
+
+/// Per-service counters, one atomic add per dropped event.
+struct DroppedCounters {
+    counts: [AtomicU64; 5],
+    since: Mutex<Option<OffsetDateTime>>,
+    /// Ticks on every count and every reset.
+    changes: tokio::sync::watch::Sender<u64>,
+}
+
+impl Default for DroppedCounters {
+    fn default() -> Self {
+        Self {
+            counts: Default::default(),
+            since: Mutex::new(None),
+            changes: tokio::sync::watch::Sender::new(0),
+        }
+    }
+}
+
+impl DroppedCounters {
+    fn reset(&self, since: Option<OffsetDateTime>) {
+        for count in &self.counts {
+            count.store(0, Ordering::Release);
+        }
+        *lock(&self.since) = since;
+        self.changes
+            .send_modify(|ticks| *ticks = ticks.wrapping_add(1));
+    }
 }
 
 struct RegistryState {
@@ -352,9 +545,76 @@ impl TriggerRegistry {
         Ok(())
     }
 
-    /// Enables or disables background event delivery without deleting inventory.
+    /// Enables or disables background event delivery without deleting
+    /// inventory. Pausing starts the dropped counts from zero with the
+    /// pause time; resuming clears them. Watchers of
+    /// [`TriggerRegistry::background_watch`] see the change.
     pub fn set_background_enabled(&self, enabled: bool) {
-        lock(&self.inner).background_enabled = enabled;
+        let changed = {
+            let mut state = lock(&self.inner);
+            let changed = state.background_enabled != enabled;
+            state.background_enabled = enabled;
+            changed
+        };
+        if changed {
+            self.dropped.reset((!enabled).then(OffsetDateTime::now_utc));
+        }
+        self.background.send_if_modified(|current| {
+            let changed = *current != enabled;
+            *current = enabled;
+            changed
+        });
+    }
+
+    /// Background delivery as it is now, then every change, from the hub's
+    /// switches and the console's alike.
+    #[must_use]
+    pub fn background_watch(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.background.subscribe()
+    }
+
+    /// Counts one event of `service` that reached no function because
+    /// background delivery is paused. One atomic add; never blocks on I/O.
+    /// Every source calls it where it returns early while paused.
+    pub fn note_dropped(&self, service: DroppedService) {
+        self.note_dropped_many(service, 1);
+    }
+
+    /// Counts `count` events of `service` at once (a Pub/Sub publish of
+    /// several messages); nothing for zero.
+    pub fn note_dropped_many(&self, service: DroppedService, count: u64) {
+        if count == 0 {
+            return;
+        }
+        self.dropped.counts[service.index()].fetch_add(count, Ordering::AcqRel);
+        self.dropped
+            .changes
+            .send_modify(|ticks| *ticks = ticks.wrapping_add(1));
+    }
+
+    /// The events dropped since delivery was paused.
+    #[must_use]
+    pub fn dropped(&self) -> DroppedEvents {
+        let since = *lock(&self.dropped.since);
+        DroppedEvents {
+            since,
+            counts: DroppedService::ALL
+                .into_iter()
+                .map(|service| {
+                    (
+                        service,
+                        self.dropped.counts[service.index()].load(Ordering::Acquire),
+                    )
+                })
+                .filter(|(_, count)| *count > 0)
+                .collect(),
+        }
+    }
+
+    /// Ticks whenever [`TriggerRegistry::dropped`] may have changed.
+    #[must_use]
+    pub fn dropped_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.dropped.changes.subscribe()
     }
 
     /// Whether background delivery is currently enabled by the Emulator Hub.
@@ -364,10 +624,21 @@ impl TriggerRegistry {
     }
 
     /// Returns registrations matching one effective document transition.
+    /// While background delivery is paused it returns none, and counts the
+    /// change as dropped when some trigger would have matched it.
     #[must_use]
     pub fn matching(&self, change: &Change) -> Vec<Trigger> {
         let state = lock(&self.inner);
         if !state.background_enabled {
+            let would_match = state
+                .v1
+                .values()
+                .chain(state.v2.values())
+                .any(|trigger| trigger.matches(change));
+            drop(state);
+            if would_match {
+                self.note_dropped(DroppedService::Firestore);
+            }
             return Vec::new();
         }
         state
@@ -393,11 +664,109 @@ impl TriggerRegistry {
 }
 
 impl Trigger {
+    /// The Functions emulator's trigger key, region included when given.
+    #[must_use]
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// The registered Firestore event type, such as
+    /// `google.cloud.firestore.document.v1.written`.
+    #[must_use]
+    pub fn event_type(&self) -> &str {
+        &self.event_type
+    }
+
     fn matches(&self, change: &Change) -> bool {
         change.key.database().project_id() == self.project
             && change.key.database().database_id() == self.database
             && event_matches(&self.event_type, change)
             && path_matches(&self.document_pattern, change.key.path())
+    }
+}
+
+/// The shape of a document change, without its documents.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ChangeShape {
+    /// The document did not exist before.
+    Created,
+    /// The document existed before and after.
+    Updated,
+    /// The document no longer exists.
+    Deleted,
+}
+
+impl ChangeShape {
+    /// The shape of an effective change; `None` when nothing existed before
+    /// or after.
+    #[must_use]
+    pub fn of(change: &Change) -> Option<Self> {
+        match (change.before.is_some(), change.after.is_some()) {
+            (false, true) => Some(Self::Created),
+            (true, true) => Some(Self::Updated),
+            (true, false) => Some(Self::Deleted),
+            (false, false) => None,
+        }
+    }
+
+    /// `created`, `updated` or `deleted`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Updated => "updated",
+            Self::Deleted => "deleted",
+        }
+    }
+}
+
+/// Whether a trigger fires for a change, and why not when it does not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MatchExplanation {
+    /// The trigger fires for the change.
+    pub fires: bool,
+    /// Why, the first condition that failed in the order the bridge checks
+    /// them: database, event, path.
+    pub reason: MatchReason,
+}
+
+/// Why a trigger fires for a change or not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MatchReason {
+    /// Every condition holds.
+    Fires,
+    /// The trigger listens on another database, the one named.
+    OtherDatabase(String),
+    /// The trigger listens for another event, the event type named, which
+    /// this shape of change does not raise.
+    OtherEvent(String),
+    /// The change's path is outside the trigger's document pattern, the one
+    /// named.
+    PathDoesNotMatch(String),
+}
+
+/// Whether `trigger` fires for a change of `shape` at `path` (relative to the
+/// database's documents) in `database`, and why not. The same conditions the
+/// bridge applies to a commit, without the documents.
+#[must_use]
+pub fn explain_match(
+    trigger: &Trigger,
+    database: &str,
+    path: &str,
+    shape: ChangeShape,
+) -> MatchExplanation {
+    let reason = if trigger.database != database {
+        MatchReason::OtherDatabase(trigger.database.clone())
+    } else if !shape_matches(&trigger.event_type, shape) {
+        MatchReason::OtherEvent(trigger.event_type.clone())
+    } else if !path_matches(&trigger.document_pattern, path) {
+        MatchReason::PathDoesNotMatch(trigger.document_pattern.clone())
+    } else {
+        MatchReason::Fires
+    };
+    MatchExplanation {
+        fires: reason == MatchReason::Fires,
+        reason,
     }
 }
 
@@ -455,6 +824,8 @@ fn build_v1_dispatch(
     }
     data.insert("updateMask".to_owned(), json!({}));
     let timestamp = format_timestamp(event_timestamp(change))?;
+    let mut headers = BTreeMap::from([("content-type".to_owned(), "application/json".to_owned())]);
+    insert_cause_headers(&mut headers, trigger, change, &event_id);
     let body = json!({
         "data": data,
         "context": {
@@ -471,10 +842,26 @@ fn build_v1_dispatch(
         .map_err(|error| invalid(format!("failed to encode v1 dispatch: {error}")))?;
     Ok(DispatchRequest {
         path,
-        headers: BTreeMap::from([("content-type".to_owned(), "application/json".to_owned())]),
+        headers,
         body,
         event_id,
     })
+}
+
+/// What caused a Firestore dispatch, for the Functions runtime's record:
+/// the document, its database, the change and the event id.
+fn insert_cause_headers(
+    headers: &mut BTreeMap<String, String>,
+    trigger: &Trigger,
+    change: &Change,
+    event_id: &str,
+) {
+    headers.insert(cause::DOCUMENT.to_owned(), cause::encode(change.key.path()));
+    headers.insert(cause::DATABASE.to_owned(), cause::encode(&trigger.database));
+    if let Some(shape) = ChangeShape::of(change) {
+        headers.insert(cause::CHANGE.to_owned(), shape.as_str().to_owned());
+    }
+    headers.insert(cause::EVENT_ID.to_owned(), cause::encode(event_id));
 }
 
 fn build_v2_dispatch(
@@ -528,6 +915,7 @@ fn build_v2_dispatch(
         headers.insert("ce-authtype".to_owned(), "unknown".to_owned());
         headers.insert("ce-authid".to_owned(), "fake-auth-id@gmail.com".to_owned());
     }
+    insert_cause_headers(&mut headers, trigger, change, &event_id);
     Ok(DispatchRequest {
         path,
         headers,
@@ -544,6 +932,47 @@ struct DocumentEventData {
     old_value: Option<firestore_proto::Document>,
     #[prost(message, optional, tag = "3")]
     update_mask: Option<firestore_proto::DocumentMask>,
+}
+
+/// A second-generation Firestore event body read back into REST documents:
+/// `{"value": document or null, "oldValue": document or null}`, each
+/// document exactly as a first-generation event carries it.
+///
+/// The body is what the bridge sends, Base64 text of a `DocumentEventData`
+/// message (the official emulator's wire quirk); a raw protobuf body is read
+/// too, as the Functions runtime accepts both.
+pub fn decode_document_event(body: &[u8]) -> Result<JsonValue, BridgeError> {
+    let bytes = BASE64.decode(body).unwrap_or_else(|_| body.to_vec());
+    let event = DocumentEventData::decode(bytes.as_slice()).map_err(|error| {
+        BridgeError(format!(
+            "the body is not a Firestore document event: {error}"
+        ))
+    })?;
+    Ok(json!({
+        "value": rest_document(event.value)?,
+        "oldValue": rest_document(event.old_value)?,
+    }))
+}
+
+/// One event document as REST JSON, after reading it the way a write is
+/// read (its name and every value checked).
+fn rest_document(document: Option<firestore_proto::Document>) -> Result<JsonValue, BridgeError> {
+    let Some(document) = document else {
+        return Ok(JsonValue::Null);
+    };
+    let (key, _) = firenook_grpc_front::decode_document(document.clone()).map_err(|status| {
+        BridgeError(format!(
+            "the event holds a document Firestore cannot read: {}",
+            status.message()
+        ))
+    })?;
+    let mut json = serde_json::to_value(firestore_proto::Document {
+        name: key.to_string(),
+        ..document
+    })
+    .map_err(|error| BridgeError(format!("failed to encode document JSON: {error}")))?;
+    utc_timestamps_as_z(&mut json);
+    Ok(json)
 }
 
 fn optional_proto_document(
@@ -721,14 +1150,24 @@ fn validate_event_type(
 }
 
 fn event_matches(event_type: &str, change: &Change) -> bool {
+    ChangeShape::of(change).is_some_and(|shape| shape_matches(event_type, shape))
+}
+
+/// Whether a change of `shape` raises `event_type`.
+fn shape_matches(event_type: &str, shape: ChangeShape) -> bool {
     let event_type = event_type
         .strip_suffix(AUTH_CONTEXT_SUFFIX)
         .unwrap_or(event_type);
-    match (change.before.is_some(), change.after.is_some()) {
-        (false, true) => matches!(event_type, V1_CREATE | V1_WRITE | V2_CREATED | V2_WRITTEN),
-        (true, true) => matches!(event_type, V1_UPDATE | V1_WRITE | V2_UPDATED | V2_WRITTEN),
-        (true, false) => matches!(event_type, V1_DELETE | V1_WRITE | V2_DELETED | V2_WRITTEN),
-        (false, false) => false,
+    match shape {
+        ChangeShape::Created => {
+            matches!(event_type, V1_CREATE | V1_WRITE | V2_CREATED | V2_WRITTEN)
+        }
+        ChangeShape::Updated => {
+            matches!(event_type, V1_UPDATE | V1_WRITE | V2_UPDATED | V2_WRITTEN)
+        }
+        ChangeShape::Deleted => {
+            matches!(event_type, V1_DELETE | V1_WRITE | V2_DELETED | V2_WRITTEN)
+        }
     }
 }
 
@@ -789,20 +1228,83 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 pub struct TriggerObserver {
     registry: TriggerRegistry,
     sender: tokio::sync::mpsc::UnboundedSender<DispatchRequest>,
+    depth: Arc<QueueDepth>,
+}
+
+/// How many dispatches wait for the delivery runtime to take them.
+#[derive(Default)]
+struct QueueDepth {
+    queued: AtomicUsize,
+    /// Woken whenever the depth falls.
+    fell: tokio::sync::Notify,
+}
+
+impl QueueDepth {
+    /// Sends `request`, counting it while it waits.
+    fn send(
+        &self,
+        sender: &tokio::sync::mpsc::UnboundedSender<DispatchRequest>,
+        request: DispatchRequest,
+    ) -> Result<(), BridgeError> {
+        // Counted before it can be taken, so the count never goes below
+        // what is queued.
+        self.queued.fetch_add(1, Ordering::AcqRel);
+        sender.send(request).map_err(|_| {
+            self.taken();
+            BridgeError("Functions delivery runtime is stopped".to_owned())
+        })
+    }
+
+    /// One dispatch was taken (admitted or deduplicated) or never queued.
+    fn taken(&self) {
+        let _ = self
+            .queued
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |queued| {
+                Some(queued.saturating_sub(1))
+            });
+        self.fell.notify_waiters();
+    }
 }
 
 /// Cloneable producer for non-Firestore background events.
 #[derive(Clone)]
 pub struct DispatchQueue {
     sender: tokio::sync::mpsc::UnboundedSender<DispatchRequest>,
+    depth: Arc<QueueDepth>,
 }
 
 impl DispatchQueue {
     /// Enqueues one event before the Firestore/Pub/Sub shared dedupe boundary.
     pub fn enqueue(&self, request: DispatchRequest) -> Result<(), BridgeError> {
-        self.sender
-            .send(request)
-            .map_err(|_| BridgeError("Functions delivery runtime is stopped".to_owned()))
+        self.depth.send(&self.sender, request)
+    }
+
+    /// Dispatches queued and not yet taken by the delivery runtime (every
+    /// producer of this queue's runtime counted, Firestore's observer
+    /// included). A receiver taken straight from [`TriggerObserver::channel`]
+    /// takes without counting down; the delivery runtime counts.
+    #[must_use]
+    pub fn depth(&self) -> usize {
+        self.depth.queued.load(Ordering::Acquire)
+    }
+
+    /// Resolves once fewer than `n` dispatches are queued, or when the
+    /// delivery runtime has stopped (nothing will take them any more). A
+    /// bulk producer awaits it between batches so it never floods the
+    /// queue.
+    pub async fn wait_below(&self, n: usize) {
+        loop {
+            let fell = self.depth.fell.notified();
+            tokio::pin!(fell);
+            fell.as_mut().enable();
+            if self.depth() < n {
+                return;
+            }
+            tokio::select! {
+                () = &mut fell => {}
+                () = self.sender.closed() => return,
+            }
+        }
     }
 }
 
@@ -816,7 +1318,14 @@ impl TriggerObserver {
         tokio::sync::mpsc::UnboundedReceiver<DispatchRequest>,
     ) {
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-        (Arc::new(Self { registry, sender }), receiver)
+        (
+            Arc::new(Self {
+                registry,
+                sender,
+                depth: Arc::default(),
+            }),
+            receiver,
+        )
     }
 
     /// Queue producer sharing this observer's dedupe and delivery worker.
@@ -824,16 +1333,24 @@ impl TriggerObserver {
     pub fn queue(&self) -> DispatchQueue {
         DispatchQueue {
             sender: self.sender.clone(),
+            depth: Arc::clone(&self.depth),
         }
     }
 }
 
 impl CommitObserver for TriggerObserver {
+    /// Queues every trigger a client commit's changes match. Housekeeping
+    /// commits (`Store::commit_maintenance`, such as the console's reset)
+    /// fire no trigger: they are neither delivered nor counted as dropped
+    /// while background triggers are paused.
     fn committed(&self, observation: &CommitObservation) {
+        if observation.origin == CommitOrigin::Maintenance {
+            return;
+        }
         for (change_index, change) in observation.changes.iter().enumerate() {
             for trigger in self.registry.matching(change) {
                 if let Ok(request) = build_dispatch(&trigger, observation, change_index) {
-                    let _ = self.sender.send(request);
+                    let _ = self.depth.send(&self.sender, request);
                 }
             }
         }
@@ -943,6 +1460,7 @@ impl DeliveryRuntime {
         let (shutdown, shutdown_receiver) = tokio::sync::watch::channel(false);
         let coordinator = tokio::spawn(delivery_coordinator(
             receiver,
+            Arc::clone(&observer.depth),
             shutdown_receiver,
             endpoint,
             client,
@@ -994,8 +1512,13 @@ fn validate_policy(policy: DeliveryPolicy) -> Result<(), BridgeError> {
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the delivery loop's inputs, each used on its own path"
+)]
 async fn delivery_coordinator(
     mut receiver: tokio::sync::mpsc::UnboundedReceiver<DispatchRequest>,
+    depth: Arc<QueueDepth>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
     endpoint: reqwest::Url,
     client: reqwest::Client,
@@ -1011,6 +1534,7 @@ async fn delivery_coordinator(
         if stopping {
             receiver.close();
             while let Ok(request) = receiver.try_recv() {
+                depth.taken();
                 admit_delivery(
                     request,
                     &mut seen,
@@ -1030,16 +1554,19 @@ async fn delivery_coordinator(
         tokio::select! {
             request = receiver.recv(), if !stopping && deliveries.len() < policy.max_concurrent => {
                 match request {
-                    Some(request) => admit_delivery(
-                        request,
-                        &mut seen,
-                        &mut seen_order,
-                        &mut deliveries,
-                        &endpoint,
-                        &client,
-                        policy,
-                        &health,
-                    ),
+                    Some(request) => {
+                        depth.taken();
+                        admit_delivery(
+                            request,
+                            &mut seen,
+                            &mut seen_order,
+                            &mut deliveries,
+                            &endpoint,
+                            &client,
+                            policy,
+                            &health,
+                        );
+                    }
                     None => stopping = true,
                 }
             }
@@ -1747,6 +2274,76 @@ mod tests {
         assert!(receiver.try_recv().is_err());
     }
 
+    #[tokio::test]
+    async fn housekeeping_commits_fire_no_trigger_and_count_no_drop() {
+        let (v1, v2) = registration_bodies();
+        let registry = TriggerRegistry::default();
+        registry
+            .register_v1(
+                "demo-fireside-phase4-trigger-oracle",
+                "us-central1-v1Created",
+                &v1,
+            )
+            .expect("v1 registration");
+        registry
+            .register_v2(
+                "demo-fireside-phase4-trigger-oracle",
+                "us-central1-v2Created",
+                &v2,
+            )
+            .expect("v2 registration");
+        let (observer, mut receiver) = TriggerObserver::channel(registry.clone());
+        let store = Store::default();
+        store.add_commit_observer(observer);
+        let database = DatabaseName::new("demo-fireside-phase4-trigger-oracle", "(default)")
+            .expect("database");
+        let create = |path: &str| Write::Create {
+            key: DocumentKey::new(database.clone(), path).expect("key"),
+            fields: Fields::new(),
+        };
+        store
+            .commit_maintenance(&[create("phase4Triggers/housekeeping")])
+            .expect("maintenance create");
+        assert!(receiver.try_recv().is_err());
+
+        // The same change from a client still dispatches to both triggers.
+        store
+            .commit(&[create("phase4Triggers/client")])
+            .expect("client create");
+        receiver.recv().await.expect("first dispatch");
+        receiver.recv().await.expect("second dispatch");
+        assert!(receiver.try_recv().is_err());
+
+        // Paused delivery counts what a client commit would have fired, and
+        // nothing for a housekeeping one.
+        registry.set_background_enabled(false);
+        store
+            .commit_maintenance(&[create("phase4Triggers/paused-housekeeping")])
+            .expect("paused maintenance create");
+        assert_eq!(
+            registry
+                .dropped()
+                .counts
+                .iter()
+                .map(|(_, count)| count)
+                .sum::<u64>(),
+            0
+        );
+        store
+            .commit(&[create("phase4Triggers/paused-client")])
+            .expect("paused client create");
+        assert!(
+            registry
+                .dropped()
+                .counts
+                .iter()
+                .map(|(_, count)| count)
+                .sum::<u64>()
+                > 0
+        );
+        assert!(receiver.try_recv().is_err());
+    }
+
     #[derive(Clone)]
     struct RetryServerState {
         attempts: Arc<AtomicUsize>,
@@ -2142,5 +2739,521 @@ mod tests {
             body: b"{}".to_vec(),
             event_id: event_id.to_owned(),
         }
+    }
+
+    #[tokio::test]
+    async fn the_background_watch_sees_every_switch() {
+        let registry = TriggerRegistry::default();
+        let mut watch = registry.background_watch();
+        assert!(*watch.borrow_and_update());
+        registry.set_background_enabled(false);
+        assert!(watch.has_changed().expect("open"));
+        assert!(!*watch.borrow_and_update());
+        // The same value again is not a change.
+        registry.set_background_enabled(false);
+        assert!(!watch.has_changed().expect("open"));
+        registry.set_background_enabled(true);
+        assert!(*watch.borrow_and_update());
+        assert!(registry.background_enabled());
+    }
+
+    #[test]
+    fn dropped_events_count_per_service_from_the_pause_and_clear_on_resume() {
+        let registry = TriggerRegistry::default();
+        let mut changes = registry.dropped_changes();
+        assert_eq!(registry.dropped(), DroppedEvents::default());
+        registry.set_background_enabled(false);
+        let paused = registry.dropped();
+        assert!(paused.since.is_some());
+        assert_eq!(paused.counts, Vec::new());
+        changes.mark_unchanged();
+        for _ in 0..3 {
+            registry.note_dropped(DroppedService::Storage);
+        }
+        registry.note_dropped(DroppedService::Firestore);
+        assert!(changes.has_changed().expect("open"));
+        let dropped = registry.dropped();
+        assert_eq!(dropped.since, paused.since);
+        assert_eq!(
+            dropped.counts,
+            [(DroppedService::Firestore, 1), (DroppedService::Storage, 3)]
+        );
+        registry.set_background_enabled(true);
+        assert_eq!(registry.dropped(), DroppedEvents::default());
+        registry.set_background_enabled(false);
+        assert_eq!(
+            registry.dropped().counts,
+            Vec::new(),
+            "a new pause counts from zero"
+        );
+        assert_eq!(DroppedService::Pubsub.as_str(), "pubsub");
+        assert_eq!(DroppedService::Schedule.as_str(), "schedule");
+    }
+
+    #[tokio::test]
+    async fn the_depth_counts_queued_dispatches_and_wait_below_ends_with_the_runtime() {
+        let (observer, receiver) = TriggerObserver::channel(TriggerRegistry::default());
+        let queue = observer.queue();
+        for index in 0..3 {
+            queue
+                .enqueue(chaos_dispatch(&format!("e{index}"), "t"))
+                .expect("queued");
+        }
+        assert_eq!(queue.depth(), 3);
+        assert_eq!(
+            observer.queue().depth(),
+            3,
+            "every producer shares the count"
+        );
+        // Below already: resolves at once.
+        tokio::time::timeout(Duration::from_secs(1), queue.wait_below(4))
+            .await
+            .expect("already below");
+        let waiting = tokio::spawn({
+            let queue = queue.clone();
+            async move { queue.wait_below(1).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!waiting.is_finished(), "nothing took the dispatches");
+        drop(receiver);
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("the stopped runtime ends the wait")
+            .expect("joined");
+        // A send to a stopped runtime fails and is not counted.
+        assert!(queue.enqueue(chaos_dispatch("late", "t")).is_err());
+        assert_eq!(queue.depth(), 3);
+    }
+
+    #[tokio::test]
+    async fn the_delivery_runtime_counts_the_depth_down_as_it_admits() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bound");
+        let address = listener.local_addr().expect("address");
+        let host = Router::new().fallback(post(|| async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            ([(DELIVERY_HEADER, DELIVERY_HANDLED)], "ok")
+        }));
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, host).await;
+        });
+        let runtime = DeliveryRuntime::start(
+            TriggerRegistry::default(),
+            &format!("http://{address}"),
+            DeliveryPolicy {
+                max_concurrent: 1,
+                ..DeliveryPolicy::default()
+            },
+        )
+        .expect("started");
+        let queue = runtime.queue();
+        for index in 0..8 {
+            queue
+                .enqueue(chaos_dispatch(&format!("d{index}"), "t"))
+                .expect("queued");
+        }
+        assert!(queue.depth() >= 6, "{} queued", queue.depth());
+        tokio::time::timeout(Duration::from_secs(10), queue.wait_below(3))
+            .await
+            .expect("the runtime took enough");
+        assert!(queue.depth() < 3);
+        let health = runtime.shutdown().await;
+        assert_eq!(health.admitted, 8);
+        assert_eq!(queue.depth(), 0);
+        server.abort();
+    }
+
+    /// Every commit of a store, as the bridge's observer sees it.
+    #[derive(Default)]
+    struct Commits(Mutex<Vec<CommitObservation>>);
+
+    impl CommitObserver for Commits {
+        fn committed(&self, observation: &CommitObservation) {
+            lock(&self.0).push(observation.clone());
+        }
+    }
+
+    /// A document created, updated and deleted, each commit observed.
+    fn create_update_delete(
+        path: &str,
+    ) -> (
+        DatabaseName,
+        CommitObservation,
+        CommitObservation,
+        CommitObservation,
+    ) {
+        let store = Store::default();
+        let commits = Arc::new(Commits::default());
+        store.add_commit_observer(commits.clone());
+        let database = DatabaseName::new("demo-explain", "(default)").expect("database");
+        let key = DocumentKey::new(database.clone(), path).expect("key");
+        store
+            .commit(&[Write::Create {
+                key: key.clone(),
+                fields: Fields::from([("name".to_owned(), Value::String("Ada".into()))]),
+            }])
+            .expect("create");
+        store
+            .commit(&[Write::Set {
+                key: key.clone(),
+                fields: BTreeMap::from([("name".to_owned(), Value::String("Grace".into()))]),
+                transforms: Vec::new(),
+                precondition: Precondition::None,
+            }])
+            .expect("update");
+        store
+            .commit(&[Write::Delete {
+                key,
+                precondition: Precondition::None,
+            }])
+            .expect("delete");
+        let mut observed = std::mem::take(&mut *lock(&commits.0)).into_iter();
+        (
+            database,
+            observed.next().expect("created"),
+            observed.next().expect("updated"),
+            observed.next().expect("deleted"),
+        )
+    }
+
+    fn trigger(
+        generation: TriggerGeneration,
+        event_type: &str,
+        database: &str,
+        pattern: &str,
+    ) -> Trigger {
+        Trigger {
+            project: "demo-explain".to_owned(),
+            key: format!("us-central1-{}", pattern.replace('/', "_")),
+            generation,
+            event_type: event_type.to_owned(),
+            database: database.to_owned(),
+            document_pattern: pattern.to_owned(),
+        }
+    }
+
+    #[test]
+    fn explain_match_says_whether_a_trigger_fires_and_why_not() {
+        use ChangeShape::{Created, Deleted, Updated};
+        use TriggerGeneration::{V1, V2};
+        let fires = MatchExplanation {
+            fires: true,
+            reason: MatchReason::Fires,
+        };
+        let check = |trigger: &Trigger, database: &str, path: &str, shape, reason| {
+            let explanation = explain_match(trigger, database, path, shape);
+            assert_eq!(explanation.reason, reason, "{trigger:?} {path} {shape:?}");
+            assert_eq!(explanation.fires, reason == MatchReason::Fires);
+        };
+        // Each shape against each event type of both generations.
+        for (event_type, generation, shapes) in [
+            (V1_CREATE, V1, [true, false, false]),
+            (V1_UPDATE, V1, [false, true, false]),
+            (V1_DELETE, V1, [false, false, true]),
+            (V1_WRITE, V1, [true, true, true]),
+            (V2_CREATED, V2, [true, false, false]),
+            (V2_UPDATED, V2, [false, true, false]),
+            (V2_DELETED, V2, [false, false, true]),
+            (V2_WRITTEN, V2, [true, true, true]),
+        ] {
+            let listener = trigger(generation, event_type, "(default)", "users/{uid}");
+            for (shape, raised) in [Created, Updated, Deleted].into_iter().zip(shapes) {
+                let reason = if raised {
+                    MatchReason::Fires
+                } else {
+                    MatchReason::OtherEvent(event_type.to_owned())
+                };
+                check(&listener, "(default)", "users/ada", shape, reason);
+            }
+        }
+        let with_auth = trigger(
+            V2,
+            &format!("{V2_CREATED}{AUTH_CONTEXT_SUFFIX}"),
+            "(default)",
+            "users/{uid}",
+        );
+        assert_eq!(
+            explain_match(&with_auth, "(default)", "users/ada", Created),
+            fires
+        );
+        // Single wildcard, recursive wildcard and an exact path.
+        let single = trigger(V2, V2_WRITTEN, "(default)", "users/{uid}");
+        check(
+            &single,
+            "(default)",
+            "users/ada/orders/o_1",
+            Updated,
+            MatchReason::PathDoesNotMatch("users/{uid}".to_owned()),
+        );
+        let recursive = trigger(V1, V1_WRITE, "(default)", "roots/{rest=**}");
+        check(
+            &recursive,
+            "(default)",
+            "roots/a/children/b",
+            Updated,
+            MatchReason::Fires,
+        );
+        check(
+            &recursive,
+            "(default)",
+            "other/a",
+            Updated,
+            MatchReason::PathDoesNotMatch("roots/{rest=**}".to_owned()),
+        );
+        let exact = trigger(V2, V2_DELETED, "(default)", "config/app");
+        check(
+            &exact,
+            "(default)",
+            "config/app",
+            Deleted,
+            MatchReason::Fires,
+        );
+        check(
+            &exact,
+            "(default)",
+            "config/web",
+            Deleted,
+            MatchReason::PathDoesNotMatch("config/app".to_owned()),
+        );
+        // Another database is named first, whatever else differs.
+        let analytics = trigger(V2, V2_CREATED, "analytics", "events/{id}");
+        check(
+            &analytics,
+            "(default)",
+            "users/ada",
+            Deleted,
+            MatchReason::OtherDatabase("analytics".to_owned()),
+        );
+        check(
+            &analytics,
+            "analytics",
+            "events/e_1",
+            Created,
+            MatchReason::Fires,
+        );
+    }
+
+    #[test]
+    fn explain_match_agrees_with_the_bridge_on_real_commits() {
+        let (database, created, updated, deleted) = create_update_delete("users/ada");
+        let listeners = [
+            trigger(TriggerGeneration::V1, V1_CREATE, "(default)", "users/{uid}"),
+            trigger(
+                TriggerGeneration::V2,
+                V2_UPDATED,
+                "(default)",
+                "users/{uid}",
+            ),
+            trigger(
+                TriggerGeneration::V2,
+                V2_WRITTEN,
+                "(default)",
+                "users/{uid}",
+            ),
+            trigger(TriggerGeneration::V1, V1_DELETE, "(default)", "teams/{id}"),
+            trigger(
+                TriggerGeneration::V2,
+                V2_WRITTEN,
+                "analytics",
+                "users/{uid}",
+            ),
+        ];
+        for observation in [&created, &updated, &deleted] {
+            let change = &observation.changes[0];
+            let shape = ChangeShape::of(change).expect("effective change");
+            for listener in &listeners {
+                assert_eq!(
+                    explain_match(listener, database.database_id(), change.key.path(), shape).fires,
+                    listener.matches(change),
+                    "{listener:?} {shape:?}"
+                );
+            }
+        }
+        assert_eq!(
+            ChangeShape::of(&created.changes[0]),
+            Some(ChangeShape::Created)
+        );
+        assert_eq!(ChangeShape::Updated.as_str(), "updated");
+        let listener = &listeners[1];
+        assert_eq!(listener.key(), listener.key);
+        assert_eq!(listener.event_type(), V2_UPDATED);
+    }
+
+    #[test]
+    fn a_second_generation_body_reads_back_as_the_first_generation_documents() {
+        let (_, created, updated, deleted) = create_update_delete("users/ada lovelace 火");
+        let v1 = trigger(TriggerGeneration::V1, V1_WRITE, "(default)", "users/{uid}");
+        let v2 = trigger(
+            TriggerGeneration::V2,
+            V2_WRITTEN,
+            "(default)",
+            "users/{uid}",
+        );
+        for observation in [&created, &updated, &deleted] {
+            let change = &observation.changes[0];
+            let expected = json!({
+                "value": optional_document_json(&change.key, change.after.as_deref())
+                    .expect("value")
+                    .unwrap_or(JsonValue::Null),
+                "oldValue": optional_document_json(&change.key, change.before.as_deref())
+                    .expect("old value")
+                    .unwrap_or(JsonValue::Null),
+            });
+            let dispatch = build_dispatch(&v2, observation, 0).expect("v2 dispatch");
+            let decoded = decode_document_event(&dispatch.body).expect("decoded");
+            assert_eq!(decoded, expected);
+            // The same documents a first-generation event carries.
+            let legacy = build_dispatch(&v1, observation, 0).expect("v1 dispatch");
+            let legacy: JsonValue = serde_json::from_slice(&legacy.body).expect("v1 JSON");
+            for field in ["value", "oldValue"] {
+                assert_eq!(
+                    legacy["data"].get(field).unwrap_or(&JsonValue::Null),
+                    &decoded[field],
+                    "{field}"
+                );
+            }
+            // A raw protobuf body (no Base64) reads the same.
+            let raw = BASE64
+                .decode(&dispatch.body)
+                .expect("the bridge sends Base64");
+            assert_eq!(decode_document_event(&raw).expect("raw"), expected);
+        }
+        let created_value =
+            decode_document_event(&build_dispatch(&v2, &created, 0).expect("dispatch").body)
+                .expect("decoded");
+        assert_eq!(created_value["oldValue"], JsonValue::Null);
+        assert_eq!(
+            created_value["value"]["fields"]["name"],
+            json!({ "stringValue": "Ada" })
+        );
+        assert!(
+            created_value["value"]["updateTime"]
+                .as_str()
+                .is_some_and(|time| time.ends_with('Z')),
+            "{created_value}"
+        );
+        let error = decode_document_event(b"\xff\xfe not an event").expect_err("garbage");
+        assert!(
+            error
+                .to_string()
+                .starts_with("the body is not a Firestore document event"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn both_dispatch_builders_name_the_cause_in_headers() {
+        let (_, created, updated, deleted) = create_update_delete("users/ada lovelace 火");
+        for generation in [TriggerGeneration::V1, TriggerGeneration::V2] {
+            let event_type = match generation {
+                TriggerGeneration::V1 => V1_WRITE,
+                TriggerGeneration::V2 => V2_WRITTEN,
+            };
+            let listener = trigger(generation, event_type, "(default)", "users/{uid}");
+            for (observation, change) in [
+                (&created, "created"),
+                (&updated, "updated"),
+                (&deleted, "deleted"),
+            ] {
+                let dispatch = build_dispatch(&listener, observation, 0).expect("dispatch");
+                let headers = &dispatch.headers;
+                assert_eq!(
+                    headers[cause::DOCUMENT],
+                    "users/ada%20lovelace%20%E7%81%AB",
+                    "{generation:?}"
+                );
+                assert_eq!(
+                    cause::decode(&headers[cause::DOCUMENT]),
+                    "users/ada lovelace 火"
+                );
+                assert_eq!(headers[cause::DATABASE], "(default)");
+                assert_eq!(headers[cause::CHANGE], change);
+                assert_eq!(headers[cause::EVENT_ID], dispatch.event_id);
+                assert!(
+                    headers
+                        .iter()
+                        .all(
+                            |(name, value)| reqwest::header::HeaderValue::from_str(value).is_ok()
+                                && reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_ok()
+                        ),
+                    "{headers:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cause_values_survive_any_text_and_plain_ones_stay_readable() {
+        for text in [
+            "users/ada",
+            "projects/p/topics/orders.v1",
+            "ada@example.test",
+            "(default)",
+            "a b%c\nd\r\te",
+            "火🔥 ünïcode",
+            "100% done",
+            "",
+        ] {
+            let encoded = cause::encode(text);
+            assert!(
+                encoded.bytes().all(|byte| (0x21..=0x7e).contains(&byte)),
+                "{encoded}"
+            );
+            assert_eq!(cause::decode(&encoded), text);
+        }
+        assert_eq!(cause::encode("users/ada"), "users/ada");
+        assert_eq!(cause::encode("100% done"), "100%25%20done");
+        // A stray % that is not an escape is kept.
+        assert_eq!(cause::decode("50%-off%zz%4"), "50%-off%zz%4");
+        assert!(cause::DOCUMENT.starts_with(cause::PREFIX));
+        assert!(cause::AUTH_CALL.starts_with(cause::PREFIX));
+    }
+
+    #[tokio::test]
+    async fn a_paused_change_counts_once_when_some_trigger_would_have_fired() {
+        let registry = TriggerRegistry::default();
+        let (observer, mut receiver) = TriggerObserver::channel(registry.clone());
+        let (v1, v2) = registration_bodies();
+        let project = "demo-fireside-phase4-trigger-oracle";
+        registry
+            .register_v1(project, "us-central1-v1Created", &v1)
+            .expect("v1 registration");
+        registry
+            .register_v2(project, "us-central1-v2Created", &v2)
+            .expect("v2 registration");
+        let store = Store::default();
+        store.add_commit_observer(observer);
+        let database = DatabaseName::new(project, "(default)").expect("database");
+        registry.set_background_enabled(false);
+        // Two triggers would fire for this change: one dropped change.
+        store
+            .commit(&[Write::Create {
+                key: DocumentKey::new(database.clone(), "phase4Triggers/paused").expect("key"),
+                fields: Fields::new(),
+            }])
+            .expect("paused create");
+        // No trigger listens here: nothing was dropped.
+        store
+            .commit(&[Write::Create {
+                key: DocumentKey::new(database, "elsewhere/doc").expect("key"),
+                fields: Fields::new(),
+            }])
+            .expect("unwatched create");
+        assert!(
+            receiver.try_recv().is_err(),
+            "nothing is delivered while paused"
+        );
+        let dropped = registry.dropped();
+        assert!(dropped.since.is_some());
+        assert_eq!(dropped.counts, [(DroppedService::Firestore, 1)]);
+        registry.note_dropped_many(DroppedService::Pubsub, 3);
+        registry.note_dropped_many(DroppedService::Pubsub, 0);
+        assert_eq!(
+            registry.dropped().counts,
+            [(DroppedService::Firestore, 1), (DroppedService::Pubsub, 3)]
+        );
+        registry.set_background_enabled(true);
+        assert_eq!(registry.dropped(), DroppedEvents::default());
     }
 }

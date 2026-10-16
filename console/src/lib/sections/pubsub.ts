@@ -1,0 +1,71 @@
+// Pub/Sub's registry entry: two pages (Topics, Schemas), its badges, and
+// where a topic, subscription, schema, message or schedule opens when ⌘K
+// finds one or another section's payload points at one. A schedule opens
+// in Functions, on the function's Schedule tab: the scheduler is Pub/Sub's
+// (a tick is a publish to the function's schedule topic), the console's
+// place for it is the function's. Its ⌘K actions are in
+// `./pubsub-actions.ts`.
+
+import { BroadcastIcon } from '@phosphor-icons/react'
+import {
+  messageSearch,
+  scheduleSearch,
+  schemaSearch,
+  subscriptionSearch,
+  topicSearch,
+} from '@/messaging/links'
+import type { ConsoleSection, SectionLink } from '../services'
+
+/** The page itself when a key is not one this section knows. */
+function open(to: string, search: Record<string, string>): SectionLink {
+  return Object.keys(search).length === 0 ? { to } : { to, search }
+}
+
+export const pubsub: ConsoleSection = {
+  id: 'pubsub',
+  to: '/pubsub',
+  label: 'Pub/Sub',
+  services: ['pubsub'],
+  area: 'messaging',
+  icon: BroadcastIcon,
+  summary:
+    'Topics with their subscriptions and the functions they trigger, every message with who received it, a composer that publishes JSON, text or bytes with attributes, backlogs you can read without taking them and purge, and Avro schemas checked as you type.',
+  pages: [
+    {
+      to: '/pubsub',
+      label: 'Topics',
+      exact: true,
+      badges: ['pubsub.rejected', 'pubsub.dead-lettered'],
+      keywords: 'subscriptions messages publish backlog purge push dead letters',
+    },
+    { to: '/pubsub/schemas', label: 'Schemas', keywords: 'avro definition' },
+  ],
+  // No badges of the section's own: its two counters are the Topics page's
+  // (the heading's dot gathers them when the nav is collapsed), and the
+  // heading carries the engine's automatic `pubsub.jobs` gauge while
+  // publish, ack or release jobs run.
+  // The API and topics take `project`, so the shell's "Show demo-other"
+  // opens the topics an app wrote under another project id.
+  projectScope: true,
+  searchLabels: {
+    'pubsub.topic': 'Topics',
+    'pubsub.subscription': 'Subscriptions',
+    'pubsub.schema': 'Schemas',
+    'pubsub.schedule': 'Scheduled functions',
+    'pubsub.message': 'Messages',
+  },
+  // The page's `q` filters one topic's messages; with no topic in the link
+  // there is nothing for it to filter, and the engine's hits already name
+  // every topic, subscription, schema and schedule the text matches.
+  searchLink: null,
+  routes: {
+    // Keys: the full resource name.
+    'pubsub.topic': (name) => open('/pubsub', topicSearch(name)),
+    'pubsub.subscription': (name) => open('/pubsub', subscriptionSearch(name)),
+    'pubsub.schema': (name) => open('/pubsub/schemas', schemaSearch(name)),
+    // Key: the function id, `us-central1-nightlyCleanup`: its Schedule tab in Functions.
+    'pubsub.schedule': (functionId) => open('/functions', scheduleSearch(functionId)),
+    // Key: `<topic full name>|<message id>`.
+    'pubsub.message': (key) => open('/pubsub', messageSearch(key)),
+  },
+}

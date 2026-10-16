@@ -1,122 +1,144 @@
+// The console's sections, one registry file each (`lib/sections/<id>.ts`),
+// assembled here in the one sidebar order (`section-order.json`, which the
+// engine sorts its status by too). A section stream edits only its own file;
+// nothing here changes when a section lands.
+//
+// A registry file is in the first route, so it holds icons, types and pure
+// string helpers only; anything heavier goes behind `shellMount` or into
+// the section's route chunk.
+
 import type { Icon } from '@phosphor-icons/react'
-import {
-  BroadcastIcon,
-  DatabaseIcon,
-  HardDrivesIcon,
-  LightningIcon,
-  ListMagnifyingGlassIcon,
-  PuzzlePieceIcon,
-  QueueIcon,
-  ScrollIcon,
-  ShareNetworkIcon,
-  UsersIcon,
-} from '@phosphor-icons/react'
+import type { ComponentType } from 'react'
+import order from './section-order.json'
+import { auth } from './sections/auth'
+import { eventarc } from './sections/eventarc'
+import { extensions } from './sections/extensions'
+import { firestore } from './sections/firestore'
+import { functions } from './sections/functions'
+import { logs } from './sections/logs'
+import { pubsub } from './sections/pubsub'
+import { storage } from './sections/storage'
+import { tasks } from './sections/tasks'
 
 export type ServiceArea = 'data' | 'compute' | 'messaging' | 'observe'
 
+/** A section's id: its route's first segment, its status entry, its topics' and badges' prefix. */
+export type SectionId =
+  | 'firestore'
+  | 'auth'
+  | 'storage'
+  | 'functions'
+  | 'extensions'
+  | 'eventarc'
+  | 'pubsub'
+  | 'tasks'
+  | 'logs'
+
+/** Where something opens: a route and its search params. */
+export interface SectionLink {
+  to: string
+  /** The page's search params, as its schema reads them (a rules page's `line` is a number). */
+  search?: Record<string, string | number | boolean | undefined>
+}
+
+export interface SectionPage {
+  to: string
+  label: string
+  /** Matches this page and nothing else under the section. */
+  exact?: boolean
+  /** Badge ids (engine `Badge.id`) shown on this page's nav item. */
+  badges?: readonly string[]
+  /** Extra words ⌘K matches the page by. */
+  keywords?: string
+}
+
+/**
+ * Something ⌘K offers from anywhere; a link, so a dialog opens from `?new=`
+ * or `?dialog=`. A section's are in `sections/<id>-actions.ts`, which only
+ * the palette loads (`palette-actions.ts`), never in its registry.
+ */
+export interface SectionAction {
+  id: string
+  title: string
+  description?: string
+  keywords?: string
+  icon: Icon
+  link: SectionLink
+}
+
 export interface ConsoleSection {
-  /** Client route. */
+  id: SectionId
+  /** Client route, `/<id>`. */
   to: string
   /** Sidebar and page label, sentence case. */
   label: string
-  /** Hub service names this section shows; empty for cross-cutting views. */
+  /** Hub service names this section shows. */
   services: readonly string[]
   area: ServiceArea
   icon: Icon
-  /** What the finished section does, in one sentence. */
+  /** What the section does, in one sentence: its gate says it while the service is absent or starting. */
   summary: string
+  /**
+   * The section's own pages, when it has more than one: shown under it in
+   * the sidebar. The first is where the section's own entry leads.
+   */
+  pages?: readonly SectionPage[]
+  /** Badge ids shown on the section's own nav item. */
+  badges?: readonly string[]
+  /**
+   * Where a thing of this section opens, by entity kind: serves engine
+   * search hits (`SearchHit.kind`) and every `EntityRef` another section's
+   * payload carries.
+   */
+  routes?: Readonly<Record<string, (key: string) => SectionLink>>
+  /** ⌘K's group label for each kind of hit ("Users", "Collections"). */
+  searchLabels?: Readonly<Record<string, string>>
+  /**
+   * Where ⌘K's "Search <section> for “text”" row leads. Absent: the
+   * section with `?q=<text>`, its filter; `null`: no such row, for a
+   * section whose `q` is not a text filter (Firestore's is an SDK query).
+   */
+  searchLink?: ((text: string) => SectionLink) | null
+  /** Where the nav item leads while one of its counter badges is above zero. Absent: `to`. */
+  badgeLink?: (seen: { count: number; cursor?: string }) => SectionLink
+  /** A lazy component the shell mounts while the section is ready. */
+  shellMount?: () => Promise<{ default: ComponentType }>
+  /**
+   * The section's API and topics accept a `project`, so a link with
+   * `?project=` can show the data of another project the app used
+   * (`useConsoleProject`). Storage buckets are not per project.
+   */
+  projectScope?: boolean
 }
 
-export const SECTIONS: readonly ConsoleSection[] = [
-  {
-    to: '/firestore',
-    label: 'Firestore',
-    services: ['firestore'],
-    area: 'data',
-    icon: DatabaseIcon,
-    summary:
-      'Path bar, document grid with inferred columns, a query builder that runs the same engine query the app runs, and view-as-user over the rules engine.',
-  },
-  {
-    to: '/auth',
-    label: 'Authentication',
-    services: ['auth'],
-    area: 'data',
-    icon: UsersIcon,
-    summary:
-      'Users table with real columns and actions, an inbox for every code and link the emulator would have sent, and a sign-in timeline with the exact error.',
-  },
-  {
-    to: '/storage',
-    label: 'Storage',
-    services: ['storage'],
-    area: 'data',
-    icon: HardDrivesIcon,
-    summary:
-      'Bucket switcher, folder browser with previews, metadata editor, and native rules reload.',
-  },
-  {
-    to: '/functions',
-    label: 'Functions',
-    services: ['functions'],
-    area: 'compute',
-    icon: LightningIcon,
-    summary:
-      'Functions by codebase with trigger type, invoke HTTP and callable functions, inject background events, and follow each function’s log stream.',
-  },
-  {
-    to: '/extensions',
-    label: 'Extensions',
-    services: ['functions'],
-    area: 'compute',
-    icon: PuzzlePieceIcon,
-    summary:
-      'Instances with their source and offline readiness, resolved parameters, and the functions each instance adds.',
-  },
-  {
-    to: '/pubsub',
-    label: 'Pub/Sub',
-    services: ['pubsub'],
-    area: 'messaging',
-    icon: BroadcastIcon,
-    summary:
-      'Topics and subscriptions, publish and pull messages, ack and seek, snapshots and schemas, delivery status to functions.',
-  },
-  {
-    to: '/eventarc',
-    label: 'Eventarc',
-    services: ['eventarc'],
-    area: 'messaging',
-    icon: ShareNetworkIcon,
-    summary: 'Channels and triggers, publish a custom event, and trace its delivery.',
-  },
-  {
-    to: '/tasks',
-    label: 'Cloud Tasks',
-    services: ['tasks'],
-    area: 'messaging',
-    icon: QueueIcon,
-    summary:
-      'Queues with stats, pending and running tasks with their retry attempt and next dispatch, and enqueue a task by hand.',
-  },
-  {
-    to: '/logs',
-    label: 'Logs',
-    services: ['logging'],
-    area: 'observe',
-    icon: ScrollIcon,
-    summary: 'One stream for every service with level and service filters and search.',
-  },
-  {
-    to: '/requests',
-    label: 'Requests',
-    services: ['firestore.websocket'],
-    area: 'observe',
-    icon: ListMagnifyingGlassIcon,
-    summary:
-      'Every rules evaluation with its allow or deny detail, coverage inline, scoped to the path you are looking at.',
-  },
-]
+const REGISTRY: Record<SectionId, ConsoleSection> = {
+  firestore,
+  auth,
+  storage,
+  functions,
+  extensions,
+  eventarc,
+  pubsub,
+  tasks,
+  logs,
+}
+
+/** Every section, in the sidebar's order. */
+export const SECTIONS: readonly ConsoleSection[] = (order as SectionId[]).map((id) => REGISTRY[id])
+
+/** The section with this id, or `undefined` for a string that names none. */
+export function sectionById(id: string): ConsoleSection | undefined {
+  return Object.hasOwn(REGISTRY, id) ? REGISTRY[id as SectionId] : undefined
+}
+
+/**
+ * The badges a section's own nav item shows: its registry's, and the gauge
+ * the engine keeps while the section's bulk jobs run (`<id>.jobs`), which
+ * no registry needs to list.
+ */
+export function itemBadges(section: ConsoleSection): readonly string[] {
+  return [...(section.badges ?? []), `${section.id}.jobs`]
+}
 
 export const AREA_LABELS: Record<ServiceArea, string> = {
   data: 'Data',

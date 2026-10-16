@@ -11,6 +11,7 @@
     "baseUrl": ".",
     "paths": { "@/*": ["./src/*"] },
     "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "isolatedModules": true,
@@ -26,5 +27,5 @@
     "erasableSyntaxOnly": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src"]
+  "include": ["src", "design-system/src", "e2e/kit-harness"]
 }

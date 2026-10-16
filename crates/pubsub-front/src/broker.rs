@@ -3,8 +3,18 @@
 //! filters, retention, seek and snapshots), push delivery and Avro schemas,
 //! with the official emulator's validation order, error strings and
 //! defaults as the recorded corpus shows them.
+//!
+//! Every change of a tracked message goes through one transition that keeps
+//! the subscription's counts and indexes (available in delivery order,
+//! leases and pushes by due time, acknowledged ids, ack ids, leased ordering
+//! keys) in step, so a pull, an ack and a tick cost what they touch, not the
+//! size of the backlog. An acknowledged message is dropped as soon as nothing
+//! can bring it back (retention, a snapshot, or another subscription of the
+//! topic still holding it), and every topic keeps a bounded history ring of
+//! what was published to it, with what each subscription did with each
+//! message once it let go of it.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -34,6 +44,18 @@ const SNAPSHOT_TTL: Duration = Duration::from_hours(168);
 pub const LONG_POLL: Duration = Duration::from_secs(89);
 /// A failed push is retried at this interval.
 pub const PUSH_RETRY: Duration = Duration::from_secs(1);
+/// A push handed to the push loop is not due again until it finishes (the
+/// loop's HTTP client gives up after 30 s); a finished push sets its own
+/// next attempt.
+const PUSH_IN_FLIGHT: Duration = Duration::from_secs(90);
+/// How often the tick prunes retention windows and retained acknowledgements.
+const SLOW_TICK: Duration = Duration::from_secs(1);
+/// What one recorded history outcome costs in a ring's byte count.
+const OUTCOME_BYTES: u64 = 8;
+/// Ordering keys remembered per topic (the newest).
+const SEEN_ORDERING_KEYS: usize = 50;
+/// Attribute names remembered per topic (the first).
+const SEEN_ATTRIBUTE_KEYS: usize = 100;
 
 /// One published message, shared by every subscription that received it.
 #[derive(Debug)]
@@ -42,6 +64,212 @@ pub struct StoredMessage {
     pub message: PubsubMessage,
     pub published: Instant,
     pub published_at: SystemTime,
+    /// Data, attribute names and values, and the ordering key, in bytes.
+    pub size: u32,
+}
+
+/// The bytes a message costs: data, attributes and ordering key.
+#[must_use]
+pub fn message_size(message: &PubsubMessage) -> u32 {
+    let attributes: usize = message
+        .attributes
+        .iter()
+        .map(|(key, value)| key.len() + value.len())
+        .sum();
+    u32::try_from(message.data.len() + attributes + message.ordering_key.len()).unwrap_or(u32::MAX)
+}
+
+/// What a subscription did with a message when it let go of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    /// Acknowledged, and nothing could bring it back.
+    Acked,
+    /// Forwarded to the dead-letter topic.
+    DeadLettered,
+    /// Taken by the functions consumer of an `emulator-sub-*` subscription.
+    Drained,
+}
+
+/// Why a publish reached none of its topic's functions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FanoutSkip {
+    /// Background triggers were paused: the events were dropped, not queued.
+    BackgroundOff,
+}
+
+/// One function a message was handed to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FanoutTarget {
+    /// The region-qualified Functions id.
+    pub function_id: String,
+    /// The `CloudEvent` id (or the legacy `context.eventId`) of the dispatch.
+    pub event_id: String,
+    /// A console redelivery, not the publish's own.
+    pub redelivery: bool,
+    /// Taken just before the dispatch was queued, so no invocation of it
+    /// began earlier: the publish's own targets share the fanout's time, a
+    /// redelivery has its own. Compute's record is read against it to tell
+    /// a dispatch still queued from one whose invocation is no longer kept.
+    pub at: SystemTime,
+}
+
+/// What the Pub/Sub runtime did with a message for the functions on its
+/// topic: recorded at publish (and on each redelivery) on the history entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fanout {
+    pub at: SystemTime,
+    pub targets: Vec<FanoutTarget>,
+    pub skipped: Option<FanoutSkip>,
+    /// The topic's fanout sequence when this was recorded or last changed.
+    pub sequence: u64,
+}
+
+impl Fanout {
+    fn bytes(&self) -> u64 {
+        let targets: usize = self
+            .targets
+            .iter()
+            .map(|target| target.function_id.len() + target.event_id.len() + 24)
+            .sum();
+        u64::try_from(targets + 32).unwrap_or(u64::MAX)
+    }
+}
+
+/// One message in a topic's history ring, with the outcomes of the
+/// subscriptions that let go of it (keyed by their slot) and its fanout.
+#[derive(Debug)]
+pub struct HistoryEntry {
+    pub message: Arc<StoredMessage>,
+    outcomes: Mutex<Vec<(u32, Outcome)>>,
+    fanout: Mutex<Option<Fanout>>,
+}
+
+impl HistoryEntry {
+    fn new(message: Arc<StoredMessage>) -> Self {
+        Self {
+            message,
+            outcomes: Mutex::new(Vec::new()),
+            fanout: Mutex::new(None),
+        }
+    }
+
+    /// The outcomes recorded so far, as `(subscription slot, outcome)`.
+    #[must_use]
+    pub fn outcomes(&self) -> Vec<(u32, Outcome)> {
+        lock(&self.outcomes).clone()
+    }
+
+    /// The fanout recorded for the message, if it reached the functions step.
+    #[must_use]
+    pub fn fanout(&self) -> Option<Fanout> {
+        lock(&self.fanout).clone()
+    }
+
+    /// What the entry costs in its ring's byte count.
+    fn bytes(&self) -> u64 {
+        let outcomes = u64::try_from(lock(&self.outcomes).len()).unwrap_or(u64::MAX);
+        let fanout = lock(&self.fanout).as_ref().map_or(0, Fanout::bytes);
+        u64::from(self.message.size)
+            .saturating_add(outcomes.saturating_mul(OUTCOME_BYTES))
+            .saturating_add(fanout)
+    }
+}
+
+/// The bounds of the history rings and of retained acknowledgements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct HistoryLimits {
+    /// Messages a topic without retention keeps.
+    pub(crate) messages: usize,
+    /// Bytes a topic without retention keeps.
+    pub(crate) bytes: u64,
+    /// Messages a topic with retention keeps inside its window.
+    pub(crate) retention_messages: usize,
+    /// Bytes a topic with retention keeps inside its window.
+    pub(crate) retention_bytes: u64,
+    /// Bytes every ring together keeps.
+    pub(crate) total_bytes: u64,
+    /// The global cap never takes a topic below this many messages.
+    pub(crate) floor: usize,
+    /// Retained acknowledged messages a subscription keeps.
+    pub(crate) retained_acked: usize,
+}
+
+impl Default for HistoryLimits {
+    fn default() -> Self {
+        Self {
+            messages: 5_000,
+            bytes: 16 << 20,
+            retention_messages: 100_000,
+            retention_bytes: 256 << 20,
+            total_bytes: 512 << 20,
+            floor: 100,
+            retained_acked: 100_000,
+        }
+    }
+}
+
+/// What a topic's history ring holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryWindow {
+    pub messages: u32,
+    pub bytes: u64,
+    pub oldest_id: Option<u64>,
+    pub capacity_messages: u32,
+    pub capacity_bytes: u64,
+    /// Messages dropped from the ring since start (subscriptions may still hold them).
+    pub dropped: u64,
+}
+
+/// Ordering keys and attribute names seen on a topic as messages arrived.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeenKeys {
+    /// The newest 50 ordering keys, newest first.
+    pub ordering_keys: Vec<String>,
+    /// The first 100 attribute names, sorted.
+    pub attribute_keys: Vec<String>,
+}
+
+/// A subscription's figures, kept as messages move.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubscriptionCounts {
+    /// Deliverable now.
+    pub available: u64,
+    /// Leased to a subscriber and not yet acknowledged.
+    pub outstanding: u64,
+    /// Owned by the push loop.
+    pub pushing: u64,
+    /// Acknowledged and kept (retention, a snapshot, or another subscription
+    /// still holding the message).
+    pub retained_acked: u64,
+    /// Bytes of the unacknowledged messages.
+    pub backlog_bytes: u64,
+    /// When the oldest unacknowledged message was published.
+    pub oldest_unacked_at: Option<SystemTime>,
+    /// Unacknowledged messages delivered more than once.
+    pub redelivered: u64,
+    /// Acknowledgements since the subscription was created.
+    pub acked_total: u64,
+    /// Messages forwarded to the dead-letter topic since it was created.
+    pub dead_lettered_total: u64,
+    /// Ordering keys held back by an outstanding message.
+    pub blocked_keys: u32,
+}
+
+/// What became of one message at one subscription.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageMark {
+    Available,
+    Outstanding,
+    Pushing,
+    /// Acknowledged: still kept, or let go (the outcome on the history entry).
+    Acked,
+    DeadLettered,
+    /// Taken by the functions consumer of an `emulator-sub-*` subscription.
+    Drained,
+    /// The subscription's filter did not pass it.
+    Filtered,
+    /// The subscription was created after the message.
+    NotTracked,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,7 +280,7 @@ enum MessageState {
     Leased { ack: u64, deadline: Instant },
     /// Owned by the push loop.
     Pushing { next_attempt: Instant },
-    /// Acknowledged and retained (`retainAckedMessages`).
+    /// Acknowledged and kept: retained, or something can still revive it.
     Acked,
 }
 
@@ -60,18 +288,46 @@ enum MessageState {
 struct Tracked {
     message: Arc<StoredMessage>,
     state: MessageState,
-    /// Deliveries so far.
+    /// Deliveries so far: what `take` reports as `deliveryAttempt` and
+    /// dead-lettering counts.
     attempts: u32,
+    /// Push attempts so far, counted apart: neither a pull nor
+    /// dead-lettering reads them.
+    push_attempts: u32,
     /// Delivery order: the message id at first, a fresh number after a nack
     /// or an expired lease (a redelivery queues behind later messages).
     sequence: u64,
+}
+
+impl Tracked {
+    fn unacked(&self) -> bool {
+        self.state != MessageState::Acked
+    }
 }
 
 #[derive(Debug)]
 struct TopicEntry {
     topic: Topic,
     generation: u64,
-    messages: Vec<Arc<StoredMessage>>,
+    created_at: SystemTime,
+    /// The console revision at which the topic's figures last changed.
+    stamp: u64,
+    published_total: u64,
+    last_published_at: Option<SystemTime>,
+    throughput: Throughput,
+    latest_id: Option<u64>,
+    /// Fanouts recorded on the topic's messages (the deliveries topic's cursor).
+    fanouts: u64,
+    /// The newest fanout records, `(sequence, message id)`.
+    recent_fanouts: VecDeque<(u64, u64)>,
+    /// The newest published messages, oldest first (ids ascend).
+    history: VecDeque<Arc<HistoryEntry>>,
+    history_bytes: u64,
+    history_dropped: u64,
+    /// The newest distinct ordering keys, newest last.
+    ordering_keys: VecDeque<String>,
+    /// The first distinct attribute names.
+    attribute_keys: BTreeSet<String>,
     /// The Avro revision bound at creation or the last `schema_settings` update.
     schema: Option<BoundSchema>,
 }
@@ -82,6 +338,111 @@ struct BoundSchema {
     parsed: Arc<AvroSchema>,
     encoding: Encoding,
     deleted: bool,
+}
+
+/// The figures one subscription keeps as its messages move.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct Counts {
+    available: u64,
+    leased: u64,
+    pushing: u64,
+    acked: u64,
+    unacked_bytes: u64,
+    redelivered: u64,
+}
+
+/// A subscription's counts and indexes; [`Index::add`] and [`Index::remove`]
+/// are the only writers, called around every change of a tracked message.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Index {
+    counts: Counts,
+    /// Unacknowledged ids (the first is the oldest).
+    unacked: BTreeSet<u64>,
+    /// Available messages in delivery order, `(sequence, id)`.
+    available: BTreeSet<(u64, u64)>,
+    /// Leased messages by lease expiry (microseconds from the epoch).
+    leases: BTreeSet<(u64, u64)>,
+    /// Pushing messages by next attempt (microseconds from the epoch).
+    push_due: BTreeSet<(u64, u64)>,
+    /// Acknowledged ids still kept.
+    acked: BTreeSet<u64>,
+    /// Ack id to message id, for leased messages.
+    acks: HashMap<u64, u64>,
+    /// Ordering key to the leased messages holding it.
+    leased_keys: HashMap<String, BTreeSet<u64>>,
+}
+
+impl Index {
+    fn add(&mut self, id: u64, tracked: &Tracked) {
+        match &tracked.state {
+            MessageState::Available => {
+                self.counts.available += 1;
+                self.available.insert((tracked.sequence, id));
+            }
+            MessageState::Leased { ack, deadline } => {
+                self.counts.leased += 1;
+                self.leases.insert((micros(*deadline), id));
+                self.acks.insert(*ack, id);
+                let key = &tracked.message.message.ordering_key;
+                if !key.is_empty() {
+                    self.leased_keys.entry(key.clone()).or_default().insert(id);
+                }
+            }
+            MessageState::Pushing { next_attempt } => {
+                self.counts.pushing += 1;
+                self.push_due.insert((micros(*next_attempt), id));
+            }
+            MessageState::Acked => {
+                self.counts.acked += 1;
+                self.acked.insert(id);
+            }
+        }
+        if tracked.unacked() {
+            self.unacked.insert(id);
+            self.counts.unacked_bytes += u64::from(tracked.message.size);
+            if tracked.attempts > 1 {
+                self.counts.redelivered += 1;
+            }
+        }
+    }
+
+    fn remove(&mut self, id: u64, tracked: &Tracked) {
+        match &tracked.state {
+            MessageState::Available => {
+                self.counts.available -= 1;
+                self.available.remove(&(tracked.sequence, id));
+            }
+            MessageState::Leased { ack, deadline } => {
+                self.counts.leased -= 1;
+                self.leases.remove(&(micros(*deadline), id));
+                self.acks.remove(ack);
+                let key = &tracked.message.message.ordering_key;
+                if !key.is_empty()
+                    && let Some(leased) = self.leased_keys.get_mut(key)
+                {
+                    leased.remove(&id);
+                    if leased.is_empty() {
+                        self.leased_keys.remove(key);
+                    }
+                }
+            }
+            MessageState::Pushing { next_attempt } => {
+                self.counts.pushing -= 1;
+                self.push_due.remove(&(micros(*next_attempt), id));
+            }
+            MessageState::Acked => {
+                self.counts.acked -= 1;
+                self.acked.remove(&id);
+            }
+        }
+        if tracked.unacked() {
+            self.unacked.remove(&id);
+            self.counts.unacked_bytes -= u64::from(tracked.message.size);
+            if tracked.attempts > 1 {
+                self.counts.redelivered -= 1;
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -95,6 +456,117 @@ struct SubscriptionEntry {
     topic_deleted: bool,
     filter: Option<Filter>,
     messages: BTreeMap<u64, Tracked>,
+    index: Index,
+    acked_total: u64,
+    dead_lettered_total: u64,
+    created_at: SystemTime,
+    /// A small id naming the subscription in history outcomes.
+    slot: u32,
+    /// The console revision at which the subscription's figures last changed.
+    stamp: u64,
+    /// Set by every change of a tracked message; the next stamp clears it.
+    dirty: bool,
+    last_pull: Option<SystemTime>,
+    /// Console views following this subscription's backlog rows.
+    readers: u32,
+    /// While it has readers: the old and new position of every moved row.
+    changes: VecDeque<(u64, BacklogKey)>,
+    change_sequence: u64,
+}
+
+/// Whether a change moved a message out of or into the backlog.
+#[derive(Debug, Clone, Copy)]
+struct Moved {
+    was_unacked: bool,
+    is_unacked: bool,
+}
+
+impl SubscriptionEntry {
+    fn is_push(&self) -> bool {
+        self.subscription
+            .push_config
+            .as_ref()
+            .is_some_and(|config| !config.push_endpoint.is_empty())
+    }
+
+    fn insert(&mut self, tracked: Tracked) {
+        let id = tracked.message.id;
+        self.index.add(id, &tracked);
+        let key = BacklogKey::of(id, &tracked);
+        if let Some(previous) = self.messages.insert(id, tracked) {
+            self.index.remove(id, &previous);
+            self.record_change(BacklogKey::of(id, &previous));
+        }
+        self.record_change(key);
+        self.dirty = true;
+    }
+
+    fn remove(&mut self, id: u64) -> Option<Tracked> {
+        let tracked = self.messages.remove(&id)?;
+        self.index.remove(id, &tracked);
+        self.record_change(BacklogKey::of(id, &tracked));
+        self.dirty = true;
+        Some(tracked)
+    }
+
+    /// The one place a tracked message changes: counts, indexes and the
+    /// console's moved-rows ring follow.
+    fn update(&mut self, id: u64, change: impl FnOnce(&mut Tracked)) -> Option<Moved> {
+        let tracked = self.messages.get_mut(&id)?;
+        let was_unacked = tracked.unacked();
+        let before = BacklogKey::of(id, tracked);
+        self.index.remove(id, tracked);
+        change(tracked);
+        self.index.add(id, tracked);
+        let after = BacklogKey::of(id, tracked);
+        let is_unacked = tracked.unacked();
+        self.record_change(before);
+        if after != before {
+            self.record_change(after);
+        }
+        self.dirty = true;
+        Some(Moved {
+            was_unacked,
+            is_unacked,
+        })
+    }
+
+    /// Remembers a row a console view must patch, while one follows.
+    fn record_change(&mut self, key: BacklogKey) {
+        if self.readers == 0 {
+            return;
+        }
+        self.change_sequence += 1;
+        self.changes.push_back((self.change_sequence, key));
+        if self.changes.len() > CHANGE_RING {
+            self.changes.pop_front();
+        }
+    }
+
+    fn counts(&self) -> SubscriptionCounts {
+        let counts = self.index.counts;
+        SubscriptionCounts {
+            available: counts.available,
+            outstanding: counts.leased,
+            pushing: counts.pushing,
+            retained_acked: counts.acked,
+            backlog_bytes: counts.unacked_bytes,
+            oldest_unacked_at: self
+                .index
+                .unacked
+                .first()
+                .and_then(|id| self.messages.get(id))
+                .map(|tracked| tracked.message.published_at),
+            redelivered: counts.redelivered,
+            acked_total: self.acked_total,
+            dead_lettered_total: self.dead_lettered_total,
+            blocked_keys: if self.subscription.enable_message_ordering {
+                u32::try_from(self.index.leased_keys.len()).unwrap_or(u32::MAX)
+            } else {
+                0
+            },
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -119,23 +591,133 @@ struct SchemaEntry {
     revisions: Vec<Revision>,
 }
 
+/// Who holds a message of a topic generation shared by two or more
+/// subscriptions: how many hold it unacknowledged, and which (by slot) keep
+/// an acknowledged copy only because a snapshot taken from one of those could
+/// revive it.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct Holders {
+    unacked: u32,
+    kept_for_peers: Vec<u32>,
+}
+
+/// One topic generation: its subscriptions, its snapshots, and (while it has
+/// two or more subscriptions) who holds each of its messages.
 #[derive(Debug, Default)]
+struct Generation {
+    members: BTreeSet<String>,
+    snapshots: u32,
+    holders: HashMap<u64, Holders>,
+}
+
+impl Generation {
+    fn shared(&self) -> bool {
+        self.members.len() >= 2
+    }
+}
+
+#[derive(Debug)]
 struct State {
     topics: BTreeMap<String, TopicEntry>,
     subscriptions: BTreeMap<String, SubscriptionEntry>,
     snapshots: BTreeMap<String, SnapshotEntry>,
     schemas: BTreeMap<String, SchemaEntry>,
+    generations: HashMap<u64, Generation>,
+    /// Subscription names by slot.
+    slots: HashMap<u32, String>,
+    next_slot: u32,
     next_message_id: u64,
     next_ack: u64,
     next_generation: u64,
     revision_counter: u64,
+    /// Bytes held by every history ring together.
+    history_bytes: u64,
+    limits: HistoryLimits,
+    /// When the tick next prunes retention windows and retained acknowledgements.
+    next_slow_tick: Instant,
+    /// Dead-letter forwards waiting for the runtime's ticker to hand them to
+    /// the functions on the dead-letter topic; kept only while a ticker
+    /// drains it.
+    outbox: VecDeque<Published>,
+    outbox_open: bool,
+    /// The console revision: bumped by every change a console view shows.
+    revision: u64,
+    /// The revision the console watch last announced.
+    announced: u64,
+    /// The revision at which each kind of resource last changed.
+    resources: ResourceStamps,
+    /// Console views following each subscription's backlog rows, by name, so
+    /// a subscription deleted and created again (or cleared) under an open
+    /// view keeps recording its moved rows.
+    readers: HashMap<String, u32>,
+    /// Messages dead-lettered since the broker started: a running total a
+    /// clear does not take back (the console's counter badge).
+    dead_lettered_total: u64,
+}
+
+/// The kinds of resource the console lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceKind {
+    Topics,
+    Subscriptions,
+    Schemas,
+}
+
+impl ResourceKind {
+    /// `topics`, `subscriptions` or `schemas`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Topics => "topics",
+            Self::Subscriptions => "subscriptions",
+            Self::Schemas => "schemas",
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct ResourceStamps {
+    topics: u64,
+    subscriptions: u64,
+    schemas: u64,
+}
+
+/// Dead-letter forwards the outbox holds at most between two ticks.
+const OUTBOX_CAPACITY: usize = 100_000;
+
+/// What the console's summary counts, from figures the broker keeps anyway.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BrokerTotals {
+    pub topics: u32,
+    pub subscriptions: u32,
+    /// The largest backlog (available, outstanding and pushing) of any
+    /// subscription.
+    pub largest_backlog: u64,
+}
+
+/// What [`Broker::reset`] removed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResetCount {
+    pub topics: u32,
+    pub subscriptions: u32,
+    pub snapshots: u32,
+    pub schemas: u32,
+    /// Messages the topics' history rings held.
+    pub messages: u64,
+    /// Messages the subscriptions tracked, unacknowledged or retained (one
+    /// message counts once per subscription).
+    pub backlog: u64,
 }
 
 /// A push the loop must attempt.
 #[derive(Debug, Clone)]
 pub struct PushJob {
     pub subscription: String,
+    /// The subscription's topic (`_deleted-topic_` once it was deleted).
+    pub topic: String,
     pub message_id: u64,
+    /// The message's push attempt this is, from 1.
+    pub attempt: u32,
     pub endpoint: String,
     pub headers: BTreeMap<String, String>,
     pub body: String,
@@ -150,10 +732,17 @@ pub struct Published {
 
 struct Inner {
     state: Mutex<State>,
-    /// Bumped on every change a waiter could care about.
+    /// Bumped on every change a waiter could care about: deliverability.
     changed: watch::Sender<u64>,
-    /// Pushes currently in flight, keyed by subscription and message id.
-    in_flight: Mutex<BTreeSet<(String, u64)>>,
+    /// Bumped on every change only the console needs (counter stamps,
+    /// resources, consumers, pulls); never wakes a subscriber.
+    console: watch::Sender<u64>,
+    /// Streaming pulls and waiting long polls, by subscription.
+    consumers: Mutex<HashMap<String, ConsumerCounts>>,
+    /// The newest filtered history searches.
+    searches: Mutex<inspect::SearchCache>,
+    /// Pushes currently in flight, by subscription.
+    in_flight: Mutex<HashMap<String, BTreeSet<u64>>>,
 }
 
 /// The shared broker.
@@ -214,20 +803,253 @@ pub fn rfc3339_millis(time: SystemTime) -> String {
     )
 }
 
+/// The instant console positions are measured from.
+fn epoch() -> Instant {
+    static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    *EPOCH.get_or_init(Instant::now)
+}
+
+/// Microseconds from [`epoch`] to `at` (zero for earlier instants).
+fn micros(at: Instant) -> u64 {
+    u64::try_from(at.saturating_duration_since(epoch()).as_micros()).unwrap_or(u64::MAX)
+}
+
+/// An instant on the wall clock.
+#[must_use]
+pub fn wall_clock(at: Instant) -> SystemTime {
+    let now = Instant::now();
+    let system = SystemTime::now();
+    if at >= now {
+        system + (at - now)
+    } else {
+        system.checked_sub(now - at).unwrap_or(UNIX_EPOCH)
+    }
+}
+
+/// Counts per second over the last minute, ending at `ends_at` (the last
+/// whole second counted); the console ages it on its own clock. The suite's
+/// one counting window, which Cloud Tasks uses too.
+pub use firenook_suite_front::window::StampedWindow as SecondWindow;
+
+/// A topic's publishes per second over the last minute.
+type Throughput = firenook_suite_front::window::SecondCounts;
+
+/// A backlog row's place in delivery order: outstanding and pushing
+/// messages first by when they are due (phase 0), then available ones in
+/// the order the next pull takes them (phase 1), then retained
+/// acknowledged ones by id (phase 2). A message that moves gets a new key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BacklogKey {
+    pub phase: u8,
+    pub order: u64,
+    pub id: u64,
+}
+
+impl BacklogKey {
+    fn of(id: u64, tracked: &Tracked) -> Self {
+        match tracked.state {
+            MessageState::Leased { deadline, .. } => Self {
+                phase: 0,
+                order: micros(deadline),
+                id,
+            },
+            MessageState::Pushing { next_attempt } => Self {
+                phase: 0,
+                order: micros(next_attempt),
+                id,
+            },
+            MessageState::Available => Self {
+                phase: 1,
+                order: tracked.sequence,
+                id,
+            },
+            MessageState::Acked => Self {
+                phase: 2,
+                order: id,
+                id,
+            },
+        }
+    }
+}
+
+impl std::fmt::Display for BacklogKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}.{}.{}", self.phase, self.order, self.id)
+    }
+}
+
+impl std::str::FromStr for BacklogKey {
+    type Err = ();
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let mut parts = text.split('.');
+        let phase = parts.next().and_then(|part| part.parse().ok()).ok_or(())?;
+        let order = parts.next().and_then(|part| part.parse().ok()).ok_or(())?;
+        let id = parts.next().and_then(|part| part.parse().ok()).ok_or(())?;
+        if parts.next().is_some() || phase > 2 {
+            return Err(());
+        }
+        Ok(Self { phase, order, id })
+    }
+}
+
+/// Moved rows a subscription with console readers remembers.
+const CHANGE_RING: usize = 1_000;
+/// Fanout records a topic remembers for the deliveries view.
+const RECENT_FANOUTS: usize = 1_000;
+
+/// Who is consuming a subscription right now.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ConsumerCounts {
+    /// Streaming pulls open on it.
+    pub streaming: u32,
+    /// Long-poll pulls waiting for a message.
+    pub waiting: u32,
+}
+
+/// What a [`ConsumerGuard`] counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsumerKind {
+    Streaming,
+    Waiting,
+}
+
+/// Counts one consumer of a subscription while it lives.
+pub struct ConsumerGuard {
+    broker: Broker,
+    subscription: String,
+    kind: ConsumerKind,
+}
+
+impl Drop for ConsumerGuard {
+    fn drop(&mut self) {
+        self.broker
+            .count_consumer(&self.subscription, self.kind, false);
+    }
+}
+
+/// Keeps a subscription's moved backlog rows remembered for a console view.
+pub struct BacklogReader {
+    broker: Broker,
+    subscription: String,
+}
+
+impl Drop for BacklogReader {
+    fn drop(&mut self) {
+        let mut state = lock(&self.broker.inner.state);
+        if let Some(count) = state.readers.get_mut(&self.subscription) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                state.readers.remove(&self.subscription);
+            }
+        }
+        if let Some(entry) = state.subscriptions.get_mut(&self.subscription) {
+            entry.readers = entry.readers.saturating_sub(1);
+            if entry.readers == 0 {
+                entry.changes.clear();
+            }
+        }
+    }
+}
+
+/// Visit counters that prove the cost model in tests.
+#[cfg(test)]
+pub(crate) mod visits {
+    use std::cell::Cell;
+
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub(crate) struct Visits {
+        /// Leases and pushes the tick looked at.
+        pub(crate) tick: u64,
+        /// Available entries a pull looked at.
+        pub(crate) take: u64,
+        /// Ack-id lookups.
+        pub(crate) ack_lookups: u64,
+        /// Walks over a subscription's whole message map.
+        pub(crate) map_walks: u64,
+        /// Acknowledged copies kept because another subscription holds the message.
+        pub(crate) kept_for_peers: u64,
+        /// Acknowledged copies kept by a snapshot.
+        pub(crate) kept_for_snapshots: u64,
+        /// Peers' copies reconsidered after the last holder let go.
+        pub(crate) released: u64,
+        /// Retained acknowledgements pruned by age or cap.
+        pub(crate) pruned: u64,
+        /// History entries a filtered search examined.
+        pub(crate) scanned: u64,
+        /// Broker lock acquisitions of a history page.
+        pub(crate) locks: u64,
+        /// Calls of `Broker::pull`.
+        pub(crate) pulls: u64,
+    }
+
+    thread_local! {
+        static VISITS: Cell<Visits> = Cell::new(Visits::default());
+    }
+
+    /// The counters since the last call, reset.
+    pub(crate) fn take() -> Visits {
+        VISITS.replace(Visits::default())
+    }
+
+    pub(crate) fn bump(change: impl FnOnce(&mut Visits)) {
+        let mut visits = VISITS.get();
+        change(&mut visits);
+        VISITS.set(visits);
+    }
+}
+
+macro_rules! visit {
+    ($field:ident) => {
+        #[cfg(test)]
+        crate::broker::visits::bump(|visits| visits.$field += 1);
+    };
+}
+
+/// Read models for the console: plain structs built under one short lock.
+#[path = "inspect.rs"]
+pub mod inspect;
+
 impl Broker {
     #[must_use]
     pub fn new() -> Self {
+        Self::with_limits(HistoryLimits::default())
+    }
+
+    pub(crate) fn with_limits(limits: HistoryLimits) -> Self {
         let (changed, _) = watch::channel(0);
+        let (console, _) = watch::channel(0);
+        let _ = epoch();
         Self {
             inner: Arc::new(Inner {
+                console,
+                consumers: Mutex::new(HashMap::new()),
+                searches: Mutex::new(inspect::SearchCache::default()),
                 state: Mutex::new(State {
+                    topics: BTreeMap::new(),
+                    subscriptions: BTreeMap::new(),
+                    snapshots: BTreeMap::new(),
+                    schemas: BTreeMap::new(),
+                    generations: HashMap::new(),
+                    slots: HashMap::new(),
+                    next_slot: 1,
                     next_message_id: 1,
                     next_ack: 1,
                     next_generation: 1,
-                    ..State::default()
+                    revision_counter: 0,
+                    history_bytes: 0,
+                    limits,
+                    next_slow_tick: Instant::now() + SLOW_TICK,
+                    outbox: VecDeque::new(),
+                    outbox_open: false,
+                    revision: 0,
+                    announced: 0,
+                    resources: ResourceStamps::default(),
+                    readers: HashMap::new(),
+                    dead_lettered_total: 0,
                 }),
                 changed,
-                in_flight: Mutex::new(BTreeSet::new()),
+                in_flight: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -240,6 +1062,34 @@ impl Broker {
 
     fn notify(&self) {
         self.inner.changed.send_modify(|version| *version += 1);
+    }
+
+    /// A receiver that wakes when anything a console view shows changed:
+    /// counters, resources, consumers, pushes, fanouts. It never wakes a
+    /// subscriber, so a pull that records itself cannot wake itself.
+    #[must_use]
+    pub fn console_watch(&self) -> watch::Receiver<u64> {
+        self.inner.console.subscribe()
+    }
+
+    /// Tells the console watch that something outside the broker's state
+    /// changed (the runtime's refusals and push records).
+    pub fn console_changed(&self) {
+        self.inner.console.send_modify(|version| *version += 1);
+    }
+
+    /// Releases the state; announces a new console revision on the console
+    /// watch, and wakes subscribers when deliverability changed.
+    fn finish(&self, mut state: MutexGuard<'_, State>, wake: bool) {
+        let announce = state.revision != state.announced;
+        state.announced = state.revision;
+        drop(state);
+        if announce {
+            self.console_changed();
+        }
+        if wake {
+            self.notify();
+        }
     }
 
     // ------------------------------------------------------------ topics
@@ -281,10 +1131,25 @@ impl Broker {
             TopicEntry {
                 topic: topic.clone(),
                 generation,
-                messages: Vec::new(),
+                created_at: SystemTime::now(),
+                stamp: 0,
+                published_total: 0,
+                last_published_at: None,
+                throughput: Throughput::default(),
+                latest_id: None,
+                fanouts: 0,
+                recent_fanouts: VecDeque::new(),
+                history: VecDeque::new(),
+                history_bytes: 0,
+                history_dropped: 0,
+                ordering_keys: VecDeque::new(),
+                attribute_keys: BTreeSet::new(),
                 schema,
             },
         );
+        state.generations.insert(generation, Generation::default());
+        state.touch(ResourceKind::Topics);
+        self.finish(state, false);
         Ok(topic)
     }
 
@@ -365,8 +1230,13 @@ impl Broker {
                 ));
             }
         }
-        let entry = state
-            .topics
+        let limits = state.limits;
+        let State {
+            topics,
+            history_bytes,
+            ..
+        } = &mut *state;
+        let entry = topics
             .get_mut(&update.name)
             .ok_or_else(|| PubsubError::not_found("Topic not found."))?;
         for path in paths {
@@ -380,7 +1250,13 @@ impl Broker {
         if let Some(bound) = bound {
             entry.schema = bound;
         }
-        Ok(entry.topic.clone())
+        // A topic that lost its retention keeps only what a topic without
+        // one keeps.
+        entry.trim(history_bytes, &limits);
+        let topic = entry.topic.clone();
+        state.touch(ResourceKind::Topics);
+        self.finish(state, false);
+        Ok(topic)
     }
 
     pub fn delete_topic(&self, name: &str) -> Result<(), PubsubError> {
@@ -389,12 +1265,17 @@ impl Broker {
         let Some(entry) = state.topics.remove(name) else {
             return Err(PubsubError::not_found("Topic not found"));
         };
+        state.history_bytes -= entry.history_bytes;
         for subscription in state.subscriptions.values_mut() {
             if subscription.topic_generation == entry.generation {
                 subscription.topic_deleted = true;
                 DELETED_TOPIC.clone_into(&mut subscription.subscription.topic);
             }
         }
+        state.forget_generation_if_unused(entry.generation);
+        state.touch(ResourceKind::Topics);
+        state.touch(ResourceKind::Subscriptions);
+        self.finish(state, false);
         Ok(())
     }
 
@@ -513,18 +1394,19 @@ impl Broker {
             state.next_message_id += 1;
             message.message_id = id.to_string();
             message.publish_time = Some(timestamp(now));
+            let size = message_size(&message);
             let record = Arc::new(StoredMessage {
                 id,
                 message,
                 published: instant,
                 published_at: now,
+                size,
             });
             ids.push(id.to_string());
             stored.push(record);
         }
         state.deliver(topic, &stored);
-        drop(state);
-        self.notify();
+        self.finish(state, true);
         Ok((
             ids,
             Published {
@@ -555,39 +1437,34 @@ impl Broker {
             "" => None,
             text => Some(Filter::parse(text)?),
         };
-        let mut entry = SubscriptionEntry {
-            subscription: subscription.clone(),
-            topic_generation: generation,
-            original_topic: subscription.topic.clone(),
-            topic_deleted: false,
-            filter,
-            messages: BTreeMap::new(),
-        };
+        let now = Instant::now();
+        state.add_subscription(&subscription, generation, filter);
         // A topic with its own retention seeds the new subscription with the
-        // messages it still holds.
-        if let Some(topic) = state.topics.get(&subscription.topic)
-            && let Some(retention) =
-                duration_seconds(topic.topic.message_retention_duration.as_ref())
-        {
-            let window = Duration::from_secs(u64::try_from(retention).unwrap_or(0));
-            let now = Instant::now();
-            for message in &topic.messages {
-                if now.duration_since(message.published) <= window {
-                    entry.track(Arc::clone(message));
+        // messages its history ring still holds inside the window.
+        let seeds: Vec<Arc<StoredMessage>> = state
+            .topics
+            .get(&subscription.topic)
+            .and_then(|topic| {
+                duration_seconds(topic.topic.message_retention_duration.as_ref()).map(|retention| {
+                    let window = Duration::from_secs(u64::try_from(retention).unwrap_or(0));
+                    topic
+                        .history
+                        .iter()
+                        .filter(|entry| now.duration_since(entry.message.published) <= window)
+                        .map(|entry| Arc::clone(&entry.message))
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+        if !seeds.is_empty() {
+            state.with_subscription(&subscription.name, |ctx| {
+                for message in seeds {
+                    ctx.track(message, now);
                 }
-            }
+            });
         }
-        let push = !entry
-            .subscription
-            .push_config
-            .as_ref()
-            .is_none_or(|config| config.push_endpoint.is_empty());
-        if push {
-            entry.start_pushing();
-        }
-        state.subscriptions.insert(subscription.name.clone(), entry);
-        drop(state);
-        self.notify();
+        state.touch(ResourceKind::Subscriptions);
+        self.finish(state, true);
         Ok(subscription)
     }
 
@@ -702,31 +1579,35 @@ impl Broker {
             }
         }
         let validated = state.validated_subscription(current)?;
-        let entry = state
-            .subscriptions
-            .get_mut(&validated.name)
-            .ok_or_else(|| PubsubError::not_found("Subscription not found."))?;
-        let was_push = entry.is_push();
-        entry.subscription = validated.clone();
-        let is_push = entry.is_push();
-        if is_push && !was_push {
-            entry.start_pushing();
-        } else if was_push && !is_push {
-            entry.stop_pushing();
-        }
-        drop(state);
-        self.notify();
+        let now = Instant::now();
+        state.with_subscription(&validated.name, |ctx| {
+            let was_push = ctx.entry.is_push();
+            let was_retaining = ctx.entry.subscription.retain_acked_messages;
+            ctx.entry.subscription = validated.clone();
+            ctx.switch_delivery(was_push, now);
+            if was_retaining && !validated.retain_acked_messages {
+                // Retention was what kept these; whatever nothing else keeps goes.
+                let acked: Vec<u64> = ctx.entry.index.acked.iter().copied().collect();
+                for id in acked {
+                    ctx.reconsider(id);
+                }
+            }
+        });
+        state.touch(ResourceKind::Subscriptions);
+        self.finish(state, true);
         Ok(validated)
     }
 
     pub fn delete_subscription(&self, name: &str) -> Result<(), PubsubError> {
         names::parse("subscriptions", name)?;
         let mut state = lock(&self.inner.state);
-        if state.subscriptions.remove(name).is_none() {
+        if !state.remove_subscription(name) {
             return Err(PubsubError::not_found("Subscription does not exist"));
         }
-        drop(state);
-        self.notify();
+        state.touch(ResourceKind::Subscriptions);
+        self.finish(state, true);
+        lock(&self.inner.in_flight).remove(name);
+        lock(&self.inner.consumers).remove(name);
         Ok(())
     }
 
@@ -737,22 +1618,19 @@ impl Broker {
     ) -> Result<(), PubsubError> {
         names::parse("subscriptions", name)?;
         let mut state = lock(&self.inner.state);
-        let entry = state
-            .subscriptions
-            .get_mut(name)
-            .ok_or_else(|| PubsubError::not_found("Subscription does not exist"))?;
+        if !state.subscriptions.contains_key(name) {
+            return Err(PubsubError::not_found("Subscription does not exist"));
+        }
         let config = config.unwrap_or_default();
         validate_push_config(&config)?;
-        let was_push = entry.is_push();
-        entry.subscription.push_config = Some(config);
-        let is_push = entry.is_push();
-        if is_push && !was_push {
-            entry.start_pushing();
-        } else if was_push && !is_push {
-            entry.stop_pushing();
-        }
-        drop(state);
-        self.notify();
+        let now = Instant::now();
+        state.with_subscription(name, |ctx| {
+            let was_push = ctx.entry.is_push();
+            ctx.entry.subscription.push_config = Some(config);
+            ctx.switch_delivery(was_push, now);
+        });
+        state.touch(ResourceKind::Subscriptions);
+        self.finish(state, true);
         Ok(())
     }
 
@@ -761,25 +1639,31 @@ impl Broker {
     /// Takes up to `max_messages` deliverable messages, or `None` when the
     /// subscription has nothing to deliver right now.
     pub fn pull(&self, name: &str, max_messages: i32) -> Result<Vec<ReceivedMessage>, PubsubError> {
+        visit!(pulls);
         names::parse("subscriptions", name)?;
         let mut state = lock(&self.inner.state);
         let next_ack = state.next_ack;
         let entry = state
             .subscriptions
-            .get_mut(name)
+            .get(name)
             .ok_or_else(|| PubsubError::not_found("Subscription does not exist"))?;
         if entry.subscription.detached {
             return Err(PubsubError::failed_precondition(
                 "Subscription is detached.",
             ));
         }
-        let (received, used) = entry.take(max_messages, next_ack, Instant::now());
+        let now = Instant::now();
+        let (received, used) = state
+            .with_subscription(name, |ctx| {
+                // Only the console hears of the pull itself.
+                ctx.entry.last_pull = Some(SystemTime::now());
+                ctx.entry.dirty = true;
+                ctx.take(max_messages, next_ack, now)
+            })
+            .unwrap_or_default();
         state.next_ack += used;
-        if received.is_empty() {
-            return Ok(received);
-        }
-        drop(state);
-        self.notify();
+        let delivered = !received.is_empty();
+        self.finish(state, delivered);
         Ok(received)
     }
 
@@ -809,24 +1693,23 @@ impl Broker {
             return Err(PubsubError::invalid_argument("No ack ids specified."));
         }
         let parsed = parse_ack_ids(name, ack_ids)?;
-        let entry = state
-            .subscriptions
-            .get_mut(name)
-            .ok_or_else(|| PubsubError::not_found("Subscription does not exist"))?;
-        let exactly_once = entry.subscription.enable_exactly_once_delivery;
-        let mut forwarded = Vec::new();
-        let mut any_stale = false;
-        for ack in parsed {
-            match entry.find_lease(ack) {
-                Some(id) => entry.acknowledge(id, &mut forwarded),
-                None => any_stale = true,
-            }
-        }
-        if exactly_once && any_stale {
+        let refused = state
+            .with_subscription(name, |ctx| {
+                let exactly_once = ctx.entry.subscription.enable_exactly_once_delivery;
+                let mut any_stale = false;
+                for ack in parsed {
+                    match ctx.find_lease(ack) {
+                        Some(id) => ctx.acknowledge(id),
+                        None => any_stale = true,
+                    }
+                }
+                exactly_once && any_stale
+            })
+            .unwrap_or_default();
+        if refused {
             return Err(PubsubError::invalid_argument(""));
         }
-        drop(state);
-        self.notify();
+        self.finish(state, true);
         Ok(())
     }
 
@@ -850,98 +1733,149 @@ impl Broker {
             ));
         }
         let parsed = parse_ack_ids(name, ack_ids)?;
-        let forwarded = {
-            let entry = state
-                .subscriptions
-                .get_mut(name)
-                .ok_or_else(|| PubsubError::not_found("Subscription does not exist"))?;
-            let mut forwarded = Vec::new();
+        let now = Instant::now();
+        state.with_subscription(name, |ctx| {
             for ack in parsed {
-                if let Some(id) = entry.find_lease(ack) {
-                    entry.modify_deadline(id, seconds, Instant::now(), &mut forwarded);
+                if let Some(id) = ctx.find_lease(ack) {
+                    ctx.modify_deadline(id, seconds, now);
                 }
             }
-            forwarded
-        };
-        state.forward_dead_letters(forwarded);
-        drop(state);
-        self.notify();
+        });
+        self.finish(state, true);
         Ok(())
     }
 
     /// Expires leases and returns the pushes that are due; run on a timer.
     #[must_use]
     pub fn tick(&self) -> Vec<PushJob> {
-        let now = Instant::now();
+        self.tick_at(Instant::now())
+    }
+
+    /// [`Broker::tick`] at `now`: visits only the leases and pushes that are
+    /// due, and once a second prunes retention windows and retained
+    /// acknowledgements.
+    pub(crate) fn tick_at(&self, now: Instant) -> Vec<PushJob> {
         let mut state = lock(&self.inner.state);
-        let mut forwarded = Vec::new();
+        let due_until = (micros(now), u64::MAX);
+        let due: Vec<String> = state
+            .subscriptions
+            .iter()
+            .filter(|(_, entry)| {
+                entry
+                    .index
+                    .leases
+                    .first()
+                    .is_some_and(|first| *first <= due_until)
+                    || (entry.is_push()
+                        && entry
+                            .index
+                            .push_due
+                            .first()
+                            .is_some_and(|first| *first <= due_until))
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
         let mut jobs = Vec::new();
         let mut changed = false;
-        let in_flight = lock(&self.inner.in_flight).clone();
-        for (name, entry) in &mut state.subscriptions {
-            changed |= entry.expire(now, &mut forwarded);
-            if entry.is_push() {
-                let endpoint = entry
-                    .subscription
-                    .push_config
-                    .as_ref()
-                    .map(|config| config.push_endpoint.clone())
-                    .unwrap_or_default();
-                // Push config attributes are stored, not sent as headers.
-                let headers = BTreeMap::new();
-                for tracked in entry.messages.values() {
-                    if let MessageState::Pushing { next_attempt } = tracked.state
-                        && next_attempt <= now
-                        && !in_flight.contains(&(name.clone(), tracked.message.id))
-                    {
-                        jobs.push(PushJob {
-                            subscription: name.clone(),
-                            message_id: tracked.message.id,
-                            endpoint: endpoint.clone(),
-                            headers: headers.clone(),
-                            body: push_envelope(name, &tracked.message),
-                        });
-                    }
-                }
-            }
-        }
-        if !forwarded.is_empty() {
-            changed = true;
-            state.forward_dead_letters(forwarded);
-        }
         {
             let mut flights = lock(&self.inner.in_flight);
-            for job in &jobs {
-                flights.insert((job.subscription.clone(), job.message_id));
+            for name in &due {
+                state.with_subscription(name, |ctx| {
+                    let expired: Vec<u64> = ctx
+                        .entry
+                        .index
+                        .leases
+                        .range(..=due_until)
+                        .map(|(_, id)| *id)
+                        .collect();
+                    for id in expired {
+                        visit!(tick);
+                        ctx.modify_deadline(id, 0, now);
+                        changed = true;
+                    }
+                    if !ctx.entry.is_push() {
+                        return;
+                    }
+                    let endpoint = ctx
+                        .entry
+                        .subscription
+                        .push_config
+                        .as_ref()
+                        .map(|config| config.push_endpoint.clone())
+                        .unwrap_or_default();
+                    let pushes: Vec<u64> = ctx
+                        .entry
+                        .index
+                        .push_due
+                        .range(..=due_until)
+                        .map(|(_, id)| *id)
+                        .collect();
+                    let topic = ctx.entry.subscription.topic.clone();
+                    let flying = flights.entry(name.clone()).or_default();
+                    for id in pushes {
+                        visit!(tick);
+                        if flying.contains(&id) {
+                            continue;
+                        }
+                        ctx.hand_out_push(id, now + PUSH_IN_FLIGHT);
+                        let Some(tracked) = ctx.entry.messages.get(&id) else {
+                            continue;
+                        };
+                        jobs.push(PushJob {
+                            subscription: name.clone(),
+                            topic: topic.clone(),
+                            message_id: id,
+                            attempt: tracked.push_attempts,
+                            endpoint: endpoint.clone(),
+                            // Push config attributes are stored, not sent as headers.
+                            headers: BTreeMap::new(),
+                            body: push_envelope(name, &tracked.message),
+                        });
+                        flying.insert(id);
+                    }
+                    if flying.is_empty() {
+                        flights.remove(name);
+                    }
+                });
             }
         }
-        drop(state);
-        if changed {
-            self.notify();
+        if now >= state.next_slow_tick {
+            state.next_slow_tick = now + SLOW_TICK;
+            state.prune(now);
         }
+        self.finish(state, changed);
         jobs
     }
 
     /// Records the outcome of a push attempt.
     pub fn push_finished(&self, job: &PushJob, delivered: bool) {
-        lock(&self.inner.in_flight).remove(&(job.subscription.clone(), job.message_id));
-        let mut state = lock(&self.inner.state);
-        let mut forwarded = Vec::new();
-        if let Some(entry) = state.subscriptions.get_mut(&job.subscription)
-            && let Some(tracked) = entry.messages.get_mut(&job.message_id)
-            && matches!(tracked.state, MessageState::Pushing { .. })
         {
-            if delivered {
-                entry.acknowledge(job.message_id, &mut forwarded);
-            } else {
-                tracked.state = MessageState::Pushing {
-                    next_attempt: Instant::now() + PUSH_RETRY,
-                };
+            let mut flights = lock(&self.inner.in_flight);
+            if let Some(flying) = flights.get_mut(&job.subscription) {
+                flying.remove(&job.message_id);
+                if flying.is_empty() {
+                    flights.remove(&job.subscription);
+                }
             }
         }
-        state.forward_dead_letters(forwarded);
-        drop(state);
-        self.notify();
+        let mut state = lock(&self.inner.state);
+        let now = Instant::now();
+        state.with_subscription(&job.subscription, |ctx| {
+            let pushing = ctx
+                .entry
+                .messages
+                .get(&job.message_id)
+                .is_some_and(|tracked| matches!(tracked.state, MessageState::Pushing { .. }));
+            if !pushing {
+                return;
+            }
+            if delivered {
+                ctx.acknowledge(job.message_id);
+            } else {
+                ctx.set_next_push(job.message_id, now + PUSH_RETRY);
+            }
+        });
+        self.finish(state, true);
     }
 
     // ------------------------------------------------------------ seek and snapshots
@@ -949,32 +1883,42 @@ impl Broker {
     pub fn seek_to_time(&self, name: &str, time: &Timestamp) -> Result<(), PubsubError> {
         names::parse("subscriptions", name)?;
         let mut state = lock(&self.inner.state);
-        let entry = state
-            .subscriptions
-            .get_mut(name)
-            .ok_or_else(|| PubsubError::not_found("Subscription does not exist"))?;
+        if !state.subscriptions.contains_key(name) {
+            return Err(PubsubError::not_found("Subscription does not exist"));
+        }
         let target = UNIX_EPOCH
             + Duration::from_secs(u64::try_from(time.seconds).unwrap_or(0))
             + Duration::from_nanos(u64::try_from(time.nanos).unwrap_or(0));
-        // Acknowledged messages come back only with `retainAckedMessages`;
-        // everything published before the target counts as acknowledged.
-        let retain = entry.subscription.retain_acked_messages;
-        for tracked in entry.messages.values_mut() {
-            if tracked.message.published_at >= target {
-                if tracked.state == MessageState::Acked && !retain {
-                    continue;
+        let now = Instant::now();
+        state.with_subscription(name, |ctx| {
+            visit!(map_walks);
+            // Acknowledged messages come back only with `retainAckedMessages`;
+            // everything published before the target counts as acknowledged.
+            let retain = ctx.entry.subscription.retain_acked_messages;
+            let plan: Vec<(u64, bool, bool)> = ctx
+                .entry
+                .messages
+                .values()
+                .map(|tracked| {
+                    (
+                        tracked.message.id,
+                        tracked.message.published_at >= target,
+                        tracked.unacked(),
+                    )
+                })
+                .collect();
+            for (id, after, unacked) in plan {
+                if after {
+                    if !unacked && !retain {
+                        continue;
+                    }
+                    ctx.revive(id, now);
+                } else {
+                    ctx.acknowledge(id);
                 }
-                tracked.state = MessageState::Available;
-                tracked.attempts = 0;
-            } else {
-                tracked.state = MessageState::Acked;
             }
-        }
-        if entry.is_push() {
-            entry.start_pushing();
-        }
-        drop(state);
-        self.notify();
+        });
+        self.finish(state, true);
         Ok(())
     }
 
@@ -994,7 +1938,7 @@ impl Broker {
         let snapshot_topic = snap.snapshot.topic.clone();
         let entry = state
             .subscriptions
-            .get_mut(name)
+            .get(name)
             .ok_or_else(|| PubsubError::not_found("Subscription does not exist"))?;
         if entry.topic_deleted || entry.topic_generation != snapshot_generation {
             let subscription_topic = entry.subscription.topic.clone();
@@ -1002,25 +1946,32 @@ impl Broker {
                 "The subscription's topic {subscription_topic} is different from that of the snapshot {snapshot_topic}; they must match in order for Seek work. Note that if a topic is deleted and then re-created with the same name, it is considered a distinct topic for these purposes."
             )));
         }
+        let now = Instant::now();
         // The snapshot decides the acknowledgement state of the messages the
         // subscription itself tracks; it does not add messages it never had.
-        for tracked in entry.messages.values_mut() {
-            let wanted =
-                unacked.contains(&tracked.message.id) || tracked.message.published > created;
-            tracked.state = if wanted {
-                MessageState::Available
-            } else {
-                MessageState::Acked
-            };
-            if wanted {
-                tracked.attempts = 0;
+        state.with_subscription(name, |ctx| {
+            visit!(map_walks);
+            let plan: Vec<(u64, bool)> = ctx
+                .entry
+                .messages
+                .values()
+                .map(|tracked| {
+                    (
+                        tracked.message.id,
+                        unacked.contains(&tracked.message.id)
+                            || tracked.message.published > created,
+                    )
+                })
+                .collect();
+            for (id, wanted) in plan {
+                if wanted {
+                    ctx.revive(id, now);
+                } else {
+                    ctx.acknowledge(id);
+                }
             }
-        }
-        if entry.is_push() {
-            entry.start_pushing();
-        }
-        drop(state);
-        self.notify();
+        });
+        self.finish(state, true);
         Ok(())
     }
 
@@ -1039,12 +1990,7 @@ impl Broker {
             return Err(PubsubError::already_exists("Snapshot already exists"));
         }
         let generation = entry.topic_generation;
-        let unacked = entry
-            .messages
-            .iter()
-            .filter(|(_, tracked)| tracked.state != MessageState::Acked)
-            .map(|(id, _)| *id)
-            .collect();
+        let unacked = entry.index.unacked.clone();
         let now = SystemTime::now();
         // Labels are accepted and dropped, as the official emulator does.
         drop(labels);
@@ -1063,6 +2009,10 @@ impl Broker {
                 created: Instant::now(),
             },
         );
+        if let Some(generation) = state.generations.get_mut(&generation) {
+            generation.snapshots += 1;
+        }
+        self.finish(state, false);
         Ok(snapshot)
     }
 
@@ -1108,9 +2058,11 @@ impl Broker {
     pub fn delete_snapshot(&self, name: &str) -> Result<(), PubsubError> {
         names::parse("snapshots", name)?;
         let mut state = lock(&self.inner.state);
-        if state.snapshots.remove(name).is_none() {
+        let Some(snapshot) = state.snapshots.remove(name) else {
             return Err(PubsubError::not_found("Snapshot does not exist"));
-        }
+        };
+        state.snapshot_removed(snapshot.topic_generation);
+        self.finish(state, false);
         Ok(())
     }
 
@@ -1139,6 +2091,8 @@ impl Broker {
                 revisions: vec![revision],
             },
         );
+        state.touch(ResourceKind::Schemas);
+        self.finish(state, false);
         Ok(output)
     }
 
@@ -1252,7 +2206,10 @@ impl Broker {
             .get_mut(base)
             .ok_or_else(|| PubsubError::not_found("Schema not found"))?;
         entry.revisions.push(revision.clone());
-        Ok(revision_view(&entry.name, &revision, SchemaView::Full))
+        let output = revision_view(&entry.name, &revision, SchemaView::Full);
+        state.touch(ResourceKind::Schemas);
+        self.finish(state, false);
+        Ok(output)
     }
 
     pub fn rollback_schema(&self, name: &str, revision_id: &str) -> Result<Schema, PubsubError> {
@@ -1276,7 +2233,10 @@ impl Broker {
             .get_mut(base)
             .ok_or_else(|| PubsubError::not_found("Schema not found"))?;
         entry.revisions.push(revision.clone());
-        Ok(revision_view(&entry.name, &revision, SchemaView::Full))
+        let output = revision_view(&entry.name, &revision, SchemaView::Full);
+        state.touch(ResourceKind::Schemas);
+        self.finish(state, false);
+        Ok(output)
     }
 
     pub fn delete_schema_revision(&self, name: &str) -> Result<Schema, PubsubError> {
@@ -1301,7 +2261,10 @@ impl Broker {
             ));
         }
         let removed = entry.revisions.remove(index);
-        Ok(revision_view(&entry.name, &removed, SchemaView::Full))
+        let output = revision_view(&entry.name, &removed, SchemaView::Full);
+        state.touch(ResourceKind::Schemas);
+        self.finish(state, false);
+        Ok(output)
     }
 
     pub fn delete_schema(&self, name: &str) -> Result<(), PubsubError> {
@@ -1321,6 +2284,9 @@ impl Broker {
                 }
             }
         }
+        state.touch(ResourceKind::Schemas);
+        state.touch(ResourceKind::Topics);
+        self.finish(state, false);
         Ok(())
     }
 
@@ -1369,9 +2335,108 @@ impl Broker {
     /// Pulls and acknowledges everything on `name` (the functions consumer).
     pub fn drain(&self, name: &str) {
         let mut state = lock(&self.inner.state);
-        if let Some(entry) = state.subscriptions.get_mut(name) {
-            entry.messages.clear();
+        state.with_subscription(name, |ctx| {
+            visit!(map_walks);
+            let ids: Vec<u64> = ctx.entry.messages.keys().copied().collect();
+            for id in ids {
+                ctx.remove(id, Outcome::Drained);
+            }
+        });
+        self.finish(state, false);
+    }
+
+    /// Keeps dead-letter forwards for [`Broker::take_outbox`] while `open`
+    /// (the runtime's ticker drains it); closing it drops what it holds.
+    pub fn set_outbox_open(&self, open: bool) {
+        let mut state = lock(&self.inner.state);
+        state.outbox_open = open;
+        if !open {
+            state.outbox.clear();
         }
+    }
+
+    /// Dead-letter forwards since the last call, for function delivery.
+    #[must_use]
+    pub fn take_outbox(&self) -> Vec<Published> {
+        let mut state = lock(&self.inner.state);
+        if state.outbox.is_empty() {
+            return Vec::new();
+        }
+        state.outbox.drain(..).collect()
+    }
+
+    /// Removes every topic, subscription, snapshot and schema with their
+    /// messages, history rings and holders (the console's clear). Message
+    /// ids, acknowledgement ids and schema revision ids keep counting, so no
+    /// id is reused within a run; subscribers waiting on a removed
+    /// subscription wake and find it gone.
+    #[must_use = "the count is what the clear reports"]
+    pub fn reset(&self) -> ResetCount {
+        let mut state = lock(&self.inner.state);
+        let count = ResetCount {
+            topics: u32::try_from(state.topics.len()).unwrap_or(u32::MAX),
+            subscriptions: u32::try_from(state.subscriptions.len()).unwrap_or(u32::MAX),
+            snapshots: u32::try_from(state.snapshots.len()).unwrap_or(u32::MAX),
+            schemas: u32::try_from(state.schemas.len()).unwrap_or(u32::MAX),
+            messages: state
+                .topics
+                .values()
+                .map(|topic| u64::try_from(topic.history.len()).unwrap_or(u64::MAX))
+                .sum(),
+            backlog: state
+                .subscriptions
+                .values()
+                .map(|entry| u64::try_from(entry.messages.len()).unwrap_or(u64::MAX))
+                .sum(),
+        };
+        state.topics.clear();
+        state.subscriptions.clear();
+        state.snapshots.clear();
+        state.schemas.clear();
+        state.generations.clear();
+        state.slots.clear();
+        state.history_bytes = 0;
+        state.outbox.clear();
+        for kind in [
+            ResourceKind::Topics,
+            ResourceKind::Subscriptions,
+            ResourceKind::Schemas,
+        ] {
+            state.touch(kind);
+        }
+        self.finish(state, true);
+        *lock(&self.inner.searches) = inspect::SearchCache::default();
+        lock(&self.inner.in_flight).clear();
+        count
+    }
+
+    /// Topics, subscriptions and the largest backlog, from the counters
+    /// each subscription keeps: one walk of the subscriptions, no message
+    /// visited.
+    #[must_use]
+    pub fn totals(&self) -> BrokerTotals {
+        let state = lock(&self.inner.state);
+        let largest_backlog = state
+            .subscriptions
+            .values()
+            .map(|entry| {
+                let counts = entry.index.counts;
+                counts.available + counts.leased + counts.pushing
+            })
+            .max()
+            .unwrap_or(0);
+        BrokerTotals {
+            topics: u32::try_from(state.topics.len()).unwrap_or(u32::MAX),
+            subscriptions: u32::try_from(state.subscriptions.len()).unwrap_or(u32::MAX),
+            largest_backlog,
+        }
+    }
+
+    /// Messages dead-lettered since the broker started (a clear keeps the
+    /// count). O(1).
+    #[must_use]
+    pub fn dead_lettered_total(&self) -> u64 {
+        lock(&self.inner.state).dead_lettered_total
     }
 
     /// Creates the topic when it does not exist yet (function targets).
@@ -1387,22 +2452,51 @@ impl Broker {
 
 impl State {
     fn deliver(&mut self, topic: &str, messages: &[Arc<StoredMessage>]) {
-        let Some(entry) = self.topics.get_mut(topic) else {
+        let limits = self.limits;
+        let Self {
+            topics,
+            generations,
+            history_bytes,
+            revision,
+            ..
+        } = self;
+        let Some(entry) = topics.get_mut(topic) else {
             return;
         };
-        entry.messages.extend(messages.iter().cloned());
-        let generation = entry.generation;
-        for subscription in self.subscriptions.values_mut() {
-            if subscription.topic_deleted || subscription.topic_generation != generation {
-                continue;
-            }
-            for message in messages {
-                subscription.track(Arc::clone(message));
-            }
+        entry.append(messages, history_bytes, &limits);
+        if let Some(last) = messages.last() {
+            entry.published_total += u64::try_from(messages.len()).unwrap_or(u64::MAX);
+            entry.last_published_at = Some(last.published_at);
+            entry.latest_id = Some(last.id);
+            entry.throughput.record(
+                last.published_at,
+                u32::try_from(messages.len()).unwrap_or(u32::MAX),
+            );
+            *revision += 1;
+            entry.stamp = *revision;
         }
+        let members: Vec<String> = generations
+            .get(&entry.generation)
+            .map(|generation| generation.members.iter().cloned().collect())
+            .unwrap_or_default();
+        let now = Instant::now();
+        for name in &members {
+            self.with_subscription(name, |ctx| {
+                if ctx.entry.topic_deleted {
+                    return;
+                }
+                for message in messages {
+                    ctx.track(Arc::clone(message), now);
+                }
+            });
+        }
+        self.enforce_history_cap();
     }
 
     fn forward_dead_letters(&mut self, forwarded: Vec<(String, Arc<StoredMessage>, u32)>) {
+        self.dead_lettered_total = self
+            .dead_lettered_total
+            .saturating_add(u64::try_from(forwarded.len()).unwrap_or(u64::MAX));
         for (subscription, message, attempts) in forwarded {
             let Some(policy) = self
                 .subscriptions
@@ -1443,13 +2537,344 @@ impl State {
             copy.message_id = id.to_string();
             let now = SystemTime::now();
             copy.publish_time = Some(timestamp(now));
+            let size = message_size(&copy);
             let stored = Arc::new(StoredMessage {
                 id,
                 message: copy,
                 published: Instant::now(),
                 published_at: now,
+                size,
             });
-            self.deliver(&policy.dead_letter_topic, &[stored]);
+            self.deliver(&policy.dead_letter_topic, std::slice::from_ref(&stored));
+            // The forward is a publish to the dead-letter topic: the
+            // functions listening there receive it like any other.
+            if self.outbox_open {
+                if self.outbox.len() >= OUTBOX_CAPACITY {
+                    self.outbox.pop_front();
+                }
+                self.outbox.push_back(Published {
+                    topic: policy.dead_letter_topic.clone(),
+                    messages: vec![stored],
+                });
+            }
+        }
+    }
+
+    /// Stores a new subscription on `generation` and gives it a slot; from
+    /// the second subscription of a generation on, who holds what is counted.
+    fn add_subscription(
+        &mut self,
+        subscription: &Subscription,
+        generation: u64,
+        filter: Option<Filter>,
+    ) {
+        let mut slot = self.next_slot;
+        while slot == 0 || self.slots.contains_key(&slot) {
+            slot = slot.wrapping_add(1);
+        }
+        self.next_slot = slot.wrapping_add(1);
+        let name = subscription.name.clone();
+        self.subscriptions.insert(
+            name.clone(),
+            SubscriptionEntry {
+                subscription: subscription.clone(),
+                topic_generation: generation,
+                original_topic: subscription.topic.clone(),
+                topic_deleted: false,
+                filter,
+                messages: BTreeMap::new(),
+                index: Index::default(),
+                acked_total: 0,
+                dead_lettered_total: 0,
+                created_at: SystemTime::now(),
+                slot,
+                stamp: 0,
+                dirty: false,
+                last_pull: None,
+                readers: self.readers.get(&name).copied().unwrap_or(0),
+                changes: VecDeque::new(),
+                change_sequence: 0,
+            },
+        );
+        self.slots.insert(slot, name.clone());
+        let Self {
+            generations,
+            subscriptions,
+            ..
+        } = self;
+        let generation = generations.entry(generation).or_default();
+        if generation.members.len() == 1
+            && let Some(existing) = generation
+                .members
+                .first()
+                .and_then(|member| subscriptions.get(member))
+        {
+            for id in &existing.index.unacked {
+                generation.holders.entry(*id).or_default().unacked += 1;
+            }
+        }
+        generation.members.insert(name);
+    }
+
+    /// Removes a subscription, letting go of everything it held.
+    fn remove_subscription(&mut self, name: &str) -> bool {
+        if self.with_subscription(name, leave).is_none() {
+            return false;
+        }
+        let Some(entry) = self.subscriptions.remove(name) else {
+            return false;
+        };
+        self.slots.remove(&entry.slot);
+        if let Some(generation) = self.generations.get_mut(&entry.topic_generation) {
+            generation.members.remove(name);
+            if !generation.shared() {
+                generation.holders.clear();
+            }
+        }
+        self.forget_generation_if_unused(entry.topic_generation);
+        true
+    }
+
+    /// A deleted snapshot no longer keeps what it listed or predates.
+    fn snapshot_removed(&mut self, generation: u64) {
+        let members: Vec<String> = match self.generations.get_mut(&generation) {
+            Some(entry) => {
+                entry.snapshots = entry.snapshots.saturating_sub(1);
+                entry.members.iter().cloned().collect()
+            }
+            None => return,
+        };
+        for name in &members {
+            self.with_subscription(name, |ctx| {
+                let acked: Vec<u64> = ctx.entry.index.acked.iter().copied().collect();
+                for id in acked {
+                    ctx.reconsider(id);
+                }
+            });
+        }
+        self.forget_generation_if_unused(generation);
+    }
+
+    /// A resource of `kind` was created, changed or deleted.
+    fn touch(&mut self, kind: ResourceKind) {
+        self.revision += 1;
+        let stamp = match kind {
+            ResourceKind::Topics => &mut self.resources.topics,
+            ResourceKind::Subscriptions => &mut self.resources.subscriptions,
+            ResourceKind::Schemas => &mut self.resources.schemas,
+        };
+        *stamp = self.revision;
+    }
+
+    /// A subscription's console figures changed outside its messages.
+    fn stamp_subscription(&mut self, name: &str) {
+        if let Some(entry) = self.subscriptions.get_mut(name) {
+            self.revision += 1;
+            entry.stamp = self.revision;
+        }
+    }
+
+    fn forget_generation_if_unused(&mut self, generation: u64) {
+        let unused = self
+            .generations
+            .get(&generation)
+            .is_some_and(|entry| entry.members.is_empty() && entry.snapshots == 0);
+        if unused
+            && !self
+                .topics
+                .values()
+                .any(|topic| topic.generation == generation)
+        {
+            self.generations.remove(&generation);
+        }
+    }
+
+    /// Runs `work` on one subscription's transitions, then applies what they
+    /// caused elsewhere: history outcomes, peers' acknowledged copies nothing
+    /// keeps any more, and dead letters.
+    fn with_subscription<R>(
+        &mut self,
+        name: &str,
+        work: impl FnOnce(&mut Ctx<'_>) -> R,
+    ) -> Option<R> {
+        let (result, applied) = {
+            let Self {
+                subscriptions,
+                generations,
+                snapshots,
+                revision,
+                ..
+            } = self;
+            let entry = subscriptions.get_mut(name)?;
+            let generation = entry.topic_generation;
+            let slot = entry.slot;
+            let mut ctx = Ctx {
+                name,
+                entry,
+                generation: generations.get_mut(&generation),
+                snapshots,
+                effects: Effects::default(),
+            };
+            let result = work(&mut ctx);
+            if ctx.entry.dirty {
+                *revision += 1;
+                ctx.entry.stamp = *revision;
+                ctx.entry.dirty = false;
+            }
+            let effects = ctx.effects;
+            let topic = (!effects.outcomes.is_empty() && !ctx.entry.topic_deleted)
+                .then(|| ctx.entry.subscription.topic.clone());
+            (
+                result,
+                Applied {
+                    effects,
+                    generation,
+                    slot,
+                    topic,
+                },
+            )
+        };
+        self.apply(applied);
+        Some(result)
+    }
+
+    /// What a subscription's transitions caused elsewhere: history outcomes,
+    /// peers' acknowledged copies nothing keeps any more, and dead letters.
+    fn apply(&mut self, applied: Applied) {
+        let Applied {
+            effects,
+            generation,
+            slot,
+            topic,
+        } = applied;
+        if let Some(topic) = topic {
+            self.write_outcomes(&topic, generation, slot, &effects.outcomes);
+        }
+        for (id, slots) in effects.released {
+            for slot in slots {
+                if let Some(peer) = self.slots.get(&slot).cloned() {
+                    self.reconsider_copy(&peer, id);
+                }
+            }
+        }
+        if !effects.forwarded.is_empty() {
+            self.forward_dead_letters(effects.forwarded);
+        }
+    }
+
+    fn reconsider_copy(&mut self, name: &str, id: u64) {
+        visit!(released);
+        self.with_subscription(name, |ctx| ctx.reconsider(id));
+    }
+
+    fn write_outcomes(
+        &mut self,
+        topic: &str,
+        generation: u64,
+        slot: u32,
+        outcomes: &[(u64, Outcome)],
+    ) {
+        let Self {
+            topics,
+            history_bytes,
+            ..
+        } = self;
+        let Some(entry) = topics.get_mut(topic) else {
+            return;
+        };
+        if entry.generation != generation {
+            return;
+        }
+        for (id, outcome) in outcomes {
+            if let Ok(position) = entry
+                .history
+                .binary_search_by_key(id, |history| history.message.id)
+            {
+                lock(&entry.history[position].outcomes).push((slot, *outcome));
+                entry.history_bytes += OUTCOME_BYTES;
+                *history_bytes += OUTCOME_BYTES;
+            }
+        }
+    }
+
+    /// Keeps every ring together under the global cap: first from topics
+    /// without retention (the one holding the most bytes, never below the
+    /// floor), then from topics with retention.
+    fn enforce_history_cap(&mut self) {
+        let limits = self.limits;
+        for with_retention in [false, true] {
+            while self.history_bytes > limits.total_bytes {
+                let mut largest: Option<(&String, u64)> = None;
+                let mut runner_up = 0;
+                for (name, topic) in &self.topics {
+                    if topic.has_retention() != with_retention
+                        || topic.history.len() <= limits.floor
+                    {
+                        continue;
+                    }
+                    match largest {
+                        Some((_, bytes)) if topic.history_bytes <= bytes => {
+                            runner_up = runner_up.max(topic.history_bytes);
+                        }
+                        _ => {
+                            if let Some((_, bytes)) = largest {
+                                runner_up = runner_up.max(bytes);
+                            }
+                            largest = Some((name, topic.history_bytes));
+                        }
+                    }
+                }
+                let Some((name, _)) = largest else {
+                    break;
+                };
+                let name = name.clone();
+                let Self {
+                    topics,
+                    history_bytes,
+                    ..
+                } = self;
+                let Some(topic) = topics.get_mut(&name) else {
+                    break;
+                };
+                while *history_bytes > limits.total_bytes && topic.history.len() > limits.floor {
+                    topic.pop_oldest(history_bytes);
+                    if topic.history_bytes < runner_up {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// The once-a-second pass: retention topics keep only their window, and
+    /// retained acknowledgements expire with their subscription's retention
+    /// (and past the cap, oldest first).
+    fn prune(&mut self, now: Instant) {
+        let Self {
+            topics,
+            history_bytes,
+            ..
+        } = self;
+        for topic in topics.values_mut() {
+            if let Some(window) = topic.retention() {
+                while topic.history.front().is_some_and(|entry| {
+                    now.saturating_duration_since(entry.message.published) > window
+                }) {
+                    topic.pop_oldest(history_bytes);
+                }
+            }
+        }
+        let cap = self.limits.retained_acked;
+        let retaining: Vec<String> = self
+            .subscriptions
+            .iter()
+            .filter(|(_, entry)| {
+                entry.subscription.retain_acked_messages && entry.index.counts.acked > 0
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        for name in &retaining {
+            self.with_subscription(name, |ctx| ctx.prune_retained(now, cap));
         }
     }
 
@@ -1759,60 +3184,460 @@ fn json_string(text: &str) -> String {
         .replace('/', "\\/")
 }
 
-// ---------------------------------------------------------------- subscriptions
+// ---------------------------------------------------------------- history
 
-impl SubscriptionEntry {
-    fn is_push(&self) -> bool {
-        self.subscription
-            .push_config
-            .as_ref()
-            .is_some_and(|config| !config.push_endpoint.is_empty())
+impl TopicEntry {
+    fn retention(&self) -> Option<Duration> {
+        duration_seconds(self.topic.message_retention_duration.as_ref())
+            .map(|seconds| Duration::from_secs(u64::try_from(seconds).unwrap_or(0)))
     }
 
-    fn track(&mut self, message: Arc<StoredMessage>) {
-        if let Some(filter) = &self.filter
+    fn has_retention(&self) -> bool {
+        self.topic.message_retention_duration.is_some()
+    }
+
+    /// The messages and bytes this topic's ring keeps.
+    fn capacity(&self, limits: &HistoryLimits) -> (usize, u64) {
+        if self.has_retention() {
+            (limits.retention_messages, limits.retention_bytes)
+        } else {
+            (limits.messages, limits.bytes)
+        }
+    }
+
+    fn append(&mut self, messages: &[Arc<StoredMessage>], total: &mut u64, limits: &HistoryLimits) {
+        for message in messages {
+            self.remember_keys(&message.message);
+            let bytes = u64::from(message.size);
+            self.history_bytes += bytes;
+            *total += bytes;
+            self.history
+                .push_back(Arc::new(HistoryEntry::new(Arc::clone(message))));
+        }
+        self.trim(total, limits);
+    }
+
+    /// Drops the oldest entries past the topic's caps; the newest message
+    /// stays whatever its size.
+    fn trim(&mut self, total: &mut u64, limits: &HistoryLimits) {
+        let (messages, bytes) = self.capacity(limits);
+        while self.history.len() > messages
+            || (self.history_bytes > bytes && self.history.len() > 1)
+        {
+            self.pop_oldest(total);
+        }
+    }
+
+    fn pop_oldest(&mut self, total: &mut u64) {
+        if let Some(entry) = self.history.pop_front() {
+            let bytes = entry.bytes();
+            self.history_bytes = self.history_bytes.saturating_sub(bytes);
+            *total = total.saturating_sub(bytes);
+            self.history_dropped += 1;
+        }
+    }
+
+    fn remember_fanout(&mut self, id: u64) {
+        self.recent_fanouts.push_back((self.fanouts, id));
+        if self.recent_fanouts.len() > RECENT_FANOUTS {
+            self.recent_fanouts.pop_front();
+        }
+    }
+
+    fn remember_keys(&mut self, message: &PubsubMessage) {
+        let key = &message.ordering_key;
+        if !key.is_empty() && self.ordering_keys.back() != Some(key) {
+            if let Some(position) = self.ordering_keys.iter().position(|seen| seen == key) {
+                self.ordering_keys.remove(position);
+            }
+            self.ordering_keys.push_back(key.clone());
+            if self.ordering_keys.len() > SEEN_ORDERING_KEYS {
+                self.ordering_keys.pop_front();
+            }
+        }
+        for name in message.attributes.keys() {
+            if self.attribute_keys.len() >= SEEN_ATTRIBUTE_KEYS {
+                break;
+            }
+            if !self.attribute_keys.contains(name) {
+                self.attribute_keys.insert(name.clone());
+            }
+        }
+    }
+}
+
+impl Broker {
+    /// What `topic`'s history ring holds and can hold.
+    #[must_use]
+    pub fn history_window(&self, topic: &str) -> Option<HistoryWindow> {
+        let state = lock(&self.inner.state);
+        let entry = state.topics.get(topic)?;
+        let (messages, bytes) = entry.capacity(&state.limits);
+        Some(HistoryWindow {
+            messages: u32::try_from(entry.history.len()).unwrap_or(u32::MAX),
+            bytes: entry.history_bytes,
+            oldest_id: entry.history.front().map(|history| history.message.id),
+            capacity_messages: u32::try_from(messages).unwrap_or(u32::MAX),
+            capacity_bytes: bytes,
+            dropped: entry.history_dropped,
+        })
+    }
+
+    /// The ordering keys and attribute names seen on `topic`.
+    #[must_use]
+    pub fn seen_keys(&self, topic: &str) -> Option<SeenKeys> {
+        let state = lock(&self.inner.state);
+        let entry = state.topics.get(topic)?;
+        Some(SeenKeys {
+            ordering_keys: entry.ordering_keys.iter().rev().cloned().collect(),
+            attribute_keys: entry.attribute_keys.iter().cloned().collect(),
+        })
+    }
+
+    /// A subscription's figures, from the counts every transition keeps.
+    #[must_use]
+    pub fn subscription_counts(&self, name: &str) -> Option<SubscriptionCounts> {
+        let state = lock(&self.inner.state);
+        state.subscriptions.get(name).map(SubscriptionEntry::counts)
+    }
+
+    /// What became of message `id` of `topic` at each of the topic's
+    /// subscriptions, by name, while the topic's history ring holds it.
+    #[must_use]
+    pub fn message_marks(&self, topic: &str, id: u64) -> Option<Vec<(String, MessageMark)>> {
+        let state = lock(&self.inner.state);
+        let entry = state.topics.get(topic)?;
+        let position = entry
+            .history
+            .binary_search_by_key(&id, |history| history.message.id)
+            .ok()?;
+        let history = &entry.history[position];
+        let outcomes = history.outcomes();
+        let generation = state.generations.get(&entry.generation)?;
+        Some(
+            generation
+                .members
+                .iter()
+                .filter_map(|name| {
+                    let subscription = state.subscriptions.get(name)?;
+                    Some((name.clone(), subscription.mark(&history.message, &outcomes)))
+                })
+                .collect(),
+        )
+    }
+}
+
+impl SubscriptionEntry {
+    /// This subscription's mark for a message of its topic: its own tracking
+    /// while it holds the message, then the outcome it recorded, then why it
+    /// never had it.
+    fn mark(&self, message: &StoredMessage, outcomes: &[(u32, Outcome)]) -> MessageMark {
+        if let Some(tracked) = self.messages.get(&message.id) {
+            return match tracked.state {
+                MessageState::Available => MessageMark::Available,
+                MessageState::Leased { .. } => MessageMark::Outstanding,
+                MessageState::Pushing { .. } => MessageMark::Pushing,
+                MessageState::Acked => MessageMark::Acked,
+            };
+        }
+        if let Some((_, outcome)) = outcomes.iter().rev().find(|(slot, _)| *slot == self.slot) {
+            return match outcome {
+                Outcome::Acked => MessageMark::Acked,
+                Outcome::DeadLettered => MessageMark::DeadLettered,
+                Outcome::Drained => MessageMark::Drained,
+            };
+        }
+        if self.created_at > message.published_at {
+            return MessageMark::NotTracked;
+        }
+        if self
+            .filter
+            .as_ref()
+            .is_some_and(|filter| !filter.matches(&message.message.attributes))
+        {
+            return MessageMark::Filtered;
+        }
+        MessageMark::NotTracked
+    }
+}
+
+// ---------------------------------------------------------------- console controls
+
+impl Broker {
+    /// Counts a streaming pull or a waiting long poll on `subscription` until
+    /// the guard drops; only the console watch hears of it.
+    #[must_use]
+    pub fn consumer_guard(&self, subscription: &str, kind: ConsumerKind) -> ConsumerGuard {
+        self.count_consumer(subscription, kind, true);
+        ConsumerGuard {
+            broker: self.clone(),
+            subscription: subscription.to_owned(),
+            kind,
+        }
+    }
+
+    fn count_consumer(&self, subscription: &str, kind: ConsumerKind, add: bool) {
+        {
+            let mut consumers = lock(&self.inner.consumers);
+            let counts = consumers.entry(subscription.to_owned()).or_default();
+            let count = match kind {
+                ConsumerKind::Streaming => &mut counts.streaming,
+                ConsumerKind::Waiting => &mut counts.waiting,
+            };
+            *count = if add {
+                count.saturating_add(1)
+            } else {
+                count.saturating_sub(1)
+            };
+            if *counts == ConsumerCounts::default() {
+                consumers.remove(subscription);
+            }
+        }
+        let mut state = lock(&self.inner.state);
+        state.stamp_subscription(subscription);
+        self.finish(state, false);
+    }
+
+    /// Streaming pulls and waiting long polls on `subscription` now.
+    #[must_use]
+    pub fn consumers(&self, subscription: &str) -> ConsumerCounts {
+        lock(&self.inner.consumers)
+            .get(subscription)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Remembers `subscription`'s moved backlog rows for a console view
+    /// until the reader drops; `None` when it does not exist.
+    #[must_use]
+    pub fn backlog_reader(&self, subscription: &str) -> Option<BacklogReader> {
+        let mut state = lock(&self.inner.state);
+        let entry = state.subscriptions.get_mut(subscription)?;
+        entry.readers += 1;
+        *state.readers.entry(subscription.to_owned()).or_default() += 1;
+        Some(BacklogReader {
+            broker: self.clone(),
+            subscription: subscription.to_owned(),
+        })
+    }
+
+    /// Acknowledges message `id` on `subscription` from the console, whatever
+    /// state it is in: an app's later ack of it is stale, as after any ack.
+    pub fn force_ack(&self, subscription: &str, id: u64) -> Result<(), PubsubError> {
+        names::parse("subscriptions", subscription)?;
+        let mut state = lock(&self.inner.state);
+        let unacked = state
+            .subscriptions
+            .get(subscription)
+            .ok_or_else(|| PubsubError::not_found("Subscription does not exist"))?
+            .messages
+            .get(&id)
+            .map(Tracked::unacked)
+            .ok_or_else(|| {
+                PubsubError::not_found(format!(
+                    "Message {id} is not in this subscription's backlog."
+                ))
+            })?;
+        if !unacked {
+            return Err(PubsubError::failed_precondition(format!(
+                "Message {id} is already acknowledged on this subscription."
+            )));
+        }
+        state.with_subscription(subscription, |ctx| ctx.acknowledge(id));
+        self.finish(state, true);
+        Ok(())
+    }
+
+    /// Ends the lease on message `id` now, as its expiry would: it is
+    /// redelivered behind later messages, or dead-lettered at its last attempt.
+    pub fn release(&self, subscription: &str, id: u64) -> Result<(), PubsubError> {
+        names::parse("subscriptions", subscription)?;
+        let mut state = lock(&self.inner.state);
+        let leased = state
+            .subscriptions
+            .get(subscription)
+            .ok_or_else(|| PubsubError::not_found("Subscription does not exist"))?
+            .messages
+            .get(&id)
+            .map(|tracked| matches!(tracked.state, MessageState::Leased { .. }))
+            .ok_or_else(|| {
+                PubsubError::not_found(format!(
+                    "Message {id} is not in this subscription's backlog."
+                ))
+            })?;
+        if !leased {
+            return Err(PubsubError::failed_precondition(format!(
+                "Message {id} is not leased on this subscription."
+            )));
+        }
+        let now = Instant::now();
+        state.with_subscription(subscription, |ctx| ctx.modify_deadline(id, 0, now));
+        self.finish(state, true);
+        Ok(())
+    }
+
+    /// Records, on each message's history entry (while the ring keeps it),
+    /// what the runtime did for the functions of `topic`.
+    pub fn record_fanout(
+        &self,
+        topic: &str,
+        at: SystemTime,
+        skipped: Option<FanoutSkip>,
+        messages: Vec<(u64, Vec<FanoutTarget>)>,
+    ) {
+        let mut state = lock(&self.inner.state);
+        let State {
+            topics,
+            history_bytes,
+            revision,
+            ..
+        } = &mut *state;
+        let Some(entry) = topics.get_mut(topic) else {
+            return;
+        };
+        let mut recorded = false;
+        for (id, targets) in messages {
+            let Ok(position) = entry
+                .history
+                .binary_search_by_key(&id, |history| history.message.id)
+            else {
+                continue;
+            };
+            entry.fanouts += 1;
+            let fanout = Fanout {
+                at,
+                targets,
+                skipped,
+                sequence: entry.fanouts,
+            };
+            let added = fanout.bytes();
+            let mut slot = lock(&entry.history[position].fanout);
+            let removed = slot.as_ref().map_or(0, Fanout::bytes);
+            *slot = Some(fanout);
+            drop(slot);
+            entry.history_bytes = entry.history_bytes.saturating_sub(removed) + added;
+            *history_bytes = history_bytes.saturating_sub(removed) + added;
+            entry.remember_fanout(id);
+            recorded = true;
+        }
+        if recorded {
+            *revision += 1;
+            entry.stamp = *revision;
+        }
+        self.finish(state, false);
+    }
+
+    /// Appends a target (a console redelivery) to message `id`'s fanout;
+    /// false when the ring no longer keeps the message.
+    pub fn add_fanout_target(&self, topic: &str, id: u64, target: FanoutTarget) -> bool {
+        let mut state = lock(&self.inner.state);
+        let State {
+            topics,
+            history_bytes,
+            revision,
+            ..
+        } = &mut *state;
+        let Some(entry) = topics.get_mut(topic) else {
+            return false;
+        };
+        let Ok(position) = entry
+            .history
+            .binary_search_by_key(&id, |history| history.message.id)
+        else {
+            return false;
+        };
+        entry.fanouts += 1;
+        let sequence = entry.fanouts;
+        let mut slot = lock(&entry.history[position].fanout);
+        let removed = slot.as_ref().map_or(0, Fanout::bytes);
+        let fanout = slot.get_or_insert_with(|| Fanout {
+            at: target.at,
+            targets: Vec::new(),
+            skipped: None,
+            sequence,
+        });
+        fanout.targets.push(target);
+        fanout.sequence = sequence;
+        let added = fanout.bytes();
+        drop(slot);
+        entry.history_bytes = entry.history_bytes.saturating_sub(removed) + added;
+        *history_bytes = history_bytes.saturating_sub(removed) + added;
+        entry.remember_fanout(id);
+        *revision += 1;
+        entry.stamp = *revision;
+        self.finish(state, false);
+        true
+    }
+}
+
+// ---------------------------------------------------------------- transitions
+
+/// What one subscription's transitions caused elsewhere, applied by
+/// [`State::with_subscription`] once the subscription is let go of.
+#[derive(Default)]
+struct Effects {
+    /// Messages whose last unacknowledged holder let go, with the slots of
+    /// the subscriptions that kept an acknowledged copy only for it.
+    released: Vec<(u64, Vec<u32>)>,
+    /// History outcomes of this subscription.
+    outcomes: Vec<(u64, Outcome)>,
+    /// Dead-lettered messages to forward: (source subscription, message, attempts).
+    forwarded: Vec<(String, Arc<StoredMessage>, u32)>,
+}
+
+/// [`Effects`] with what they need to be applied.
+struct Applied {
+    effects: Effects,
+    generation: u64,
+    slot: u32,
+    topic: Option<String>,
+}
+
+/// One subscription's transitions, with the generation's holder counts and
+/// the snapshots that decide what an acknowledgement may drop.
+struct Ctx<'a> {
+    name: &'a str,
+    entry: &'a mut SubscriptionEntry,
+    generation: Option<&'a mut Generation>,
+    snapshots: &'a BTreeMap<String, SnapshotEntry>,
+    effects: Effects,
+}
+
+impl Ctx<'_> {
+    /// Starts tracking a published message, unless the filter refuses it.
+    fn track(&mut self, message: Arc<StoredMessage>, now: Instant) {
+        if let Some(filter) = &self.entry.filter
             && !filter.matches(&message.message.attributes)
         {
             return;
         }
-        let state = if self.is_push() {
-            MessageState::Pushing {
-                next_attempt: Instant::now(),
-            }
+        let id = message.id;
+        if self.entry.messages.contains_key(&id) {
+            return;
+        }
+        let state = if self.entry.is_push() {
+            MessageState::Pushing { next_attempt: now }
         } else {
             MessageState::Available
         };
-        self.messages.insert(
-            message.id,
-            Tracked {
-                sequence: message.id,
-                message,
-                state,
-                attempts: 0,
-            },
-        );
+        self.entry.insert(Tracked {
+            sequence: id,
+            message,
+            state,
+            attempts: 0,
+            push_attempts: 0,
+        });
+        self.hold(id);
     }
 
-    fn start_pushing(&mut self) {
-        for tracked in self.messages.values_mut() {
-            if tracked.state == MessageState::Available {
-                tracked.state = MessageState::Pushing {
-                    next_attempt: Instant::now(),
-                };
-            }
-        }
+    fn find_lease(&self, ack: u64) -> Option<u64> {
+        visit!(ack_lookups);
+        self.entry.index.acks.get(&ack).copied()
     }
 
-    fn stop_pushing(&mut self) {
-        for tracked in self.messages.values_mut() {
-            if matches!(tracked.state, MessageState::Pushing { .. }) {
-                tracked.state = MessageState::Available;
-            }
-        }
-    }
-
-    /// Delivers available messages: unordered ones in publish order, ordered
-    /// ones only while no earlier message of the same key is outstanding.
+    /// Delivers available messages in delivery order: unordered ones as they
+    /// come, ordered ones only while no earlier message of the same key is
+    /// outstanding.
     fn take(
         &mut self,
         max_messages: i32,
@@ -1820,48 +3645,45 @@ impl SubscriptionEntry {
         now: Instant,
     ) -> (Vec<ReceivedMessage>, u64) {
         let limit = usize::try_from(max_messages).unwrap_or(0);
-        let ordered = self.subscription.enable_message_ordering;
-        let blocked: BTreeSet<String> = if ordered {
-            self.messages
-                .values()
-                .filter(|tracked| matches!(tracked.state, MessageState::Leased { .. }))
-                .map(|tracked| tracked.message.message.ordering_key.clone())
-                .filter(|key| !key.is_empty())
-                .collect()
-        } else {
-            BTreeSet::new()
-        };
-        let deadline = now
-            + Duration::from_secs(
-                u64::try_from(self.subscription.ack_deadline_seconds).unwrap_or(10),
-            );
-        let dead_letter = self.subscription.dead_letter_policy.is_some();
-        let mut candidates: Vec<(u64, u64)> = self
-            .messages
-            .iter()
-            .filter(|(_, tracked)| tracked.state == MessageState::Available)
-            .map(|(id, tracked)| (tracked.sequence, *id))
-            .collect();
-        candidates.sort_unstable();
-        let mut received = Vec::new();
-        let mut used = 0;
-        for (_, id) in candidates {
-            if received.len() >= limit {
+        let ordered = self.entry.subscription.enable_message_ordering;
+        let mut chosen = Vec::new();
+        for &(_, id) in &self.entry.index.available {
+            if chosen.len() >= limit {
                 break;
             }
-            let Some(tracked) = self.messages.get_mut(&id) else {
-                continue;
-            };
-            let key = &tracked.message.message.ordering_key;
-            if ordered && !key.is_empty() && blocked.contains(key) {
+            visit!(take);
+            if ordered
+                && let Some(tracked) = self.entry.messages.get(&id)
+                && !tracked.message.message.ordering_key.is_empty()
+                && self
+                    .entry
+                    .index
+                    .leased_keys
+                    .contains_key(&tracked.message.message.ordering_key)
+            {
                 continue;
             }
+            chosen.push(id);
+        }
+        let deadline = now
+            + Duration::from_secs(
+                u64::try_from(self.entry.subscription.ack_deadline_seconds).unwrap_or(10),
+            );
+        let dead_letter = self.entry.subscription.dead_letter_policy.is_some();
+        let mut received = Vec::with_capacity(chosen.len());
+        let mut used = 0;
+        for id in chosen {
             let ack = first_ack + used;
             used += 1;
-            tracked.attempts += 1;
-            tracked.state = MessageState::Leased { ack, deadline };
+            self.entry.update(id, |tracked| {
+                tracked.attempts += 1;
+                tracked.state = MessageState::Leased { ack, deadline };
+            });
+            let Some(tracked) = self.entry.messages.get(&id) else {
+                continue;
+            };
             received.push(ReceivedMessage {
-                ack_id: format!("{}:{ack}", self.subscription.name),
+                ack_id: format!("{}:{ack}", self.entry.subscription.name),
                 message: Some(tracked.message.message.clone()),
                 delivery_attempt: if dead_letter {
                     i32::try_from(tracked.attempts).unwrap_or(i32::MAX)
@@ -1873,82 +3695,524 @@ impl SubscriptionEntry {
         (received, used)
     }
 
-    fn find_lease(&self, ack: u64) -> Option<u64> {
-        self.messages
-            .iter()
-            .find(|(_, tracked)| matches!(tracked.state, MessageState::Leased { ack: leased, .. } if leased == ack))
-            .map(|(id, _)| *id)
-    }
-
-    fn acknowledge(&mut self, id: u64, _forwarded: &mut Vec<(String, Arc<StoredMessage>, u32)>) {
-        if let Some(tracked) = self.messages.get_mut(&id) {
-            tracked.state = MessageState::Acked;
+    /// Acknowledges a message; the copy stays only while something can
+    /// bring it back: retention, a snapshot, or another subscription of the
+    /// topic still holding it.
+    fn acknowledge(&mut self, id: u64) {
+        let Some(moved) = self
+            .entry
+            .update(id, |tracked| tracked.state = MessageState::Acked)
+        else {
+            return;
+        };
+        if !moved.was_unacked {
+            return;
+        }
+        self.entry.acked_total += 1;
+        let peers = self.let_go(id);
+        if peers {
+            visit!(kept_for_peers);
+            self.keep_for_peers(id);
+        } else if !self.keeps_itself(id) {
+            self.entry.remove(id);
+            self.effects.outcomes.push((id, Outcome::Acked));
         }
     }
 
     /// A nack (`0`) makes the message available again (queued behind later
     /// messages) or dead-letters it; any other value extends the lease.
-    fn modify_deadline(
-        &mut self,
-        id: u64,
-        seconds: i32,
-        now: Instant,
-        forwarded: &mut Vec<(String, Arc<StoredMessage>, u32)>,
-    ) {
-        let max_attempts = self
-            .subscription
-            .dead_letter_policy
-            .as_ref()
-            .map(|policy| policy.max_delivery_attempts);
-        let push = self.is_push();
-        let Some(tracked) = self.messages.get_mut(&id) else {
+    fn modify_deadline(&mut self, id: u64, seconds: i32, now: Instant) {
+        let Some(tracked) = self.entry.messages.get(&id) else {
             return;
         };
         let MessageState::Leased { ack, .. } = tracked.state else {
             return;
         };
-        if seconds == 0 {
-            if let Some(max) = max_attempts
-                && i32::try_from(tracked.attempts).unwrap_or(i32::MAX) >= max
-            {
-                forwarded.push((
-                    self.subscription.name.clone(),
-                    Arc::clone(&tracked.message),
-                    tracked.attempts,
-                ));
-                self.messages.remove(&id);
-                return;
-            }
+        if seconds != 0 {
+            let deadline = now + Duration::from_secs(u64::try_from(seconds).unwrap_or(0));
+            self.entry.update(id, |tracked| {
+                tracked.state = MessageState::Leased { ack, deadline };
+            });
+            return;
+        }
+        let max_attempts = self
+            .entry
+            .subscription
+            .dead_letter_policy
+            .as_ref()
+            .map(|policy| policy.max_delivery_attempts);
+        if let Some(max) = max_attempts
+            && i32::try_from(tracked.attempts).unwrap_or(i32::MAX) >= max
+        {
+            self.effects.forwarded.push((
+                self.name.to_owned(),
+                Arc::clone(&tracked.message),
+                tracked.attempts,
+            ));
+            self.entry.dead_lettered_total += 1;
+            self.remove(id, Outcome::DeadLettered);
+            return;
+        }
+        let push = self.entry.is_push();
+        self.entry.update(id, |tracked| {
             tracked.sequence = next_sequence();
             tracked.state = if push {
                 MessageState::Pushing { next_attempt: now }
             } else {
                 MessageState::Available
             };
-        } else {
-            tracked.state = MessageState::Leased {
-                ack,
-                deadline: now + Duration::from_secs(u64::try_from(seconds).unwrap_or(0)),
+        });
+    }
+
+    /// Makes a message deliverable again from its first attempt (seek).
+    fn revive(&mut self, id: u64, now: Instant) {
+        let push = self.entry.is_push();
+        let Some(moved) = self.entry.update(id, |tracked| {
+            tracked.state = if push {
+                MessageState::Pushing { next_attempt: now }
+            } else {
+                MessageState::Available
             };
+            tracked.attempts = 0;
+        }) else {
+            return;
+        };
+        if !moved.was_unacked && moved.is_unacked {
+            self.hold(id);
         }
     }
 
-    /// Returns expired leases to the backlog; reports whether anything changed.
-    fn expire(
-        &mut self,
-        now: Instant,
-        forwarded: &mut Vec<(String, Arc<StoredMessage>, u32)>,
-    ) -> bool {
-        let expired: Vec<u64> = self
-            .messages
-            .iter()
-            .filter(|(_, tracked)| matches!(tracked.state, MessageState::Leased { deadline, .. } if deadline <= now))
-            .map(|(id, _)| *id)
-            .collect();
-        for id in &expired {
-            self.modify_deadline(*id, 0, now, forwarded);
+    /// A push handed to the push loop: one more push attempt, not due again
+    /// until it finishes.
+    fn hand_out_push(&mut self, id: u64, hold: Instant) {
+        self.entry.update(id, |tracked| {
+            if let MessageState::Pushing { .. } = tracked.state {
+                tracked.push_attempts += 1;
+                tracked.state = MessageState::Pushing { next_attempt: hold };
+            }
+        });
+    }
+
+    fn set_next_push(&mut self, id: u64, at: Instant) {
+        self.entry.update(id, |tracked| {
+            if let MessageState::Pushing { .. } = tracked.state {
+                tracked.state = MessageState::Pushing { next_attempt: at };
+            }
+        });
+    }
+
+    /// After a push configuration change: a new endpoint takes the available
+    /// messages, a removed one gives the pushing ones back to pulls.
+    fn switch_delivery(&mut self, was_push: bool, now: Instant) {
+        let is_push = self.entry.is_push();
+        if is_push && !was_push {
+            let ids: Vec<u64> = self
+                .entry
+                .index
+                .available
+                .iter()
+                .map(|(_, id)| *id)
+                .collect();
+            for id in ids {
+                self.entry.update(id, |tracked| {
+                    tracked.state = MessageState::Pushing { next_attempt: now };
+                });
+            }
+        } else if was_push && !is_push {
+            let ids: Vec<u64> = self
+                .entry
+                .index
+                .push_due
+                .iter()
+                .map(|(_, id)| *id)
+                .collect();
+            for id in ids {
+                self.entry
+                    .update(id, |tracked| tracked.state = MessageState::Available);
+            }
         }
-        !expired.is_empty()
+    }
+
+    /// Removes a message the subscription lets go of, recording why.
+    fn remove(&mut self, id: u64, outcome: Outcome) {
+        let Some(tracked) = self.entry.remove(id) else {
+            return;
+        };
+        if tracked.unacked() {
+            self.let_go(id);
+            self.effects.outcomes.push((id, outcome));
+        } else {
+            self.forget_peer_copy(id);
+            self.effects.outcomes.push((id, Outcome::Acked));
+        }
+    }
+
+    /// An acknowledged copy whose reason to stay may have gone: kept while
+    /// another subscription holds the message, retention or a snapshot keeps
+    /// it; dropped otherwise.
+    fn reconsider(&mut self, id: u64) {
+        if self.entry.messages.get(&id).is_none_or(Tracked::unacked) {
+            return;
+        }
+        if self.peers_hold(id) {
+            self.keep_for_peers(id);
+        } else if !self.keeps_itself(id) {
+            self.drop_acked(id);
+        }
+    }
+
+    fn drop_acked(&mut self, id: u64) {
+        if self.entry.remove(id).is_some() {
+            self.forget_peer_copy(id);
+            self.effects.outcomes.push((id, Outcome::Acked));
+        }
+    }
+
+    /// Drops retained acknowledgements older than the subscription's
+    /// retention, then the oldest past `cap`.
+    fn prune_retained(&mut self, now: Instant, cap: usize) {
+        let retention =
+            duration_seconds(self.entry.subscription.message_retention_duration.as_ref())
+                .map_or(Duration::from_hours(168), |seconds| {
+                    Duration::from_secs(u64::try_from(seconds).unwrap_or(0))
+                });
+        let mut expired = Vec::new();
+        for id in &self.entry.index.acked {
+            let Some(tracked) = self.entry.messages.get(id) else {
+                continue;
+            };
+            if now.saturating_duration_since(tracked.message.published) <= retention {
+                break;
+            }
+            expired.push(*id);
+        }
+        let over = self
+            .entry
+            .index
+            .acked
+            .len()
+            .saturating_sub(expired.len())
+            .saturating_sub(cap);
+        let skip = expired.len();
+        expired.extend(self.entry.index.acked.iter().skip(skip).take(over).copied());
+        for id in expired {
+            visit!(pruned);
+            self.drop_acked(id);
+        }
+    }
+
+    /// Lets go of everything before the subscription is deleted.
+    fn leave(&mut self) {
+        visit!(map_walks);
+        let unacked: Vec<u64> = self.entry.index.unacked.iter().copied().collect();
+        for id in unacked {
+            self.let_go(id);
+        }
+        let acked: Vec<u64> = self.entry.index.acked.iter().copied().collect();
+        for id in acked {
+            self.forget_peer_copy(id);
+        }
+    }
+
+    // ---- holders (E-PS-02)
+
+    fn hold(&mut self, id: u64) {
+        let slot = self.entry.slot;
+        if let Some(generation) = self
+            .generation
+            .as_deref_mut()
+            .filter(|entry| entry.shared())
+        {
+            let holders = generation.holders.entry(id).or_default();
+            holders.unacked += 1;
+            holders.kept_for_peers.retain(|kept| *kept != slot);
+        }
+    }
+
+    /// One unacknowledged holder fewer; returns whether another subscription
+    /// still holds the message unacknowledged.
+    fn let_go(&mut self, id: u64) -> bool {
+        let Some(generation) = self
+            .generation
+            .as_deref_mut()
+            .filter(|entry| entry.shared())
+        else {
+            return false;
+        };
+        let Some(holders) = generation.holders.get_mut(&id) else {
+            return false;
+        };
+        holders.unacked = holders.unacked.saturating_sub(1);
+        if holders.unacked > 0 {
+            return true;
+        }
+        if let Some(holders) = generation.holders.remove(&id)
+            && !holders.kept_for_peers.is_empty()
+        {
+            self.effects.released.push((id, holders.kept_for_peers));
+        }
+        false
+    }
+
+    fn peers_hold(&self, id: u64) -> bool {
+        self.generation
+            .as_deref()
+            .filter(|entry| entry.shared())
+            .and_then(|entry| entry.holders.get(&id))
+            .is_some_and(|holders| holders.unacked > 0)
+    }
+
+    fn keep_for_peers(&mut self, id: u64) {
+        let slot = self.entry.slot;
+        if let Some(holders) = self
+            .generation
+            .as_deref_mut()
+            .and_then(|entry| entry.holders.get_mut(&id))
+            && !holders.kept_for_peers.contains(&slot)
+        {
+            holders.kept_for_peers.push(slot);
+        }
+    }
+
+    fn forget_peer_copy(&mut self, id: u64) {
+        let slot = self.entry.slot;
+        if let Some(holders) = self
+            .generation
+            .as_deref_mut()
+            .and_then(|entry| entry.holders.get_mut(&id))
+        {
+            holders.kept_for_peers.retain(|kept| *kept != slot);
+        }
+    }
+
+    fn keeps_itself(&self, id: u64) -> bool {
+        self.entry.subscription.retain_acked_messages || self.snapshot_keeps(id)
+    }
+
+    /// Whether a snapshot of the generation would revive the message: it
+    /// lists it, or it was taken before it was published.
+    fn snapshot_keeps(&self, id: u64) -> bool {
+        if self
+            .generation
+            .as_deref()
+            .is_none_or(|entry| entry.snapshots == 0)
+        {
+            return false;
+        }
+        let Some(tracked) = self.entry.messages.get(&id) else {
+            return false;
+        };
+        let generation = self.entry.topic_generation;
+        let kept = self.snapshots.values().any(|snapshot| {
+            snapshot.topic_generation == generation
+                && (snapshot.unacked.contains(&id) || tracked.message.published > snapshot.created)
+        });
+        if kept {
+            visit!(kept_for_snapshots);
+        }
+        kept
+    }
+}
+
+/// [`Ctx::leave`], as a function every context lifetime fits.
+fn leave(ctx: &mut Ctx<'_>) {
+    ctx.leave();
+}
+
+#[cfg(test)]
+impl Broker {
+    /// Asserts that every count, index, holder counter and ring byte count
+    /// equals what a full scan finds, and that every acknowledged copy has a
+    /// reason to be kept.
+    pub(crate) fn check_invariants(&self) {
+        lock(&self.inner.state).check_invariants();
+    }
+
+    /// Message ids a subscription tracks, by state name, for tests.
+    pub(crate) fn tracked_ids(&self, name: &str) -> BTreeMap<u64, &'static str> {
+        let state = lock(&self.inner.state);
+        state
+            .subscriptions
+            .get(name)
+            .map(|entry| {
+                entry
+                    .messages
+                    .iter()
+                    .map(|(id, tracked)| {
+                        let state = match tracked.state {
+                            MessageState::Available => "available",
+                            MessageState::Leased { .. } => "leased",
+                            MessageState::Pushing { .. } => "pushing",
+                            MessageState::Acked => "acked",
+                        };
+                        (*id, state)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+impl State {
+    #[allow(clippy::too_many_lines)]
+    fn check_invariants(&self) {
+        assert_eq!(self.slots.len(), self.subscriptions.len(), "slots");
+        for (name, entry) in &self.subscriptions {
+            assert_eq!(self.slots.get(&entry.slot), Some(name), "slot of {name}");
+            let mut rebuilt = Index::default();
+            for (id, tracked) in &entry.messages {
+                assert_eq!(*id, tracked.message.id, "key of {name}");
+                rebuilt.add(*id, tracked);
+            }
+            assert_eq!(entry.index, rebuilt, "indexes of {name}");
+            let count = |wanted: fn(&Tracked) -> bool| {
+                u64::try_from(
+                    entry
+                        .messages
+                        .values()
+                        .filter(|tracked| wanted(tracked))
+                        .count(),
+                )
+                .unwrap_or(u64::MAX)
+            };
+            let counts = entry.index.counts;
+            assert_eq!(
+                counts.available,
+                count(|tracked| tracked.state == MessageState::Available),
+                "available of {name}"
+            );
+            assert_eq!(
+                counts.leased,
+                count(|tracked| matches!(tracked.state, MessageState::Leased { .. })),
+                "leased of {name}"
+            );
+            assert_eq!(
+                counts.pushing,
+                count(|tracked| matches!(tracked.state, MessageState::Pushing { .. })),
+                "pushing of {name}"
+            );
+            assert_eq!(
+                counts.acked,
+                count(|tracked| tracked.state == MessageState::Acked),
+                "acked of {name}"
+            );
+            assert_eq!(
+                counts.redelivered,
+                count(|tracked| tracked.unacked() && tracked.attempts > 1),
+                "redelivered of {name}"
+            );
+            let bytes: u64 = entry
+                .messages
+                .values()
+                .filter(|tracked| tracked.unacked())
+                .map(|tracked| u64::from(tracked.message.size))
+                .sum();
+            assert_eq!(counts.unacked_bytes, bytes, "bytes of {name}");
+            if let Some(filter) = &entry.filter {
+                assert!(
+                    entry
+                        .messages
+                        .values()
+                        .all(|tracked| filter.matches(&tracked.message.message.attributes)),
+                    "{name} tracks a message its filter refuses"
+                );
+            }
+            let generation = self
+                .generations
+                .get(&entry.topic_generation)
+                .expect("generation of a subscription");
+            assert!(generation.members.contains(name), "membership of {name}");
+            for id in &entry.index.acked {
+                let tracked = &entry.messages[id];
+                let retained = entry.subscription.retain_acked_messages;
+                let snapshot = self.snapshots.values().any(|snapshot| {
+                    snapshot.topic_generation == entry.topic_generation
+                        && (snapshot.unacked.contains(id)
+                            || tracked.message.published > snapshot.created)
+                });
+                let peers = generation.shared()
+                    && generation.holders.get(id).is_some_and(|holders| {
+                        holders.unacked > 0 && holders.kept_for_peers.contains(&entry.slot)
+                    });
+                assert!(
+                    retained || snapshot || peers,
+                    "{name} keeps acknowledged message {id} for no reason"
+                );
+            }
+        }
+        for (key, generation) in &self.generations {
+            for member in &generation.members {
+                assert!(
+                    self.subscriptions
+                        .get(member)
+                        .is_some_and(|entry| entry.topic_generation == *key),
+                    "member {member} of generation {key}"
+                );
+            }
+            assert_eq!(
+                usize::try_from(generation.snapshots).unwrap_or(usize::MAX),
+                self.snapshots
+                    .values()
+                    .filter(|snapshot| snapshot.topic_generation == *key)
+                    .count(),
+                "snapshots of generation {key}"
+            );
+            if !generation.shared() {
+                assert!(generation.holders.is_empty(), "holders of generation {key}");
+                continue;
+            }
+            let mut expected: HashMap<u64, u32> = HashMap::new();
+            for member in &generation.members {
+                for id in &self.subscriptions[member].index.unacked {
+                    *expected.entry(*id).or_default() += 1;
+                }
+            }
+            assert_eq!(
+                generation.holders.len(),
+                expected.len(),
+                "held messages of generation {key}"
+            );
+            for (id, holders) in &generation.holders {
+                assert_eq!(
+                    Some(&holders.unacked),
+                    expected.get(id),
+                    "holders of {id} in generation {key}"
+                );
+                let distinct: BTreeSet<&u32> = holders.kept_for_peers.iter().collect();
+                assert_eq!(distinct.len(), holders.kept_for_peers.len(), "kept twice");
+                for slot in &holders.kept_for_peers {
+                    let name = &self.slots[slot];
+                    assert!(generation.members.contains(name), "kept by a stranger");
+                    assert!(
+                        self.subscriptions[name]
+                            .messages
+                            .get(id)
+                            .is_some_and(|tracked| !tracked.unacked()),
+                        "{name} is listed as keeping {id} acknowledged"
+                    );
+                }
+            }
+        }
+        let mut total = 0;
+        for (name, topic) in &self.topics {
+            let bytes: u64 = topic.history.iter().map(|entry| entry.bytes()).sum();
+            assert_eq!(topic.history_bytes, bytes, "ring bytes of {name}");
+            assert!(
+                topic
+                    .history
+                    .iter()
+                    .zip(topic.history.iter().skip(1))
+                    .all(|(older, newer)| older.message.id < newer.message.id),
+                "ring order of {name}"
+            );
+            assert!(
+                topic.history.len() <= topic.capacity(&self.limits).0,
+                "ring length of {name}"
+            );
+            total += bytes;
+        }
+        assert_eq!(self.history_bytes, total, "ring bytes");
     }
 }
 

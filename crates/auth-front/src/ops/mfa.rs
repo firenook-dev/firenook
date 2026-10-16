@@ -5,9 +5,9 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
 
 use super::{Ctx, new_random_id, obfuscate_phone_number, verify_phone_number};
-use crate::Runtime;
 use crate::blocking::{BlockingContext, OauthTokens};
 use crate::error::{ApiError, ensure, require};
+use crate::observe::{Delivery, MessageMeta, SmsPurpose, sms_message_text};
 use crate::state::{
     BlockingEvent, PROVIDER_ANONYMOUS, PROVIDER_CUSTOM, PROVIDER_GAME_CENTER, PROVIDER_PHONE,
     UpdateOptions, UserRecord, passkeys,
@@ -16,6 +16,7 @@ use crate::token::{
     IssueOptions, SecondFactor, issue_tokens, parse_id_token, parse_pending_credential,
 };
 use crate::util::{is_valid_phone, now_iso, now_millis, str_field, truthy, truthy_str};
+use crate::{AuthMessageRef, Runtime};
 
 const MFA_INELIGIBLE_PROVIDERS: &[&str] = &[
     PROVIDER_ANONYMOUS,
@@ -64,8 +65,23 @@ pub fn mfa_enrollment_start(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiErr
             !has_enrolled_phone(&parsed.user, phone),
             "SECOND_FACTOR_EXISTS : Phone number already enrolled as second factor for this account."
         );
-        let verification = scope.project().create_verification_code(phone);
-        rt.log("BULLET", &format!("To enroll MFA with {phone}, use the code {}.", verification.code));
+        let id = rt.next_message_id();
+        let uid = crate::observe::uid_of(&parsed.user);
+        let verification = scope.project().create_verification_code(
+            phone,
+            SmsPurpose::MfaEnrollment,
+            MessageMeta { id, delivery: Delivery::Sent, continue_url: None, uid: uid.clone() },
+        );
+        rt.log_message(
+            "BULLET",
+            &sms_message_text(SmsPurpose::MfaEnrollment, phone, &verification.code),
+            &AuthMessageRef {
+                id,
+                project: scope.project_id.clone(),
+                tenant: scope.tenant_id.clone(),
+                uid,
+            },
+        );
         Ok(json!({ "phoneSessionInfo": { "sessionInfo": verification.session_info } }))
     })
 }
@@ -226,13 +242,27 @@ pub fn mfa_sign_in_start(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiError>
             .filter(|phone| !phone.is_empty())
             .map(str::to_owned);
         let phone = require!(phone, "INVALID_ARGUMENT : MFA provider not supported!");
-        let verification = scope.project().create_verification_code(&phone);
-        rt.log(
+        let id = rt.next_message_id();
+        let uid = crate::observe::uid_of(&user);
+        let verification = scope.project().create_verification_code(
+            &phone,
+            SmsPurpose::MfaSignIn,
+            MessageMeta {
+                id,
+                delivery: Delivery::Sent,
+                continue_url: None,
+                uid: uid.clone(),
+            },
+        );
+        rt.log_message(
             "BULLET",
-            &format!(
-                "To sign in with MFA using {phone}, use the code {}.",
-                verification.code
-            ),
+            &sms_message_text(SmsPurpose::MfaSignIn, &phone, &verification.code),
+            &AuthMessageRef {
+                id,
+                project: scope.project_id.clone(),
+                tenant: scope.tenant_id.clone(),
+                uid,
+            },
         );
         Ok(json!({ "phoneResponseInfo": { "sessionInfo": verification.session_info } }))
     })

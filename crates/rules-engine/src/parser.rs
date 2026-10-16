@@ -122,8 +122,10 @@ impl Parser {
     }
 
     fn match_block(&mut self) -> Result<MatchBlock, ParseError> {
+        let header_start = self.current().offset;
         self.expect_identifier("match")?;
         let raw = self.take_path("match path")?;
+        let header = header_start..self.previous_end();
         let pattern = parse_pattern(&raw, self.previous_offset())?;
         let scope_depth = self.scope.len();
         for segment in &pattern {
@@ -156,6 +158,7 @@ impl Parser {
         self.advance();
         self.scope.truncate(scope_depth);
         Ok(MatchBlock {
+            header,
             pattern,
             functions,
             allows,
@@ -259,12 +262,14 @@ impl Parser {
         // `allow read, write;` (no condition) is an unconditional grant: the
         // official `templates/emulators/default_storage.rules` and the
         // Firebase rules reference both use it.
-        let condition = if self.consume(&TokenKind::Colon) {
+        let (condition, condition_span) = if self.consume(&TokenKind::Colon) {
             self.expect_identifier("if")?;
-            self.expression(0)?
+            let start = self.current().offset;
+            let condition = self.expression(0)?;
+            (condition, start..self.previous_end())
         } else {
             let end = self.previous_end();
-            Expr::new(ExprKind::Bool(true), end, end)
+            (Expr::new(ExprKind::Bool(true), end, end), end..end)
         };
         // The official rules runtime accepts an allow without a trailing
         // semicolon when it is the last declaration of its block
@@ -274,6 +279,8 @@ impl Parser {
         }
         Ok(Allow {
             location,
+            statement: byte_offset..self.previous_end(),
+            condition_span,
             operations,
             condition,
         })

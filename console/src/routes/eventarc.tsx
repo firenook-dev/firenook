@@ -1,10 +1,21 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { SectionPlaceholder } from '@/components/section-placeholder'
-import { SECTIONS } from '@/lib/services'
+import { SectionFrame } from '@/components/console/section-gate'
+import { EventsPage } from '@/eventarc/components/events-page'
+import { eventsSearch } from '@/eventarc/search'
 
-const section = SECTIONS.find((candidate) => candidate.to === '/eventarc')
-if (!section) throw new Error('The eventarc section is missing from the registry')
-
+// Every Eventarc event on every channel, live, with the trigger each one
+// reached or the filter that kept it out; publishing a custom event with a
+// preview of who it would reach. Every view of it is a link
+// (`../eventarc/search.ts`).
 export const Route = createFileRoute('/eventarc')({
-  component: () => <SectionPlaceholder section={section} />,
+  validateSearch: eventsSearch,
+  component: EventarcRoute,
 })
+
+function EventarcRoute() {
+  return (
+    <SectionFrame section="eventarc">
+      <EventsPage />
+    </SectionFrame>
+  )
+}

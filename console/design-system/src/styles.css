@@ -1,0 +1,10 @@
+@import '../../src/styles.css';
+@source '../../src';
+@source './';
+
+/* A card shows a live row flash as it starts: held at its first frame, since
+   a still cannot show 1.6 s passing. */
+.ds-hold-flash .row-flash > td,
+.ds-hold-flash .row-flash-deleted > td {
+  animation-play-state: paused;
+}

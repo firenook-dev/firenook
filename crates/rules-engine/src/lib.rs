@@ -5,18 +5,29 @@
 
 #![forbid(unsafe_code)]
 
+mod analysis;
 mod ast;
 mod coverage_layout;
 mod coverage_observer;
 mod evaluator;
+mod explain;
 mod lexer;
 mod model;
 mod parser;
 mod trace;
 
+pub use analysis::{
+    CollectionGovernance, GoverningMap, GoverningMatch, LintCode, OutlineAllow, OutlineMatch,
+    RulesOutline, SourceRange, UnusedMatch,
+};
 pub use coverage_layout::{CoverageNode, SourcePosition};
 pub use coverage_observer::{
-    CoverageObserver, ExpressionKey, ExpressionValue, MapDifference, MapKeyStatus,
+    CoverageObserver, ExpressionKey, ExpressionValue, MapDifference, MapKeyStatus, QueryComparison,
+    QueryProof,
+};
+pub use explain::{
+    EvaluationExplanation, ExplainedAllow, ExplanationStep, MAXIMUM_EXPLANATION_STEPS,
+    MAXIMUM_VALUE_CHARS, RulesExplainer, SourceIndex, SourceSpan,
 };
 
 pub use trace::{
@@ -60,6 +71,15 @@ pub struct Diagnostic {
     pub column: usize,
     /// Zero-based UTF-8 byte offset.
     pub byte_offset: usize,
+    /// Zero-based UTF-16 code-unit offset of the start. Browser editors
+    /// index text in UTF-16, so this is what places a mark there; the byte
+    /// offset would drift after the first non-ASCII character.
+    pub from: usize,
+    /// Exclusive UTF-16 end. Equal to `from` when only a position is known,
+    /// as for compiler errors.
+    pub to: usize,
+    /// The lint that raised a warning; `None` for a compiler error.
+    pub code: Option<LintCode>,
 }
 
 /// Structural counts for an installed ruleset.
@@ -100,6 +120,47 @@ impl Ruleset {
     #[must_use]
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    /// The same source, shared rather than copied, for a caller that keeps
+    /// it longer than the ruleset (a version history keeps the text, not the
+    /// compiled program).
+    #[must_use]
+    pub fn shared_source(&self) -> Arc<str> {
+        Arc::clone(&self.source)
+    }
+
+    /// The match blocks and allow statements in source order, positioned in
+    /// UTF-16. Nothing is evaluated.
+    #[must_use]
+    pub fn outline(&self) -> RulesOutline {
+        analysis::outline(&self.program, &self.source)
+    }
+
+    /// Warnings about constructs that compile but rarely mean what was
+    /// intended, in source order. Each carries its [`LintCode`].
+    #[must_use]
+    pub fn lints(&self) -> Vec<Diagnostic> {
+        analysis::lints(&self.program, &self.source)
+    }
+
+    /// Which match blocks govern the documents of each collection pattern
+    /// (`users/*/orders`, as a schema index writes them) in `database_id`,
+    /// and which blocks govern none of them. Matching is the evaluator's
+    /// own, run against a representative document path per pattern, so the
+    /// answer agrees with what a request would hit.
+    #[must_use]
+    pub fn governing<S: AsRef<str>>(
+        &self,
+        database_id: &str,
+        collection_patterns: &[S],
+    ) -> GoverningMap {
+        analysis::governing(
+            &self.program,
+            &self.source,
+            database_id,
+            collection_patterns,
+        )
     }
 
     /// Service named by the `service` head.
@@ -357,8 +418,11 @@ fn collect_direct_calls(expression: &Expr, calls: &mut BTreeSet<String>) {
 }
 
 fn diagnostic(source: &str, offset: usize, message: String) -> Diagnostic {
-    let offset = offset.min(source.len());
+    // An offset past the end, or inside a multi-byte character (the size
+    // limit cuts wherever it falls), must not panic the slicing below.
+    let offset = source.floor_char_boundary(offset.min(source.len()));
     let before = &source[..offset];
+    let from = before.encode_utf16().count();
     let line = before.bytes().filter(|byte| *byte == b'\n').count() + 1;
     let column = before
         .rsplit_once('\n')
@@ -372,7 +436,19 @@ fn diagnostic(source: &str, offset: usize, message: String) -> Diagnostic {
         line,
         column,
         byte_offset: offset,
+        from,
+        to: from,
+        code: None,
     }
+}
+
+/// The UTF-16 code-unit offset of a UTF-8 byte offset in `source`, which is
+/// how a browser editor addresses the same place. An offset inside a
+/// character is taken at that character's start.
+#[must_use]
+pub fn utf16_offset(source: &str, byte_offset: usize) -> usize {
+    let offset = source.floor_char_boundary(byte_offset.min(source.len()));
+    source[..offset].encode_utf16().count()
 }
 
 #[cfg(test)]
@@ -399,6 +475,26 @@ mod tests {
         let source = "x".repeat(MAXIMUM_SOURCE_BYTES + 1);
         let error = compile(&source).expect_err("oversized source must fail");
         assert!(error[0].message.contains("maximum is 262144"));
+    }
+
+    #[test]
+    fn compiler_errors_carry_utf16_positions_for_browser_editors() {
+        let source = "// é🔥\nrules_version = '2'; service cloud.firestore { match }";
+        let errors = compile(source).expect_err("a match without a path must fail");
+        let error = &errors[0];
+        assert_eq!(error.from, utf16_offset(source, error.byte_offset));
+        // é is two bytes and one unit, 🔥 four bytes and two units.
+        assert_eq!(error.byte_offset - error.from, 3);
+        assert_eq!(error.to, error.from, "only a position is known");
+        assert_eq!(error.code, None);
+    }
+
+    #[test]
+    fn an_oversized_source_cut_inside_a_character_is_still_reported() {
+        let source = format!("{}é", "x".repeat(MAXIMUM_SOURCE_BYTES - 1));
+        let error = compile(&source).expect_err("oversized source must fail");
+        assert_eq!(error[0].byte_offset, MAXIMUM_SOURCE_BYTES - 1);
+        assert_eq!(error[0].from, MAXIMUM_SOURCE_BYTES - 1);
     }
 
     #[test]

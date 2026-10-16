@@ -1,0 +1,548 @@
+{
+  "note": "The Eventarc event filter's golden cases (crates/console-front/src/compute/filters.rs EVENT_FIELDS, console/src/eventarc/filters.ts). Both sides parse and validate every text against these fields and must give exactly this result or this error, message and UTF-16 span included.",
+  "regex": false,
+  "fields": [
+    {
+      "key": "type",
+      "kind": "exact",
+      "help": "Event type; end with * for a prefix"
+    },
+    {
+      "key": "source",
+      "kind": "exact",
+      "help": "CloudEvent source"
+    },
+    {
+      "key": "subject",
+      "kind": "exact",
+      "help": "CloudEvent subject"
+    },
+    {
+      "key": "publisher",
+      "kind": "exact",
+      "help": "Extension instance that published it"
+    },
+    {
+      "key": "origin",
+      "kind": "enum",
+      "help": "Who published it",
+      "values": ["console", "replay", "app"]
+    },
+    {
+      "key": "delivery",
+      "kind": "enum",
+      "help": "What became of it",
+      "values": ["delivered", "filtered", "unheard", "failed", "pending"]
+    },
+    {
+      "key": "at",
+      "kind": "time",
+      "help": "When it arrived"
+    }
+  ],
+  "cases": [
+    {
+      "name": "empty",
+      "text": "",
+      "ok": {}
+    },
+    {
+      "name": "a-word",
+      "text": "greeted",
+      "ok": {
+        "words": [
+          {
+            "text": "greeted",
+            "negated": false,
+            "from": 0,
+            "to": 7
+          }
+        ]
+      }
+    },
+    {
+      "name": "a-negated-word",
+      "text": "-greeted",
+      "ok": {
+        "words": [
+          {
+            "text": "greeted",
+            "negated": true,
+            "from": 0,
+            "to": 8
+          }
+        ]
+      }
+    },
+    {
+      "name": "a-phrase",
+      "text": "\"vip greeting\"",
+      "ok": {
+        "words": [
+          {
+            "text": "vip greeting",
+            "negated": false,
+            "from": 0,
+            "to": 14
+          }
+        ]
+      }
+    },
+    {
+      "name": "exact-type",
+      "text": "type:test.greeter.v1.greeted",
+      "ok": {
+        "terms": [
+          {
+            "key": "type",
+            "op": "eq",
+            "value": "test.greeter.v1.greeted",
+            "negated": false,
+            "from": 0,
+            "to": 28
+          }
+        ]
+      }
+    },
+    {
+      "name": "type-prefix",
+      "text": "type:test.greeter.*",
+      "ok": {
+        "terms": [
+          {
+            "key": "type",
+            "op": "eq",
+            "value": "test.greeter.*",
+            "negated": false,
+            "from": 0,
+            "to": 19
+          }
+        ]
+      },
+      "note": "A trailing * matches every type that starts with the rest."
+    },
+    {
+      "name": "source",
+      "text": "source:projects/demo-x/instances/greeter",
+      "ok": {
+        "terms": [
+          {
+            "key": "source",
+            "op": "eq",
+            "value": "projects/demo-x/instances/greeter",
+            "negated": false,
+            "from": 0,
+            "to": 40
+          }
+        ]
+      }
+    },
+    {
+      "name": "subject",
+      "text": "subject:greetings/ada",
+      "ok": {
+        "terms": [
+          {
+            "key": "subject",
+            "op": "eq",
+            "value": "greetings/ada",
+            "negated": false,
+            "from": 0,
+            "to": 21
+          }
+        ]
+      }
+    },
+    {
+      "name": "quoted-subject",
+      "text": "subject:\"greetings/vip 1\"",
+      "ok": {
+        "terms": [
+          {
+            "key": "subject",
+            "op": "eq",
+            "value": "greetings/vip 1",
+            "negated": false,
+            "from": 0,
+            "to": 25
+          }
+        ]
+      }
+    },
+    {
+      "name": "publisher",
+      "text": "publisher:greeter",
+      "ok": {
+        "terms": [
+          {
+            "key": "publisher",
+            "op": "eq",
+            "value": "greeter",
+            "negated": false,
+            "from": 0,
+            "to": 17
+          }
+        ]
+      }
+    },
+    {
+      "name": "origin-console",
+      "text": "origin:console",
+      "ok": {
+        "terms": [
+          {
+            "key": "origin",
+            "op": "eq",
+            "value": "console",
+            "negated": false,
+            "from": 0,
+            "to": 14
+          }
+        ]
+      }
+    },
+    {
+      "name": "origin-app",
+      "text": "origin:app",
+      "ok": {
+        "terms": [
+          {
+            "key": "origin",
+            "op": "eq",
+            "value": "app",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "origin-replay",
+      "text": "origin:replay",
+      "ok": {
+        "terms": [
+          {
+            "key": "origin",
+            "op": "eq",
+            "value": "replay",
+            "negated": false,
+            "from": 0,
+            "to": 13
+          }
+        ]
+      }
+    },
+    {
+      "name": "origin-unknown",
+      "text": "origin:browser",
+      "error": {
+        "message": "\"origin:\" is one of console, replay, app.",
+        "from": 0,
+        "to": 14
+      }
+    },
+    {
+      "name": "delivered",
+      "text": "delivery:delivered",
+      "ok": {
+        "terms": [
+          {
+            "key": "delivery",
+            "op": "eq",
+            "value": "delivered",
+            "negated": false,
+            "from": 0,
+            "to": 18
+          }
+        ]
+      }
+    },
+    {
+      "name": "filtered",
+      "text": "delivery:filtered",
+      "ok": {
+        "terms": [
+          {
+            "key": "delivery",
+            "op": "eq",
+            "value": "filtered",
+            "negated": false,
+            "from": 0,
+            "to": 17
+          }
+        ]
+      }
+    },
+    {
+      "name": "unheard",
+      "text": "delivery:unheard",
+      "ok": {
+        "terms": [
+          {
+            "key": "delivery",
+            "op": "eq",
+            "value": "unheard",
+            "negated": false,
+            "from": 0,
+            "to": 16
+          }
+        ]
+      }
+    },
+    {
+      "name": "failed",
+      "text": "delivery:failed",
+      "ok": {
+        "terms": [
+          {
+            "key": "delivery",
+            "op": "eq",
+            "value": "failed",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      }
+    },
+    {
+      "name": "pending",
+      "text": "delivery:pending",
+      "ok": {
+        "terms": [
+          {
+            "key": "delivery",
+            "op": "eq",
+            "value": "pending",
+            "negated": false,
+            "from": 0,
+            "to": 16
+          }
+        ]
+      }
+    },
+    {
+      "name": "delivery-unknown",
+      "text": "delivery:lost",
+      "error": {
+        "message": "\"delivery:\" is one of delivered, filtered, unheard, failed, pending.",
+        "from": 0,
+        "to": 13
+      }
+    },
+    {
+      "name": "not-filtered",
+      "text": "-delivery:filtered",
+      "ok": {
+        "terms": [
+          {
+            "key": "delivery",
+            "op": "eq",
+            "value": "filtered",
+            "negated": true,
+            "from": 0,
+            "to": 18
+          }
+        ]
+      }
+    },
+    {
+      "name": "two-deliveries",
+      "text": "delivery:failed delivery:unheard",
+      "ok": {
+        "terms": [
+          {
+            "key": "delivery",
+            "op": "eq",
+            "value": "failed",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          },
+          {
+            "key": "delivery",
+            "op": "eq",
+            "value": "unheard",
+            "negated": false,
+            "from": 16,
+            "to": 32
+          }
+        ]
+      },
+      "note": "One key twice: either value."
+    },
+    {
+      "name": "delivery-range",
+      "text": "delivery:>failed",
+      "error": {
+        "message": "\">\" works on times, numbers, sizes and durations only.",
+        "from": 0,
+        "to": 16
+      }
+    },
+    {
+      "name": "since-15-minutes",
+      "text": "at:>-15m",
+      "ok": {
+        "terms": [
+          {
+            "key": "at",
+            "op": "gt",
+            "value": "-15m",
+            "negated": false,
+            "from": 0,
+            "to": 8
+          }
+        ]
+      }
+    },
+    {
+      "name": "a-day",
+      "text": "at:2026-10-12",
+      "ok": {
+        "terms": [
+          {
+            "key": "at",
+            "op": "eq",
+            "value": "2026-10-12",
+            "negated": false,
+            "from": 0,
+            "to": 13
+          }
+        ]
+      }
+    },
+    {
+      "name": "today",
+      "text": "at:today",
+      "ok": {
+        "terms": [
+          {
+            "key": "at",
+            "op": "eq",
+            "value": "today",
+            "negated": false,
+            "from": 0,
+            "to": 8
+          }
+        ]
+      }
+    },
+    {
+      "name": "not-a-time",
+      "text": "at:soon",
+      "error": {
+        "message": "\"at:\" needs a time, like 2026-10-01, -2h or today.",
+        "from": 0,
+        "to": 7
+      }
+    },
+    {
+      "name": "unknown-field",
+      "text": "kind:http",
+      "error": {
+        "message": "Unknown filter \"kind:\". Use type, source, subject, publisher, origin, delivery or at; quote it to search for the text.",
+        "from": 0,
+        "to": 9
+      }
+    },
+    {
+      "name": "empty-value",
+      "text": "type:",
+      "error": {
+        "message": "\"type:\" needs a value.",
+        "from": 0,
+        "to": 5
+      }
+    },
+    {
+      "name": "upper-key",
+      "text": "TYPE:test.greeter.v1.greeted",
+      "ok": {
+        "terms": [
+          {
+            "key": "type",
+            "op": "eq",
+            "value": "test.greeter.v1.greeted",
+            "negated": false,
+            "from": 0,
+            "to": 28
+          }
+        ]
+      }
+    },
+    {
+      "name": "everything",
+      "text": "publisher:greeter type:test.greeter.* delivery:filtered -origin:replay vip",
+      "ok": {
+        "terms": [
+          {
+            "key": "publisher",
+            "op": "eq",
+            "value": "greeter",
+            "negated": false,
+            "from": 0,
+            "to": 17
+          },
+          {
+            "key": "type",
+            "op": "eq",
+            "value": "test.greeter.*",
+            "negated": false,
+            "from": 18,
+            "to": 37
+          },
+          {
+            "key": "delivery",
+            "op": "eq",
+            "value": "filtered",
+            "negated": false,
+            "from": 38,
+            "to": 55
+          },
+          {
+            "key": "origin",
+            "op": "eq",
+            "value": "replay",
+            "negated": true,
+            "from": 56,
+            "to": 70
+          }
+        ],
+        "words": [
+          {
+            "text": "vip",
+            "negated": false,
+            "from": 71,
+            "to": 74
+          }
+        ]
+      }
+    },
+    {
+      "name": "unicode-word",
+      "text": "grüße subject:greetings/ada",
+      "ok": {
+        "terms": [
+          {
+            "key": "subject",
+            "op": "eq",
+            "value": "greetings/ada",
+            "negated": false,
+            "from": 6,
+            "to": 27
+          }
+        ],
+        "words": [
+          {
+            "text": "grüße",
+            "negated": false,
+            "from": 0,
+            "to": 5
+          }
+        ]
+      }
+    }
+  ]
+}

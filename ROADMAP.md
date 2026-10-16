@@ -480,7 +480,7 @@ resume tokens issued before it; no emulator behaviour changed.
   (every version carries the deprecation notice; a notice-only
   `0.1.0-next.10` with no engine is their `latest`/`next`).
 
-## Read path and listener maintenance (`0.2.0-next.2`, unreleased)
+## Read path and listener maintenance (`0.2.0-next.2`)
 
 A fix round on the `0.2.0-next.1` engine, recorded in
 `support/read-path-audit.md`: the official Emulator UI's Firestore browser
@@ -534,14 +534,479 @@ served until every section has landed.
   the Console API's first route with Rust-generated TypeScript types; unit,
   end-to-end (real engine) and bundle-budget checks in CI; the console is
   built before every engine build.
-- [ ] Console API contract and live channel (one multiplexed socket, deltas
-  per scope, bounded like the Requests feed).
-- [ ] Firestore workbench: path bar, grid with inferred columns, query
-  builder, inspector, bulk actions, view-as-user over the rules engine.
-- [ ] Authentication: users table with actions, the codes-and-links inbox,
-  sign-in timeline, providers and tenants.
-- [ ] Storage, Functions, Extensions, Pub/Sub, Eventarc, Cloud Tasks, Logs and
-  Requests sections.
-- [ ] Parity checklist against the Google UI, then remove the archive and
-  `setup`.
+- [x] Same-origin data services under the console: the Firestore REST front,
+  the Requests feed and the Auth application mount under `/console/api/v1`,
+  so the console works wherever its page loads from (a proxy, an HTTPS
+  alias) and never needs the service ports from the browser.
+- [x] Live channel: a server-sent event stream fed by the store's commit
+  observers carries every commit's document paths; the console invalidates
+  by scope and flashes the rows on screen. Nothing polls.
+- [x] Firestore workbench: path bar as a command line with completion and
+  index counts, grid with inferred typed columns (mixed types flagged),
+  cursor-paged and virtualized, the SDK query chain as text with the live
+  count, view-as-user over the rules engine with the Requests drawer and the
+  deciding rule lines, inspector with typed editors and JSON, add and delete
+  (recursive), copy as code (Web, Admin, Flutter, REST). Found and fixed on
+  the way: the REST front ignored `startAt`/`endAt` cursors.
+- [x] Creating and shaping: one `New` menu that follows the context (document,
+  root collection, subcollection under the open document, duplicate, JSON
+  import), typed fields from the first document, the inspector grows
+  subcollections in place, the path bar offers to create what does not
+  exist, column headers sort, filter and hide, scalar cells edit in place,
+  reference cells peek at their target beside the grid, every row shows
+  its subcollections and jumps into them, and ⌘K carries the page's
+  collections, recent paths and actions.
+- [x] The shape of the data: the engine keeps a schema index per database
+  (collection patterns such as `users/*/orders/*/items` with document and
+  parent counts, one key-only walk on first use, exact from then on through
+  the commit observer) and serves it at `/console/api/v1/firestore/schema`.
+  The console draws it as a tree: a root opens as a grid, a nested pattern
+  opens as the collection group it names, the row for the current shape is
+  marked and the foot says how many parents carry it. The grid names each
+  row's subcollections in their own column, the path bar shows a pattern's
+  `*`, the root landing describes each collection's shape, and ⌘K finds
+  any pattern by name.
+- [x] The shell's layout: the navigation is expanded or collapsed to icons
+  (flipped at its foot or with `[`, kept per browser), a collapsed one
+  slides its labels out on hover, and every section can fill a panel
+  column beside its content. Firestore fills it with the database, a filter and the schema
+  tree, open only along the current path, so a database with dozens of
+  roots and hundreds of thousands of documents reads at a glance; the
+  workbench runs edge to edge under its own toolbar, and `t` hides the
+  panel.
+- [x] Every database of the project: `/console/api/v1/firestore/databases`
+  lists `(default)`, every database `firebase.json` declares and every one
+  a client has written to (the store seeks once per database), and the
+  panel's picker offers them, asking again each time it opens. Picking one
+  switches the tree, the path bar and the grid to that database alone.
+- [x] A pass over the Firestore section against a database of its own making:
+  a long field name no longer widens its column without end and a short one
+  under a long type badge keeps its header, arrays preview their items the
+  way maps preview their keys, the inspector keeps a long field's type and
+  remove controls inside the panel, a query that does not parse says so
+  instead of claiming to load for ever and leaves its text editable, the
+  document actions sit below the subcollections they act with, the grid's
+  footer and the query line scroll rather than stack when the column is
+  narrow, the inspector floats over the grid below `xl` instead of
+  squeezing it to a sliver, and the console follows the operating system's
+  colour scheme (Kumo's dark tokens were complete; nothing set `data-mode`).
+- [x] A theme the person picks: light, dark, or match the operating system,
+  remembered per browser and offered both in the header and in ⌘K. `system`
+  keeps following the OS live, so a machine that darkens at sunset takes the
+  console with it, while an explicit choice outlives the OS changing. Three
+  buttons rather than a menu, because Kumo's `DropdownMenu` is not in the
+  first route's chunk and pulling it in cost 10 KB of the bundle budget.
+- [x] One request for a whole screen of subcollections.
+  `POST /console/api/v1/firestore/subcollections` answers a list of parents
+  at once — which collections each document has and how many documents are
+  in each — from the schema index, which now keeps the concrete collections
+  (`users/u_9f3k2/orders`) beside the patterns it already kept. The grid's
+  column asked `ListCollectionIds` per rendered row and a count per chip, so
+  a screen cost dozens of requests and scrolling a large collection cost
+  thousands; the console now collects every path a tick asks for into one
+  request, while keeping its cache and live invalidation per document. The
+  index agrees with the store's own listing, descendant-only collections
+  included: `teams/t1` has `channels` even when no channel document exists.
+  Measured on 82,000 documents, a 32-row screen takes 2 ms in one request
+  against 9 ms in the 96 it replaces.
+- [x] The engine reports the version it actually ships as. Every crate here
+  carries the `0.0.1` workspace placeholder, because the npm package's
+  version is set by the packaging checkout while the binary is built from
+  the pinned engine commit — so the binary cannot know it at compile time
+  and the console's badge read `engine 0.0.1`. The CLI now passes
+  `FIRENOOK_RELEASE_VERSION` and `FIRENOOK_ENGINE_REVISION` at launch,
+  `firenook --version` and the console's status document report them, and a
+  binary started any other way says "unreleased build" rather than naming a
+  number that means nothing.
+- [x] The grid reads previews instead of whole documents. A collection whose
+  documents carry large maps made the page query ship 30 MB of JSON to paint
+  one screen — 302 KB a document, of which a cell shows one truncated line,
+  and the inspector refetched the document anyway. `runQuery` now opts in
+  with `x-firenook-preview`, and the REST front cuts strings and containers
+  to what a preview can draw while reporting their real sizes, so a cell
+  still shows the true entry count and never passes a fragment off as the
+  whole value. The fields the cursor orders by are kept whole, a cut value
+  is not editable in place, and a request without the header is unchanged
+  byte for byte.
+- [x] A console reader that goes away no longer wedges the schema index.
+  The walk was owned by whichever request asked for it first, so a browser
+  navigating, a socket closing or a client timing out dropped it mid-flight
+  and left the database marked as building for ever: the schema tree and the
+  grid's subcollections then hung for the life of the process while queries
+  and the status document kept answering normally. The walk now runs on its
+  own task and every reader waits on the notification, with an attempt
+  budget so a store that cannot be walked fails instead of looping.
+- [x] One connection could hold the suite's stop open for ever. The engine
+  printed that it was stopping and then never exited, so the ports stayed
+  taken and nothing could restart on them. A listener's graceful drain stops
+  accepting and then waits for the connections it already has: it closes the
+  ones sitting idle between requests, but a connection that has begun a
+  request and not finished sending it is not idle, so the wait never ended.
+  Every stream the console and the UI hold open already ends itself on the
+  stop signal, which is why the change feed was not the cause. Each HTTP
+  listener now gives the drain three seconds and then closes whatever is
+  still connected, the way the Firestore port already closed its WebChannel
+  and gRPC responses. A stop with nothing left to wait for is unchanged.
+- [x] Explain: what a query reads here, and what it would need in
+  production. The local engine answers every query it is given, so a query
+  that works all through development can still fail after a deploy for want
+  of a composite index. The plan comes from the code that runs the query,
+  not from a description of it — one function decides the strategy and
+  `execute_iter` and `plan` both call it — and names where the candidates
+  come from: documents read by name, an equality field index, a collection
+  scan or a collection-group scan. Beside it is the index requirement,
+  derived by asking a catalog that declares nothing what the query would
+  need, and the project's own `firestore.indexes.json` then says whether it
+  is already declared. The entry to paste is printed from the requirement
+  and a test declares that printed entry to prove it satisfies the query. A
+  declared index is a trailing `__name__` away from looking missing, which
+  is how the Firebase CLI writes some of its entries, so that field is now
+  matched as the implicit one it is.
+- [x] Export from the page: the query you are looking at, as JSON, NDJSON or
+  CSV. It reads whole documents rather than the previews a cell draws from,
+  pages the whole result with the grid's own cursors, and says before it
+  writes anything what the file will contain and whose view it is — an
+  export made while viewing as a user holds what that user can read. Plain
+  JSON is keyed by document id, which is the shape this console imports, so
+  an export loads straight back in; references, bytes, geopoints and vectors
+  have no plain-JSON form that survives that, so "keep Firestore types
+  exactly" writes the REST wire shape and the import now recognises it
+  instead of storing the wrappers as maps.
+- [x] One instant, one spelling. Writing that round trip found the engine
+  answering with a timestamp in two shapes: every REST response it encodes
+  by hand carried `Z` and as many fractional digits as the value needed,
+  while a listing, which is serialized from the protobuf message, carried
+  `+00:00` and six. A client comparing an `updateTime` it listed against one
+  it read saw one document with two different times. Protobuf JSON's
+  canonical form — always `Z`, a fraction of exactly zero, three, six or
+  nine digits — is now what every endpoint writes, and the normalisation the
+  WebChannel and Functions paths each carried a copy of lives in one place.
+- [x] A rules editor. The emulator exists so rules can be got right before
+  they reach production, and the loop that takes — edit the file, restart,
+  try again — is the slowest part of writing them. The rules are now the
+  text on screen: `GET`/`PUT /console/api/v1/firestore/rules` read what is
+  in force and replace it, a change compiles and takes effect on the next
+  request, and the Requests feed then shows the line that decided it.
+  Applying and saving are separate, so trying something out never rewrites
+  the file behind you; a ruleset that does not compile changes nothing, says
+  which line and column, and never reaches the file. A database whose rules
+  `firebase.json` does not configure can still be edited and says it was not
+  saved rather than implying it was.
+- [x] One live connection per browser. Every console page used to open its
+  own server-sent event stream, and over plain http the browser allows six
+  connections to the console's address, shared by every tab and every request:
+  a few tabs and the console's own requests queued behind its streams. Pages now
+  subscribe to topics on one stream that one visible tab holds for all the
+  others; a tab opened in the background takes nothing until it is shown. A
+  subscriber that missed something — a reconnect, a slow tab, a tab that was
+  hidden — gets what it missed replayed, or is told so and reloads what it
+  shows; the Firestore grid now refetches only the queries a missed write
+  touched, and patches a changed document in place instead of reloading every
+  page it had scrolled through. When the engine stops it says so at once; when
+  it restarts, the console notices by itself, says so, and reloads what is on
+  screen.
+- [x] Every section knows whether it can be used. The status document names
+  each section as ready, starting or absent, with why — not configured in
+  firebase.json, left out by --only, or not emulated by Firenook — and the
+  exact firebase.json lines or command to turn it on, and is pushed when a
+  service finishes starting, so the Functions page fills in by itself when
+  discovery ends. The navigation dims what is not running and carries badges
+  for what needs a look: a rules file that stopped compiling is a red count on
+  Rules the moment it is saved.
+- [x] The console says what is true for the whole suite: background triggers
+  paused by a test harness (with Resume, since when, and how many events
+  reached no function), an app that writes to another project id than this
+  emulator's (with the project it used, its data a click away, and how to fix
+  it), and whether the data lives in memory or on disk and survives a restart.
+- [x] ⌘K searches Firestore's collections and documents from anywhere, from the
+  engine's own indexes rather than a walk of the data; each section adds its
+  own things to the same search when it lands.
+- [x] One error shape across the Console API, with a code and a fix, one
+  paging contract with opaque cursors, and one filter language
+  (`provider:google -is:disabled ada`, `level=error data.userId:u_1`) that the
+  browser and the engine parse the same way, held to one shared file of cases.
+- [x] One kit every section is built from: the page's panel, toolbar rows and
+  inspector, a table that pages through the engine in both directions and
+  patches live rows in place, feeds that pause without losing their place,
+  JSON and payload views, a filter field that knows its keys, editors, a
+  request composer, an identity picker, a confirmation that says what a
+  destructive action sets off, and empty states that hand over the exact
+  snippet to connect an app. An empty Firestore collection now shows that
+  snippet too.
+- [x] Authentication. The users table reads the engine, not the whole
+  user list: a page is one request whatever the user count, filtering and
+  sorting run in the engine over an index it keeps beside the accounts and
+  reads outside the data lock, so the console never slows the app's own
+  Auth calls, and the filters panel counts disabled, anonymous,
+  custom-token, MFA, claims, unverified, never-signed-in and per-provider
+  users exactly. Sign-ups and sign-ins appear without a reload and without
+  moving the row being read, and a token refresh costs the console nothing.
+  A user opens onto every field the emulator stores — the password it
+  keeps recoverably included — with the account actions the Admin SDK has;
+  the claims editor checks what Firebase checks as it is typed, measures
+  the 1,000-character limit the way Firebase does, and shows the ID token
+  those claims produce. "Sign in as" mints the token a real sign-in would —
+  tenant, provider and second factor, beforeSignIn on request — without
+  signing in, and Inspect a token shows it with what still differs;
+  Firestore's "view as" and every identity picker now take
+  their token from the engine the same way, re-mint it before it expires
+  and drop it as soon as a change to the account would change it. Every link and code the
+  emulator would have sent is in an inbox, live, with the action it stands
+  for one click away, and ⌘K copies the latest SMS code or opens the latest
+  email link from anywhere. Every call to the Auth emulator is in Activity
+  with its exact error, the name the SDK gives it, what to change, and what
+  it caused: the blocking functions it ran (with their own messages), the
+  triggers it queued, the codes it sent and the accounts it changed; a
+  call can be copied as curl or replayed. A pasted token is decoded and
+  judged the way the rules, the emulator and the Admin SDK would judge it. Tenants (with the id you choose), one account
+  per email, email enumeration protection, blocking functions and the
+  lifecycle listeners are on one settings page; bulk changes run as jobs
+  you can preview and cancel, users import (streamed) and export in the
+  emulator's own format, and sample users (up to 1,000 at a time) fill a
+  project in seconds and leave as cleanly. Users are in ⌘K. Found and fixed on the way: the suite
+  gave Auth no origin, so a code requested through the console linked to
+  the console's address; every mutating Auth request — every token refresh
+  included — rewrote the whole state, pretty-printed, under the lock, which
+  is now snapshotted in O(1) and written off the request path; an engine
+  started without a state file saved it under the older layout's version,
+  so tenants, codes and proofs were lost on the next restart; custom claims
+  were measured in UTF-8 bytes where Firebase counts UTF-16 code units; and
+  `batchGet` cloned every account for each page.
+- [x] Storage. Every bucket and folder with the files under it, counted
+  and sized exactly by an index the engine keeps beside the objects and
+  updates one write at a time, so the folder tree and the counts stay
+  current without a scan. A folder lists from the engine one page at a
+  time in either direction, by name, size, last change or type, filtered
+  by name, type, size, dates, custom metadata or what a file carries;
+  writes from the app patch the rows they touch in place, and a sorted or
+  filtered view counts them and offers Refresh instead of jumping. A list
+  and a thumbnail grid, and previews that ask only for what they draw:
+  images, video, audio, PDFs, text and code, JSON as text or a tree, CSV
+  as a table, HTML with scripts off, and any other bytes, a zip among
+  them, as hex with what their first bytes say. A file opens onto its
+  facts, the gs:// path, the download URL and REST address an app
+  connected to the emulator gets, its download tokens (made and revoked
+  from there), a metadata editor that sends only what changed and says
+  when the file changed underneath, its history — who changed it, from the
+  app or the console, and whether the event reached the Functions emulator
+  and which invocations it started — the exact event bodies it sends, with
+  Send again, and a warning with a one-click fix when its contentType
+  disagrees with its bytes. Small text files edit in place. Uploads of
+  files and whole folders with progress, cancel, retry and a question when
+  names are taken; new folders, rename, move, copy, duplicate, metadata
+  for many files at once and delete run as jobs that report progress and
+  can be cancelled, and a folder or a selection downloads as one streamed
+  zip at any size. The whole page can act as any Auth user, an anonymous
+  client or a custom token: listings, previews and uploads then meet the
+  rules (uploads are judged before a byte is sent), a column says what
+  that identity may read and delete, and every refusal names the line that
+  refused it, with "See why" and "Try in the playground". ⌘K goes to a
+  pasted gs:// or download URL, a recent folder or file, any folder the
+  tree has read and any bucket. Storage rules have their own page: an
+  editor that knows Storage rules (the file an upload proposes,
+  `firestore.get()`, the metadata keys the bucket's files carry), live
+  checks with Storage's own lints, every decision the rules made with the
+  values each expression had written into the editor, a playground, saved
+  tests that export as a test file, coverage, history, what applying a
+  draft would turn around, starter rules drawn from the bucket's folders,
+  and the folders each match block governs. Found and fixed on the way:
+  Storage rules files were never reloaded when they changed (the official
+  CLI watches them); listing a folder walked every object under it twice
+  on every page while holding the service's lock; an aborted upload left
+  its staged bytes behind, and so did a crash mid-upload; two uploads
+  staged in the same microsecond shared a file; Storage queued trigger
+  events even when the suite ran no Functions (the official emulator sends
+  none then); and an unfinished resumable upload kept its staged bytes for
+  ever (it now goes after seven idle days, as production's session URIs
+  expire).
+- [x] Functions: every function by codebase with its trigger in plain words,
+  and every way one receives nothing said out loud — ignored, its service
+  not started, paused, removed by a reload, or dropped at load because the
+  emulator cannot deliver its event type. The load that failed and the one
+  still serving, the worker behind each codebase (reported the moment it
+  exits, restarted from the page, with its inspector address under
+  `--inspect-functions`), a TypeScript build that is behind its sources,
+  and an env file changed since the last load. Invoke an HTTP function or
+  a callable as any Auth user with App Check, or paste a curl command into
+  the form; watch a streaming answer arrive; send a test event shaped
+  exactly like the official functions shell's; or do the real thing —
+  write the document, publish the message, enqueue the task through Cloud
+  Tasks, upload the file, sign the user up. Every invocation is kept with
+  its request or event, its answer, its timing and **only its own log
+  lines**: the worker tags each line with the invocation that printed it,
+  which the runtime threw away before. Replay one after a fix, or edit it
+  and replay. Schedules show their next run in the zone the scheduler
+  evaluates them in and run now through it; the environment shows which
+  file set each value, secrets masked until revealed, and sets a missing
+  secret or param in the right file, putting the file back if the codebase
+  then does not load. Pausing background triggers (the console's one
+  switch) says how many events of each service were dropped, counted at
+  the sources. Every invocation links to what caused it — the document,
+  the object, the user, the message, the task, the event, the sign-up that
+  ran a blocking function — and a red badge on Invocations counts failures
+  you have not looked at. Nothing polls: everything rides the console's one
+  live channel, filtered in the engine, and recording is bounded (2,000
+  invocations and 64 MiB, at least 200 of each kind) with budgets on its
+  hot paths (`cargo bench -p firenook-functions-runtime --bench monitor`).
+  Found and fixed on the way: a worker outlived an engine killed outright
+  (SIGKILL, a crash), idling for ever with its codebase loaded; it now
+  ends itself within a second of its runtime going away. And the reload
+  watcher, given a project path through a symlink (macOS's `/var`) with a
+  dot-named directory above it, ignored every change; it now matches the
+  canonical spelling too.
+- [x] Extensions: each instance with its source and whether it starts
+  offline, its configuration and the file each value comes from, the
+  functions it adds and the ones the emulator does not deliver, the APIs it
+  would call that have no emulator, its roles and lifecycle hooks, the
+  events it emits, and its notes rendered safely with their console links
+  kept in the console. Reconfigure writes the file that actually set the
+  value, keeping its comments, and reloads the instance in place, once —
+  and puts the file back if the new values do not load; editing an
+  instance's parameter file in an editor reloads it too. A registry
+  instance can be vendored into the project from the page. An instance
+  dropped for triggers the suite does not emulate now says so.
+- [x] Eventarc: every event on every channel with the trigger it reached or
+  the filter that kept it out, the type nobody listens for with the one you
+  probably meant, publishing a custom event with a preview of who will get
+  it, replaying one with a new id, and who publishes what to whom. Events
+  that could not be read or matched nothing used to vanish without a trace;
+  the last 1,000 are kept.
+- [ ] Firebase Alerts through the Eventarc emulator's native channel, as on
+  the official emulator, and the thirteen test alerts the official UI
+  offered. Waits on recording the oracle (`functions-alerts-v1`); until
+  then an alert function loads, is listed as not delivered with that
+  reason, and there is no Alerts page.
+- [ ] Declared SDK params: resolve defaults into the worker environment the
+  way the official emulator does (it writes them to `.env.local`); record
+  the oracle first. The console already marks unresolved params and sets a
+  value on request.
+- [ ] Extension lifecycle tasks (onInstall/onUpdate/onConfigure): the
+  recorded oracle drops the task-queue functions they run; running them
+  needs a new recording and a deliberate divergence.
+- [x] Eventarc publishing from function or extension code through the Admin
+  SDK, with no credential of its own: the Admin SDK asks Google's token
+  endpoint for an access token before it calls the local emulator, and the
+  worker now answers that exchange for the synthetic credential every
+  worker holds (a credential the developer configured still goes to
+  Google), so `getEventarc().channel().publish()` works offline as it does
+  in production.
+- [x] Pub/Sub. Topics with their subscriptions and the functions they
+  trigger, in a tree that also flags topics written under another project
+  id than the emulator's, and publishes the emulator refused because the
+  topic does not exist — with the topic you probably meant. The messages a
+  topic received stay readable (the engine keeps the newest 5,000 of each
+  topic and 16 MiB, or the topic's own retention window up to 100,000),
+  filtered by key, id, text or the same filter expression a subscription
+  takes, exported as NDJSON or JSON and published again, ticked rows or a
+  file at a time. Each message shows, for every subscription and function,
+  what became of it: waiting, leased, acknowledged, dead-lettered, filtered
+  out, queued for a function, delivered, or failed with the handler's error,
+  with the exact request each function received, and a function can be run
+  again with one message alone; every run of a topic's functions is one
+  link away in Functions › Invocations. A composer publishes JSON, text,
+  bytes or Avro with attributes and an ordering key, up to a thousand at a
+  time with templated ids, or on an interval that keeps going when the tab
+  is closed, and checks data against the topic's schema as it is typed. A
+  backlog can be read in the order the next pull takes it, without leasing
+  it, its rows acknowledged or returned, and purged; push subscriptions
+  show every outcome with its count, dead letters have their own list, and
+  filters say where they fail to parse. A whole setup — topics,
+  subscriptions, schemas — exports to a file and imports into another run
+  or project. Schemas have an editor the engine's parser checks as it is
+  typed, each commit a new revision, and the topics that use them. A
+  scheduled function's Schedule tab in Functions shows its expression in
+  words, its next runs and its runs' outcomes, runs it now, pauses it, and
+  the schedule runs in the time zone it declares. Found and
+  fixed on the way: every published message and every acknowledged one was
+  kept for the life of the process, and the acknowledged ones were visited
+  by the 50 ms timer; every pull sorted the whole backlog; dead-lettered
+  messages never reached a function on the dead-letter topic, whose
+  subscription then grew for ever; cron schedules fired at UTC hours
+  whatever zone they declared, and a daily schedule with a zone never fired;
+  the Pub/Sub timer outlived the suite.
+- [x] Cloud Tasks. Every queue with its configuration in force and where each
+  value came from, live counters (pending, held, running, in backoff, slots
+  and, while the rate limit holds tasks back, a token bucket that refills
+  on screen), every pending and running task with its first and latest
+  attempts, the handler's responses and the next retry, with the emulator's
+  `maxAttempts` + 1 said where the figure shows, a queue's attempts as they
+  happen as its function's invocations in Functions, and the last thousand
+  finished tasks with their outcome. Tasks can be enqueued by hand exactly
+  as the Admin SDK sends them, run now, stopped, deleted (auto-named ones
+  too, which the API cannot), re-enqueued from history; queues pause,
+  resume, purge, and can hold scheduled tasks until their time. Refused
+  enqueues are listed with where the queue really is, and a queue
+  re-registered because its options changed says what it dropped instead
+  of losing it silently. The Tasks port is unchanged: these controls are
+  the console's. Found and fixed on the way: dispatch responses were never
+  read, refused queue registrations left only a log line, and the
+  statistics windows grew until someone asked for them.
+- [x] Logs: one stream for every service. The engine keeps the latest 20,000
+  lines as structured entries beside the official Logging feed, which is
+  unchanged, and keeps the last 2,000 errors, failures and denials longer,
+  so a flood of output does not erase the error it was caused by. The
+  console pages back through them, follows new lines and freezes the moment
+  you scroll, filters with the console's one filter language — level,
+  service, function, extension instance, codebase, kind, invocation, payload
+  field, words, regular expressions, and `-` to exclude any of them — with
+  live counts per value and a volume strip to pick a time from, opens any
+  line with the lines around it, and downloads exactly what the filter
+  shows. Everything a function prints says which call printed it,
+  firebase-functions' structured lines arrive as fields, and every call has
+  exactly one end line even when nobody reads its response. Notable engine
+  events are lines of their own: a refused rules decision with a link to
+  why (told apart from the console's own "view as" reads), rules applied
+  from the console or reloaded from their file, a rules file that stopped
+  compiling, the official Firestore clear, a reset from the console,
+  background triggers paused and resumed. Found on the
+  way: the official feed writes levels in lower case and Firenook wrote them
+  in capitals, and the debug log dropped any line longer than 8 KiB.
+- [x] Overview: what runs, where, and whether it is healthy — each section's
+  address, its live figures, its current problems, why a section is not
+  running and the exact fix, the recent errors, failures and denials over
+  the last hour, the code to connect an app on every platform with the host
+  it sees, and the engine's own configuration and where its data lives. The
+  suite's own warnings — an app writing to another project id,
+  background triggers left paused by a test harness — lead the page in the
+  same words every page uses; configuration the terminal prints once (a
+  project that is not a demo, a public listen address, emulators missing
+  while Functions run, diagnostics off) stays until it is dismissed.
+- [x] Snapshots and resets from the console, as engine jobs: download the
+  emulators' data as a standard export (the zip unpacks into a folder
+  `--import` reads), save one on the engine's machine, or reset a section's
+  data (Firestore, Authentication, Storage, Pub/Sub, Cloud Tasks) or every
+  resettable section at once. One data job runs at a time, shows its
+  progress in every tab, survives the tab that started it, and is cancelled
+  cleanly before the engine exits. A Firestore reset runs no Functions
+  triggers unless asked to — it commits as maintenance, which the trigger
+  observer ignores and every listener still sees — and open Firestore pages
+  reload once at its start and once at its end.
+- [ ] Parity checklist against the Google UI (`support/console-parity.md`):
+  every feature of the 1.15 bundle with the console screen that covers it.
+  When every row is ticked, remove the archive and `setup` (the root `/`
+  keeps serving the Google UI until then; its index is pinned by the
+  `ui-config-logging-and-websocket` fixture).
+- [ ] A write log, and perhaps an undo with it. Built and then taken out
+  again, which is the useful part of the entry: the engine can keep a
+  bounded window of commits with the document as it was and as it became,
+  and the console can list them, show the leaves that moved under their
+  dotted path, and put one back. Nothing else in the field ships this —
+  the Firebase console versions Rules and Remote Config but not documents,
+  Supabase needs an audit extension you install yourself, and the usual
+  answer elsewhere is point-in-time restore, which rolls the whole
+  database rather than one write. That is an argument for it, since the
+  objections are production's and not an emulator's: storage cost and
+  undoing a write something downstream already read.
+
+  Two findings decided against shipping it now. The undo writes through
+  the store, so **it fires triggers** — undoing a write a Function made
+  runs that Function again, which can re-apply it or loop, and the button
+  promises a restoration it cannot keep. And the value is lopsided: the
+  log answers "what did my app just do?", which nothing else answers,
+  while the undo is the half carrying the hazard and the least worth in a
+  database you can re-seed. If it returns: log first, undo behind a
+  confirmation that says triggers will fire, and the per-document history
+  in the inspector rather than one global list — the question is almost
+  always "what happened to *this*?". The removal is one commit, so the
+  implementation is readable in the history rather than lost.
 

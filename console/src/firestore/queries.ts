@@ -1,0 +1,202 @@
+// Server state for the workbench, keyed by scope so the live channel can
+// invalidate exactly what a commit touched. Nothing here polls.
+
+import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query'
+import { type WorkbenchQuery, effectiveOrder, printQuery, toStructuredQuery } from './query'
+import {
+  type FirestoreScope,
+  countQuery,
+  documentRoot,
+  getDocument,
+  keySlot,
+  listCollectionIds,
+  listDocumentIds,
+  listMissingDocuments,
+  runQuery,
+} from './rest'
+import { identityKey } from '@/lib/identity'
+import { type FsDocument, type RestValue, encodeValue } from './value'
+
+export const FS = 'fs' as const
+
+export const collectionsQuery = (scope: FirestoreScope, parent: string) =>
+  queryOptions({
+    queryKey: [FS, keySlot(scope), 'collections', parent, identityKey(scope.identity)],
+    queryFn: () => listCollectionIds(scope, parent),
+    staleTime: 30_000,
+    retry: false,
+  })
+
+/** Document ids in one collection from a prefix, for completing a reference. */
+export const documentIdsQuery = (scope: FirestoreScope, collection: string, from: string) =>
+  queryOptions({
+    queryKey: [FS, keySlot(scope), 'ids', collection, from, identityKey(scope.identity)],
+    queryFn: () => listDocumentIds(scope, collection, from, 20),
+    staleTime: 30_000,
+    retry: false,
+  })
+
+export const countQueryOptions = (
+  scope: FirestoreScope,
+  collectionPath: string,
+  group: boolean,
+  query: WorkbenchQuery,
+) => {
+  const { parent, collectionId } = splitCollection(collectionPath, group)
+  return queryOptions({
+    queryKey: [
+      FS,
+      keySlot(scope),
+      'count',
+      collectionPath,
+      group,
+      printQuery({ ...query, limit: 1 }),
+      identityKey(scope.identity),
+    ],
+    queryFn: () => {
+      // A count has no limit; the structured query drops it.
+      const { limit: _limit, ...structured } = toStructuredQuery(
+        collectionId,
+        group,
+        { ...query, limit: 1 },
+        documentRoot(scope),
+      )
+      return countQuery(scope, parent, structured)
+    },
+    staleTime: 30_000,
+    retry: false,
+  })
+}
+
+export const documentQuery = (scope: FirestoreScope, path: string) =>
+  queryOptions({
+    queryKey: [FS, keySlot(scope), 'doc', path, identityKey(scope.identity)],
+    queryFn: () => getDocument(scope, path),
+    staleTime: 30_000,
+    retry: false,
+  })
+
+export const missingDocumentsQuery = (scope: FirestoreScope, collectionPath: string) =>
+  queryOptions({
+    queryKey: [FS, keySlot(scope), 'missing', collectionPath, identityKey(scope.identity)],
+    queryFn: () => listMissingDocuments(scope, collectionPath, 300),
+    staleTime: 30_000,
+    retry: false,
+  })
+
+/** `users/u1/orders` → parent `users/u1`, collection `orders`; group queries run from the root. */
+export function splitCollection(collectionPath: string, group: boolean) {
+  const slash = collectionPath.lastIndexOf('/')
+  const collectionId = slash === -1 ? collectionPath : collectionPath.slice(slash + 1)
+  const parent = group || slash === -1 ? '' : collectionPath.slice(0, slash)
+  return { parent, collectionId }
+}
+
+/** The cursor after `document` for the query's effective order. */
+export function cursorAfter(
+  document: FsDocument,
+  query: WorkbenchQuery,
+  root: string,
+): RestValue[] {
+  return effectiveOrder(query).map((order) => {
+    if (order.field === '__name__') return { referenceValue: `${root}/${document.path}` }
+    const value = order.field.split('.').reduce<unknown>((current, segment) => {
+      if (current && typeof current === 'object' && 'type' in current) {
+        const typed = current as { type: string; fields?: Record<string, unknown> }
+        return typed.type === 'map' ? typed.fields?.[segment] : undefined
+      }
+      if (current && typeof current === 'object')
+        return (current as Record<string, unknown>)[segment]
+      return undefined
+    }, document.fields)
+    return value ? encodeValue(value as FsDocument['fields'][string], root) : { nullValue: null }
+  })
+}
+
+/** Pages a grid keeps loaded at most: scrolled deeper, the oldest page goes and comes back if wanted. */
+export const MAX_PAGES = 20
+
+/**
+ * Where a page starts: the query's start (the first page, or the page that
+ * follows an empty one at the top), after a document, or the page before a
+ * document — the query run reversed from it, as the SDKs do for
+ * `limitToLast`.
+ */
+export type PageParam =
+  | undefined
+  | { from: 'start' }
+  | { after: RestValue[] }
+  | { before: RestValue[] }
+
+/** The query with every order direction flipped: what runs to read the page before a document. */
+export function reversedQuery(query: WorkbenchQuery): WorkbenchQuery {
+  return {
+    ...query,
+    orderBy: effectiveOrder(query).map((order) => ({
+      field: order.field,
+      direction: order.direction === 'desc' ? 'asc' : 'desc',
+    })),
+  }
+}
+
+export const pageQueryOptions = (
+  scope: FirestoreScope,
+  collectionPath: string,
+  group: boolean,
+  query: WorkbenchQuery,
+) => {
+  const { parent, collectionId } = splitCollection(collectionPath, group)
+  const root = documentRoot(scope)
+  // The cursor compares these, so they must not arrive cut short.
+  const keep = effectiveOrder(query).map((order) => order.field)
+  return infiniteQueryOptions({
+    queryKey: [
+      FS,
+      keySlot(scope),
+      'page',
+      collectionPath,
+      group,
+      printQuery(query),
+      identityKey(scope.identity),
+    ],
+    queryFn: async ({ pageParam }: { pageParam: PageParam }) => {
+      if (pageParam && 'before' in pageParam) {
+        const page = await runQuery(
+          scope,
+          parent,
+          toStructuredQuery(collectionId, group, reversedQuery(query), root, pageParam.before),
+          { keep },
+        )
+        return { ...page, documents: page.documents.toReversed() }
+      }
+      const cursor = pageParam && 'after' in pageParam ? pageParam.after : undefined
+      return runQuery(scope, parent, toStructuredQuery(collectionId, group, query, root, cursor), {
+        keep,
+      })
+    },
+    initialPageParam: undefined as PageParam,
+    getNextPageParam: (last, _pages, lastParam): PageParam => {
+      const tail = last.documents.at(-1)
+      if (lastParam && 'before' in lastParam) {
+        // A page read backwards always has its window's next page after it;
+        // an empty one means the window now starts at the query's start.
+        return tail ? { after: cursorAfter(tail, query, root) } : { from: 'start' }
+      }
+      if (last.documents.length < query.limit || !tail) return undefined
+      return { after: cursorAfter(tail, query, root) }
+    },
+    getPreviousPageParam: (first, _pages, firstParam): PageParam => {
+      // The window starts where the query does.
+      if (firstParam === undefined || 'from' in firstParam) return undefined
+      if ('before' in firstParam && first.documents.length < query.limit) return undefined
+      const head = first.documents[0]
+      return head ? { before: cursorAfter(head, query, root) } : undefined
+    },
+    // A grid scrolled 50 pages deep refetches at most 20 on a change, and
+    // holds at most 20 in memory; the oldest is read again if scrolled back.
+    maxPages: MAX_PAGES,
+    staleTime: 30_000,
+    // Rules decide deterministically; a retry only repeats the denial.
+    retry: false,
+  })
+}

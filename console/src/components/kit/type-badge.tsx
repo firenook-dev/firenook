@@ -1,0 +1,80 @@
+import { Tooltip } from '@cloudflare/kumo'
+import { CaretDownIcon } from '@phosphor-icons/react'
+
+export type FirestoreValueType =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'timestamp'
+  | 'reference'
+  | 'geopoint'
+  | 'map'
+  | 'array'
+  | 'bytes'
+  | 'vector'
+  | 'null'
+  | 'doc'
+
+/**
+ * Tags a column or a field with its Firestore value type.
+ *
+ * One quiet treatment for every type, because the word already says which
+ * one it is. A colour per type repeats that in a second channel, and eight
+ * saturated chips across a header row is a rainbow with no hierarchy — it
+ * also drowns the one colour in there that carries information. Colour in
+ * this console means something or it is not spent, and a `null` is a value
+ * like any other, not the error its red chip claimed.
+ *
+ * `mixed` is the something: the breakdown of a column that holds values of
+ * two different types, which is the one case worth a mark. It is the only
+ * coloured badge in the grid, and the odd cells beneath it carry the same
+ * amber. What counts as that case is the caller's to decide — a column of
+ * timestamps and nulls does not.
+ *
+ * `menu` is the other half of that restraint, and the two places differ in
+ * what they are doing. In a grid header the chip is a label in a dense row
+ * and takes a ground to separate it. On a field row it is a control in a
+ * column of its own, where a stack of filled chips is a ladder nobody
+ * needs to climb — so it is a word and a caret, and the ground arrives
+ * with the rest of the row's controls, under the pointer.
+ * @category Data
+ */
+export function TypeBadge({
+  type,
+  mixed,
+  menu,
+}: {
+  type: FirestoreValueType
+  mixed?: string | undefined
+  /** This chip opens a menu: it takes a caret. */
+  menu?: boolean | undefined
+}) {
+  return (
+    <Tooltip
+      content={mixed ? `More than one type here: ${mixed}` : ''}
+      disabled={!mixed}
+      render={
+        <span
+          // Both places this sits are hover targets that light up, which
+          // would swallow the chip; it keeps its ground by going a step darker
+          // with them (it used to go white, a light chip on a grey ground). In
+          // a menu trigger it has no ground of its own: the trigger's hover is
+          // the chip's. The amber keeps its own, being the point.
+          className={`flex h-4.5 shrink-0 items-center gap-1 rounded px-1 font-mono text-[11px] ${
+            mixed
+              ? 'bg-kumo-warning-tint text-kumo-default'
+              : menu
+                ? 'text-kumo-subtle'
+                : 'bg-kumo-tint text-kumo-subtle group-hover:ink'
+          }`}
+          data-testid="type-badge"
+          data-mixed={mixed ? '' : undefined}
+        >
+          {mixed && <span className="size-1.5 shrink-0 rounded-full bg-kumo-warning" />}
+          {type}
+          {menu && <CaretDownIcon size={9} className="-mr-0.5 shrink-0 opacity-70" />}
+        </span>
+      }
+    />
+  )
+}

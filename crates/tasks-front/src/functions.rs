@@ -15,6 +15,12 @@ pub struct DiscoveredQueue {
     pub key: String,
     /// The function's exported name, the queue id.
     pub name: String,
+    /// The function's region-qualified id.
+    pub function_id: String,
+    /// The function's region, the queue's location.
+    pub region: String,
+    /// The project the queue registers under.
+    pub project: String,
     /// The registration body: the trigger's keys, then `defaultUri`.
     pub registration: OrderedJson,
 }
@@ -61,6 +67,9 @@ pub fn discover(
             Some(DiscoveredQueue {
                 key: queue_key(project, &function.region, &function.name),
                 name: function.name.clone(),
+                function_id: function.id.clone(),
+                region: function.region.clone(),
+                project: project.to_owned(),
                 registration: OrderedJson::Object(registration),
             })
         })

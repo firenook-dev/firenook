@@ -1,10 +1,21 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { SectionPlaceholder } from '@/components/section-placeholder'
-import { SECTIONS } from '@/lib/services'
+import { SectionFrame } from '@/components/console/section-gate'
+import { ExtensionsPage } from '@/extensions/components/extensions-page'
+import { extensionsSearch } from '@/extensions/search'
 
-const section = SECTIONS.find((candidate) => candidate.to === '/extensions')
-if (!section) throw new Error('The extensions section is missing from the registry')
-
+// Every instance of every extension in firebase.json, and one of them in
+// full: its source and offline readiness, its configuration with the file
+// each value comes from, the functions it adds, the events it publishes
+// and its own notes. Every view of it is a link (`../extensions/search.ts`).
 export const Route = createFileRoute('/extensions')({
-  component: () => <SectionPlaceholder section={section} />,
+  validateSearch: extensionsSearch,
+  component: ExtensionsRoute,
 })
+
+function ExtensionsRoute() {
+  return (
+    <SectionFrame section="extensions">
+      <ExtensionsPage />
+    </SectionFrame>
+  )
+}

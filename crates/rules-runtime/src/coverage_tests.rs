@@ -338,3 +338,48 @@ fn total_budget_project_limit_and_idle_expiry_are_bounded() {
     assert_eq!(state.entries.len(), 1);
     assert!(state.entries[0].updated.elapsed() < Duration::from_secs(1));
 }
+
+#[test]
+fn coverage_recorder_reports_with_its_file_name() {
+    let rules = Arc::new(
+        compile(
+            "rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o/{path=**} {\n    allow read: if request.auth != null && request.auth.uid == 'u1';\n  }\n}\n",
+        )
+        .unwrap(),
+    );
+    let recorder = CoverageRecorder::new();
+    let mut request = EvaluationRequest::storage(
+        RequestOperation::Get,
+        "/b/bucket/o/users/u1/a.png",
+        Timestamp::new(0, 0),
+    );
+    request.auth = Some(firenook_rules_engine::Auth {
+        uid: Some("u1".to_owned()),
+        token: std::collections::BTreeMap::new(),
+    });
+    let (result, trace) = recorder.evaluate("storage/*", &rules, &request, &EmptyDocumentAccess);
+    assert_eq!(result, rules.evaluate(&request, &EmptyDocumentAccess));
+    assert!(result.allowed);
+    assert_eq!(trace.outcomes().len(), 1);
+    let report: Json = serde_json::from_slice(
+        &recorder
+            .report("storage/*", &rules, "storage.rules")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(report["rules"]["files"][0]["name"], "storage.rules");
+    assert_eq!(report["rules"]["files"][0]["content"], rules.source());
+    let values = report["report"].to_string();
+    assert!(values.contains("\"count\":1"), "{values}");
+    assert_eq!(
+        report["firenookCoverage"]["countModel"],
+        "actual-evaluator-visits"
+    );
+    // The Firestore report keeps its file name.
+    let store = CoverageStore::default();
+    assert_eq!(
+        serde_json::from_slice::<Json>(&store.report("demo", &rules).unwrap()).unwrap()["rules"]["files"]
+            [0]["name"],
+        "firestore.rules"
+    );
+}

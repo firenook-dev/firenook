@@ -1,10 +1,20 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { SectionPlaceholder } from '@/components/section-placeholder'
-import { SECTIONS } from '@/lib/services'
+import { SectionFrame } from '@/components/console/section-gate'
+import { FunctionsPage, FunctionsStarting } from '@/functions/components/functions-page'
+import { functionsSearch } from '@/functions/search'
 
-const section = SECTIONS.find((candidate) => candidate.to === '/functions')
-if (!section) throw new Error('The functions section is missing from the registry')
-
+// Every function by codebase, one codebase, or one function with its
+// invocations and its Run, Trigger and Environment tabs: every view is a
+// link (compute spec §4.3).
 export const Route = createFileRoute('/functions')({
-  component: () => <SectionPlaceholder section={section} />,
+  validateSearch: functionsSearch,
+  component: FunctionsRoute,
 })
+
+function FunctionsRoute() {
+  return (
+    <SectionFrame section="functions" skeleton={<FunctionsStarting />}>
+      <FunctionsPage />
+    </SectionFrame>
+  )
+}

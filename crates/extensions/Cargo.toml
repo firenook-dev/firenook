@@ -22,6 +22,7 @@ zip.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
+firenook-functions-bridge = { path = "../functions-bridge" }
 tempfile = "3"
 
 [lints]

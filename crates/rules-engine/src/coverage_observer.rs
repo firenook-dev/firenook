@@ -1,7 +1,9 @@
 //! Borrowed observations of actual expression execution; no retained payloads.
 use std::collections::BTreeMap;
 
-use crate::{Auth, EvaluationRequest, Resource, RuntimeError, Value};
+use crate::{
+    Auth, ConstraintOperator, EvaluationRequest, FieldConstraint, Resource, RuntimeError, Value,
+};
 
 /// An expression's internal UTF-8 syntax range in its immutable rules source.
 /// This key is not the coverage wire protocol's Unicode-scalar source position.
@@ -91,4 +93,79 @@ pub trait CoverageObserver {
     /// Unvisited expressions receive no callback; literals are absent from the
     /// report layout. Observation cannot change the expression's returned value.
     fn observe(&mut self, key: ExpressionKey, value: ExpressionValue<'_>);
+
+    /// Whether this observer wants the list-query proof details below. Coverage
+    /// does not: while this is false the evaluator never calls
+    /// [`observe_query`](Self::observe_query) or
+    /// [`observe_query_comparison`](Self::observe_query_comparison), so every
+    /// observation stays exactly what [`observe`](Self::observe) received before
+    /// these hooks existed.
+    fn explains_queries(&self) -> bool {
+        false
+    }
+
+    /// Observe an expression evaluated inside a list-query proof whose value
+    /// stands for (or was read from) the documents the query may return. `value`
+    /// is what [`observe`](Self::observe) would have received; the default
+    /// forwards it there unchanged.
+    fn observe_query(
+        &mut self,
+        key: ExpressionKey,
+        value: ExpressionValue<'_>,
+        proof: QueryProof<'_>,
+    ) {
+        let _ = proof;
+        self.observe(key, value);
+    }
+
+    /// A comparison between a document field and a value, inside a list-query
+    /// proof, that the query's filters did not prove true. Reported after both
+    /// operands were observed and before the comparison itself is.
+    fn observe_query_comparison(&mut self, comparison: QueryComparison<'_>) {
+        let _ = comparison;
+    }
+}
+
+/// What a list query's proof knows about an expression. A list is allowed only
+/// when the rules hold for every document the query could return, so `resource`
+/// in a list proof is not one document but all of them, described by the
+/// query's filters.
+#[derive(Clone, Copy, Debug)]
+pub enum QueryProof<'a> {
+    /// `resource`: any document the query may return.
+    Resource,
+    /// `resource.data` of any such document.
+    Data,
+    /// One field of any such document. `constraints` is every predicate of the
+    /// query branch under proof; those whose `field` equals `field` are the ones
+    /// that constrain it (none means the query leaves the field unconstrained).
+    Field {
+        /// Field path below `resource.data`.
+        field: &'a [String],
+        /// Predicates of the proof branch, including those on other fields.
+        constraints: &'a [FieldConstraint],
+    },
+    /// A value the query's filters cannot decide either way.
+    Unknown,
+}
+
+/// A rule comparison between a document field and a value, as a query filter
+/// would have to spell it to prove the rule: `field operator value`, already
+/// oriented with the field on the left (`'x' in resource.data.tags` becomes
+/// `tags array-contains 'x'`).
+#[derive(Clone, Copy, Debug)]
+pub struct QueryComparison<'a> {
+    /// The whole comparison expression.
+    pub key: ExpressionKey,
+    /// Field path below `resource.data`.
+    pub field: &'a [String],
+    /// The filter operator that would prove the comparison.
+    pub operator: ConstraintOperator,
+    /// The value the rule compares the field with.
+    pub value: &'a Value,
+    /// Every predicate of the proof branch; those on `field` constrain it.
+    pub constraints: &'a [FieldConstraint],
+    /// `Some(false)` when the filters prove the comparison false for some
+    /// result, `None` when they cannot decide it.
+    pub proven: Option<bool>,
 }

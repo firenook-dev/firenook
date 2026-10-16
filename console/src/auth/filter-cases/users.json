@@ -1,0 +1,851 @@
+{
+  "note": "The Authentication users table's filter (crates/console-front/src/auth/filter.rs USER_FIELDS, console/src/auth/fields.ts). The engine and the browser parse and validate every text against these fields and must give exactly this result or this error, UTF-16 span included. What each case means to the index is pinned in user-filter.json.",
+  "regex": false,
+  "fields": [
+    {
+      "key": "is",
+      "kind": "enum",
+      "help": "Account state",
+      "values": ["disabled", "verified", "anonymous", "custom-token", "sample"]
+    },
+    {
+      "key": "has",
+      "kind": "enum",
+      "help": "What the account has",
+      "values": ["email", "phone", "password", "mfa", "claims", "photo", "name", "sign-in"]
+    },
+    {
+      "key": "provider",
+      "aliases": ["p"],
+      "kind": "exact",
+      "help": "Linked sign-in provider"
+    },
+    {
+      "key": "claim",
+      "kind": "exact",
+      "help": "Custom claim"
+    },
+    {
+      "key": "created",
+      "kind": "time",
+      "help": "When the account was created"
+    },
+    {
+      "key": "signed-in",
+      "aliases": ["last-sign-in"],
+      "kind": "time",
+      "help": "Last sign-in"
+    },
+    {
+      "key": "uid",
+      "aliases": ["id"],
+      "kind": "exact",
+      "help": "Account id"
+    },
+    {
+      "key": "email",
+      "kind": "text",
+      "help": "Email address"
+    },
+    {
+      "key": "phone",
+      "kind": "text",
+      "help": "Phone number"
+    },
+    {
+      "key": "name",
+      "kind": "text",
+      "help": "Display name"
+    }
+  ],
+  "cases": [
+    {
+      "name": "empty",
+      "text": "",
+      "ok": {}
+    },
+    {
+      "name": "one-word",
+      "text": "ada",
+      "ok": {
+        "words": [
+          {
+            "from": 0,
+            "negated": false,
+            "text": "ada",
+            "to": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "negated-word",
+      "text": "-ada",
+      "ok": {
+        "words": [
+          {
+            "from": 0,
+            "negated": true,
+            "text": "ada",
+            "to": 4
+          }
+        ]
+      }
+    },
+    {
+      "name": "quoted-phrase",
+      "text": "\"ada lovelace\"",
+      "ok": {
+        "words": [
+          {
+            "from": 0,
+            "negated": false,
+            "text": "ada lovelace",
+            "to": 14
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-disabled",
+      "text": "is:disabled",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "is",
+            "negated": false,
+            "op": "eq",
+            "to": 11,
+            "value": "disabled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "not-disabled",
+      "text": "-is:disabled",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "is",
+            "negated": true,
+            "op": "eq",
+            "to": 12,
+            "value": "disabled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-any-of",
+      "text": "is:verified is:anonymous",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "is",
+            "negated": false,
+            "op": "eq",
+            "to": 11,
+            "value": "verified"
+          },
+          {
+            "from": 12,
+            "key": "is",
+            "negated": false,
+            "op": "eq",
+            "to": 24,
+            "value": "anonymous"
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-custom-token",
+      "text": "is:custom-token",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "is",
+            "negated": false,
+            "op": "eq",
+            "to": 15,
+            "value": "custom-token"
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-sample",
+      "text": "is:sample",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "is",
+            "negated": false,
+            "op": "eq",
+            "to": 9,
+            "value": "sample"
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-unknown-value",
+      "text": "is:nope",
+      "error": {
+        "from": 0,
+        "to": 7,
+        "message": "\"is:\" is one of disabled, verified, anonymous, custom-token, sample."
+      }
+    },
+    {
+      "name": "has-email",
+      "text": "has:email",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "has",
+            "negated": false,
+            "op": "eq",
+            "to": 9,
+            "value": "email"
+          }
+        ]
+      }
+    },
+    {
+      "name": "has-phone",
+      "text": "has:phone",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "has",
+            "negated": false,
+            "op": "eq",
+            "to": 9,
+            "value": "phone"
+          }
+        ]
+      }
+    },
+    {
+      "name": "has-password",
+      "text": "has:password",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "has",
+            "negated": false,
+            "op": "eq",
+            "to": 12,
+            "value": "password"
+          }
+        ]
+      }
+    },
+    {
+      "name": "has-mfa",
+      "text": "has:mfa",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "has",
+            "negated": false,
+            "op": "eq",
+            "to": 7,
+            "value": "mfa"
+          }
+        ]
+      }
+    },
+    {
+      "name": "has-claims",
+      "text": "has:claims",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "has",
+            "negated": false,
+            "op": "eq",
+            "to": 10,
+            "value": "claims"
+          }
+        ]
+      }
+    },
+    {
+      "name": "has-photo",
+      "text": "has:photo",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "has",
+            "negated": false,
+            "op": "eq",
+            "to": 9,
+            "value": "photo"
+          }
+        ]
+      }
+    },
+    {
+      "name": "has-name",
+      "text": "has:name",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "has",
+            "negated": false,
+            "op": "eq",
+            "to": 8,
+            "value": "name"
+          }
+        ]
+      }
+    },
+    {
+      "name": "never-signed-in",
+      "text": "-has:sign-in",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "has",
+            "negated": true,
+            "op": "eq",
+            "to": 12,
+            "value": "sign-in"
+          }
+        ]
+      }
+    },
+    {
+      "name": "provider",
+      "text": "provider:google.com",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "provider",
+            "negated": false,
+            "op": "eq",
+            "to": 19,
+            "value": "google.com"
+          }
+        ]
+      }
+    },
+    {
+      "name": "provider-alias",
+      "text": "p:password",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "provider",
+            "negated": false,
+            "op": "eq",
+            "to": 10,
+            "value": "password"
+          }
+        ]
+      }
+    },
+    {
+      "name": "provider-any-of",
+      "text": "provider:google.com provider:github.com",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "provider",
+            "negated": false,
+            "op": "eq",
+            "to": 19,
+            "value": "google.com"
+          },
+          {
+            "from": 20,
+            "key": "provider",
+            "negated": false,
+            "op": "eq",
+            "to": 39,
+            "value": "github.com"
+          }
+        ]
+      }
+    },
+    {
+      "name": "provider-excluded-twice",
+      "text": "-provider:anonymous -provider:password",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "provider",
+            "negated": true,
+            "op": "eq",
+            "to": 19,
+            "value": "anonymous"
+          },
+          {
+            "from": 20,
+            "key": "provider",
+            "negated": true,
+            "op": "eq",
+            "to": 38,
+            "value": "password"
+          }
+        ]
+      }
+    },
+    {
+      "name": "provider-prefix",
+      "text": "provider:saml.*",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "provider",
+            "negated": false,
+            "op": "eq",
+            "to": 15,
+            "value": "saml.*"
+          }
+        ]
+      }
+    },
+    {
+      "name": "claim-key",
+      "text": "claim:role",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "claim",
+            "negated": false,
+            "op": "eq",
+            "to": 10,
+            "value": "role"
+          }
+        ]
+      }
+    },
+    {
+      "name": "claim-bool",
+      "text": "claim:admin=true",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "claim",
+            "negated": false,
+            "op": "eq",
+            "to": 16,
+            "value": "admin=true"
+          }
+        ]
+      }
+    },
+    {
+      "name": "claim-text",
+      "text": "claim:plan=pro",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "claim",
+            "negated": false,
+            "op": "eq",
+            "to": 14,
+            "value": "plan=pro"
+          }
+        ]
+      }
+    },
+    {
+      "name": "claim-quoted-json-string",
+      "text": "claim:\"flag=\\\"true\\\"\"",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "claim",
+            "negated": false,
+            "op": "eq",
+            "to": 21,
+            "value": "flag=\"true\""
+          }
+        ]
+      }
+    },
+    {
+      "name": "claim-number",
+      "text": "claim:level=3",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "claim",
+            "negated": false,
+            "op": "eq",
+            "to": 13,
+            "value": "level=3"
+          }
+        ]
+      }
+    },
+    {
+      "name": "claim-excluded",
+      "text": "-claim:role",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "claim",
+            "negated": true,
+            "op": "eq",
+            "to": 11,
+            "value": "role"
+          }
+        ]
+      }
+    },
+    {
+      "name": "claim-without-key",
+      "text": "claim:=x",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "claim",
+            "negated": false,
+            "op": "eq",
+            "to": 8,
+            "value": "=x"
+          }
+        ]
+      }
+    },
+    {
+      "name": "created-relative",
+      "text": "created:>-7d",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "created",
+            "negated": false,
+            "op": "gt",
+            "to": 12,
+            "value": "-7d"
+          }
+        ]
+      }
+    },
+    {
+      "name": "created-day",
+      "text": "created:2026-10-01",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "created",
+            "negated": false,
+            "op": "eq",
+            "to": 18,
+            "value": "2026-10-01"
+          }
+        ]
+      }
+    },
+    {
+      "name": "created-range",
+      "text": "created:>=2026-10-01 created:<2026-11-01",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "created",
+            "negated": false,
+            "op": "ge",
+            "to": 20,
+            "value": "2026-10-01"
+          },
+          {
+            "from": 21,
+            "key": "created",
+            "negated": false,
+            "op": "lt",
+            "to": 40,
+            "value": "2026-11-01"
+          }
+        ]
+      }
+    },
+    {
+      "name": "created-until-today",
+      "text": "created:<=today",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "created",
+            "negated": false,
+            "op": "le",
+            "to": 15,
+            "value": "today"
+          }
+        ]
+      }
+    },
+    {
+      "name": "created-after-instant",
+      "text": "created:>2026-10-01T12:00:00Z",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "created",
+            "negated": false,
+            "op": "gt",
+            "to": 29,
+            "value": "2026-10-01T12:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "signed-in-before",
+      "text": "signed-in:<2026-10-01",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "signed-in",
+            "negated": false,
+            "op": "lt",
+            "to": 21,
+            "value": "2026-10-01"
+          }
+        ]
+      }
+    },
+    {
+      "name": "signed-in-alias",
+      "text": "last-sign-in:>-1h",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "signed-in",
+            "negated": false,
+            "op": "gt",
+            "to": 17,
+            "value": "-1h"
+          }
+        ]
+      }
+    },
+    {
+      "name": "signed-in-bad-time",
+      "text": "signed-in:yesterday",
+      "error": {
+        "from": 0,
+        "to": 19,
+        "message": "\"signed-in:\" needs a time, like 2026-10-01, -2h or today."
+      }
+    },
+    {
+      "name": "uid-prefix",
+      "text": "uid:sample-*",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "uid",
+            "negated": false,
+            "op": "eq",
+            "to": 12,
+            "value": "sample-*"
+          }
+        ]
+      }
+    },
+    {
+      "name": "uid-alias",
+      "text": "id:u_ada",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "uid",
+            "negated": false,
+            "op": "eq",
+            "to": 8,
+            "value": "u_ada"
+          }
+        ]
+      }
+    },
+    {
+      "name": "uid-empty",
+      "text": "uid:",
+      "error": {
+        "from": 0,
+        "to": 4,
+        "message": "\"uid:\" needs a value."
+      }
+    },
+    {
+      "name": "email",
+      "text": "email:example.test",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "email",
+            "negated": false,
+            "op": "eq",
+            "to": 18,
+            "value": "example.test"
+          }
+        ]
+      }
+    },
+    {
+      "name": "email-case",
+      "text": "email:Ada@Example.Test",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "email",
+            "negated": false,
+            "op": "eq",
+            "to": 22,
+            "value": "Ada@Example.Test"
+          }
+        ]
+      }
+    },
+    {
+      "name": "email-empty",
+      "text": "email:",
+      "error": {
+        "from": 0,
+        "to": 6,
+        "message": "\"email:\" needs a value."
+      }
+    },
+    {
+      "name": "phone-quoted",
+      "text": "phone:\"+1 (555) 0100\"",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "phone",
+            "negated": false,
+            "op": "eq",
+            "to": 21,
+            "value": "+1 (555) 0100"
+          }
+        ]
+      }
+    },
+    {
+      "name": "name-quoted",
+      "text": "name:\"Ada Lovelace\"",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "name",
+            "negated": false,
+            "op": "eq",
+            "to": 19,
+            "value": "Ada Lovelace"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown-key",
+      "text": "foo:bar",
+      "error": {
+        "from": 0,
+        "to": 7,
+        "message": "Unknown filter \"foo:\". Use is, has, provider, claim, created, signed-in, uid, email, phone or name; quote it to search for the text."
+      }
+    },
+    {
+      "name": "spec-example",
+      "text": "is:disabled provider:google.com claim:role=admin created:>-7d -provider:anonymous ada",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "is",
+            "negated": false,
+            "op": "eq",
+            "to": 11,
+            "value": "disabled"
+          },
+          {
+            "from": 12,
+            "key": "provider",
+            "negated": false,
+            "op": "eq",
+            "to": 31,
+            "value": "google.com"
+          },
+          {
+            "from": 32,
+            "key": "claim",
+            "negated": false,
+            "op": "eq",
+            "to": 48,
+            "value": "role=admin"
+          },
+          {
+            "from": 49,
+            "key": "created",
+            "negated": false,
+            "op": "gt",
+            "to": 61,
+            "value": "-7d"
+          },
+          {
+            "from": 62,
+            "key": "provider",
+            "negated": true,
+            "op": "eq",
+            "to": 81,
+            "value": "anonymous"
+          }
+        ],
+        "words": [
+          {
+            "from": 82,
+            "negated": false,
+            "text": "ada",
+            "to": 85
+          }
+        ]
+      }
+    }
+  ]
+}
