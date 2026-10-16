@@ -284,7 +284,7 @@ for (const scheme of ['light', 'dark'] as const)
       page.getByRole('menuitem', { name: 'Sort ascending' }),
     )
     await page.keyboard.press('Escape')
-    await page.keyboard.press('Meta+k')
+    await page.keyboard.press('ControlOrMeta+k')
     await measure(
       'palette result',
       page.getByRole('option').nth(2),
