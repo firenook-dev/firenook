@@ -1035,6 +1035,9 @@ async fn export_stream_round_trips_and_tickets_serve_a_retry() {
     assert_eq!(ticket.objects, 2);
     let source = ExportSource::Ticket(ticket.id.clone());
     let (_, aborted) = harness.console().export_stream(&source).expect("first");
+    // The archive is small enough to sit whole in the channel's buffer: the
+    // writer is done long before anyone reads, and the ticket is still taken.
+    tokio::time::sleep(Duration::from_millis(200)).await;
     let busy = harness.console().export_stream(&source).expect_err("busy");
     assert!(matches!(busy, ConsoleError::Conflict(_)));
     drop(aborted);

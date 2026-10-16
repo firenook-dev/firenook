@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 use std::io::{Read as _, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -375,7 +376,9 @@ impl StorageConsoleApi {
 
     /// The `.zip` of a ticket or a folder: its file name and the streamed
     /// body. A ticket is refused while another response streams it, and is
-    /// used up once one response completes.
+    /// used up once one response reaches its end with the whole archive
+    /// written; a response dropped before that, or an archive that failed,
+    /// leaves it usable for a retry.
     pub fn export_stream(&self, source: &ExportSource) -> Result<(String, Body), ConsoleError> {
         let state = self.state_ref().clone();
         let (bucket, root, entries, ticket) = match source {
@@ -426,26 +429,23 @@ impl StorageConsoleApi {
             buffer: Vec::with_capacity(CHUNK),
             state: state.clone(),
         };
+        // The response holds the ticket, not the writer: a small archive is
+        // written into the channel's buffer before anyone reads it, and the
+        // ticket must stay taken until the response itself is done.
+        let complete = Arc::new(AtomicBool::new(false));
+        let release = ticket.map(|id| TicketRelease {
+            state: state.clone(),
+            id,
+            complete: Arc::clone(&complete),
+            settled: false,
+        });
         let worker = state.clone();
         let started = state.tasks.spawn_blocking(move || {
-            let written = write_archive(&worker, &bucket, &root, entries, writer);
-            if let Some(id) = &ticket {
-                let mut live = lock(&worker.exports.tickets);
-                match &written {
-                    // Used up: one response completed.
-                    Ok(()) => {
-                        live.remove(id);
-                    }
-                    // Usable again for a retry.
-                    Err(_) => {
-                        if let Some(ticket) = live.get_mut(id) {
-                            ticket.streaming = false;
-                        }
-                    }
+            match write_archive(&worker, &bucket, &root, entries, writer) {
+                Ok(()) => complete.store(true, Ordering::Release),
+                Err(error) => {
+                    let _ = sender.try_send(Err(std::io::Error::other(error)));
                 }
-            }
-            if let Err(error) = written {
-                let _ = sender.try_send(Err(std::io::Error::other(error)));
             }
         });
         if !started {
@@ -454,10 +454,52 @@ impl StorageConsoleApi {
             ));
         }
         let body = Body::from_stream(futures_util::stream::unfold(
-            receiver,
-            |mut receiver| async move { receiver.recv().await.map(|chunk| (chunk, receiver)) },
+            (receiver, release),
+            |(mut receiver, mut release)| async move {
+                let chunk = receiver.recv().await;
+                if chunk.is_none()
+                    && let Some(release) = release.as_mut()
+                {
+                    release.settle();
+                }
+                chunk.map(|chunk| (chunk, (receiver, release)))
+            },
         ));
         Ok((file_name, body))
+    }
+}
+
+/// A ticket taken by one response. The channel closes once the writer is
+/// done: if the archive was written whole the ticket is used up, otherwise
+/// (and when the response is dropped before its end) it is free again.
+struct TicketRelease {
+    state: StorageState,
+    id: String,
+    /// Set by the writer once the whole archive is in the channel.
+    complete: Arc<AtomicBool>,
+    settled: bool,
+}
+
+impl TicketRelease {
+    /// The response reached its end.
+    fn settle(&mut self) {
+        self.settled = true;
+        let mut live = lock(&self.state.exports.tickets);
+        if self.complete.load(Ordering::Acquire) {
+            live.remove(&self.id);
+        } else if let Some(ticket) = live.get_mut(&self.id) {
+            ticket.streaming = false;
+        }
+    }
+}
+
+impl Drop for TicketRelease {
+    fn drop(&mut self) {
+        if !self.settled
+            && let Some(ticket) = lock(&self.state.exports.tickets).get_mut(&self.id)
+        {
+            ticket.streaming = false;
+        }
     }
 }
 
