@@ -48,7 +48,7 @@ use blocking::{BlockingContext, BlockingOutcome, BlockingTarget, OauthTokens};
 use error::ApiError;
 use observe::{
     ACTIVITY_HEADER, AuthObserver, Body as RecordedBody, CallError, CallRecord, ConsoleOrigin,
-    Description, Notice, Step, Trace, TriggerOutcome,
+    Description, Notice, Step, Trace, TriggerOutcome, UserChange,
 };
 use ops::Ctx;
 pub use persist::PersistStats;
@@ -457,6 +457,23 @@ impl AuthRuntime {
     }
 }
 
+/// What a sign-in or a token refresh stamps on the account it signs in.
+const BOOKKEEPING: [&str; 2] = ["lastLoginAt", "lastRefreshAt"];
+
+/// Whether a change only stamped [`BOOKKEEPING`] fields on existing
+/// accounts. A change that said nothing of itself is not: it is written
+/// before the call answers like any other.
+fn bookkeeping_only(notices: &[(String, Option<String>, Notice)]) -> bool {
+    !notices.is_empty()
+        && notices.iter().all(|(_, _, notice)| {
+            matches!(
+                notice,
+                Notice::User { change: UserChange::Updated, fields, .. }
+                    if fields.iter().all(|field| BOOKKEEPING.contains(&field.as_str()))
+            )
+        })
+}
+
 impl Runtime {
     /// The project requests without an explicit target project address.
     #[must_use]
@@ -583,12 +600,19 @@ impl Runtime {
 
     /// Runs `body` against the request's project or tenant under the state
     /// lock, persists the result and dispatches the lifecycle events it queued.
+    ///
+    /// An operation answers once what it changed is on disk, and a write that
+    /// fails (a full disk) fails the operation, so every acknowledged account,
+    /// code or setting survives a restart. The one exception is the
+    /// bookkeeping a sign-in or a token refresh stamps on the account
+    /// ([`BOOKKEEPING`]): it is written behind, or every sign-in would wait
+    /// for the whole state to be encoded.
     pub fn scope<T>(
         &self,
         ctx: &Ctx,
         body: impl FnOnce(&mut Scope<'_>) -> Result<T, ApiError>,
     ) -> Result<T, ApiError> {
-        self.update_traced(&ctx.trace, |data| {
+        self.apply(&ctx.trace, true, |data| {
             let mut scope = Scope::new(data, &ctx.project_id, ctx.tenant_id.as_deref());
             body(&mut scope)
         })
@@ -619,10 +643,21 @@ impl Runtime {
         trace: &Trace,
         body: impl FnOnce(&mut AuthData) -> T,
     ) -> Result<T, AuthError> {
-        // Nothing is encoded here: a change only marks the state dirty, and
-        // the writer snapshots it in O(1) and encodes it off the request
-        // path, so a lookup never rewrites the state and a write never waits
-        // for an encode, whatever the number of users.
+        self.apply(trace, false, body)
+    }
+
+    /// The change itself. A change marks the state dirty and the writer
+    /// snapshots it in O(1) and encodes it off the request path, so a lookup
+    /// never rewrites the state. With `answered_on_disk` (the operations'
+    /// [`Runtime::scope`]) a change other than sign-in bookkeeping is also
+    /// written before this returns: changes that arrive together share that
+    /// write, and its failure is this call's.
+    fn apply<T>(
+        &self,
+        trace: &Trace,
+        answered_on_disk: bool,
+        body: impl FnOnce(&mut AuthData) -> T,
+    ) -> Result<T, AuthError> {
         let (result, events, notices, changed) = {
             let mut data = lock(&self.inner.data);
             let before = data.generation();
@@ -634,6 +669,9 @@ impl Runtime {
         };
         if changed {
             self.mark_dirty();
+            if answered_on_disk && !bookkeeping_only(&notices) {
+                self.write_state(false)?;
+            }
         }
         // A project's configuration holds its blocking functions.
         if notices.iter().any(|(_, _, notice)| {
