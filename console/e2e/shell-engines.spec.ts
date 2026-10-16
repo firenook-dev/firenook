@@ -200,13 +200,19 @@ dedicated.describe('with engines of their own', () => {
       const details = page.getByTestId('overview-engine-details')
       await expect(details).toBeInViewport()
       await expect(page.getByTestId('engine-data')).toContainText('On disk')
-      await expect(page.getByTestId('engine-data')).toContainText(join(engine.directory, 'state'))
+      await expect(page.getByTestId('engine-data').locator('[data-path]')).toHaveAttribute(
+        'data-path',
+        join(engine.directory, 'state'),
+      )
       await expect(page.getByTestId('engine-writes')).toContainText(data.durability)
 
       // Scrolled away on the Overview, the badge brings the section back.
-      await page.getByTestId('overview-scroll').evaluate((column) => column.scrollTo({ top: 0 }))
-      await expect(details).not.toBeInViewport()
+      const column = page.getByTestId('overview-scroll')
+      const scrolled = () => column.evaluate((element) => element.scrollTop)
+      await column.evaluate((element) => element.scrollTo({ top: 0 }))
+      await expect.poll(scrolled).toBe(0)
       await page.getByTestId('engine-badge-button').click()
+      await expect.poll(scrolled).toBeGreaterThan(0)
       await expect(details).toBeInViewport()
 
       // ⌘K's one way to save a snapshot opens the Overview's save dialog,

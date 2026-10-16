@@ -94,9 +94,10 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
   budget" is never by itself a reason to refuse something a route loads
   lazily. Check the manifest before claiming it; the rules editor carried
   that wrong claim in a header comment for months. The Overview's dialogs
-  (save, reset) load when first asked for, which kept the
-  dropdown, dialog, radio, checkbox and danger-confirm chunks off the
-  landing route.
+  (save, reset, Connect your app) load when first asked for, and its reset
+  menu right after the first paint (the same button stands in until it
+  has), which keeps the dropdown, dialog, radio, checkbox and
+  danger-confirm chunks off the landing route.
 - Every script, stylesheet and SVG over 1 KB gets a gzip copy at build time
   (`precompress` in `vite.config.ts`); the engine serves it when the
   request accepts gzip, with `Vary: accept-encoding` (`serve` in
@@ -3463,18 +3464,20 @@ ones are the palette's Suite group, `suiteItems` in `command-palette.tsx`). Jour
   ⌘K's "Download a snapshot") downloads it by itself. A snapshot download
   holds every service the engine runs; choosing services is the save's.
 - **A data job's progress is shown once.** On the Overview its Data card
-  follows it (snapshot and save on the Snapshot card, a reset on the Reset
-  card, with Cancel when it can stop): each dialog closes once the engine
+  follows it (snapshot and save in its Snapshot half, a reset in its Reset
+  half, with Cancel when it can stop): each dialog closes once the engine
   has started the job, and the shell's job toasts (`JobsWatch`, `jobToast`)
   leave a running suite job alone while the Overview is on screen. Every
   other page and tab follows it in the toast; how it ended is toasted
   everywhere.
 - **The Overview's links.** Other pages lead here with `/?connect=<tab>`
-  (Connect on that tab, in view), `/?dialog=reset&section=<id>` (that
+  (the Connect dialog on that platform; closing it drops the parameter, and
+  the header's button opens it on `web`), `/?dialog=reset&section=<id>` (that
   section's reset, nothing while it cannot be reset), `/?dialog=save`, and
   the hashes `#engine` and `#data` (`useRevealHash`, which reveals in the
   column, never `scrollIntoView`, and again on each ask while the page is
   open, since a link to the address shown changes nothing the router sees).
+  `#engine` also opens the engine card whole, as "Show all" does.
   ⌘K's Suite group (`suiteItems`) holds the suite-wide actions once, from
   any page; the Overview's own palette adds "Connect your app" and the
   snippet copies.
@@ -3491,15 +3494,37 @@ ones are the palette's Suite group, `suiteItems` in `command-palette.tsx`). Jour
   once at its start and once at its end (`announce_rebuilt`; two in 100 ms
   are one). Every new trigger-like `CommitObserver` must ignore
   `CommitOrigin::Maintenance`.
-- **The data cards draw from what they are given.** `DataCards` takes the
+- **The data card draws from what it is given.** `DataCard` takes the
   status and a `SnapshotView`; `DataSection` keeps the hooks (the jobs topic)
   and the three dialogs. Keep it that way: a design-system card cannot
   subscribe, so a component that both subscribes and draws cannot be shown
   there.
-- **Figures above 14 px.** The Overview's headline figures are 16 px mono
-  medium — the only figures above 14 px, because each is its card's
-  subject; their labels are 12 px sans. A card without figures says what its
-  section holds in one line (`cardHolds`), never a made-up zero.
+- **Figures above 14 px.** A tile's headline figure (its section's first)
+  is 22 px semibold with tabular digits, its name 12 px under it — the only
+  figures above 14 px, because each is its tile's subject; up to two more
+  sit beside it as 12 px name and mono value. A tile without figures says
+  what its section holds in one line (`cardHolds`), never a made-up zero.
+- **The Overview is four parts, in the order a visit asks.** Redesigned on
+  2026-10-16 after the page was found cluttered (nine cards each carrying
+  an address and up to six links, an infrastructure row, a not-running
+  list, a code block and a fourteen-row engine table, all at one weight).
+  The header says the whole suite in one line (`suiteHealth`) and holds the
+  page's one action, Connect your app (a dialog: platforms down the side
+  by who runs the code). Services are a tile per section in a fixed grid
+  (`@container` columns: three whenever the column is 768 px or wider);
+  the whole tile is the link (a stretched title link, the port's copy
+  above it), running is the green dot alone, and a section the engine does
+  not run keeps its place as a dashed outline with the engine's reason,
+  opening its gate, which has the fix. The host every tile shares is
+  written once above the grid (`sharedHost`), so a tile shows its port.
+  Then the recent problems, one line a row whatever the length of what it
+  names. Last, the Data card (snapshot, and a reset menu saying what each
+  section holds) beside the engine card, which holds the five facts asked
+  most at rest and the rest under "Show all": the other ports, the files,
+  the switches. Paths there lose their middle (`shortPath`), never their
+  end. The project and the engine's version are the top bar's, not said
+  again. A part that is not the answer to one of those questions does not
+  go back on the page.
 - **Import `@/observe/live` for its effect.** `import '@/observe/live'`, never
   `import type` alone: the `declareTopic` calls would not run and `overview`
   would resume as `replay` (one engine subscription per subscriber, no

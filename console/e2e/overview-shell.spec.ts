@@ -197,7 +197,9 @@ test('⌘K: the suite’s data actions, each once', async ({ page, engine }) => 
   await expect(page.getByTestId('overview-connect-snippet')).toContainText(
     'FIRESTORE_EMULATOR_HOST=',
   )
-  // A platform's snippet copies from ⌘K; its tab is one click away on the page.
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('overview-connect')).toHaveCount(0)
+  // A platform's snippet copies from ⌘K; its platform is one click away in the dialog.
   const platforms = await palette('flutter')
   await expect(platforms.filter({ hasText: 'Copy the Flutter snippet' })).toHaveCount(1)
   await expect(platforms.filter({ hasText: 'Connect with' })).toHaveCount(0)

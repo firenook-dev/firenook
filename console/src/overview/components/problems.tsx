@@ -10,11 +10,11 @@
 import { SkeletonLine, Tooltip } from '@cloudflare/kumo'
 import type { UseQueryResult } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
+import { ArrowRightIcon, CheckCircleIcon } from '@phosphor-icons/react'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import type { OverviewProblem } from '@/api/generated/observe/OverviewProblem'
 import type { OverviewState } from '@/api/generated/observe/OverviewState'
 import { useDelayedFlag } from '@/components/console/empty-state'
-import { EntityLink } from '@/components/console/entity-link'
 import { LiveNotice } from '@/components/console/live-notice'
 import { RelativeTime } from '@/components/console/relative-time'
 import { type SubscriptionStatus, liveChannel } from '@/lib/live/channel'
@@ -67,47 +67,54 @@ export function RecentProblems({
       data-testid="overview-problems"
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
-        <h2 id="overview-problems-title" className="text-[16px] leading-6 font-semibold">
-          Recent problems
-        </h2>
-        {data && hour.length > 0 && (
-          <div className="flex items-center gap-2">
-            {/* A slot per minute: an hour with no problem still reads as an hour. */}
-            <LevelStrip
-              buckets={problemBuckets(hour)}
-              height={20}
-              ground="slots"
-              label="Warnings and errors per minute, last hour"
-              tooltip={(index) => {
-                const bucket = hour[index]
-                const span = bucketSpan(
-                  hourBucketStart(data.generatedAt, index, hour.length),
-                  MINUTE,
-                )
-                return bucket ? problemSentence(bucket, span) : span
-              }}
-              {...(pick ? { onPick: pick } : {})}
-              className="w-60"
-              testId="overview-problems-bars"
-            />
-            <span className="text-[12px] text-kumo-subtle">last hour</span>
-          </div>
-        )}
-        {data && data.problemsLogged > 0 && (
-          <span className="text-[12px] text-kumo-subtle" data-testid="overview-problems-total">
-            {formatCount(data.problemsLogged, PROBLEM)} since the engine started
-          </span>
-        )}
-        <span className="ml-auto flex items-center gap-3">
+        <div className="flex min-w-0 items-baseline gap-x-3">
+          <h2 id="overview-problems-title" className="text-[16px] leading-6 font-semibold">
+            Recent problems
+          </h2>
+          {data && data.problemsLogged > 0 && (
+            <span className="text-[12px] text-kumo-subtle" data-testid="overview-problems-total">
+              {formatCount(data.problemsLogged, PROBLEM)} since the engine started
+            </span>
+          )}
+        </div>
+        <span className="ml-auto flex min-w-0 items-center gap-4">
           <LiveNotice
             status={live}
             what="the recent problems"
             onRetry={() => liveChannel.retry()}
             testId="overview-live-notice"
           />
+          {data && hour.length > 0 && (
+            <span className="flex items-center gap-2">
+              {/* A slot per minute: an hour with no problem still reads as an hour. */}
+              <LevelStrip
+                buckets={problemBuckets(hour)}
+                height={18}
+                ground="slots"
+                label="Warnings and errors per minute, last hour"
+                tooltip={(index) => {
+                  const bucket = hour[index]
+                  const span = bucketSpan(
+                    hourBucketStart(data.generatedAt, index, hour.length),
+                    MINUTE,
+                  )
+                  return bucket ? problemSentence(bucket, span) : span
+                }}
+                {...(pick ? { onPick: pick } : {})}
+                className="w-44"
+                testId="overview-problems-bars"
+              />
+              <span className="text-[12px] whitespace-nowrap text-kumo-subtle">Last hour</span>
+            </span>
+          )}
           {logs && (
-            <TextLink link={logs} className="text-[13px]" testId="overview-open-logs">
+            <TextLink
+              link={logs}
+              className="inline-flex items-center gap-1 text-[13px] whitespace-nowrap"
+              testId="overview-open-logs"
+            >
               Open logs
+              <ArrowRightIcon size={12} aria-hidden />
             </TextLink>
           )}
         </span>
@@ -122,9 +129,15 @@ export function RecentProblems({
         ) : data ? (
           data.problems.length === 0 ? (
             <p
-              className="px-4 py-3 text-[13px] text-kumo-subtle"
+              className="flex items-center gap-2 px-4 py-3.5 text-[13px] text-kumo-subtle"
               data-testid="overview-problems-empty"
             >
+              <CheckCircleIcon
+                size={16}
+                weight="fill"
+                className="shrink-0 text-kumo-success"
+                aria-hidden
+              />
               No errors, failures or denials since the engine started.
             </p>
           ) : (
@@ -153,7 +166,7 @@ function ProblemRow({ problem, status }: { problem: OverviewProblem; status: Con
   const source = labelSource(problem.source)
   return (
     <li
-      className="relative grid h-8 grid-cols-[5.5rem_2.5rem_minmax(0,6.5rem)_minmax(0,1fr)_auto] items-center gap-x-3 border-b border-kumo-hairline px-4 last:border-b-0 hover:ink"
+      className="relative grid h-9 grid-cols-[5.5rem_2.75rem_minmax(0,8rem)_minmax(0,1fr)_auto] items-center gap-x-3 border-b border-kumo-hairline px-4 last:border-b-0 hover:ink"
       data-testid="overview-problem"
       data-level={problem.level}
       data-kind={problem.kind ?? undefined}
@@ -188,16 +201,30 @@ function ProblemRow({ problem, status }: { problem: OverviewProblem; status: Con
           }
         />
       )}
-      <span className="relative z-10 flex min-w-0 max-w-64 justify-end text-[12px]">
+      <span className="relative z-10 flex min-w-0 justify-end text-[12px]">
         {primary ? (
           primary.label === 'See why' ? (
-            <TextLink link={primary.link} testId="overview-problem-why">
+            <TextLink
+              link={primary.link}
+              className="whitespace-nowrap"
+              testId="overview-problem-why"
+            >
               See why
             </TextLink>
           ) : (
-            <EntityLink
-              entity={{ kind: primary.kind, key: primary.key, label: primary.label }}
-              testId="overview-problem-ref"
+            // What the line is about, cut to one line however long its name:
+            // a function's full id ran to three lines and over the row below.
+            <Tooltip
+              content={<span className="font-mono text-[12px] break-all">{primary.label}</span>}
+              render={
+                <TextLink
+                  link={primary.link}
+                  className="block max-w-56 truncate font-mono text-[12px]"
+                  testId="overview-problem-ref"
+                >
+                  {primary.label}
+                </TextLink>
+              }
             />
           )
         ) : null}

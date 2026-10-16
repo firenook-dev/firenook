@@ -17,12 +17,12 @@ The official home page (`components/Home/*`).
 
 | Feature (Google UI 1.15) | Where in the console | Owner | Status |
 | --- | --- | --- | --- |
-| One card per emulator, with On/Off and its port | Overview › Sections: a card per running section with its health, `host:port` (copy), the figures its section counts and its current problems, each linking to the page that carries it | observe | [x] |
+| One card per emulator, with On/Off and its port | Overview › Services: a tile per section that opens it, with its health, its port (the shared host written once; a click copies `host:port`), the figures its section counts and its current problems, each linking to the page that carries it | observe | [x] |
 | "Go to …" on each card | The card's title and "Open <section>", and the section's later pages ("Rules") | observe | [x] |
 | The Functions card links to the logs | The Functions card's "Logs" (`/logs?q=service:functions`) | observe | [x] |
-| "Not running" cards with the `firebase init emulators` text | Overview › Not running: the engine's own reason and the copyable fix (the `firebase.json` block, or the `--only` command line with the section added); sections one fix turns on share it | observe | [x] |
+| "Not running" cards with the `firebase init emulators` text | Overview › Services: a section the engine does not run keeps its tile, as an outline with the engine's own reason, and opens its gate with the copyable fix (the `firebase.json` block, or the `--only` command line with the section added) | observe | [x] |
 | The warning for a project that is not a demo ("Remember this is a local environment…"), View project and Dismiss, remembered in the browser | Overview's configuration notices: a project that is not a demo, a public listen address, emulators missing while Functions run, diagnostics off; each dismissed for this engine run in every tab. No "View project": a local tool never links to production, the notice says why it matters | observe | [x] |
-| The emulators' ports, the hub's among them | Overview › Infrastructure: the hub, this UI, the logging feed and the Firestore requests socket, each with its address | observe | [x] |
+| The emulators' ports, the hub's among them | Overview › Engine › Show all › Other ports: the hub, this UI, the logging feed and the Firestore requests socket, each with its port (a click copies the address) | observe | [x] |
 | "Overview Page Loading…" spinner | The route reads the status before it draws: no spinner | observe | [x] |
 
 ## Logs
@@ -65,7 +65,7 @@ The official users page (`components/Auth/*`).
 | Edit a user: display name, email, password, phone, photo URL, custom claims JSON with validation, MFA phone factors, sign-in method | Authentication › Users › the inspector: Details (name, email, phone, photo URL, verified, times), Password, Claims (Firebase's own checks and the token they make), SMS second factors, linked providers | auth | [x] |
 | Delete a user | Authentication › Users: the row menu, the inspector and ticked rows › Delete, a job with the functions it runs | auth | [x] |
 | Enable and disable a user | Authentication › Users: the inspector's switch, and Disable / Enable on ticked rows or everything the filter matches (a job) | auth | [x] |
-| Clear all users | Overview › Data › Reset › Authentication (every user of every tenant, one suite job; Settings › Data links to it); one tenant's or the project's users: Users › select every match › Delete, or ⌘K "Delete all users…" (a job, with or without triggers) | auth | [x] |
+| Clear all users | Overview › Data › Reset data › Authentication (every user of every tenant, one suite job; Settings › Data links to it); one tenant's or the project's users: Users › select every match › Delete, or ⌘K "Delete all users…" (a job, with or without triggers) | auth | [x] |
 | One account per email address | Authentication › Settings › Sign-in (the switch, with what it changes for a provider sign-in) | auth | [x] |
 | Refresh | Authentication › Users is live: rows arrive, flash and patch in place from the `auth.users` topic; no refresh button | auth | [x] |
 | Zero state | Authentication › Users: "No users yet" with how an app connects to this engine's Auth; an empty tenant names the scopes that hold users; New user, Sample users and Import | auth | [x] |
@@ -82,7 +82,7 @@ The official data and requests pages (`components/Firestore/*`).
 | Delete a collection | Firestore › Data: Select all, then Delete (every document the query reaches, subcollections optional) | foundation | [x] |
 | Delete a document | Firestore › Data: the inspector's Delete and ticked rows' Delete | foundation | [x] |
 | Delete fields | Firestore › Data › the inspector's field rows (Remove), saved as one write | foundation | [x] |
-| Clear all data | Overview › Data › Reset Firestore: every database, as a job, no Functions triggers unless asked, open pages reload once at its start and end | observe | [x] |
+| Clear all data | Overview › Data › Reset data › Firestore: every database, as a job, no Functions triggers unless asked, open pages reload once at its start and end | observe | [x] |
 | Typed editors: string, number, boolean, timestamp, geopoint, reference, map and array JSON | Firestore › Data: a typed editor per value in the inspector and in the grid's cells, the JSON view beside them | foundation | [x] |
 | Collection filter: conditions and sort | Firestore › Data: the query line (`where(…).orderBy(…).limit(n)`), column header sort and filter, explain | foundation | [x] |
 | Requests table | Firestore › Rules › Decisions (every rules decision, live on the `firestore.decisions` topic every tab shares, the newest 10,000, narrowed by the engine by path, uid, verdict and operation; the official Requests socket is unchanged for the Google UI) | foundation | [x] |
@@ -101,7 +101,7 @@ The official files page (`components/Storage/*`).
 | Upload: button and drag and drop | Storage › Upload (files, a folder, with options), a drop on the list or a folder of the tree, a pasted image; the tray with progress, cancel, retry and the taken-names question | storage | [x] |
 | Create a folder | Storage › New folder (`n`, ⌘K), a zero-byte marker shown as an empty folder | storage | [x] |
 | Delete selected | Storage › ticked rows › Delete: the dry run's counts in DangerConfirm, then a job with progress and cancel | storage | [x] |
-| Delete all | Storage › bucket menu › "Empty the bucket…" (the same delete job), and Overview › Data › Reset | storage | [ ] until a journey empties a bucket (the folder-delete journey covers the job path) |
+| Delete all | Storage › bucket menu › "Empty the bucket…" (the same delete job), and Overview › Data › Reset data › Storage | storage | [ ] until a journey empties a bucket (the folder-delete journey covers the job path) |
 | Table: name, size, type, modified | Storage › the list: name, size, type, last changed, metadata keys, tokens (and Access as a client); folders first with their figures; sort and filter in the engine; the grid | storage | [x] |
 | Multiple selection | Storage › ticks, Shift ranges, ⌘A, "Select all N" for the whole listing | storage | [x] |
 | Side panel with a preview | Storage › the inspector's Details and Quick Look: images, video, audio, PDF, text, JSON, CSV and HTML; any other bytes, a zip among them, as hex with what their first bytes say | storage | [x] |

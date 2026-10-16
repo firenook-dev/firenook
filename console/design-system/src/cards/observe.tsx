@@ -39,7 +39,7 @@ import { PauseButton } from '@/components/console/pause-button'
 import { SectionBody } from '@/components/console/section-page'
 import { ShellBanners } from '@/components/console/shell-banners'
 import { SectionToolbar, ToolbarDivider, ToolbarRow } from '@/components/console/toolbar'
-import { formatCount } from '@/lib/format'
+import type { ConnectParam } from '@/lib/connect-tabs'
 import { useLayout } from '@/lib/layout'
 import { createFeedStore } from '@/lib/live/feed-store'
 import { FacetsPanel } from '@/logs/components/facets-panel'
@@ -52,18 +52,16 @@ import { LOGS_PLACEHOLDER, logFields } from '@/logs/fields'
 import { type LogItem, edgeItem, groupLines, itemKey } from '@/logs/rows'
 import { bucketSentence, bucketSpan, levelBuckets } from '@/observe/level-bars'
 import { LevelStrip } from '@/observe/level-strip'
-import { ConnectSection } from '@/overview/components/connect'
-import { DataCards } from '@/overview/components/data-section'
+import { ConnectBody } from '@/overview/components/connect-dialog'
+import { DataCard } from '@/overview/components/data-section'
 import { EngineDetails } from '@/overview/components/engine-details'
-import { Infrastructure } from '@/overview/components/infrastructure'
-import { NotRunning } from '@/overview/components/not-running'
 import { Notices } from '@/overview/components/notices'
 import { OverviewHeader } from '@/overview/components/overview-header'
 import { RecentProblems } from '@/overview/components/problems'
-import { SectionCard } from '@/overview/components/section-card'
+import { ServiceTile } from '@/overview/components/service-tile'
 import { SnapshotTargets, snapshotServices } from '@/overview/components/snapshot-targets'
 import { LINK_CLASS } from '@/overview/components/text-link'
-import { absentGroups, absentSections, infrastructure, sectionCards } from '@/overview/model'
+import { sectionCards, sharedHost, suiteHealth } from '@/overview/model'
 import type { SnapshotView } from '@/overview/snapshot'
 import { sectionEntry, testStatus } from '@/test/status'
 import { defineCards } from '../registry'
@@ -830,50 +828,70 @@ const PREPARING = snapshotView({
   },
 })
 
-const RUNNING = { one: 'running', other: 'running' }
-
 /** An overview part's heading, as the page writes it. */
 function PartTitle({ children }: { children: ReactNode }) {
-  return <h2 className="text-lg font-semibold">{children}</h2>
+  return <h2 className="text-[16px] leading-6 font-semibold">{children}</h2>
 }
 
 function OverviewSample() {
   const cards = sectionCards(STATUS, BADGES)
-  const absent = absentGroups(STATUS)
-  const listeners = infrastructure(STATUS)
+  const host = sharedHost(cards)
   return (
     <div className="flex min-w-0 flex-col overflow-hidden rounded-lg bg-kumo-canvas ring ring-kumo-line">
       <ShellBanners />
-      <div className="mx-auto grid w-full max-w-[1320px] gap-9 p-6 pb-10">
+      <div className="mx-auto grid w-full max-w-[1200px] gap-10 p-6 pb-10">
         <div className="grid gap-4">
-          <OverviewHeader status={STATUS} />
+          <OverviewHeader status={STATUS} health={suiteHealth(cards)} onConnect={noop} />
           <Notices notices={OVERVIEW.notices} instance={STATUS.instance} />
         </div>
-        <section className="grid gap-4">
-          <div className="flex min-w-0 flex-wrap items-baseline gap-x-3">
-            <PartTitle>Sections</PartTitle>
-            <span className="text-[12px] text-kumo-subtle">
-              {formatCount(cards.length, RUNNING)} · {absentSections(STATUS).length} not running
-            </span>
+        <section className="grid gap-3">
+          <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4">
+            <PartTitle>Services</PartTitle>
+            {host && (
+              <span className="text-[12px] text-kumo-subtle">
+                Listening on <span className="font-mono text-kumo-default">{host}</span>
+              </span>
+            )}
           </div>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(272px,1fr))] gap-3">
+          <div className="grid grid-cols-3 gap-3">
             {cards.map((card) => (
-              <SectionCard key={card.section.id} card={card} tick={STATUS} onConnect={noop} />
+              <ServiceTile key={card.section.id} card={card} host={host} tick={STATUS} />
             ))}
           </div>
-          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-6 gap-y-4 pt-1">
-            <Infrastructure entries={listeners} />
-            <NotRunning groups={absent} />
-          </dl>
         </section>
         <RecentProblems status={STATUS} state={answered(OVERVIEW)} live="live" />
-        <ConnectSection status={STATUS} engine={ENGINE} param="flutter" onParam={noop} />
-        <section className="grid gap-3">
-          <PartTitle>Data</PartTitle>
-          <DataCards status={STATUS} snapshot={RESETTING} onDialog={noop} onReset={noop} />
-        </section>
-        <EngineDetails status={STATUS} details={answered(ENGINE)} />
+        <div className="grid grid-cols-2 items-start gap-6">
+          <section className="grid gap-3">
+            <div className="flex h-8 items-center">
+              <PartTitle>Data</PartTitle>
+            </div>
+            <DataCard status={STATUS} snapshot={RESETTING} onDialog={noop} onReset={noop} />
+          </section>
+          <EngineDetails status={STATUS} details={answered(ENGINE)} />
+        </div>
       </div>
+    </div>
+  )
+}
+
+/** "Connect your app" as its dialog draws it, at rest in the card instead of over the page. */
+function ConnectSample() {
+  const [param, setParam] = useState<ConnectParam>('flutter')
+  return (
+    <div className="flex h-[560px] w-[1000px] flex-col overflow-hidden rounded-xl bg-kumo-base shadow-lg ring ring-kumo-line">
+      <div className="grid gap-1 px-6 pt-5 pb-4">
+        <h3 className="text-lg font-semibold text-kumo-default">Connect your app</h3>
+        <p className="text-[14px] text-kumo-subtle">
+          The code that points an app at this engine, with its ports, host and project id filled in.
+        </p>
+      </div>
+      <ConnectBody
+        status={STATUS}
+        engine={ENGINE}
+        host="127.0.0.1"
+        param={param}
+        onParam={setParam}
+      />
     </div>
   )
 }
@@ -884,9 +902,15 @@ function OverviewCard() {
       <Stack>
         <Section
           title="Overview"
-          note="The suite's own warnings first, in the shell's words, then this engine's configuration notices. A card per running section — figures, a gauge problem with its page, starting, or what it holds while it counts nothing — and what does not run with the exact fix. Recent problems over the last hour, the code to connect an app, the data jobs (a reset running holds back every other), and the engine with its buffers."
+          note="The suite's own warnings first, in the shell's words, then the header's one line on the whole suite and this engine's configuration notices. A tile per section in a fixed grid — its headline figure with up to two beside it, a gauge problem with its page, starting, what it holds while it counts nothing, or an outline with the reason it does not run. Recent problems over the last hour, then the data card (a reset running holds back every other job) beside the engine at rest."
         >
           <OverviewSample />
+        </Section>
+        <Section
+          title="Connect your app"
+          note="The header's one action, a dialog: the platforms down the side by who runs the code, the snippet with this engine's ports, host and project id, and what to change."
+        >
+          <ConnectSample />
         </Section>
       </Stack>
     </Kit>
@@ -1044,8 +1068,8 @@ function DataJobsCard() {
           note="A snapshot ready to download (the engine keeps it ten minutes, or until it is downloaded); one being prepared, which holds back every other data job and says why."
         >
           <div className="grid gap-4">
-            <DataCards status={CALM} snapshot={READY} onDialog={noop} onReset={noop} />
-            <DataCards status={CALM} snapshot={PREPARING} onDialog={noop} onReset={noop} />
+            <DataCard status={CALM} snapshot={READY} onDialog={noop} onReset={noop} />
+            <DataCard status={CALM} snapshot={PREPARING} onDialog={noop} onReset={noop} />
           </div>
         </Section>
         <Section
@@ -1098,7 +1122,7 @@ defineCards([
     group: 'Patterns',
     name: 'Overview',
     subtitle:
-      'ShellBanners above a configuration notice, section cards (figures, a gauge problem, starting, no summary yet), not running with its fixes, recent problems, connect tabs, data cards with a running job, engine details',
+      'ShellBanners above a configuration notice, the suite line, section tiles (figures, a gauge problem, starting, no summary yet, not running), recent problems, the data card with a running job, the engine at rest, and the Connect dialog',
     width: 1200,
     surface: 'canvas',
     render: () => <OverviewCard />,

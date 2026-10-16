@@ -11,17 +11,21 @@ const project = () => process.env.FIRENOOK_CONSOLE_PROJECT ?? 'demo-console-e2e'
 test('the overview shows what the engine runs, where, and what it does not', async ({ page }) => {
   await page.goto(`${origin()}/console`)
   await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible()
-  await expect(page.getByTestId('overview-project')).toHaveText(project())
-  // A card per running section, each with the address an app connects to.
-  const firestore = page.getByTestId('overview-card-firestore')
-  await expect(firestore.getByTestId('overview-card-firestore-address')).toHaveText(
-    /^127\.0\.0\.1:\d+$/,
+  // The project is the top bar's, on every page; the header says the suite in one line.
+  await expect(page.locator('header').filter({ hasText: 'Project' }).first()).toContainText(
+    project(),
   )
+  await expect(page.getByTestId('overview-health')).toContainText('running')
+  // A tile per section, each with the port an app connects to on the shared host.
+  const firestore = page.getByTestId('overview-card-firestore')
+  await expect(firestore.getByTestId('overview-card-firestore-address')).toHaveText(/^:\d+$/)
+  await expect(page.getByTestId('overview-host-shared')).toContainText('127.0.0.1')
   await expect(firestore.getByTestId('overview-card-firestore-health')).toHaveText('Running')
   await expect(page.getByTestId('overview-card-auth')).toBeVisible()
-  await expect(page.getByTestId('overview-infrastructure')).toContainText('Hub')
-  // This profile starts Firestore and Authentication only: Storage says why it is missing.
-  await expect(page.getByTestId('overview-absent-storage')).toBeVisible()
+  // This profile starts Firestore and Authentication only: Storage keeps its place and says why.
+  const storage = page.getByTestId('overview-card-storage')
+  await expect(storage).toHaveAttribute('data-state', 'absent')
+  await expect(page.getByTestId('overview-card-storage-health')).toHaveText('Not running')
   // The release the launcher declared, not the placeholder crate version:
   // the engine is built from a pinned commit and cannot know what it ships
   // as, so a wrong number here means the handoff is broken.
@@ -31,9 +35,12 @@ test('the overview shows what the engine runs, where, and what it does not', asy
     'title',
     `Firenook ${RELEASE_VERSION}, engine source ${ENGINE_REVISION.slice(0, 12)}`,
   )
-  await expect(page.getByTestId('overview-engine')).toHaveText(
-    `Firenook ${RELEASE_VERSION} (engine ${ENGINE_REVISION.slice(0, 12)})`,
+  await expect(page.getByTestId('engine-version')).toHaveText(
+    `${RELEASE_VERSION}·${ENGINE_REVISION.slice(0, 12)}`,
   )
+  // The hub and the other ports no section owns are on the engine card, under "Show all".
+  await page.getByTestId('overview-engine-all').click()
+  await expect(page.getByTestId('overview-infrastructure')).toContainText('Hub')
 })
 
 test('the theme is light, dark or the system\u2019s, and it is remembered', async ({ browser }) => {

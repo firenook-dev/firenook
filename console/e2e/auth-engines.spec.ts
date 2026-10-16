@@ -179,10 +179,10 @@ dedicated.describe('with engines of their own', () => {
       await expect(confirm).toContainText('Reset Authentication')
       await expect(confirm).toContainText('Codes and links already issued stay in the inbox.')
       await confirm.getByRole('button', { name: /^Reset/ }).click()
-      // The dialog closes once the job has started; the reset's progress and
-      // end are said once, on the Overview's own row for Authentication.
+      // The dialog closes once the job has started; the Data card follows the
+      // reset, and the Authentication tile counts what is left.
       await expect(confirm).toHaveCount(0)
-      await expect(page.getByTestId('overview-reset-auth')).toContainText('Empty', {
+      await expect(page.getByTestId('overview-figure-auth-users')).toHaveText('0', {
         timeout: 60_000,
       })
       expect(clears).toEqual([{ sections: ['auth'] }])

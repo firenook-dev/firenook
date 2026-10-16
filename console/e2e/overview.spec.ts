@@ -35,10 +35,7 @@ async function sections(origin: string): Promise<StatusSection[]> {
 const figureId = (section: string, label: string) =>
   `overview-figure-${section}-${label.toLowerCase().replaceAll(' ', '-')}`
 
-test('a card per running section: its address, its figures, its health', async ({
-  page,
-  engine,
-}) => {
+test('a tile per section: its port, its figures, its health', async ({ page, engine }) => {
   await page.goto(`${engine.origin}/console`)
   const status = await statusOf(engine)
   const port = (name: string) => status.services.find((service) => service.name === name)?.port
@@ -46,17 +43,28 @@ test('a card per running section: its address, its figures, its health', async (
     if (section.state !== 'ready') continue
     const card = page.getByTestId(`overview-card-${section.id}`)
     await expect(card).toBeVisible()
+    // Running is the dot alone; the word is for a screen reader.
     await expect(page.getByTestId(`overview-card-${section.id}-health`)).toHaveText('Running')
-    await expect(page.getByTestId(`overview-card-${section.id}-address`)).toHaveText(
-      /^127\.0\.0\.1:\d+$/,
+    await expect(page.getByTestId(`overview-card-${section.id}-health`)).toHaveAttribute(
+      'data-tone',
+      'success',
     )
+    await expect(page.getByTestId(`overview-card-${section.id}-address`)).toHaveText(/^:\d+$/)
   }
+  // Every service shares the host, so it is written once above the grid.
+  await expect(page.getByTestId('overview-host-shared')).toHaveText('Listening on 127.0.0.1')
 
-  // An address copies as an app writes it.
+  // A port copies as the whole address, as an app writes it, and does not open the section.
   const address = page.getByTestId('overview-card-firestore-address')
-  await expect(address).toHaveText(`127.0.0.1:${port('firestore')}`)
+  await expect(address).toHaveText(`:${port('firestore')}`)
   await address.click()
   await expect.poll(() => readClipboard(page)).toBe(`127.0.0.1:${port('firestore')}`)
+  await expect(page).toHaveURL(/\/console\/?$/)
+
+  // The rest of a tile opens its section.
+  await page.getByTestId('overview-card-auth').click({ position: { x: 24, y: 96 } })
+  await expect(page).toHaveURL(/\/console\/auth/)
+  await page.goto(`${engine.origin}/console`)
 
   // Firestore's figures are its summary: the seeded documents and databases.
   const all = await sections(engine.origin)
@@ -169,6 +177,12 @@ test('connect: a snippet per platform, with the host the app sees', async ({ pag
   await page.goto(`${engine.origin}/console`)
   const snippet = page.getByTestId('overview-connect-snippet')
 
+  // The header's one action opens the dialog, on the web snippet.
+  await page.getByTestId('overview-connect-open').click()
+  await expect(page.getByTestId('overview-connect')).toBeVisible()
+  await expect.poll(() => new URL(page.url()).searchParams.get('connect')).toBe('web')
+  await expect(snippet).toContainText('connectFirestoreEmulator(getFirestore(app)')
+
   await page.getByTestId('overview-connect-tabs').getByRole('tab', { name: 'Flutter' }).click()
   await expect.poll(() => new URL(page.url()).searchParams.get('connect')).toBe('flutter')
   await expect(snippet).toContainText(
@@ -217,9 +231,14 @@ test('connect: a snippet per platform, with the host the app sees', async ({ pag
   )
   for (const line of lines) expect(line).toMatch(/^[A-Z_]+=\S+\s+# \S/)
 
-  // The address is the view: a reload keeps the tab.
+  // The address is the view: a reload keeps the dialog on its platform.
   await page.reload()
   await expect(snippet).toContainText('FIRESTORE_EMULATOR_HOST=')
+
+  // Closing it drops the platform from the address.
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('overview-connect')).toHaveCount(0)
+  await expect.poll(() => new URL(page.url()).searchParams.get('connect')).toBeNull()
 })
 
 test('links from other pages: a reset for one section, and a connect tab', async ({
@@ -241,9 +260,9 @@ test('links from other pages: a reset for one section, and a connect tab', async
   await expect(page.getByTestId('overview')).toBeVisible()
   await expect(dialog).toHaveCount(0)
 
-  // An empty state's "Connect" lands on its tab, in view.
+  // An empty state's "Connect" opens the dialog on its platform.
   await page.goto(`${engine.origin}/console?connect=python`)
-  const connect = page.getByTestId('overview-connect')
+  const connect = page.getByRole('dialog', { name: 'Connect your app' })
   await expect(connect).toBeInViewport()
   await expect(connect.getByRole('tab', { name: 'Python', selected: true })).toBeVisible()
   await expect(page.getByTestId('overview-connect-snippet')).toContainText('firebase_admin')
@@ -281,10 +300,21 @@ test('engine details: the configuration, and where the data lives', async ({ pag
   const details = page.getByTestId('overview-engine-details')
   await details.scrollIntoViewIfNeeded()
   await expect(details).toBeVisible()
-  await expect(page.getByTestId('engine-project-dir')).toContainText(engine.directory)
-  await expect(page.getByTestId('engine-offline')).toBeVisible()
-  await expect(page.getByTestId('engine-data')).toContainText(join(engine.directory, 'state'))
+  // A path is shown with its middle taken out, and kept whole for the copy and the tooltip.
+  await expect(page.getByTestId('engine-project-dir').locator('[data-path]')).toHaveAttribute(
+    'data-path',
+    engine.directory,
+  )
+  await expect(page.getByTestId('engine-data').locator('[data-path]')).toHaveAttribute(
+    'data-path',
+    join(engine.directory, 'state'),
+  )
   await expect(page.getByTestId('engine-writes')).toBeVisible()
+  // The switches and the other ports are under "Show all".
+  await expect(page.getByTestId('engine-offline')).toHaveCount(0)
+  await page.getByTestId('overview-engine-all').click()
+  await expect(page.getByTestId('engine-offline')).toBeVisible()
+  await expect(page.getByTestId('overview-infrastructure')).toContainText('Hub')
 
   // The engine details carry the configuration, and nothing of the data facts.
   const response = (await (
