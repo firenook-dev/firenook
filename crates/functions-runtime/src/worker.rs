@@ -2,13 +2,14 @@
 //! environment, reports its loopback port, pid and Node version on stdout,
 //! streams attributed log lines back, and is watched: a task owns the child
 //! process, so an exit is reported the moment it happens, not discovered by
-//! the next call.
-use std::collections::BTreeMap;
+//! the next call. A call's end line waits for the worker's answered line, so
+//! it follows everything the call printed (see [`EndLines`]).
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt as _, BufReader};
@@ -21,6 +22,13 @@ use crate::monitor::{FUNCTION_ERROR, Monitor, WorkerTransition, exit_description
 
 /// The record prefix of a worker log line.
 const LOG_PREFIX: &str = "FIRENOOK_WORKER_LOG ";
+/// The record prefix of the line a worker writes just before it answers a
+/// call.
+const ANSWERED_PREFIX: &str = "FIRENOOK_WORKER_ANSWERED ";
+/// How long a call's end line waits for its worker's answered line.
+const END_LINE_WAIT: Duration = Duration::from_millis(500);
+/// Answered lines kept for calls whose end has not come yet.
+const ANSWERED_KEPT: usize = 256;
 /// How long a stopped worker gets to exit after `/__/quit` before it is killed.
 const STOP_GRACE: Duration = Duration::from_secs(3);
 
@@ -66,6 +74,108 @@ struct FatalLine {
     message: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct AnsweredLine {
+    execution: String,
+}
+
+/// The end lines of a codebase's calls, each after everything its call
+/// printed.
+///
+/// A call's lines reach the runtime on its worker's stdout, but its answer
+/// comes on the worker's connection, and can arrive while lines the call
+/// printed before answering are still unread. The worker writes an answered
+/// line on stdout just before it answers. An end line recorded once that
+/// line has been read follows every line the call printed first, so an end
+/// line that comes before it is held until it is read. The wait is at most
+/// [`END_LINE_WAIT`], for a call answered some other way (a dropped
+/// connection) or a worker that stopped writing.
+#[derive(Clone, Default)]
+pub struct EndLines(Arc<std::sync::Mutex<EndLinesState>>);
+
+#[derive(Default)]
+struct EndLinesState {
+    /// Calls whose answered line has been read and whose end line has not
+    /// come yet, oldest first.
+    answered: VecDeque<String>,
+    /// End lines waiting for their call's answered line.
+    waiting: HashMap<String, (LogSink, LogEvent)>,
+}
+
+impl EndLines {
+    fn lock(&self) -> std::sync::MutexGuard<'_, EndLinesState> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Records `event`, the end line of `execution`, once the call's
+    /// answered line has been read: now when it has, else when it is read
+    /// or the wait is over.
+    pub fn record(&self, log: &LogSink, execution: &str, event: LogEvent) {
+        let event = {
+            let mut state = self.lock();
+            if let Some(index) = state.answered.iter().position(|id| id == execution) {
+                state.answered.remove(index);
+                event
+            } else if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                // Stamped now, so the line keeps the time the call ended.
+                let event = event.with_time(SystemTime::now());
+                state
+                    .waiting
+                    .insert(execution.to_owned(), (log.clone(), event));
+                let lines = self.clone();
+                let execution = execution.to_owned();
+                runtime.spawn(async move {
+                    tokio::time::sleep(END_LINE_WAIT).await;
+                    let waiting = lines.lock().waiting.remove(&execution);
+                    if let Some((log, event)) = waiting {
+                        log.record(event);
+                    }
+                });
+                return;
+            } else {
+                event
+            }
+        };
+        log.record(event);
+    }
+
+    /// The worker's answered line for `execution` was read: everything the
+    /// call printed before answering has been recorded, so its end line
+    /// can follow.
+    fn answered(&self, execution: String) {
+        let waiting = {
+            let mut state = self.lock();
+            let waiting = state.waiting.remove(&execution);
+            if waiting.is_none() {
+                if state.answered.len() == ANSWERED_KEPT {
+                    state.answered.pop_front();
+                }
+                state.answered.push_back(execution);
+            }
+            waiting
+        };
+        if let Some((log, event)) = waiting {
+            log.record(event);
+        }
+    }
+
+    /// The worker's output ended: nothing more is coming, so every waiting
+    /// end line is recorded now.
+    fn closed(&self) {
+        let waiting: Vec<(LogSink, LogEvent)> = self
+            .lock()
+            .waiting
+            .drain()
+            .map(|(_, waiting)| waiting)
+            .collect();
+        for (log, event) in waiting {
+            log.record(event);
+        }
+    }
+}
+
 struct Ready {
     port: u16,
     pid: Option<u32>,
@@ -88,6 +198,7 @@ impl Worker {
     pub async fn spawn(
         spec: &WorkerSpec,
         log: &LogSink,
+        end_lines: &EndLines,
         timeout: Duration,
         monitor: &Monitor,
     ) -> Result<Self, RuntimeError> {
@@ -119,6 +230,7 @@ impl Worker {
             let label = spec.label.clone();
             let codebase = spec.codebase.clone();
             let exited = Arc::clone(&exited);
+            let end_lines = end_lines.clone();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
@@ -139,12 +251,17 @@ impl Worker {
                                 .with_codebase(&codebase),
                         );
                         let _ = ready_sender.send(Err(message));
+                    } else if let Some(json) = line.strip_prefix(ANSWERED_PREFIX) {
+                        if let Ok(answered) = serde_json::from_str::<AnsweredLine>(json) {
+                            end_lines.answered(answered.execution);
+                        }
                     } else {
                         for event in worker_events(&line, &label, &codebase) {
                             log.record(event);
                         }
                     }
                 }
+                end_lines.closed();
                 exited.store(true, Ordering::SeqCst);
             });
         }
@@ -333,6 +450,7 @@ pub struct WorkerSlot {
     spec: Mutex<WorkerSpec>,
     worker: Mutex<Option<Worker>>,
     log: LogSink,
+    end_lines: EndLines,
     monitor: Monitor,
     codebase: String,
 }
@@ -344,9 +462,16 @@ impl WorkerSlot {
             spec: Mutex::new(spec),
             worker: Mutex::new(None),
             log,
+            end_lines: EndLines::default(),
             monitor,
             codebase,
         }
+    }
+
+    /// Where the end lines of this codebase's calls are recorded.
+    #[must_use]
+    pub fn end_lines(&self) -> EndLines {
+        self.end_lines.clone()
     }
 
     /// Replaces the spec (after a reload) and stops the current worker.
@@ -387,7 +512,7 @@ impl WorkerSlot {
         self.monitor
             .worker_state(&self.codebase, WorkerTransition::Starting);
         let started = Instant::now();
-        match Worker::spawn(&spec, &self.log, timeout, &self.monitor).await {
+        match Worker::spawn(&spec, &self.log, &self.end_lines, timeout, &self.monitor).await {
             Ok(worker) => {
                 let took = started.elapsed();
                 self.monitor.worker_state(
@@ -504,5 +629,95 @@ mod tests {
         assert_eq!(both.len(), 2);
         assert_eq!(both[0].message, "partial");
         assert_eq!(both[1].message, "x");
+    }
+
+    fn end_line(execution: &str) -> LogEvent {
+        LogEvent::new("INFO", "functions", format!("Finished {execution}"))
+            .with_execution(execution)
+    }
+
+    fn messages(events: &std::sync::Mutex<Vec<LogEvent>>) -> Vec<String> {
+        events
+            .lock()
+            .expect("the events")
+            .iter()
+            .map(|event| event.message.clone())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn an_end_line_after_its_answer_is_recorded_at_once() {
+        let (log, events) = LogSink::recording();
+        let lines = EndLines::default();
+        lines.answered("a-1".to_owned());
+        lines.record(&log, "a-1", end_line("a-1"));
+        assert_eq!(messages(&events), ["Finished a-1"]);
+        // The answer was used: the next call's end line waits for its own.
+        lines.record(&log, "a-2", end_line("a-2"));
+        assert_eq!(messages(&events), ["Finished a-1"]);
+    }
+
+    #[tokio::test]
+    async fn an_end_line_before_its_answer_follows_what_the_call_printed() {
+        let (log, events) = LogSink::recording();
+        let lines = EndLines::default();
+        let ended = SystemTime::now();
+        lines.record(&log, "a-1", end_line("a-1"));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        log.record(LogEvent::new("INFO", "functions", "printed".to_owned()));
+        assert_eq!(messages(&events), ["printed"]);
+        lines.answered("a-1".to_owned());
+        assert_eq!(messages(&events), ["printed", "Finished a-1"]);
+        // It keeps the time the call ended, not the time it was recorded.
+        let time = events.lock().expect("the events")[1].time.expect("stamped");
+        let late = time.duration_since(ended).expect("after the end");
+        assert!(late < Duration::from_millis(40), "{late:?}");
+        // Recorded once: the end of the wait records nothing more.
+        tokio::time::sleep(END_LINE_WAIT + Duration::from_millis(100)).await;
+        assert_eq!(messages(&events), ["printed", "Finished a-1"]);
+    }
+
+    #[tokio::test]
+    async fn an_end_line_never_answered_is_recorded_after_the_wait() {
+        let (log, events) = LogSink::recording();
+        let lines = EndLines::default();
+        let started = Instant::now();
+        lines.record(&log, "a-1", end_line("a-1"));
+        while messages(&events).is_empty() {
+            assert!(started.elapsed() < END_LINE_WAIT * 4, "never recorded");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(started.elapsed() >= END_LINE_WAIT);
+        assert_eq!(messages(&events), ["Finished a-1"]);
+    }
+
+    #[tokio::test]
+    async fn a_closed_output_records_every_waiting_end_line() {
+        let (log, events) = LogSink::recording();
+        let lines = EndLines::default();
+        lines.record(&log, "a-1", end_line("a-1"));
+        lines.record(&log, "a-2", end_line("a-2"));
+        lines.closed();
+        let mut recorded = messages(&events);
+        recorded.sort();
+        assert_eq!(recorded, ["Finished a-1", "Finished a-2"]);
+    }
+
+    #[test]
+    fn without_a_runtime_an_end_line_is_recorded_at_once() {
+        let (log, events) = LogSink::recording();
+        EndLines::default().record(&log, "a-1", end_line("a-1"));
+        assert_eq!(messages(&events), ["Finished a-1"]);
+    }
+
+    #[test]
+    fn answers_whose_end_never_came_are_bounded() {
+        let lines = EndLines::default();
+        for index in 0..ANSWERED_KEPT + 10 {
+            lines.answered(format!("a-{index}"));
+        }
+        let state = lines.lock();
+        assert_eq!(state.answered.len(), ANSWERED_KEPT);
+        assert_eq!(state.answered.front().map(String::as_str), Some("a-10"));
     }
 }

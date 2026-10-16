@@ -141,11 +141,12 @@ async fn http_calls_are_recorded_with_their_own_lines() {
             .all(|name| !name.to_ascii_lowercase().starts_with("x-firenook-")),
         "{seen}"
     );
-    eventually("the lines", || {
+    eventually("the lines and the end line", || {
         harness
             .monitor
             .invocation(&id)
             .is_some_and(|detail| detail.logs.len() >= 4)
+            && !harness.end_lines(&id).is_empty()
     })
     .await;
     let detail = harness.monitor.invocation(&id).expect("kept");
@@ -536,5 +537,83 @@ async fn a_burst_of_deliveries_waits_its_turn_and_none_crashes() {
         .collect();
     assert_eq!(crashed, Vec::<String>::new());
     assert!(answers.iter().all(|(response, _)| response.status() == 200));
+    harness.stop().await;
+}
+
+const CHATTY_INDEX: &str = r#"
+exports.chatty = (req, res) => {
+  const filler = "x".repeat(60);
+  for (let index = 0; index < 3000; index += 1) console.log(`line ${index} ${filler}`);
+  res.send("done");
+};
+"#;
+
+const CHATTY_MANIFEST: &str = "specVersion: v1alpha1
+endpoints:
+  chatty:
+    entryPoint: chatty
+    platform: gcfv2
+    httpsTrigger: {}
+";
+
+#[tokio::test]
+async fn an_end_line_follows_every_line_its_call_printed() {
+    // A call's lines reach the runtime on the worker's output and its answer
+    // on the worker's connection. A call that prints more than the output
+    // pipe holds is answered well before its lines are all read; its end
+    // line still comes after every one of them.
+    let harness = match Harness::start(CHATTY_INDEX, CHATTY_MANIFEST, LogDelivery::Attributed).await
+    {
+        Ok(harness) => harness,
+        Err(reason) => {
+            eprintln!("skipped: {reason}");
+            return;
+        }
+    };
+    let (response, body) = harness
+        .call_text(
+            Request::get(url("chatty", ""))
+                .header("x-firenook-console", "functions")
+                .body(Body::empty())
+                .expect("a request"),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(body, "done");
+    let id = response
+        .headers()
+        .get("x-firenook-execution")
+        .expect("the console asked for the id")
+        .to_str()
+        .expect("text")
+        .to_owned();
+    let own = |event: &LogEvent| event.execution.as_deref() == Some(id.as_str());
+    let printed_count = || {
+        harness
+            .events()
+            .iter()
+            .filter(|event| own(event) && event.message.starts_with("line "))
+            .count()
+    };
+    eventually("every line and the end line", || {
+        printed_count() == 3000 && !harness.end_lines(&id).is_empty()
+    })
+    .await;
+    let events = harness.events();
+    let end = events
+        .iter()
+        .position(|event| own(event) && event.kind == Some("function.finish"))
+        .expect("an end line");
+    let printed: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| own(event) && event.message.starts_with("line "))
+        .map(|(index, _)| index)
+        .collect();
+    let late = printed.iter().filter(|&&index| index > end).count();
+    assert_eq!(
+        late, 0,
+        "{late} of the call's 3000 lines came after its end line"
+    );
     harness.stop().await;
 }

@@ -27,6 +27,7 @@ use crate::monitor::{
     InvocationTarget, InvocationToken, Monitor, RecordedEvent,
 };
 use crate::registry::EventarcSubscription;
+use crate::worker::EndLines;
 use crate::{RuntimeState, WORKER_READY_TIMEOUT};
 
 type Shared = Arc<RuntimeState>;
@@ -507,6 +508,7 @@ pub(crate) async fn dispatch(
         token: token.clone(),
         function_id: function_id.clone(),
         codebase: backend_id.clone(),
+        lines: backend.slot.end_lines(),
         started,
         written: false,
     };
@@ -673,6 +675,7 @@ struct EndLine {
     token: InvocationToken,
     function_id: String,
     codebase: String,
+    lines: EndLines,
     started: Instant,
     written: bool,
 }
@@ -728,8 +731,7 @@ impl EndLine {
             "functions",
             format!("Finished \"{}\" in {elapsed}ms", self.function_id),
         ));
-        self.log
-            .record(line.with_kind(kind).with_detail(Value::Object(detail)));
+        self.record(line.with_kind(kind).with_detail(Value::Object(detail)));
     }
 
     /// A background handler threw: a console-only error line.
@@ -755,8 +757,12 @@ impl EndLine {
                 self.function_id
             ),
         ));
-        self.log
-            .record(line.with_kind("function.failed").with_detail(detail));
+        self.record(line.with_kind("function.failed").with_detail(detail));
+    }
+
+    /// After every line the call printed before its worker answered.
+    fn record(&self, line: LogEvent) {
+        self.lines.record(&self.log, &self.token.id, line);
     }
 }
 

@@ -12,7 +12,9 @@
 // invocation is written as one FIRENOOK_WORKER_LOG record carrying the
 // invocation id, the function, the call's true level and the stream Node
 // would have written it to; outside an invocation the original methods run
-// untouched.
+// untouched. Just before an invocation answers, one FIRENOOK_WORKER_ANSWERED
+// line follows its records on stdout: the answer travels on the connection,
+// so the runtime holds the call's end line until that line is read.
 //
 // The request handling mirrors firebase-tools 15.22.0
 // `functionsEmulatorRuntime.js` (Express with `trust proxy`, JSON / text /
@@ -56,6 +58,20 @@ function record(fields) {
 
 function log(level, message, extra = {}) {
   record({ level, message: String(message), ...extra });
+}
+
+// The answered line, written once as the response starts to end, before
+// any of its last bytes reach the connection.
+function announceAnswer(response, execution) {
+  const original = response.end;
+  let announced = false;
+  response.end = function endAfterAnnouncing(...args) {
+    if (!announced) {
+      announced = true;
+      process.stdout.write(`FIRENOOK_WORKER_ANSWERED ${JSON.stringify({ execution })}\n`);
+    }
+    return original.apply(this, args);
+  };
 }
 
 // console.* inside an invocation: one attributed record per call, with the
@@ -352,6 +368,7 @@ async function main() {
 }
 
 async function handle(request, response, target, signature, service, execution, fn) {
+  if (execution) announceAnswer(response, execution);
   // The environment a handler observes for this invocation, set before any
   // user code runs (one worker serves every function of the codebase). The
   // official debug-mode runtime (`--inspect-functions`) serves every
