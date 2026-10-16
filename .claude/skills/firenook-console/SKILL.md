@@ -44,15 +44,27 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 
 ## The shell (`src/components/shell/`)
 
+- **One bar across the whole window, then the columns under it** (since
+  2026-10-17, after the Supabase dashboard's shape): the top bar is 48 px,
+  full width — Firenook's mark and name (a link to the Overview), a slash,
+  the project id (copyable), and at its end the engine badge, the search
+  field (⌘K) and the theme. The mark sits over the navigation's icon
+  column, so collapsing the navigation moves nothing in the bar. The
+  navigation carries no brand of its own.
 - Primary navigation is Kumo's `Sidebar`, expanded or collapsed
   (`useLayout.navOpen`, localStorage), always `peekable`: collapsed, the
   labels slide out over the page on hover, as on kumo-ui.com. The foot of
   the nav is Kumo's own `Sidebar.Trigger` (icon only, in a tooltip); `[`
   flips it; ⌘K offers it under "Layout". Only the navigation sits inside
-  `Sidebar.Provider`, and the provider's wrapper is `z-30 w-auto shrink-0`
-  so the fixed peek overlays the content. (Kumo 2.14's context memo omits
-  `peekable`, so never flip that prop at runtime; it is constant here.) The
-  expanded width is 14rem through `--sidebar-width` on the provider.
+  `Sidebar.Provider`, which is `contained`: Kumo then places the collapsed
+  and peeking nav `absolute` inside its own column instead of `fixed` to
+  the window, which would lay the peek over the top bar, and drops the
+  provider's `min-h-svh`, which would push the column 48 px past the
+  window. The provider's wrapper is `z-30 w-auto shrink-0` so the peek
+  overlays the content. (Kumo 2.14's context memo omits `peekable`, so
+  never flip that prop, or `contained`, at runtime; both are constant
+  here.) The expanded width is 14rem through `--sidebar-width` on the
+  provider.
 - The section panel is a second column beside the content (`PANEL_WIDTH`,
   264 px). A section fills it by rendering `<SectionPanel label="…">` (a
   portal into the shell's slot, so the section's providers reach it). The

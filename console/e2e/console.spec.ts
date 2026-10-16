@@ -12,9 +12,7 @@ test('the overview shows what the engine runs, where, and what it does not', asy
   await page.goto(`${origin()}/console`)
   await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible()
   // The project is the top bar's, on every page; the header says the suite in one line.
-  await expect(page.locator('header').filter({ hasText: 'Project' }).first()).toContainText(
-    project(),
-  )
+  await expect(page.getByTestId('top-bar-project')).toHaveText(project())
   await expect(page.getByTestId('overview-health')).toContainText('running')
   // A tile per section, each with the port an app connects to on the shared host.
   const firestore = page.getByTestId('overview-card-firestore')

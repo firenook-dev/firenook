@@ -1,8 +1,10 @@
-// The shell: primary navigation on the left, the bar with the project and
-// the engine on top, and beneath it two columns: the section panel (the
-// column a section can fill through `SectionPanel`) and the content. The
-// navigation is expanded or collapsed to icons; collapsed, it slides its
-// labels out over the page while the pointer is on it. The control at its
+// The shell: one bar across the whole window on top — Firenook, the
+// project, and the engine, search and theme at its end — and beneath it
+// three columns: the primary navigation, the section panel (the column a
+// section can fill through `SectionPanel`) and the content. The navigation
+// is expanded or collapsed to icons under the bar; collapsed, it slides its
+// labels out over the page while the pointer is on it, and never over the
+// bar (Kumo's `contained`, which places the peek inside its column). The control at its
 // foot and `[` flip it; `t` hides and shows the panel. The shell also holds
 // the console's one keydown listener (`lib/shortcuts.ts`): its own keys,
 // ⌘K, `[`, `t` and `?`, and every page's, go through the same registry;
@@ -18,7 +20,6 @@
 
 import {
   Badge,
-  Button,
   InlineCopyText,
   Sidebar,
   Text,
@@ -27,7 +28,7 @@ import {
   TooltipProvider,
   useSidebar,
 } from '@cloudflare/kumo'
-import { CommandIcon, GaugeIcon } from '@phosphor-icons/react'
+import { CubeIcon, GaugeIcon, MagnifyingGlassIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import type {
@@ -184,22 +185,23 @@ export function AppShell({ children }: { children: ReactNode }) {
     // stack through `consoleToasts`, under the one policy in `lib/toasts.ts`.
     <Toasty toastManager={consoleToasts}>
       <TooltipProvider>
-        <div className="flex h-full">
-          {/* Only the navigation lives inside Kumo's provider, and the
-              wrapper sits above the content so a peek overlays it. */}
-          <Sidebar.Provider
-            open={navOpen}
-            onOpenChange={setNavOpen}
-            peekable
-            collapsible="icon"
-            className="z-30 h-full w-auto shrink-0"
-            style={NAV_WIDTH}
-          >
-            <Navigation />
-          </Sidebar.Provider>
-          <div className="flex min-w-0 flex-1 flex-col bg-kumo-canvas">
-            <TopBar />
-            <div className="flex min-h-0 flex-1">
+        <div className="flex h-full flex-col">
+          <TopBar />
+          <div className="flex min-h-0 flex-1">
+            {/* Only the navigation lives inside Kumo's provider, and the
+                wrapper sits above the content so a peek overlays it. */}
+            <Sidebar.Provider
+              open={navOpen}
+              onOpenChange={setNavOpen}
+              peekable
+              contained
+              collapsible="icon"
+              className="z-30 h-full min-h-0 w-auto shrink-0"
+              style={NAV_WIDTH}
+            >
+              <Navigation />
+            </Sidebar.Provider>
+            <div className="flex min-w-0 flex-1 bg-kumo-canvas">
               <aside
                 ref={setSlot}
                 aria-label={panel.label || undefined}
@@ -265,17 +267,6 @@ function Navigation() {
       data-testid="primary-nav"
       contentClassName="group-data-[state=peeking]/sidebar:shadow-lg"
     >
-      <Sidebar.Header>
-        <div className="flex min-w-0 items-center gap-2 px-2 py-1">
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-kumo-brand text-kumo-inverse">
-            <GaugeIcon size={14} weight="bold" />
-          </span>
-          <span className="flex min-w-0 items-center gap-2 transition-opacity duration-(--sidebar-animation-duration) group-data-[state=collapsed]/sidebar:opacity-0">
-            <Text bold>Firenook</Text>
-            <Text variant="secondary">console</Text>
-          </span>
-        </div>
-      </Sidebar.Header>
       <Sidebar.Content>
         <Sidebar.Group>
           <Sidebar.Menu>
@@ -504,40 +495,81 @@ function NavToggle() {
 function TopBar() {
   const status = useQuery(statusQuery)
   const setPaletteOpen = useConsoleUi((state) => state.setPaletteOpen)
-  // The console's own bar. The section panel's toggle is the section's
-  // (`PanelToggle`), placed in the panel and in the section's toolbar.
+  const go = useGo()
+  // The console's own bar, across the whole window: where you are on the
+  // left (Firenook, which opens the Overview, then the project), the engine,
+  // search and the theme at the end. The brand's mark sits over the
+  // navigation's icons, so collapsing the navigation moves nothing here.
+  // The section panel's toggle is the section's (`PanelToggle`), placed in
+  // the panel and in the section's toolbar.
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-kumo-line bg-kumo-base px-4">
-      <div className="flex min-w-0 items-center gap-2">
-        <Text variant="secondary" size="sm">
-          Project
-        </Text>
-        {status.data ? (
-          <InlineCopyText value={status.data.projectId} className="font-mono text-[0.9em]">
-            {status.data.projectId}
-          </InlineCopyText>
-        ) : (
-          <Text variant="mono-secondary">…</Text>
-        )}
+    <header
+      className="flex h-12 shrink-0 items-center gap-3 border-b border-kumo-line bg-kumo-base pr-3 pl-[17px]"
+      data-testid="top-bar"
+    >
+      <div className="flex min-w-0 items-center gap-2.5">
+        <a
+          href="/console"
+          onClick={go({ to: '/' })}
+          className="flex shrink-0 items-center gap-2 rounded-md outline-none focus-visible:ring focus-visible:ring-kumo-focus"
+          aria-label="Firenook console: Overview"
+          data-testid="top-bar-home"
+        >
+          <span className="flex size-6 items-center justify-center rounded-md bg-kumo-brand text-kumo-inverse">
+            <GaugeIcon size={14} weight="bold" />
+          </span>
+          <span className="text-[14px] font-semibold text-kumo-default">Firenook</span>
+        </a>
+        <Slash />
+        <span className="flex min-w-0 items-center gap-2" data-testid="top-bar-project">
+          <CubeIcon size={15} className="shrink-0 text-kumo-subtle" aria-hidden />
+          {status.data ? (
+            <InlineCopyText
+              value={status.data.projectId}
+              variant="body"
+              size="sm"
+              className="min-w-0 font-mono text-kumo-default"
+            >
+              {status.data.projectId}
+            </InlineCopyText>
+          ) : (
+            <Text variant="mono-secondary">…</Text>
+          )}
+        </span>
       </div>
       <div className="ml-auto flex items-center gap-2">
         <EngineBadge />
-        <ThemePicker />
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={<CommandIcon />}
+        <button
+          type="button"
           onClick={() => setPaletteOpen(true)}
           aria-label="Open the command palette"
+          className="flex h-8 w-56 items-center gap-2 rounded-lg bg-kumo-base px-2.5 text-[13px] text-kumo-subtle ring ring-kumo-line outline-none hover:ink focus-visible:ring-2 focus-visible:ring-kumo-focus max-md:w-auto"
+          data-testid="top-bar-search"
         >
-          <span className="flex items-center gap-1.5">
-            Search
-            {/* ⌘K on a Mac, Ctrl+K elsewhere: the key the registry listens for. */}
-            <Kbd className="text-inherit">{describeKey('Mod+k')}</Kbd>
-          </span>
-        </Button>
+          <MagnifyingGlassIcon size={14} aria-hidden className="shrink-0" />
+          <span className="max-md:hidden">Search…</span>
+          {/* ⌘K on a Mac, Ctrl+K elsewhere: the key the registry listens for. */}
+          <Kbd className="ml-auto text-inherit max-md:hidden">{describeKey('Mod+k')}</Kbd>
+        </button>
+        <ThemePicker />
       </div>
     </header>
+  )
+}
+
+/** The bar's separator between where you are and what is in it, as a path is written. */
+function Slash() {
+  return (
+    <svg
+      viewBox="0 0 12 24"
+      className="h-5 w-2.5 shrink-0 text-kumo-line"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      aria-hidden
+    >
+      <path d="M9.5 3.5 2.5 20.5" strokeLinecap="round" />
+    </svg>
   )
 }
 
