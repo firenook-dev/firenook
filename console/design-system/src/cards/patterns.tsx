@@ -182,7 +182,7 @@ function Shell() {
               contained
               defaultOpen
               className="h-full w-auto shrink-0 min-h-0!"
-              style={{ '--sidebar-width': '14rem' } as CSSProperties}
+              style={{ '--sidebar-width': '15.5rem' } as CSSProperties}
             >
               <Sidebar>
                 <Sidebar.Content>

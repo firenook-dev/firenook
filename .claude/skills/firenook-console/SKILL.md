@@ -89,7 +89,7 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
   window. The provider's wrapper is `z-30 w-auto shrink-0` so the peek
   overlays the content. (Kumo 2.14's context memo omits `peekable`, so
   never flip that prop, or `contained`, at runtime; both are constant
-  here.) The expanded width is 14rem through `--sidebar-width` on the
+  here.) The expanded width is 15.5rem through `--sidebar-width` on the
   provider.
 - The section panel is a second column beside the content (`PANEL_WIDTH`,
   264 px). A section fills it by rendering `<SectionPanel label="…">` (a

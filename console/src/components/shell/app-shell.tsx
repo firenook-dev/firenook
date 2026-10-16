@@ -118,11 +118,12 @@ export function hrefOf(link: SectionLink): string {
 export const PANEL_WIDTH = 264
 
 /**
- * The navigation's expanded width. Kumo's default is 16.25rem; the labels
- * here are short (the longest is "Authentication"), so the nav gives the
- * width back to the data.
+ * The navigation's expanded width, 248 px. Kumo's default is 16.25rem; the
+ * labels here are short (the longest is "Authentication"), so the nav gives
+ * a little back to the data. 14rem fit the labels but crowded them against
+ * a section's count and chevron, and left the version at its foot no room.
  */
-const NAV_WIDTH: CSSProperties = { '--sidebar-width': '14rem' } as CSSProperties
+const NAV_WIDTH: CSSProperties = { '--sidebar-width': '15.5rem' } as CSSProperties
 
 /** A page label as a test id's tail: "All functions" → `all-functions`. */
 function slug(label: string): string {
