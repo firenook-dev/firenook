@@ -46,11 +46,19 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 
 - **One bar across the whole window, then the columns under it** (since
   2026-10-17, after the Supabase dashboard's shape): the top bar is 48 px,
-  full width — Firenook's mark and name (a link to the Overview), a slash,
-  the project id (copyable), and at its end the engine badge, the search
-  field (⌘K) and the theme. The mark sits over the navigation's icon
-  column, so collapsing the navigation moves nothing in the bar. The
-  navigation carries no brand of its own.
+  full width — Firenook's logo (a link to the Overview), a slash, the
+  project id (copyable), and at its end the engine badge, the search field
+  (⌘K) and the theme. The logo is `FirenookLogo` (`components/kit`), the
+  brand's flat horizontal file with its paths unchanged and its viewBox
+  cropped to the artwork; the wordmark takes `--color-firenook-wordmark`
+  (charcoal, white in dark). It is 24 px tall in `px`, not rem: the root is
+  14 px here, so `h-6` is 21 px. Its flames sit between the navigation's
+  expanded and collapsed icon columns (they differ by 4 px), so collapsing
+  the navigation moves nothing in the bar. The navigation carries no brand
+  of its own. The favicons, app icons and `site.webmanifest` are the
+  brand's set in `console/public`, linked from `index.html` through
+  `%BASE_URL%` (a bare `/favicon.svg` would miss the `/console/` base);
+  `console.spec.ts` fetches each from the engine.
 - Primary navigation is Kumo's `Sidebar`, expanded or collapsed
   (`useLayout.navOpen`, localStorage), always `peekable`: collapsed, the
   labels slide out over the page on hover, as on kumo-ui.com. The foot of

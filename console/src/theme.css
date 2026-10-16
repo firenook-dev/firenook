@@ -69,6 +69,23 @@
  * of this palette shipped: a key and a string 0.06 apart. They are
  * 0.21 apart now, and the journey will not accept less than 0.19.
  */
+/*
+ * The logo's wordmark, in the brand's two colours: charcoal on light and
+ * white on dark (the brand README; its files are the source).
+ */
+:root,
+[data-theme='kumo'] {
+  --color-firenook-wordmark: #202124;
+}
+
+:root[data-mode='dark'],
+[data-mode='dark']:not([data-theme]),
+[data-mode='dark'] [data-theme='kumo'],
+[data-theme='kumo'][data-mode='dark'],
+[data-theme='kumo'] [data-mode='dark'] {
+  --color-firenook-wordmark: #ffffff;
+}
+
 :root,
 [data-theme='kumo'] {
   --color-firenook-code-key: oklch(0.47 0.16 258);

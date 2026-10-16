@@ -43,7 +43,7 @@ import type { SectionStatus } from '@/api/generated/SectionStatus'
 import { statusQuery } from '@/api/queries'
 import { useNavBadge } from '@/lib/badges'
 import { engineBuild, engineVersion } from '@/lib/engine'
-import { Kbd, NavBadge, NavIconWithDot } from '@/components/kit'
+import { FirenookLogo, Kbd, NavBadge, NavIconWithDot } from '@/components/kit'
 import { NARROW_BELOW, panelShown, useLayout } from '@/lib/layout'
 import { useLiveStatus } from '@/lib/live/channel'
 import { useBadges, useShellLive } from '@/lib/live/shell'
@@ -504,21 +504,18 @@ function TopBar() {
   // the panel and in the section's toolbar.
   return (
     <header
-      className="flex h-12 shrink-0 items-center gap-3 border-b border-kumo-line bg-kumo-base pr-3 pl-[17px]"
+      className="flex h-12 shrink-0 items-center gap-3 border-b border-kumo-line bg-kumo-base pr-3 pl-[18px]"
       data-testid="top-bar"
     >
       <div className="flex min-w-0 items-center gap-2.5">
         <a
           href="/console"
           onClick={go({ to: '/' })}
-          className="flex shrink-0 items-center gap-2 rounded-md outline-none focus-visible:ring focus-visible:ring-kumo-focus"
+          className="flex shrink-0 items-center rounded-md outline-none focus-visible:ring focus-visible:ring-kumo-focus focus-visible:ring-offset-2"
           aria-label="Firenook console: Overview"
           data-testid="top-bar-home"
         >
-          <span className="flex size-6 items-center justify-center rounded-md bg-kumo-brand text-kumo-inverse">
-            <GaugeIcon size={14} weight="bold" />
-          </span>
-          <span className="text-[14px] font-semibold text-kumo-default">Firenook</span>
+          <FirenookLogo className="h-[24px] w-auto" />
         </a>
         <Slash />
         <span className="flex min-w-0 items-center gap-2" data-testid="top-bar-project">

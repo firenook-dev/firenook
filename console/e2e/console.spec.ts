@@ -41,6 +41,28 @@ test('the overview shows what the engine runs, where, and what it does not', asy
   await expect(page.getByTestId('overview-infrastructure')).toContainText('Hub')
 })
 
+test('the tab carries Firenook’s icon, and the console installs as an app', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore`)
+  // Links under the console's base path, from any page however deep.
+  const icons = await page
+    .locator('link[rel="icon"], link[rel="apple-touch-icon"], link[rel="manifest"]')
+    .evaluateAll((links) => links.map((link) => (link as unknown as { href: string }).href))
+  expect(icons.length).toBe(4)
+  for (const href of icons) {
+    const response = await page.request.get(href)
+    expect(response.status(), href).toBe(200)
+    expect(response.headers()['content-type'], href).not.toContain('text/html')
+  }
+  const manifest = (await (
+    await page.request.get(`${origin()}/console/site.webmanifest`)
+  ).json()) as { start_url: string; icons: { src: string }[] }
+  for (const icon of manifest.icons)
+    expect((await page.request.get(new URL(icon.src, `${origin()}/console/`).href)).status()).toBe(
+      200,
+    )
+  await expect(page.getByTestId('firenook-logo')).toBeVisible()
+})
+
 test('the theme is light, dark or the system\u2019s, and it is remembered', async ({ browser }) => {
   // A browser whose OS says dark, so "match the system" has something to
   // follow and an explicit choice has something to override.

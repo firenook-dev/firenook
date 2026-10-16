@@ -1,5 +1,6 @@
 export { CopyGlyph, useCopied } from './copy-glyph'
 export { CountBadge, type CountTone } from './count-badge'
+export { FirenookLogo } from './firenook-logo'
 export { FLASH_MS } from './flash'
 export { Kbd } from './kbd'
 export { Mark } from './mark'
