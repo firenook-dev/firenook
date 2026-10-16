@@ -211,7 +211,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 style={{ width: PANEL_WIDTH }}
                 data-testid="section-panel"
               />
-              <main className="relative min-h-0 min-w-0 flex-1 overflow-auto">{children}</main>
+              <main className="relative min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
+                {children}
+              </main>
             </div>
           </div>
         </div>

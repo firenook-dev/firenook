@@ -15,18 +15,14 @@ body,
   height: 100%;
 }
 
-/* The window never scrolls: the shell fills it, and each page scrolls inside
-   its own column. Anything that strays past the bottom (an absolutely placed
-   element whose containing block is the page) cannot make the document
-   scrollable, so a wheel or a trackpad flick that runs off the end of a
-   column has nowhere to go, and macOS has no window to bounce. The ground
-   under the shell is the canvas, not the browser's white. */
-html,
-body {
-  overflow: hidden;
-  overscroll-behavior: none;
-}
-
+/* The ground under the shell is the canvas, not the browser's white, so
+   nothing white ever shows around it. The window itself never needs to
+   scroll: the shell fills it and each page scrolls inside its own column
+   (`main` contains its scrolling, so a flick past the end of a column is
+   not handed on to the window), and nothing hangs below it (the copy
+   text's announcement, below). Not `overscroll-behavior` or `overflow:
+   hidden` on the root: in Chromium either stops a drag from selecting text
+   inside an input, as in the grid's cell editor. */
 body {
   margin: 0;
   background-color: var(--color-kumo-canvas);
