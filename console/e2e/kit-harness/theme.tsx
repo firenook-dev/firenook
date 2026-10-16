@@ -84,6 +84,18 @@ function srgb(css: string, host: Element): { rgb: [number, number, number]; alph
   return { rgb: [r, g, b], alpha }
 }
 
+/** A colour as the browser resolves it, in OKLCH: its chroma and hue. */
+function oklch(css: string, host: Element): { chroma: number; hue: number } {
+  const probe = document.createElement('span')
+  host.append(probe)
+  probe.style.color = `color-mix(in oklch, ${css} 100%, transparent)`
+  const [, chroma = 0, hue = 0] = getComputedStyle(probe)
+    .color.match(/-?[\d.]+/g)!
+    .map(Number)
+  probe.remove()
+  return { chroma, hue }
+}
+
 function channel(value: number): number {
   const unit = Math.min(1, Math.max(0, value))
   return unit <= 0.04045 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4
@@ -169,19 +181,16 @@ export function measureTheme(): ThemeRun {
   const drawn = srgb(getComputedStyle(underline).backgroundColor, root).rgb
   checks.push({ what: 'tab underline', ratio: ratio(drawn, surface('base')), need: 3 })
 
-  // The primary button's own fill (the foot of its gradient), in OKLCH.
-  const primary = root.querySelector('[data-variant="primary"]')!
-  const probe = document.createElement('span')
-  primary.append(probe)
-  probe.style.color =
-    'color-mix(in oklch, var(--kumo-button-emphasis-gradient-end) 100%, transparent)'
-  const [, chroma = 0, hue = 0] = getComputedStyle(probe)
-    .color.match(/-?[\d.]+/g)!
-    .map(Number)
-  probe.remove()
+  // The primary button's own fill (the foot of its gradient), and a link,
+  // in OKLCH.
+  const link = root.querySelector('[data-testid="theme-link"]')!
   return {
     checks,
-    primary: { chroma, hue },
+    primary: oklch(
+      'var(--kumo-button-emphasis-gradient-end)',
+      root.querySelector('[data-variant="primary"]')!,
+    ),
+    link: oklch(getComputedStyle(link).color, root),
     underlineIsFlame: drawn.every((value, index) => Math.abs(value - (flame[index] ?? 0)) < 0.002),
   }
 }

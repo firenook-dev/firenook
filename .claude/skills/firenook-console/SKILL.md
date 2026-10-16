@@ -885,14 +885,15 @@ colours split by job, and the type pair (Inter for the interface, the face
 Kumo's docs render in; IBM Plex Mono for data), self-hosted from
 `public/fonts`. **Blue** (a cobalt, `oklch(0.49 0.2 263)`; rings and dots
 take a lighter `#4c8eef` in dark mode) is `--color-kumo-brand`: the primary
-button, focus rings, progress, an in-flight state, the unsaved dot.
+button, links, focus rings, progress, an in-flight state, the unsaved dot.
 Charcoal, the logo's amber and a rust orange were tried on buttons and set
 aside; blue is what flame-logo consoles (Firebase, Cloudflare) press with.
 **Flame** (the logo's vermilion `#F23818`, `bg-firenook-flame`) marks
 where you are and nothing else: the active tab's underline, the selected
 row's bar in a tree, a table or the schema, the open document, the current
-sort, a checked menu item, a drop target; links and `text-kumo-brand` take
-it darkened for text. The flame never fills a button or colours a state,
+sort, a checked menu item, a drop target; `text-kumo-brand` (those icons)
+takes it darkened for text. Never a link: a vermilion "See why" beside an
+`error` and a `warn` read as a third problem. The flame never fills a button or colours a state,
 because vermilion is the danger red within ten degrees and amber is the
 warning. A feed's selected row (Logs, events) keeps a blue bar: a log
 line's left edge is its level's. A primary button is the cobalt in both

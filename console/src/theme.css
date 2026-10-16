@@ -12,8 +12,8 @@
  * theirs: a flame logo beside a blue for everything that can be pressed.
  *
  * - Blue, a cobalt (oklch 0.49 0.2 263, #1c53cf), is Kumo's brand colour:
- *   the primary button, focus rings, progress, an in-flight state, and the
- *   unsaved dot that waits on the primary Save. Blue sits opposite the
+ *   the primary button, links, focus rings, progress, an in-flight state,
+ *   and the unsaved dot that waits on the primary Save. Blue sits opposite the
  *   flame on the wheel, so the logo stands out beside it, and it is no
  *   state's colour. White on the button measures 5.5:1 where its label
  *   sits, 4.65:1 hovered; in dark mode rings and dots take a lighter blue
@@ -23,8 +23,10 @@
  *   a table or the schema, the open document, the current sort, the
  *   checked menu item, a drop target. A feed's selected row (Logs, events)
  *   keeps a blue bar, because a log line's left edge is its level's. As
- *   text (links) the flame is darkened until it reads, 5.3:1 on white, and
- *   lightened to 6.2:1 on dark.
+ *   text (`text-kumo-brand`: the sort arrow, a menu's check, the open row's
+ *   button) the flame is darkened until it reads, 5.3:1 on white, and
+ *   lightened to 6.2:1 on dark. Links are not the flame: a vermilion "See
+ *   why" beside an `error` and a `warn` read as a third problem.
  *
  * The flame never fills a button or colours a state. A fire's two colours
  * are an interface's two alarms: vermilion is within ten degrees of Kumo's
@@ -141,7 +143,7 @@
   --color-kumo-brand: oklch(0.49 0.2 263);
   --color-kumo-brand-hover: oklch(0.44 0.19 263);
   --text-color-kumo-brand: var(--color-firenook-flame-text);
-  --text-color-kumo-link: var(--color-firenook-flame-text);
+  --text-color-kumo-link: oklch(0.49 0.2 263);
 }
 
 :root[data-mode='dark'],
@@ -154,7 +156,7 @@
   --color-kumo-brand-hover: oklch(0.7 0.15 258);
   --color-firenook-hover: oklch(100% 0 0 / 0.096);
   --text-color-kumo-brand: var(--color-firenook-flame-text);
-  --text-color-kumo-link: var(--color-firenook-flame-text);
+  --text-color-kumo-link: oklch(0.68 0.15 256);
 }
 
 /*

@@ -5,9 +5,9 @@
 // for a mark. A filled button is measured where its label sits, halfway
 // down its gradient, at rest and hovered.
 //
-// It also holds the two choices the theme makes: a primary button is blue,
-// so it is never mistaken for a red Delete or a warning; and the active
-// tab is underlined in the logo's flame.
+// It also holds the choices the theme makes: a primary button and a link
+// are blue, so neither is mistaken for a red Delete, an error or a warning;
+// and the active tab is underlined in the logo's flame.
 
 import { buildKitHarness, type KitBuild, type KitHarness, openKitHarness } from './support/kit'
 import { expect, test } from './fixtures'
@@ -52,6 +52,8 @@ test.describe('theme', () => {
       expect(run.primary.chroma, 'the primary is a colour').toBeGreaterThan(0.1)
       expect(run.primary.hue, 'the primary is blue').toBeGreaterThan(240)
       expect(run.primary.hue, 'the primary is blue').toBeLessThan(280)
+      expect(run.link.hue, 'a link is blue').toBeGreaterThan(240)
+      expect(run.link.hue, 'a link is blue').toBeLessThan(280)
       expect(run.underlineIsFlame, 'the active tab is underlined in the flame').toBe(true)
     })
   }

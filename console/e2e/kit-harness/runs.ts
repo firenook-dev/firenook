@@ -35,6 +35,8 @@ export interface ThemeRun {
   checks: Array<{ what: string; ratio: number; need: number }>
   /** The primary button's fill in OKLCH: a blue, nowhere near the danger red. */
   primary: { chroma: number; hue: number }
+  /** A link's colour in OKLCH: blue as well, never a level's red or amber. */
+  link: { chroma: number; hue: number }
   /** Whether the active tab's underline is drawn in the logo's flame. */
   underlineIsFlame: boolean
 }

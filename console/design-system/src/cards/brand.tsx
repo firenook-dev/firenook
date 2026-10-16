@@ -54,16 +54,17 @@ defineCards([
             <Role
               name="Blue"
               values="#1c53cf · rings and dots in dark #4c8eef"
-              job="Kumo's brand token: the primary button, focus rings, progress, the unsaved dot. Opposite the flame on the wheel, and no state's colour; white on the button reads 5.5:1."
+              job="Kumo's brand token: the primary button, links, focus rings, progress, the unsaved dot. Opposite the flame on the wheel, and no state's colour; white on the button reads 5.5:1."
             >
               <Button variant="primary" icon={<PlusIcon />}>
                 Add document
               </Button>
+              <span className="text-sm text-kumo-link">Open logs</span>
             </Role>
             <Role
               name="Flame"
               values="#F23818 · as text oklch(0.55 0.19 35)"
-              job="The logo's vermilion marks where you are: the active tab, the selected row, the open document, the current sort. Links take it as text: 5.3:1 on light, 6.2:1 on dark."
+              job="The logo's vermilion marks where you are: the active tab, the selected row, the open document, the current sort. Never a link: beside an error or a warning it reads as a third problem."
             >
               <span className="relative flex h-8 items-center px-1 text-sm text-kumo-default">
                 Rules
@@ -72,7 +73,6 @@ defineCards([
               <span className="flex h-7 items-center rounded-md bg-kumo-tint pr-2 pl-2.5 text-sm text-kumo-default shadow-[inset_2px_0_0_var(--color-firenook-flame)]">
                 orders
               </span>
-              <span className="text-sm text-kumo-link">Open</span>
             </Role>
             <Role
               name="Danger"
