@@ -76,6 +76,9 @@ export async function loadHidden(page: Page): Promise<void> {
   })
 }
 
+/** How late a handed-over stream's abort may be reported (see `liveRequests`). */
+const HANDOVER_GRACE_MS = 250
+
 /**
  * Counts the live streams of a page, or of every page of a browser
  * context: how many were opened, how many are open now, and the most that
@@ -84,17 +87,39 @@ export async function loadHidden(page: Page): Promise<void> {
 export function liveRequests(target: Page | BrowserContext) {
   const events = target as Pick<Page, 'on' | 'off'>
   const open = new Set<Request>()
+  const streams: { request: Request; start: number; end?: number }[] = []
   let opened = 0
-  let most = 0
   const onRequest = (request: Request) => {
     if (!isLiveStream(request)) return
     opened += 1
     open.add(request)
-    most = Math.max(most, open.size)
+    streams.push({ request, start: performance.now() })
   }
   const onDone = (request: Request) => {
     open.delete(request)
+    const stream = streams.find((each) => each.request === request && each.end === undefined)
+    if (stream) stream.end = performance.now()
   }
+  // The most streams open at once. A leader closes its stream before it lets
+  // the next tab lead (channel.ts `stopLeading`), but the browser reports the
+  // old stream's abort from another process, a moment after the new one's
+  // request on a slow machine: a stream that ended within HANDOVER_GRACE_MS of
+  // a newer one starting was already closed when that one opened.
+  const most = () =>
+    streams.reduce(
+      (highest, stream) =>
+        Math.max(
+          highest,
+          1 +
+            streams.filter(
+              (other) =>
+                other !== stream &&
+                other.start <= stream.start &&
+                (other.end === undefined || other.end - stream.start > HANDOVER_GRACE_MS),
+            ).length,
+        ),
+      0,
+    )
   // A closed page's requests end without an event: they are not open.
   const living = () =>
     [...open].filter((request) => {
@@ -111,7 +136,7 @@ export function liveRequests(target: Page | BrowserContext) {
   return {
     open: () => living().length,
     opened: () => opened,
-    most: () => most,
+    most,
     dispose() {
       events.off('request', onRequest)
       events.off('requestfinished', onDone)
