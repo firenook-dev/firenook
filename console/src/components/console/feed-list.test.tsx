@@ -433,6 +433,47 @@ describe('FeedList', () => {
     expect(screen.getByTestId('following')).toHaveTextContent('false')
   })
 
+  it('stays paused when the list settles at the live edge just after a press and a pause', async () => {
+    const store = createFeedStore<Line>({ max: 1_000, key: rowKey })
+    store.push(lines(100))
+    function Pausing() {
+      const [follow, setFollow] = useState(true)
+      return (
+        <>
+          <button type="button" onClick={() => setFollow(false)}>
+            Pause
+          </button>
+          <span data-testid="following">{String(follow)}</span>
+          <FeedList<Line>
+            ariaLabel="Lines"
+            store={store}
+            order="newest-last"
+            rowHeight={28}
+            rowKey={rowKey}
+            renderRow={(line) => <span>{line.text}</span>}
+            follow={follow}
+            onFollowChange={setFollow}
+            empty={<p>Nothing yet</p>}
+          />
+        </>
+      )
+    }
+    render(<Pausing />)
+    await frame()
+    // A press in the list (a row's own button), then the pause (`p`, the
+    // button), within the moments a press counts as the reader's: the list
+    // settling at its live edge right after is not the reader coming back.
+    fireEvent.pointerDown(scroller())
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    act(() => {
+      scroller().dispatchEvent(new Event('scroll'))
+    })
+    expect(screen.getByTestId('following')).toHaveTextContent('false')
+    // The reader's own scroll back to the edge still follows again.
+    readerScrolls(100 * 28)
+    expect(screen.getByTestId('following')).toHaveTextContent('true')
+  })
+
   it('opens a row the URL names in the middle of the view', async () => {
     const store = createFeedStore<Line>({ max: 1_000, key: rowKey })
     store.push(lines(500))

@@ -318,6 +318,12 @@ export function FeedList<T>({
   const noteIntent = () => {
     intent.current = Date.now()
   }
+  // A pause (the button, `p`) is the reader's decision: a press from before
+  // it no longer makes the list's own settling a return to the live edge.
+  // A layout effect, so it lands before the scroll the same render causes.
+  useLayoutEffect(() => {
+    if (!follow) intent.current = 0
+  }, [follow])
 
   // A row asked for by the URL: put in view once it is in the store, once.
   const placed = useRef<string | undefined>(undefined)
