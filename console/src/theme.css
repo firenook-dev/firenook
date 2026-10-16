@@ -1,26 +1,30 @@
 /*
- * Firenook's identity on top of Kumo: the logo's colours and one type pair.
- * Inter is the face Kumo's own documentation renders in, so every component
- * looks exactly as Kumo designed it; IBM Plex Mono carries paths, ids,
- * values and code. Every other token is Kumo's, so components keep their
- * tested light and dark behaviour, but for four set darker where Kumo's
- * read below AA (below). Change the colours here and nowhere else. The @font-face rules live in fonts.css so the component library
- * can ship the same faces from its own path.
+ * Firenook's identity on top of Kumo: its colours and one type pair. Inter
+ * is the face Kumo's own documentation renders in, so every component looks
+ * exactly as Kumo designed it; IBM Plex Mono carries paths, ids, values and
+ * code. Every other token is Kumo's, so components keep their tested light
+ * and dark behaviour, but for four set darker where Kumo's read below AA
+ * (below). Change the colours here and nowhere else. The @font-face rules
+ * live in fonts.css so the component library can ship the same faces from
+ * its own path.
  *
- * The colours are the brand kit's (brand/README.md), split by job the way
- * Kumo splits its own, an orange logo colour beside a blue for everything
- * that can be pressed:
+ * The colours are split by job, the way Firebase and Cloudflare split
+ * theirs: a flame logo beside a blue for everything that can be pressed.
  *
- * - Ink, the brand's charcoal #202124 (near-white in dark mode), is Kumo's
- *   brand colour: the primary button, focus rings, progress, an in-flight
- *   state, and the unsaved dot that waits on the primary Save. White on
- *   it measures 16:1 in light mode and charcoal on it 13.5:1 in dark.
+ * - Blue, a cobalt (oklch 0.49 0.2 263, #1c53cf), is Kumo's brand colour:
+ *   the primary button, focus rings, progress, an in-flight state, and the
+ *   unsaved dot that waits on the primary Save. Blue sits opposite the
+ *   flame on the wheel, so the logo stands out beside it, and it is no
+ *   state's colour. White on the button measures 5.5:1 where its label
+ *   sits, 4.65:1 hovered; in dark mode rings and dots take a lighter blue
+ *   (#4c8eef) and the button keeps the cobalt.
  * - Flame, the logo's own vermilion #F23818, unchanged in both modes, marks
  *   where you are: the active tab's underline, the selected row of a tree,
  *   a table or the schema, the open document, the current sort, the
  *   checked menu item, a drop target. A feed's selected row (Logs, events)
- *   keeps an ink bar, because a log line's left edge is its level's. As text (links) it is darkened until it
- *   reads: 5.3:1 on white, and lightened to 6.2:1 on dark.
+ *   keeps a blue bar, because a log line's left edge is its level's. As
+ *   text (links) the flame is darkened until it reads, 5.3:1 on white, and
+ *   lightened to 6.2:1 on dark.
  *
  * The flame never fills a button or colours a state. A fire's two colours
  * are an interface's two alarms: vermilion is within ten degrees of Kumo's
@@ -129,15 +133,13 @@
  * too and come later, which is what makes them apply. Each block sets the
  * Kumo tokens itself rather than leaving them to follow a Firenook token:
  * a custom property is resolved where it is declared, so a nested dark
- * block that changed only the Firenook token would inherit light ink.
+ * block that changed only the Firenook token would inherit the light one.
  */
 :root,
 [data-theme='kumo'] {
-  --color-firenook-ink: #202124;
-  --color-firenook-on-ink: #ffffff;
   --color-firenook-flame-text: oklch(0.55 0.19 35);
-  --color-kumo-brand: var(--color-firenook-ink);
-  --color-kumo-brand-hover: #34353a;
+  --color-kumo-brand: oklch(0.49 0.2 263);
+  --color-kumo-brand-hover: oklch(0.44 0.19 263);
   --text-color-kumo-brand: var(--color-firenook-flame-text);
   --text-color-kumo-link: var(--color-firenook-flame-text);
 }
@@ -147,11 +149,9 @@
 [data-mode='dark'] [data-theme='kumo'],
 [data-theme='kumo'][data-mode='dark'],
 [data-theme='kumo'] [data-mode='dark'] {
-  --color-firenook-ink: #eaebed;
-  --color-firenook-on-ink: #202124;
   --color-firenook-flame-text: oklch(0.68 0.17 40);
-  --color-kumo-brand: var(--color-firenook-ink);
-  --color-kumo-brand-hover: #ffffff;
+  --color-kumo-brand: oklch(0.65 0.16 258);
+  --color-kumo-brand-hover: oklch(0.7 0.15 258);
   --color-firenook-hover: oklch(100% 0 0 / 0.096);
   --text-color-kumo-brand: var(--color-firenook-flame-text);
   --text-color-kumo-link: var(--color-firenook-flame-text);
@@ -193,19 +193,21 @@
 }
 
 /*
- * Kumo writes a primary button's label in white whatever its fill
- * (`!text-white`), which on dark mode's near-white ink is white on white.
- * The label's white is redefined on the button alone, to the colour that
- * reads on ink in each mode. Kumo marks a primary button only by the
- * gradient it mixes from the brand token in the button's own style, so
- * that is what the rule keys on; `shell-theme.spec.ts` measures every
- * button variant in both modes and fails if a Kumo upgrade moves it.
+ * A primary button is the cobalt in both modes. Kumo mixes its gradient
+ * from the brand token in the button's own style, and hover lifts the
+ * gradient's head a further 15 % toward white, so Kumo's own blue (#056dff)
+ * measured 3.95:1 under its white label at rest and 3.5:1 hovered. The
+ * cobalt is the lightest blue that passes both; dark mode's lighter blue,
+ * right for a ring or a dot on near-black, would not hold a white label.
+ * The token is redefined on the button alone; `shell-theme.spec.ts`
+ * measures every button variant in both modes and fails if a Kumo upgrade
+ * moves it.
  */
 :is(
   [data-kumo-component='Button'],
   [data-kumo-component='LinkButton']
 )[style*='--color-kumo-brand'] {
-  --color-white: var(--color-firenook-on-ink);
+  --color-kumo-brand: oklch(0.49 0.2 263);
 }
 
 /*
@@ -227,7 +229,7 @@
 
 /*
  * The active tab's underline is a "you are here", so it is drawn in the
- * flame rather than Kumo's brand colour (ink, here). Unlayered, so it beats
+ * flame rather than Kumo's brand colour (blue, here). Unlayered, so it beats
  * the indicator's utility class.
  */
 .kumo-tabs-list .bg-kumo-brand {

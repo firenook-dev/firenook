@@ -1,6 +1,6 @@
 // The inspector's Details tab: every field the emulator stores for the
 // account, in the inspector's field-line language — a 13 px English name, a
-// 12 px value in a box, a 28 px line, the ink dot beside a name the next
+// 12 px value in a box, a 28 px line, the blue dot beside a name the next
 // Save will write — and the account actions the Admin SDK has, each where
 // the thing it changes is.
 //
@@ -79,7 +79,7 @@ function FieldLine({
   wrap = false,
 }: {
   label: string
-  /** The next Save writes this field: the ink dot beside its name. */
+  /** The next Save writes this field: the blue dot beside its name. */
   unsaved?: boolean
   problem?: string | undefined
   note?: ReactNode

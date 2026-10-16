@@ -169,20 +169,19 @@ export function measureTheme(): ThemeRun {
   const drawn = srgb(getComputedStyle(underline).backgroundColor, root).rgb
   checks.push({ what: 'tab underline', ratio: ratio(drawn, surface('base')), need: 3 })
 
-  // OKLCH chroma: ink is a grey and the danger red is a colour.
-  const chroma = (css: string) => {
-    const probe = document.createElement('span')
-    root.append(probe)
-    probe.style.color = `color-mix(in oklch, ${css} 100%, transparent)`
-    const [, c = 0] = getComputedStyle(probe)
-      .color.match(/-?[\d.]+/g)!
-      .map(Number)
-    probe.remove()
-    return c
-  }
+  // The primary button's own fill (the foot of its gradient), in OKLCH.
+  const primary = root.querySelector('[data-variant="primary"]')!
+  const probe = document.createElement('span')
+  primary.append(probe)
+  probe.style.color =
+    'color-mix(in oklch, var(--kumo-button-emphasis-gradient-end) 100%, transparent)'
+  const [, chroma = 0, hue = 0] = getComputedStyle(probe)
+    .color.match(/-?[\d.]+/g)!
+    .map(Number)
+  probe.remove()
   return {
     checks,
-    primaryChroma: chroma('var(--color-kumo-brand)'),
+    primary: { chroma, hue },
     underlineIsFlame: drawn.every((value, index) => Math.abs(value - (flame[index] ?? 0)) < 0.002),
   }
 }

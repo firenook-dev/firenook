@@ -33,7 +33,7 @@ defineCards([
     id: 'identity',
     group: 'Brand',
     name: 'Identity',
-    subtitle: 'The logo, ink and flame, and the type pair',
+    subtitle: 'The logo, blue and flame, and the type pair',
     width: 880,
     render: () => (
       <Stack>
@@ -48,13 +48,13 @@ defineCards([
         </Section>
         <Section
           title="Colour"
-          note="Split by job, the way Kumo splits its own. The flame never fills a button or colours a state: vermilion is within ten degrees of the danger red and amber is the warning, so red means delete or failed and amber a warning, nothing else."
+          note="Split by job, the way Firebase and Cloudflare split theirs: a flame logo beside a blue for everything that can be pressed. The flame never fills a button or colours a state: vermilion is within ten degrees of the danger red and amber is the warning, so red means delete or failed and amber a warning, nothing else."
         >
           <div className="flex flex-wrap gap-6">
             <Role
-              name="Ink"
-              values="#202124 · dark #eaebed"
-              job="The brand's charcoal as Kumo's brand token: the primary button, focus rings, progress, the unsaved dot."
+              name="Blue"
+              values="#1c53cf · rings and dots in dark #4c8eef"
+              job="Kumo's brand token: the primary button, focus rings, progress, the unsaved dot. Opposite the flame on the wheel, and no state's colour; white on the button reads 5.5:1."
             >
               <Button variant="primary" icon={<PlusIcon />}>
                 Add document

@@ -883,22 +883,25 @@ no colour transitions on hover, dialogs always mounted and toggled with
 `open`. Firenook's identity lives in `src/theme.css` alone: the brand kit's
 colours split by job, and the type pair (Inter for the interface, the face
 Kumo's docs render in; IBM Plex Mono for data), self-hosted from
-`public/fonts`. **Ink** (the brand's charcoal `#202124`, near-white in dark
-mode) is `--color-kumo-brand`: the primary button, focus rings, progress,
-an in-flight state, the unsaved dot. **Flame** (the logo's vermilion
-`#F23818`, `bg-firenook-flame`) marks where you are and nothing else: the
-active tab's underline, the selected row's bar in a tree, a table or the
-schema, the open document, the current sort, a checked menu item, a drop
-target; links and `text-kumo-brand` take it darkened for text. The flame
-never fills a button or colours a state, because vermilion is the danger
-red within ten degrees and amber is the warning. A feed's selected row
-(Logs, events) keeps an ink bar: a log line's left edge is its level's.
-A primary button's label is `--color-firenook-on-ink` (Kumo forces white),
-a Delete button fills deeper than Kumo's red so its white label reads, and
-secondary, warning and placeholder text and the warning fill are set
-darker where Kumo's measure below AA; `e2e/shell-theme.spec.ts` holds every
-one of those ratios in both modes on the kit harness. The sans face is registered as
-`InterVariable`, not `Inter`: the TanStack devtools inject a document-level
+`public/fonts`. **Blue** (a cobalt, `oklch(0.49 0.2 263)`; rings and dots
+take a lighter `#4c8eef` in dark mode) is `--color-kumo-brand`: the primary
+button, focus rings, progress, an in-flight state, the unsaved dot.
+Charcoal, the logo's amber and a rust orange were tried on buttons and set
+aside; blue is what flame-logo consoles (Firebase, Cloudflare) press with.
+**Flame** (the logo's vermilion `#F23818`, `bg-firenook-flame`) marks
+where you are and nothing else: the active tab's underline, the selected
+row's bar in a tree, a table or the schema, the open document, the current
+sort, a checked menu item, a drop target; links and `text-kumo-brand` take
+it darkened for text. The flame never fills a button or colours a state,
+because vermilion is the danger red within ten degrees and amber is the
+warning. A feed's selected row (Logs, events) keeps a blue bar: a log
+line's left edge is its level's. A primary button is the cobalt in both
+modes (Kumo's own `#056dff` fails under its white label), a Delete button
+fills deeper than Kumo's red so its white label reads, and secondary,
+warning and placeholder text and the warning fill are set darker where
+Kumo's measure below AA; `e2e/shell-theme.spec.ts` holds every one of
+those ratios in both modes on the kit harness. The sans face is registered
+as `InterVariable`, not `Inter`: the TanStack devtools inject a document-level
 `@font-face` named Inter in dev builds, and the last declared face wins, so
 a face named Inter would render the devtools' build on the dev server.
 Light, dark, or the operating system's choice: `lib/color-mode.ts` holds
@@ -1650,7 +1653,7 @@ text right and break the value column the whole layout exists for.
 Remember that `html` is 14 px here, so `max-w-40` is 140 px, not 160.
 
 Once a panel is that quiet, **the footer's count needs somewhere to point**:
-a field the next Save will write carries a small ink dot beside its name,
+a field the next Save will write carries a small blue dot beside its name,
 in the primary's own colour: Save is the row's primary action and this is
 what it is about to write.
 

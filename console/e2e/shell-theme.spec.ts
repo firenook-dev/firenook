@@ -5,9 +5,9 @@
 // for a mark. A filled button is measured where its label sits, halfway
 // down its gradient, at rest and hovered.
 //
-// It also holds the two choices the theme makes: Kumo's brand colour is
-// the brand's ink, a grey, so a primary button is never mistaken for a red
-// Delete; and the active tab is underlined in the logo's flame.
+// It also holds the two choices the theme makes: a primary button is blue,
+// so it is never mistaken for a red Delete or a warning; and the active
+// tab is underlined in the logo's flame.
 
 import { buildKitHarness, type KitBuild, type KitHarness, openKitHarness } from './support/kit'
 import { expect, test } from './fixtures'
@@ -49,7 +49,9 @@ test.describe('theme', () => {
       const short = run.checks.filter((check) => check.ratio < check.need)
       expect(short, `below their minimum in ${mode} mode`).toEqual([])
 
-      expect(run.primaryChroma, 'the primary is ink, a grey').toBeLessThan(0.02)
+      expect(run.primary.chroma, 'the primary is a colour').toBeGreaterThan(0.1)
+      expect(run.primary.hue, 'the primary is blue').toBeGreaterThan(240)
+      expect(run.primary.hue, 'the primary is blue').toBeLessThan(280)
       expect(run.underlineIsFlame, 'the active tab is underlined in the flame').toBe(true)
     })
   }

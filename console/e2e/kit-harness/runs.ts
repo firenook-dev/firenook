@@ -33,8 +33,8 @@ export interface JsonRun {
 export interface ThemeRun {
   /** WCAG 2 contrast ratios, rounded to hundredths, with the minimum each needs. */
   checks: Array<{ what: string; ratio: number; need: number }>
-  /** OKLCH chroma of Kumo's brand token, which is the brand's ink: a grey. */
-  primaryChroma: number
+  /** The primary button's fill in OKLCH: a blue, nowhere near the danger red. */
+  primary: { chroma: number; hue: number }
   /** Whether the active tab's underline is drawn in the logo's flame. */
   underlineIsFlame: boolean
 }
