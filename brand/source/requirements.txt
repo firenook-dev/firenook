@@ -1,0 +1,7 @@
+fonttools>=4.50
+uharfbuzz>=0.40
+skia-pathops
+numpy
+scipy
+shapely>=2
+pillow
