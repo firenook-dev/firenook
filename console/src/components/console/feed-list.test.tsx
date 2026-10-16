@@ -433,6 +433,23 @@ describe('FeedList', () => {
     expect(screen.getByTestId('following')).toHaveTextContent('false')
   })
 
+  it('keeps following when a press on a row is followed by the list moving on its own', async () => {
+    const store = createFeedStore<Line>({ max: 1_000, key: rowKey })
+    render(<Feed store={store} />)
+    act(() => store.push(lines(100)))
+    await frame()
+    expect(screen.getByTestId('following')).toHaveTextContent('true')
+    // A press on a row (its own button, a marker's Show) is not a scroll: the
+    // list moving right after it (rows re-rendered, a page read in) is its own.
+    fireEvent.pointerDown(screen.getAllByTestId('feed-row')[0]!)
+    act(() => scrollTo(scroller(), 10 * 28))
+    expect(screen.getByTestId('following')).toHaveTextContent('true')
+    // A press on the scrollbar is the reader's, as a wheel is.
+    fireEvent.pointerDown(scroller())
+    act(() => scrollTo(scroller(), 5 * 28))
+    expect(screen.getByTestId('following')).toHaveTextContent('false')
+  })
+
   it('stays paused when the list settles at the live edge just after a press and a pause', async () => {
     const store = createFeedStore<Line>({ max: 1_000, key: rowKey })
     store.push(lines(100))

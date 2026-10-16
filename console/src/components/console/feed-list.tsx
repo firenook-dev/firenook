@@ -312,8 +312,9 @@ export function FeedList<T>({
   }, [size, hasMore, nearOlderEdge, loadMore])
 
   // A scroll is the reader's when it follows their own wheel, touch, key or
-  // press; the list's own moves (following, anchoring, placing a row the
-  // URL names) never pause it or follow again.
+  // press on the scrollbar; the list's own moves (following, anchoring,
+  // placing a row the URL names, the rows a press on a row's button brings)
+  // never pause it or follow again.
   const intent = useRef(0)
   const noteIntent = () => {
     intent.current = Date.now()
@@ -472,7 +473,11 @@ export function FeedList<T>({
             onScroll={onScroll}
             onWheel={noteIntent}
             onTouchMove={noteIntent}
-            onPointerDown={noteIntent}
+            onPointerDown={(event) => {
+              // The scrollbar (the container itself) or a middle-button
+              // autoscroll; a press on a row or its buttons is not a scroll.
+              if (event.target === event.currentTarget || event.button === 1) noteIntent()
+            }}
             onKeyDown={noteIntent}
             data-testid={testId ? `${testId}-scroll` : 'feed-scroll'}
             data-follow={follow ? '' : undefined}
