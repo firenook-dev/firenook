@@ -1,3 +1,45 @@
+# 0.2.0-next.3 — Firenook's own console, and Google's Emulator UI gone
+
+- Pin the engine to `19f2338d667e729420df12c97eee96e65cd7adb5`, the merge of
+  [PR #80](https://github.com/firenook-dev/firenook/pull/80) (five checks that
+  failed now and then) on [PR #79](https://github.com/firenook-dev/firenook/pull/79)
+  (the UI port serves the console alone), [PR #78](https://github.com/firenook-dev/firenook/pull/78)
+  (the Overview, top bar and theme), [PR #76](https://github.com/firenook-dev/firenook/pull/76)
+  (a call's end line follows its output) and [PR #64](https://github.com/firenook-dev/firenook/pull/64)
+  (the console for every emulated service). Its tree is the PR head's,
+  `8b3d3d4`, which passed CI
+  ([run 39026825633](https://github.com/firenook-dev/firenook/actions/runs/39026825633))
+  and the five-platform packed-install matrix
+  ([run 39026825610](https://github.com/firenook-dev/firenook/actions/runs/39026825610)).
+- **The console.** `/console` on the UI port covers every service the suite
+  runs: Firestore data, queries, explain and security rules; Authentication
+  users, activity, the inbox of codes and links, and settings; Storage files
+  and rules; Functions with their invocations, schedules and load log;
+  Extensions; Eventarc; Pub/Sub; Cloud Tasks; Logs; and an Overview with each
+  section's health, recent problems, snapshots and resets. It follows the
+  engine live over one connection per browser and works offline.
+- **Google's Emulator UI is gone.** Every feature of the Emulator UI 1.15 has a
+  console screen (`support/console-parity.md`), so nothing is downloaded and
+  the UI port serves the console alone. The port's root and the official UI's
+  addresses (`/firestore/…`, `/auth`, `/storage/…`, `/extensions/…`,
+  `/logs?q=…`) lead to the console's page for the same thing.
+  `/api/config`, the logging WebSocket and the Firestore Requests socket are
+  unchanged.
+- **CLI.** `firenook setup` downloads nothing and stays so that scripts which
+  run it keep passing. The engine's `--ui-archive` argument is gone; the npm
+  package never passed it by hand. `doctor` no longer reports asset files.
+- **Functions.** A call's last log lines no longer appear after its own
+  `Finished "…"` line. The source watcher waits for a second of quiet after
+  the last change (at most five after the first), as the official CLI does,
+  and an extension's parameter file is read only once it holds still, so a
+  save caught between truncate and write no longer reloads an instance with
+  every value at its default.
+- No emulator protocol, port, command or state format changed otherwise. A
+  state written by `0.2.0-next.2` was picked up by a local candidate of this
+  revision, written to there, and picked up by `0.2.0-next.2` again. The same
+  candidate started a real project with three registry extensions: 24
+  handlers admitted, the 2 that firebase-tools ignores reported.
+
 # 0.2.0-next.2 — the read path, incremental listeners and a field index
 
 - Pin the engine to `63d554c15f2699cf623c7fac19a4d1393c77f322`, the qualified head of
