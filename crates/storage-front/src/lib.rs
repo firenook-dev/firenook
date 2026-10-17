@@ -2556,6 +2556,11 @@ async fn import_directory(state: &StorageState, root: &FilePath) -> Result<usize
         if entry.path().extension().and_then(|value| value.to_str()) != Some("json") {
             continue;
         }
+        // A `._` file is the metadata macOS writes beside a file on a volume
+        // without extended attributes; an export's own names never start so.
+        if entry.file_name().to_string_lossy().starts_with("._") {
+            continue;
+        }
         entries.push(entry.path());
     }
     // Order is irrelevant: every object lands in the keyed map below, and the

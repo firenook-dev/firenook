@@ -169,6 +169,37 @@ impl Step {
     }
 }
 
+/// `32.6 GB`, `512 MB`: a store's size, as a person reads it.
+pub(crate) fn size(bytes: u64) -> String {
+    #[allow(clippy::cast_precision_loss)]
+    let bytes = bytes as f64;
+    if bytes >= 1e9 {
+        format!("{:.1} GB", bytes / 1e9)
+    } else {
+        format!("{:.0} MB", (bytes / 1e6).max(1.0))
+    }
+}
+
+/// The Firestore row while a repair after an unclean stop reads the store:
+/// how far it has got, out of a thousand.
+pub(crate) fn repairing(fraction: f64, bytes: u64) {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let done = (fraction.clamp(0.0, 1.0) * 1000.0).round() as u64;
+    emit(&json!({
+        "type": "step", "id": "firestore", "state": "running", "verb": "repairing",
+        "done": done, "total": 1000, "unit": "percent",
+        "detail": format!("after an unclean stop, {}", size(bytes)),
+    }));
+}
+
+/// The repair is over: the row goes back to what it was doing.
+pub(crate) fn repaired(verb: &str) {
+    emit(&json!({
+        "type": "step", "id": "firestore", "state": "running", "verb": verb,
+        "done": null, "total": null, "unit": null, "detail": null,
+    }));
+}
+
 /// A warning: before readiness kept for the `ready` event (each text once),
 /// after it a line of the log.
 pub(crate) fn warn(source: &str, message: &str) {

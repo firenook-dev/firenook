@@ -176,18 +176,53 @@ pub fn adopt_legacy_files(directory: &Path) -> io::Result<bool> {
     Ok(adopted)
 }
 
+/// What a disk store reports while it opens, and how it is stopped there.
+pub trait OpenWatch: Send + Sync {
+    /// A repair after an unclean stop has read `fraction` of the store's
+    /// `bytes`. Returning `false` abandons it: the file stays as it was, and
+    /// the next open repairs it again.
+    fn repairing(&self, fraction: f64, bytes: u64) -> bool;
+    /// Whether the open should stop at its next safe point.
+    fn stopped(&self) -> bool;
+}
+
 impl DiskStore {
     /// Opens or creates a disk store inside `directory` and replays any
     /// journaled commit not already present in redb.
     pub fn open(directory: impl AsRef<Path>, options: DiskOptions) -> Result<Self, DiskError> {
+        Self::open_watched(directory, options, None)
+    }
+
+    /// [`DiskStore::open`], telling `watch` about a repair and stopping
+    /// early when it asks: before the store is opened, or while its documents
+    /// are counted. Either way nothing is left half-written.
+    pub fn open_watched(
+        directory: impl AsRef<Path>,
+        options: DiskOptions,
+        watch: Option<&Arc<dyn OpenWatch>>,
+    ) -> Result<Self, DiskError> {
         let directory = directory.as_ref();
         fs::create_dir_all(directory)?;
         adopt_legacy_files(directory)?;
         let database_path = directory.join(DATABASE_FILE);
         let mut builder = Builder::new();
         builder.set_cache_size(options.cache_size_bytes);
+        // redb runs its repair on a file it has just created, too: only an
+        // existing one is worth reporting.
+        if let Some(watch) = watch.filter(|_| database_path.exists()) {
+            let watch = Arc::clone(watch);
+            let bytes = fs::metadata(&database_path).map_or(0, |metadata| metadata.len());
+            builder.set_repair_callback(move |session| {
+                if !watch.repairing(session.progress(), bytes) {
+                    session.abort();
+                }
+            });
+        }
         let database = if database_path.exists() {
-            builder.open(&database_path).map_err(DiskError::redb)?
+            builder.open(&database_path).map_err(|error| match error {
+                redb::DatabaseError::RepairAborted => DiskError::Stopped,
+                error => DiskError::redb(error),
+            })?
         } else {
             builder.create(&database_path).map_err(DiskError::redb)?
         };
@@ -221,7 +256,9 @@ impl DiskStore {
             None
         };
 
-        let (revision, last_commit_time, current_documents) = load_database(&database, counted)?;
+        let stopped = || watch.is_some_and(|watch| watch.stopped());
+        let (revision, last_commit_time, current_documents) =
+            load_database(&database, counted, &stopped)?;
         let memory = State::from_persisted(
             options.store,
             revision,
@@ -1204,6 +1241,7 @@ fn persist_state_durably(
     transaction
         .set_durability(Durability::Immediate)
         .map_err(DiskError::redb)?;
+    transaction.set_quick_repair(true);
     persist_state(
         &transaction,
         memory.revision,
@@ -1284,6 +1322,7 @@ fn initialize_database(database: &Database) -> Result<(), DiskError> {
     transaction
         .set_durability(Durability::Immediate)
         .map_err(DiskError::redb)?;
+    transaction.set_quick_repair(true);
     {
         transaction
             .open_table(LEGACY_DOCUMENTS)
@@ -1325,6 +1364,7 @@ fn migrate_legacy_documents(database: &Database) -> Result<(), DiskError> {
     transaction
         .set_durability(Durability::Immediate)
         .map_err(DiskError::redb)?;
+    transaction.set_quick_repair(true);
     {
         let legacy = transaction
             .open_table(LEGACY_DOCUMENTS)
@@ -1379,6 +1419,7 @@ fn migrate_ordered_scope_indexes(database: &Database) -> Result<(), DiskError> {
     transaction
         .set_durability(Durability::Immediate)
         .map_err(DiskError::redb)?;
+    transaction.set_quick_repair(true);
     {
         let documents = transaction.open_table(DOCUMENTS).map_err(DiskError::redb)?;
         let mut collections = transaction
@@ -1412,13 +1453,20 @@ fn migrate_ordered_scope_indexes(database: &Database) -> Result<(), DiskError> {
 fn load_database(
     database: &Database,
     counted: Option<LogicalMemoryUsage>,
+    stopped: &dyn Fn() -> bool,
 ) -> Result<LoadedDatabase, DiskError> {
+    // How many documents are counted between looks at `stopped`.
+    const STOP_EVERY: usize = 4096;
     let transaction = database.begin_read().map_err(DiskError::redb)?;
     let mut current_documents = counted.unwrap_or_default();
     if counted.is_none() {
         let table = transaction.open_table(DOCUMENTS).map_err(DiskError::redb)?;
         let entries = table.iter().map_err(DiskError::redb)?;
-        for entry in entries {
+        for (index, entry) in entries.enumerate() {
+            // Only read so far: stopping here leaves the store as it was.
+            if index % STOP_EVERY == 0 && stopped() {
+                return Err(DiskError::Stopped);
+            }
             let (key, document) = entry.map_err(DiskError::redb)?;
             let key = decode_document_key(key.value())?;
             let document = decode_stored_document(document.value())
@@ -1482,6 +1530,10 @@ fn persist_record(
     transaction
         .set_durability(durability)
         .map_err(DiskError::redb)?;
+    // Not quick-repair: under per-commit durability this is every write, and
+    // saving the allocator state doubles a durable commit's time. The
+    // periodic and bulk commits save it, so a write-behind store (the
+    // default) recovers from a crash without walking the whole file.
     apply_mutations(
         &transaction,
         &record.mutations,
@@ -1652,6 +1704,7 @@ fn rebuild_field_index(database: &Database) -> Result<LogicalMemoryUsage, DiskEr
     transaction
         .set_durability(Durability::Immediate)
         .map_err(DiskError::redb)?;
+    transaction.set_quick_repair(true);
     transaction
         .delete_table(FIELD_INDEX)
         .map_err(DiskError::redb)?;
@@ -1738,6 +1791,7 @@ impl DiskStore {
         transaction
             .set_durability(Durability::Immediate)
             .map_err(DiskError::redb)?;
+        transaction.set_quick_repair(true);
         Ok(DiskBulkCommit {
             state,
             transaction: Some(transaction),
@@ -2353,6 +2407,9 @@ pub enum DiskError {
     /// An earlier persistence failure was ambiguous; reopen to recover before
     /// accepting another commit.
     RequiresRestart,
+    /// The open was asked to stop ([`OpenWatch::stopped`]) and did, leaving
+    /// the store as it was.
+    Stopped,
 }
 
 impl DiskError {
@@ -2378,6 +2435,7 @@ impl Display for DiskError {
             Self::RequiresRestart => formatter.write_str(
                 "persistence outcome is ambiguous; reopen the store to recover before writing",
             ),
+            Self::Stopped => formatter.write_str("stopped while the store was opening"),
         }
     }
 }
@@ -2391,7 +2449,8 @@ impl Error for DiskError {
             | Self::Encoding(_)
             | Self::Corrupt(_)
             | Self::RecordTooLarge { .. }
-            | Self::RequiresRestart => None,
+            | Self::RequiresRestart
+            | Self::Stopped => None,
         }
     }
 }
@@ -2420,6 +2479,160 @@ mod tests {
     use crate::{DatabaseName, Fields, Precondition, Value};
 
     static TEST_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    /// What an open told its watch.
+    #[derive(Default)]
+    struct Watched {
+        repairs: Mutex<Vec<f64>>,
+        abandon_repair: bool,
+        stop: bool,
+    }
+
+    impl OpenWatch for Watched {
+        fn repairing(&self, fraction: f64, _bytes: u64) -> bool {
+            self.repairs
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(fraction);
+            !self.abandon_repair
+        }
+        fn stopped(&self) -> bool {
+            self.stop
+        }
+    }
+
+    fn open_watching(
+        directory: &TestDirectory,
+        watch: &Arc<Watched>,
+    ) -> Result<DiskStore, DiskError> {
+        let watch: Arc<dyn OpenWatch> = Arc::clone(watch) as Arc<dyn OpenWatch>;
+        DiskStore::open_watched(directory.path(), DiskOptions::default(), Some(&watch))
+    }
+
+    fn repairs(watch: &Watched) -> Vec<f64> {
+        watch
+            .repairs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The store's files as a crash would leave them: copied while it is
+    /// open, so redb finds them marked for recovery.
+    fn crashed_copy(open: &TestDirectory) -> TestDirectory {
+        let copy = TestDirectory::new();
+        fs::create_dir_all(copy.path()).unwrap();
+        for file in [DATABASE_FILE, JOURNAL_FILE] {
+            if open.path().join(file).exists() {
+                fs::copy(open.path().join(file), copy.path().join(file)).unwrap();
+            }
+        }
+        copy
+    }
+
+    fn written_and_flushed(directory: &TestDirectory) -> DiskStore {
+        let store = DiskStore::open(directory.path(), DiskOptions::default()).unwrap();
+        store
+            .commit(&[Write::Create {
+                key: key("items/kept"),
+                fields: fields(Value::Integer(7)),
+            }])
+            .unwrap();
+        store.flush().unwrap();
+        store
+    }
+
+    #[test]
+    fn a_new_store_reports_no_repair() {
+        let directory = TestDirectory::new();
+        let watch = Arc::new(Watched::default());
+        drop(open_watching(&directory, &watch).unwrap());
+        assert_eq!(repairs(&watch), Vec::<f64>::new());
+        // A clean close saves what the next open needs.
+        drop(open_watching(&directory, &watch).unwrap());
+        assert_eq!(repairs(&watch), Vec::<f64>::new());
+    }
+
+    #[test]
+    fn a_crash_after_a_durable_commit_needs_no_repair() {
+        let directory = TestDirectory::new();
+        let open = written_and_flushed(&directory);
+        // Acknowledged after the last flush: the journal brings it back.
+        open.commit(&[Write::Create {
+            key: key("items/journaled"),
+            fields: fields(Value::Integer(8)),
+        }])
+        .unwrap();
+        let copy = crashed_copy(&directory);
+        let watch = Arc::new(Watched::default());
+        let reopened = open_watching(&copy, &watch).unwrap();
+        // The allocator state saved with the commit replaced the repair.
+        assert_eq!(repairs(&watch), Vec::<f64>::new());
+        assert!(reopened.snapshot().get(&key("items/kept")).is_some());
+        assert!(reopened.snapshot().get(&key("items/journaled")).is_some());
+        drop(open);
+    }
+
+    /// A store whose last durable commit saved no allocator state, as every
+    /// commit before quick repair was: a crash then needs the full repair.
+    fn crashed_without_quick_repair() -> (TestDirectory, TestDirectory) {
+        let directory = TestDirectory::new();
+        drop(written_and_flushed(&directory));
+        let database = Database::open(directory.path().join(DATABASE_FILE)).unwrap();
+        let mut transaction = database.begin_write().unwrap();
+        transaction.set_durability(Durability::Immediate).unwrap();
+        transaction.commit().unwrap();
+        let copy = crashed_copy(&directory);
+        drop(database);
+        (directory, copy)
+    }
+
+    #[test]
+    fn a_full_repair_reports_its_progress_and_keeps_the_data() {
+        let (_directory, copy) = crashed_without_quick_repair();
+        let watch = Arc::new(Watched::default());
+        let store = open_watching(&copy, &watch).unwrap();
+        let seen = repairs(&watch);
+        assert_eq!(seen.first().copied(), Some(0.0), "{seen:?}");
+        assert!(seen.windows(2).all(|pair| pair[0] <= pair[1]), "{seen:?}");
+        assert!(store.snapshot().get(&key("items/kept")).is_some());
+    }
+
+    #[test]
+    fn an_abandoned_repair_leaves_the_store_to_repair_next_time() {
+        let (_directory, copy) = crashed_without_quick_repair();
+        let abandon = Arc::new(Watched {
+            abandon_repair: true,
+            ..Watched::default()
+        });
+        assert!(matches!(
+            open_watching(&copy, &abandon),
+            Err(DiskError::Stopped)
+        ));
+        let watch = Arc::new(Watched::default());
+        let store = open_watching(&copy, &watch).unwrap();
+        assert_ne!(repairs(&watch), Vec::<f64>::new());
+        assert!(store.snapshot().get(&key("items/kept")).is_some());
+    }
+
+    #[test]
+    fn a_stop_while_documents_are_counted_closes_the_store_cleanly() {
+        let directory = TestDirectory::new();
+        drop(written_and_flushed(&directory));
+        let stop = Arc::new(Watched {
+            stop: true,
+            ..Watched::default()
+        });
+        assert!(matches!(
+            open_watching(&directory, &stop),
+            Err(DiskError::Stopped)
+        ));
+        // Closed as it was opened: the next open repairs nothing.
+        let watch = Arc::new(Watched::default());
+        let store = open_watching(&directory, &watch).unwrap();
+        assert_eq!(repairs(&watch), Vec::<f64>::new());
+        assert!(store.snapshot().get(&key("items/kept")).is_some());
+    }
 
     #[test]
     fn a_store_written_under_the_former_name_is_adopted_in_place() {

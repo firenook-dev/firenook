@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { resolve } from 'node:path';
 import { binaryPath, manifest, release } from '../src/binary.mjs';
 import { parseOptions } from '../src/options.mjs';
-import { diagnose, prepareLaunch, supervise, vendorExtensions } from '../src/runtime.mjs';
+import { adoptSeed, diagnose, prepareLaunch, supervise, vendorExtensions } from '../src/runtime.mjs';
 import { runInteractive } from '../src/session.mjs';
 import { interactive } from '../src/terminal.mjs';
 import { nativeEnvironment, requestNativeStop } from '../src/processes.mjs';
@@ -37,6 +38,10 @@ Emulators
   firenook ext:vendor [--instance ID]...                  Copy registry Extensions into the project
   firenook mcp [--project ID] [--only firestore,auth,...] Model Context Protocol server over stdio
 
+Saved data (--state-dir with --resume-state)
+  firenook state:adopt-seed --state-dir DIR --import DIR  Keep saved data whose seed changed: record the
+                                                          seed as it is now (the old receipt is kept)
+
 Advanced
   firenook binary-path                                    Verified packaged native binary location
   firenook native ARGS...                                 Explicit native CLI (no adapter safeguards)
@@ -70,6 +75,7 @@ const accepted = {
   init:[...common, 'adopt', 'dry-run', 'force', 'functions', 'no-functions'],
   'functions:invoke':[...common, 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'hub-port'],
   mcp:[...common, 'only', 'hub-port'],
+  'state:adopt-seed':[...common, 'state-dir', 'import'],
 };
 function checkOptions(action, options) {
   for (const [name, value] of Object.entries(options)) {
@@ -136,6 +142,11 @@ async function main() {
   if (action === 'target:clear') return targetClear(positionals, options);
   if (action === 'init') { noPositionals(action, positionals); return options.adopt ? adopt(options) : scaffold(options); }
   if (action === 'mcp') { noPositionals(action, positionals); return serveMcp(options); }
+  if (action === 'state:adopt-seed') {
+    noPositionals(action, positionals);
+    if (!options['state-dir'] || !options.import) throw new Error('state:adopt-seed needs --state-dir (the saved data) and --import (its seed), as given to emulators:start');
+    return adoptSeed(binaryPath(), resolve(process.cwd(), options['state-dir']), resolve(process.cwd(), options.import));
+  }
   const testCommand = action === 'emulators:exec' ? execCommand(action, parsed) : noPositionals(action, positionals);
   // In a terminal, emulators:start draws its own UI; everything else, and
   // any pipe, CI or log file, gets the plain line protocol.

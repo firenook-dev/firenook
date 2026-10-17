@@ -74,8 +74,9 @@ mod project_scope;
 mod rules_watch;
 mod shutdown_io;
 pub mod terminal;
-pub use control::wait_for_shutdown;
+pub use control::{listen_for_shutdown, wait_for_shutdown};
 pub use launch::{LaunchContext, LaunchReason};
+pub use native_state::{AdoptedSeed, adopt_seed};
 
 use console_wiring::{FunctionsConsoleOptions, HookContext};
 
@@ -370,6 +371,10 @@ pub fn endpoint(host: &str, port: u16) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SuiteOutcome {
+    /// Stopped while it was still starting: nothing was served, and the data
+    /// was closed as it was opened.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub before_ready: bool,
     pub functions: usize,
     pub schedules: usize,
     pub task_queues: usize,
@@ -381,7 +386,7 @@ pub struct SuiteOutcome {
 }
 
 /// Serializable Functions-delivery health.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryOutcome {
     pub admitted: u64,
@@ -394,7 +399,7 @@ pub struct DeliveryOutcome {
 }
 
 /// Bounded successful Functions-delivery latency summary.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryLatencyOutcome {
     pub samples: usize,
@@ -597,9 +602,21 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
     let functions_requested = config.services.functions;
     let config = without_absent_functions(config)?;
     validate_config(&config)?;
+    // From here a stop is a request: the start-up work that can end early
+    // does, and the data is closed as it was opened.
+    control::listen_for_shutdown()?;
     // Keep the OS lock alive through every service's shutdown. It is released
     // automatically on process death, without deleting/replacing the lock inode.
-    let (native_state, prepared) = prepare_native_suite(&config).await?;
+    let (native_state, prepared) = match prepare_native_suite(&config).await {
+        Ok(prepared) => prepared,
+        Err(error) if stopped(&error) => return Ok(stopped_before_ready(None).await),
+        Err(error) => return Err(error),
+    };
+    if control::stop_requested() {
+        let outcome = stopped_before_ready(Some(prepared)).await;
+        drop(native_state);
+        return Ok(outcome);
+    }
     let PreparedSuite {
         store,
         triggers,
@@ -887,7 +904,11 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         ..hooks
     });
 
-    announce_ready(&config, &logging, function_count);
+    // A stop asked for while Functions loaded ends the start here: the
+    // select below sees it at once, and the shutdown is the usual one.
+    if !control::stop_requested() {
+        announce_ready(&config, &logging, function_count);
+    }
 
     let failure_reason = tokio::select! {
         signal = wait_for_shutdown() => signal.err().map(|error| error.to_string()),
@@ -1142,7 +1163,7 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
         .map_err(|error| failure(format!("failed to create suite state: {error}")))?;
     let logging = prepare_logging(config)?;
     let [firestore_step, auth_step, storage_step] = begin_data_steps(config);
-    let store = open_store(config)?;
+    let store = open_store(config, data_verb(config))?;
     let triggers = TriggerRegistry::default();
     let functions_endpoint = format!("{}/", config.origin(config.ports.functions));
     let delivery = DeliveryRuntime::start(
@@ -1393,6 +1414,49 @@ impl ShutdownSuite {
     }
 }
 
+/// Why a start-up step ended early when a stop was asked for.
+const STOPPED: &str = "stopped while starting";
+
+fn stopped_while_starting() -> SuiteRuntimeError {
+    failure(STOPPED)
+}
+
+/// Whether `error` is a start-up step that ended early for a stop: the
+/// store's open, the seed check or an import.
+fn stopped(error: &SuiteRuntimeError) -> bool {
+    control::stop_requested() && error.0.contains(STOPPED)
+}
+
+/// A stop asked for before the emulators were ready: what was opened is
+/// closed cleanly, and nothing is exported, since nothing was served.
+async fn stopped_before_ready(prepared: Option<PreparedSuite>) -> SuiteOutcome {
+    terminal::stopping(None);
+    let mut outcome = SuiteOutcome {
+        before_ready: true,
+        functions: 0,
+        schedules: 0,
+        task_queues: 0,
+        firestore_documents: 0,
+        auth_users: 0,
+        storage_objects: 0,
+        storage_bytes: 0,
+        delivery: DeliveryOutcome::default(),
+    };
+    if let Some(prepared) = prepared {
+        if let Err(error) = prepared.store.flush() {
+            eprintln!("firenook: Firestore flush failed while stopping: {error}");
+        }
+        outcome.firestore_documents = prepared.store.document_total();
+        outcome.auth_users = prepared.auth.as_ref().map_or(0, |auth| auth.user_count());
+        if let Some(storage) = &prepared.storage {
+            outcome.storage_objects = storage.object_count();
+            outcome.storage_bytes = storage.object_bytes();
+        }
+        outcome.delivery = prepared.delivery.shutdown().await.into();
+    }
+    outcome
+}
+
 async fn finish_suite(
     mut suite: ShutdownSuite,
     failure_reason: Option<String>,
@@ -1486,6 +1550,7 @@ async fn finish_suite(
         return Err(failure(failures.join("; ")));
     }
     Ok(SuiteOutcome {
+        before_ready: false,
         functions: suite.function_count,
         schedules: suite.schedule_count,
         task_queues,
@@ -1637,13 +1702,15 @@ const fn storage_durability(durability: DiskDurability) -> StorageDurability {
     }
 }
 
-fn open_store(config: &SuiteConfig) -> Result<Store, SuiteRuntimeError> {
+fn open_store(config: &SuiteConfig, verb: &str) -> Result<Store, SuiteRuntimeError> {
     // Without the Firestore service the store only backs Storage rules'
     // `firestore.get()` and never persists anything.
     if config.firestore_in_memory || !config.services.firestore {
         return Ok(Store::new(StoreOptions::default()));
     }
-    Store::open_disk(
+    let opening = Arc::new(OpeningWatch::default());
+    let watch: Arc<dyn firenook_core_store::OpenWatch> = Arc::clone(&opening) as _;
+    let opened = Store::open_disk_watched(
         config.state_dir.join("firestore"),
         DiskOptions {
             store: StoreOptions::default(),
@@ -1652,8 +1719,88 @@ fn open_store(config: &SuiteConfig) -> Result<Store, SuiteRuntimeError> {
             durability: config.durability,
             field_indexes: firenook_core_store::field_indexes_from_env(),
         },
-    )
-    .map_err(|error| failure(format!("Firestore state failed to open: {error}")))
+        Some(&watch),
+    );
+    opening.finished(verb, opened.is_ok());
+    opened.map_err(|error| match error {
+        firenook_core_store::DiskError::Stopped => stopped_while_starting(),
+        error => failure(format!("Firestore state failed to open: {error}")),
+    })
+}
+
+/// Tells the terminal (or the plain log) about a repair after an unclean
+/// stop, which reads the whole store once, and stops the open when a stop
+/// is asked for.
+#[derive(Default)]
+struct OpeningWatch {
+    /// When the repair began, the store's size, and how far the plain log
+    /// last said it had got.
+    repair: std::sync::Mutex<Option<(std::time::Instant, u64, f64)>>,
+}
+
+impl firenook_core_store::OpenWatch for OpeningWatch {
+    fn repairing(&self, fraction: f64, bytes: u64) -> bool {
+        if terminal::enabled() {
+            self.repair
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get_or_insert((std::time::Instant::now(), bytes, 0.0));
+            terminal::repairing(fraction, bytes);
+        } else {
+            let mut repair = self
+                .repair
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match repair.as_mut() {
+                None => {
+                    *repair = Some((std::time::Instant::now(), bytes, fraction));
+                    eprintln!(
+                        "firenook: Firestore was not closed cleanly last time; repairing it reads the whole {} once. Stopping now only postpones the repair.",
+                        terminal::size(bytes)
+                    );
+                }
+                // The plain log says how far it has got as it goes, so a
+                // long repair is not mistaken for a hang.
+                Some((began, _, said)) if fraction >= *said + 0.1 => {
+                    *said = fraction;
+                    eprintln!(
+                        "firenook: repairing Firestore: {:.0}% after {:.0} s",
+                        fraction * 100.0,
+                        began.elapsed().as_secs_f64()
+                    );
+                }
+                Some(_) => {}
+            }
+        }
+        !control::stop_requested()
+    }
+
+    fn stopped(&self) -> bool {
+        control::stop_requested()
+    }
+}
+
+impl OpeningWatch {
+    fn finished(&self, verb: &str, opened: bool) {
+        let Some((began, bytes, _)) = *self
+            .repair
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        else {
+            return;
+        };
+        if !opened {
+            return;
+        }
+        terminal::repaired(verb);
+        if !terminal::enabled() {
+            eprintln!(
+                "firenook: Firestore repaired in {:.1} s ({})",
+                began.elapsed().as_secs_f64(),
+                terminal::size(bytes)
+            );
+        }
+    }
 }
 
 /// Every configured index file, parsed once and kept per database id.
@@ -2405,25 +2552,6 @@ fn project_aliases(project_dir: &Path, project_id: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-async fn shutdown_signal() -> Result<(), SuiteRuntimeError> {
-    #[cfg(unix)]
-    {
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .map_err(|error| failure(format!("failed to install SIGTERM handler: {error}")))?;
-        tokio::select! {
-            result = tokio::signal::ctrl_c() => result.map_err(|error| failure(format!("failed to wait for Ctrl-C: {error}"))),
-            _ = terminate.recv() => Ok(()),
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        tokio::signal::ctrl_c()
-            .await
-            .map_err(|error| failure(format!("failed to wait for Ctrl-C: {error}")))
-    }
-}
-
 fn spawn_exporter(
     mut receiver: mpsc::Receiver<ExportCommand>,
     config: SuiteConfig,
@@ -2449,14 +2577,18 @@ fn spawn_exporter(
 }
 
 /// Opens the terminal's start-up rows for the selected data services.
-fn begin_data_steps(config: &SuiteConfig) -> [Option<terminal::Step>; 3] {
-    let verb = if config.import.is_some() {
+fn data_verb(config: &SuiteConfig) -> &'static str {
+    if config.import.is_some() {
         "importing"
     } else if config.resume_state {
         "resuming"
     } else {
         "starting"
-    };
+    }
+}
+
+fn begin_data_steps(config: &SuiteConfig) -> [Option<terminal::Step>; 3] {
+    let verb = data_verb(config);
     let services = config.services;
     [
         ("firestore", services.firestore),
@@ -2525,7 +2657,13 @@ async fn import_suite(
     if let Some(firestore) = metadata.firestore {
         if config.services.firestore {
             let path = root.join(firestore.metadata_file);
-            let count = seed_store(store, &path, &config.project_id, firestore_step)?;
+            let count = seed_store(
+                store,
+                &path,
+                &config.project_id,
+                firestore_step,
+                !config.resume_state,
+            )?;
             imported.firestore = Some(count);
             if !terminal::enabled() {
                 eprintln!("firenook imported {count} Firestore documents");
@@ -2597,6 +2735,7 @@ fn seed_store(
     path: &Path,
     project: &str,
     progress: Option<&terminal::Step>,
+    stoppable: bool,
 ) -> Result<u64, SuiteRuntimeError> {
     let reader = ExportReader::open(path)
         .map_err(|error| failure(format!("Firestore import failed: {error}")))?
@@ -2628,6 +2767,10 @@ fn seed_store(
             batch_logical_bytes = 0;
             if let Some(step) = progress {
                 step.progress(count, None, None);
+            }
+            // Dropping the bulk commit aborts its one transaction.
+            if stoppable && control::stop_requested() {
+                return Err(stopped_while_starting());
             }
         }
         writes.push(Write::Set {
@@ -2948,8 +3091,14 @@ mod tests {
         );
 
         let restored = Store::default();
-        let count = seed_store(&restored, written.overall_metadata_path(), project, None)
-            .expect("import should restore every database");
+        let count = seed_store(
+            &restored,
+            written.overall_metadata_path(),
+            project,
+            None,
+            false,
+        )
+        .expect("import should restore every database");
         assert_eq!(count, 3);
         let snapshot = restored.snapshot();
         assert_eq!(

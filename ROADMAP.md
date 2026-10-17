@@ -1052,3 +1052,28 @@ The last row of the CLI surface: what a developer sees in the terminal from
 - [ ] Acceptance-host lanes for the console and terminal engines: not run
   before publication; the local and CI verification is in the CHANGELOG
   entries of both releases.
+
+## Saved data: the seed record, quick repairs, safe stops (unreleased)
+
+Saved data (`--state-dir` with `--resume-state`) checked its seed by reading
+every byte on every start (26 s for a 7.8 GB seed), and a `.DS_Store` that
+Finder wrote refused it. A stop during start-up ended the process where it
+stood, which left the store to a full repair at the next start, shown only as
+"resuming".
+
+- [x] `native-seed.json`: each seed file's size, times and SHA-256; a start
+  compares details and reads only the files whose details changed.
+- [x] Files operating systems write (`.DS_Store`, `._*`, `Thumbs.db`,
+  `desktop.ini`, `__MACOSX` …) are ignored; the Storage import skips `._*`.
+- [x] A first import hashes the seed on worker threads beside the import; the
+  receipt keeps the whole-seed fingerprint earlier engines verify.
+- [x] Data saved by an earlier engine is checked once in full, with or without
+  the operating system's files, then recorded.
+- [x] `firenook state:adopt-seed`: keep the data with the seed as it is now;
+  the previous receipt is kept.
+- [x] A refused seed names the files that changed, on screen and in the log.
+- [x] Quick repair on the store's durable commits; a full repair shows its
+  progress.
+- [x] Stops are listened for from the first moment: a stop while starting
+  closes the data cleanly, and the start-up limit counts quiet time only.
+

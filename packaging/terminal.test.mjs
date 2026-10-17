@@ -250,3 +250,80 @@ test('a service that fails after readiness stops the session with a card that sa
   for (const expected of ['All emulators ready', 'Firenook stopped', 'the firestore listener failed: connection reset', 'Data']) shows(shown, expected);
   assert.ok(!shown.includes('Firenook could not start'));
 });
+
+test('a repair after an unclean stop shows how far it has got, then the start goes on', async () => {
+  const {out, text} = screen(110, 40);
+  const input = keyboard();
+  const {spawner} = engine(async ({send, stopping}) => {
+    send({type: 'step', id: 'firestore', state: 'running', verb: 'resuming'});
+    send({type: 'step', id: 'firestore', state: 'running', verb: 'repairing', done: 0, total: 1000, unit: 'percent', detail: 'after an unclean stop, 32.6 GB'});
+    await tick(450);
+    send({type: 'step', id: 'firestore', state: 'running', verb: 'repairing', done: 300, total: 1000, unit: 'percent', detail: 'after an unclean stop, 32.6 GB'});
+    await tick(120);
+    send({type: 'step', id: 'firestore', state: 'running', verb: 'resuming', done: null, total: null, unit: null, detail: null});
+    await tick(60);
+    send({type: 'step', id: 'firestore', state: 'done', ms: 900, figures: [[211310, 'documents']]});
+    send({type: 'ready', ms: 950, console: 'http://127.0.0.1:4000/console', ports: {firestore: 8080}, functions: 0, warnings: []});
+    await stopping;
+    send({type: 'stopped', outcome: {}});
+    return 0;
+  });
+  const running = runInteractive(launch(['--resume-state']), {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input, env, platform: 'darwin', spawner});
+  for (let i = 0; i < 100 && !text().includes('All emulators ready'); i += 1) await tick(20);
+  input.emit('data', Buffer.from('q'));
+  assert.equal(await running, 0);
+  const shown = text();
+  for (const expected of ['repairing 30%', 'after an unclean stop, 32.6 GB', '211,310 documents', 'All emulators ready']) shows(shown, expected);
+});
+
+test('a seed that changed names its files, and both ways on as commands', async () => {
+  const {out, text} = screen(120, 50);
+  const {spawner} = engine(async ({send}) => {
+    send({type: 'step', id: 'data', state: 'running', verb: 'checking'});
+    send({type: 'seed', whole: false, changed: ['firestore_export/output-0'], added: ['notes.json'], removed: [], counts: [4, 1, 0], finder: []});
+    send({type: 'step', id: 'data', state: 'failed', ms: 40, message: 'refused'});
+    send({type: 'failed', kind: 'state', message: 'native state refused: the seed /tmp/firenook-terminal-seed changed after it was imported: …; existing data preserved.', reason: 'the seed /tmp/firenook-terminal-seed changed after it was imported: …'});
+    return 1;
+  });
+  const code = await runInteractive(launch(['--resume-state', '--import', '/tmp/firenook-terminal-seed']), {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input: keyboard(), env, platform: 'darwin', spawner});
+  assert.equal(code, 1);
+  const shown = text();
+  for (const expected of ['Firenook could not start', 'the seed /tmp/firenook-terminal-seed changed after it was imported',
+    'firestore_export/output-0 changed', 'and 3 more changed', 'notes.json added', 'to import the changed seed, start with a new --state-dir',
+    // Too long for the card: one part a line, as the shell continues one.
+    'firenook state:adopt-seed \\ --state-dir /tmp/firenook-terminal-state \\ --import /tmp/firenook-terminal-seed',
+    'nothing was deleted']) shows(shown, expected);
+});
+
+test('data an earlier engine saved, whose seed cannot be proven, points to adopting it', async () => {
+  const {out, text} = screen(120, 50);
+  const {spawner} = engine(async ({send}) => {
+    send({type: 'seed', whole: true, changed: [], added: [], removed: [], counts: [0, 0, 0], finder: ['.DS_Store']});
+    send({type: 'failed', kind: 'state', message: 'native state refused: the seed changed; existing data preserved.', reason: 'the seed changed'});
+    return 1;
+  });
+  await runInteractive(launch(['--resume-state', '--import', '/tmp/firenook-terminal-seed']), {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input: keyboard(), env, platform: 'darwin', spawner});
+  const shown = text();
+  // Joined the platform's way: backslashes on Windows.
+  for (const expected of ['kept one fingerprint for the whole seed', `${join('/tmp/firenook-terminal-seed', '.DS_Store')} (Finder writes this file)`, 'firenook state:adopt-seed']) shows(shown, expected);
+});
+
+test('a stop before the emulators are ready closes the data cleanly and says so', async () => {
+  const {out, text} = screen(150);
+  const input = keyboard();
+  const {spawner} = engine(async ({send, stopping}) => {
+    send({type: 'step', id: 'firestore', state: 'running', verb: 'resuming'});
+    await stopping;
+    send({type: 'stopping'});
+    await tick(40);
+    send({type: 'stopped', outcome: {beforeReady: true}});
+    return 0;
+  });
+  const running = runInteractive(launch(['--resume-state', '--export-on-exit', '/tmp/firenook-terminal-export']), {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input, env, platform: 'darwin', spawner});
+  await tick(60);
+  input.emit('data', Buffer.from('q'));
+  assert.equal(await running, 0);
+  const shown = text();
+  for (const expected of ['closing the data cleanly first', 'stopped', 'the data in /tmp/firenook-terminal-state is as it was', 'before it was ready']) shows(shown, expected);
+  assert.ok(!flat(shown).includes('exported to'), 'nothing is exported before the emulators served anything');
+});

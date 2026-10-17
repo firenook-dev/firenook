@@ -158,8 +158,10 @@ When Firenook cannot start, the card says what went wrong, how to fix it and
 what became of the data, and the command exits with code 1. A port someone
 else holds names the program and its process id, with the command that
 stops it and a free port for `firebase.json`. Saved data refused because its
-seed changed names the change, and a `.DS_Store` that Finder wrote is named
-as such. When your functions do not load, everything else keeps running: the
+seed changed names the files that changed, with the command that keeps the
+data. A repair after an unclean stop shows how far it has got, and a stop
+while Firenook is still starting closes the data before it exits. When your
+functions do not load, everything else keeps running: the
 card shows the error and the code around it, and the next save loads them
 again.
 
@@ -388,12 +390,38 @@ Without resume, never reuse a state directory as an implicit reset/reimport.
 `--export-on-exit` without a directory follows `--import`; never use this with
 an immutable resume seed. Ctrl-C requests graceful export; await completion.
 
+Picking saved data up checks that the seed has not changed since it was
+imported. Each file's size and times are recorded at the import
+(`native-seed.json`, beside the receipt), so the check reads only a file whose
+details changed, to tell a touched file from an edited one. Files operating
+systems write into any folder they show (`.DS_Store`, `._*`, `Thumbs.db`,
+`desktop.ini`) are ignored. When the seed did change, the start is refused and
+nothing is deleted: import the changed seed into a new `--state-dir`, or keep
+the data with the seed as it is now:
+
+```sh
+firenook state:adopt-seed --state-dir ./local-state --import ./seed
+```
+
+The previous receipt is kept beside the new one. Data saved by 0.2.0-next.4 or
+earlier is checked in full once, then recorded; it stays readable by those
+versions.
+
 Writes are acknowledged as soon as they are journaled and are synced to the
 drive once a second and on shutdown (write-behind durability). Killing the
 emulator loses nothing; only a kernel crash or power cut can lose the last
 second of writes, and the state stays consistent. `--durability per-commit`
 syncs every write before acknowledging it, at the drive's flush latency
 (typically 10 to 30 ms per write) instead of under a millisecond.
+
+A stop at any moment, even while the data is still opening, closes the data
+cleanly: a check of the seed or a repair is abandoned, an import into a fresh
+run's directory ends at once, and an import into saved data finishes first,
+since half an import could never be picked up. A process killed anyway leaves
+the store to repair at the next start. Under write-behind, the store saves
+what a repair needs with each sync, so that repair takes moments;
+`--durability per-commit` leaves that out to keep its commit latency, and
+repairs by reading the store once, with its progress on screen.
 
 Disk state keeps an equality index over every document's top-level fields, so
 a query with `==` or `in` on them reads only the documents holding the value,

@@ -129,6 +129,32 @@ enum Command {
     /// Inspect or vendor the project's Firebase Extensions without starting
     /// the suite.
     Extensions(ExtensionsArgs),
+    /// Work with saved data (a `--state-dir`) without starting the suite.
+    State(StateArgs),
+}
+
+#[derive(Debug, PartialEq, Eq, Args)]
+struct StateArgs {
+    #[command(subcommand)]
+    action: StateAction,
+}
+
+#[derive(Debug, PartialEq, Eq, Subcommand)]
+enum StateAction {
+    /// Record the seed as it is now as the one the saved data came from,
+    /// keeping the data: for a seed that changed in a way that does not
+    /// matter to it. The previous receipt is kept beside the new one.
+    AdoptSeed(AdoptSeedArgs),
+}
+
+#[derive(Debug, PartialEq, Eq, Args)]
+struct AdoptSeedArgs {
+    /// The saved data, as given to `--state-dir` when it was made.
+    #[arg(long = "state-dir")]
+    state_dir: PathBuf,
+    /// The seed to record, as given to `--import`.
+    #[arg(long = "import")]
+    import: PathBuf,
 }
 
 #[derive(Debug, PartialEq, Eq, Args)]
@@ -460,6 +486,33 @@ fn main() -> ExitCode {
         Command::CaptureProxy(arguments) => run_capture_proxy_runtime(&arguments),
         Command::Suite(arguments) => run_suite_runtime(&arguments),
         Command::Extensions(arguments) => run_extensions_command(&arguments),
+        Command::State(arguments) => run_state_command(&arguments),
+    }
+}
+
+fn run_state_command(arguments: &StateArgs) -> ExitCode {
+    let StateAction::AdoptSeed(adopt) = &arguments.action;
+    match firenook_suite_runtime::adopt_seed(&adopt.state_dir, &adopt.import) {
+        Ok(adopted) => {
+            println!(
+                "Recorded {} as the seed of {} ({} files).",
+                adopted.seed.display(),
+                adopt.state_dir.display(),
+                adopted.files
+            );
+            if adopted.previous_seed != adopted.seed {
+                println!("It was imported from {}.", adopted.previous_seed.display());
+            }
+            println!(
+                "The saved data is as it was; the previous receipt is at {}.",
+                adopted.backup.display()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -1743,6 +1796,7 @@ fn normalize_arguments(arguments: impl IntoIterator<Item = OsString>) -> Vec<OsS
                     | "capture-proxy"
                     | "suite"
                     | "extensions"
+                    | "state"
                     | "help"
                     | "--help"
                     | "-h"
