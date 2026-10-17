@@ -69,6 +69,19 @@ test('the top bar: Connect over the page on screen, and help', async ({ page }) 
   await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible()
 })
 
+test('a press on Help while its menu is still loading opens the menu when it arrives', async ({
+  page,
+}) => {
+  // The menu's code is held back, as on a slow first load.
+  await page.route(/help-menu-[^/]+\.js$/, async (route) => {
+    await new Promise((done) => setTimeout(done, 1500))
+    await route.continue()
+  })
+  await page.goto(`${origin()}/console/firestore`)
+  await page.getByTestId('top-bar-help').click()
+  await expect(page.getByTestId('help-docs')).toBeVisible({ timeout: 8000 })
+})
+
 test('the tab carries Firenook’s icon, and the console installs as an app', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore`)
   // Links under the console's base path, from any page however deep.
@@ -170,7 +183,15 @@ test('the navigation collapses to icons that peek on hover, and remembers it', a
   await expect
     .poll(() => nav.evaluate((element) => element.getBoundingClientRect().width))
     .toBeLessThan(56)
+  // The rail narrows over a transition: measured on its way, a button is
+  // not yet square. Wait for it to settle, then measure.
   const functions = page.getByTestId('nav-functions')
+  await expect
+    .poll(async () => {
+      const button = await box(functions)
+      return Math.abs(button.width - button.height)
+    })
+    .toBeLessThan(1)
   const geometry = {
     button: await box(functions),
     icon: await box(functions.locator('svg').first()),

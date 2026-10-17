@@ -25,12 +25,13 @@ import { describeKey } from '@/lib/shortcuts'
 import { useConsoleUi } from '@/lib/store'
 import { HelpButton } from './help-button'
 
-export function HelpMenu() {
+/** `defaultOpen`: the "?" was pressed while this menu's code was on its way. */
+export function HelpMenu({ defaultOpen = false }: { defaultOpen?: boolean }) {
   const status = useQuery(statusQuery)
   const setShortcutsOpen = useConsoleUi((state) => state.setShortcutsOpen)
   const engine = status.data?.engine
   return (
-    <DropdownMenu>
+    <DropdownMenu defaultOpen={defaultOpen}>
       <DropdownMenu.Trigger render={<HelpButton />} />
       <DropdownMenu.Content align="end" className="min-w-60" data-testid="help-menu">
         <DropdownMenu.Item

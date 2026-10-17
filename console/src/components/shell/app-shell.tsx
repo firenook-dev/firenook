@@ -560,6 +560,7 @@ function TopBar() {
   const live = useLiveStatus((state) => state.status)
   const updated = useLiveStatus((state) => state.engineUpdated)
   const setPaletteOpen = useConsoleUi((state) => state.setPaletteOpen)
+  const [helpAsked, setHelpAsked] = useState(false)
   const go = useGo()
   // The console's own bar, across the whole window: where you are on the
   // left (Firenook, which opens the Overview, then the project and the way
@@ -607,8 +608,9 @@ function TopBar() {
       </div>
       <div className="ml-auto flex items-center gap-2">
         <EngineBadge />
-        <Suspense fallback={<HelpButton />}>
-          <HelpMenu />
+        {/* A press on the "?" before the menu's code arrives opens it when it does. */}
+        <Suspense fallback={<HelpButton onClick={() => setHelpAsked(true)} />}>
+          <HelpMenu defaultOpen={helpAsked} />
         </Suspense>
         <button
           type="button"

@@ -21,6 +21,20 @@ import {
   upload,
 } from './support/storage'
 
+/** The page as a journey watching one click on it sees it (the specs have no DOM types). */
+interface ClickWatch {
+  addEventListener(
+    type: 'click',
+    listener: (event: {
+      defaultPrevented: boolean
+      preventDefault(): void
+      target: { closest(selector: string): { getAttribute(name: string): string | null } | null }
+    }) => void,
+    options: { once: boolean },
+  ): void
+  folderClick?: { link: string | null; takenOver: boolean }
+}
+
 // The Storage Files page against the real engine and the storage profile:
 // two buckets the seeder filled (scripts/seed/storage.mjs) and the per-bucket
 // rules of scripts/fixtures/storage.mjs. Every count is the seed manifest's
@@ -202,14 +216,35 @@ test('folders open on Enter, a double click or a link, and the path goes back up
   await page.getByTestId('path-segment').first().click()
   await expect(page).not.toHaveURL(/path=/)
 
-  // The folder's name is a real link: ⌘-click opens a new page there.
-  const opened = context.waitForEvent('page')
-  await row(page, 'reports/')
-    .getByTestId('folder-link')
-    .click({ modifiers: ['ControlOrMeta'] })
-  const other = await opened
-  await other.waitForLoadState()
-  expect(new URL(other.url()).searchParams.get('path')).toBe('reports/')
+  // The folder's name is a real link: the page leaves a ⌘-click to the
+  // browser, which opens a new page at the link's address. (The browser's own
+  // tab is not waited for: headless Chromium sometimes opens it unannounced,
+  // so the journey checks the click went untouched and opens the address.)
+  const link = row(page, 'reports/').getByTestId('folder-link')
+  const address = new URL((await link.getAttribute('href')) ?? '', engine.origin)
+  expect(address.searchParams.get('path')).toBe('reports/')
+  await page.evaluate(() => {
+    const watch = globalThis as unknown as ClickWatch
+    // After the page's own listeners: whether it took the click over.
+    watch.addEventListener(
+      'click',
+      (event) => {
+        watch.folderClick = {
+          link: event.target.closest('a')?.getAttribute('href') ?? null,
+          takenOver: event.defaultPrevented,
+        }
+        event.preventDefault()
+      },
+      { once: true },
+    )
+  })
+  await link.click({ modifiers: ['ControlOrMeta'] })
+  expect(await page.evaluate(() => (globalThis as unknown as ClickWatch).folderClick)).toEqual({
+    link: `${address.pathname}${address.search}`,
+    takenOver: false,
+  })
+  const other = await context.newPage()
+  await other.goto(address.toString())
   await expect(
     other.getByTestId('file-list').locator(`tr[data-key="${seed.names.pdf}"]`),
   ).toBeVisible()
@@ -1458,8 +1493,13 @@ test('the keyboard reaches everything: rows, ticks, Quick Look, the row menu and
   await openFiles(page, engine, { path: 'public/data/' })
   await expect(rows(page)).toHaveCount(seed.counts['public/data/'] ?? 0)
   const cursor = () => list(page).locator('tr[data-cursor]')
-  await page.keyboard.press('ArrowDown')
-  await expect(cursor()).toHaveAttribute('data-key', seed.names.bigCsv)
+  // ↓ from no cursor lands on the first row. A list read again just after it
+  // loads (a write in the last 2 s made its first page stale) has no rows for
+  // a moment, and a key pressed then finds none: press again until it lands.
+  await expect(async () => {
+    if ((await cursor().count()) === 0) await page.keyboard.press('ArrowDown')
+    await expect(cursor()).toHaveAttribute('data-key', seed.names.bigCsv, { timeout: 1_000 })
+  }).toPass()
   await page.keyboard.press('ArrowDown')
   await expect(cursor()).toHaveAttribute('data-key', seed.names.events)
   // Space ticks the cursor row.
