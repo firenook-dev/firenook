@@ -34,9 +34,13 @@ export function PathBar() {
     { key: '/', label: 'Edit the path', run: () => setEditing(workbench.path) },
   ])
 
+  // Opening the field selects the whole path, so typing replaces it the way
+  // an address bar does. Only opening: run on every keystroke, it selected
+  // what had just been typed, and the next key replaced it.
+  const isEditing = editing !== null
   useEffect(() => {
-    if (editing !== null) inputRef.current?.select()
-  }, [editing])
+    if (isEditing) inputRef.current?.select()
+  }, [isEditing])
 
   // A path too long for its box scrolls to the end, not the start: the
   // database name never changes, and where you are is the last segment. Both
