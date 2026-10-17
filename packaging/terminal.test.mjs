@@ -304,7 +304,8 @@ test('data an earlier engine saved, whose seed cannot be proven, points to adopt
   });
   await runInteractive(launch(['--resume-state', '--import', '/tmp/firenook-terminal-seed']), {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input: keyboard(), env, platform: 'darwin', spawner});
   const shown = text();
-  for (const expected of ['kept one fingerprint for the whole seed', '/tmp/firenook-terminal-seed/.DS_Store (Finder writes this file)', 'firenook state:adopt-seed']) shows(shown, expected);
+  // Joined the platform's way: backslashes on Windows.
+  for (const expected of ['kept one fingerprint for the whole seed', `${join('/tmp/firenook-terminal-seed', '.DS_Store')} (Finder writes this file)`, 'firenook state:adopt-seed']) shows(shown, expected);
 });
 
 test('a stop before the emulators are ready closes the data cleanly and says so', async () => {
