@@ -1,3 +1,45 @@
+# 0.2.0-next.4 — the terminal UI
+
+- Pin the engine to `8cf0bab1f16469b0c996e3d12d266feec8d87130`, the merge of
+  [PR #82](https://github.com/firenook-dev/firenook/pull/82) (the terminal UI)
+  on 0.2.0-next.3. Its tree is the PR head's, `768b1ec`, which passed CI
+  ([run 39031424075](https://github.com/firenook-dev/firenook/actions/runs/39031424075))
+  and the five-platform packed-install matrix
+  ([run 39031424125](https://github.com/firenook-dev/firenook/actions/runs/39031424125)),
+  whose suite smoke now also runs the terminal UI against the packaged engine.
+- **The terminal UI.** In a terminal, `emulators:start` draws its own screen:
+  a start-up card with a row per service filling in with how long it took and
+  what it holds, the ready summary (the console's address, the ports, the
+  start-up warnings once, a newer release), the log with a line per call, its
+  duration and cause and the function's own output under it at its level,
+  reloads and failed saves with the code around the error, and a footer
+  pinned to the window's last line with the keys: `o` console, `r` reload,
+  `e` export, `w` warnings, `?` keys, `q` (or Ctrl-C) stop, saving first.
+- **A start that cannot run** says what went wrong, how to fix it and what
+  became of the data, and exits 1. A taken port names the program holding it,
+  the command that stops it and a free port for `firebase.json`; saved data
+  refused because its seed changed says so, and names a `.DS_Store` Finder
+  wrote into the seed. Functions that do not load leave every emulator
+  running and load again on the next save.
+- **The plain output is unchanged.** Pipes, CI, log files, `emulators:exec`,
+  `--plain`, `FIRENOOK_PLAIN=1` and `TERM=dumb` get the same lines as before,
+  `All emulators ready` alone on its line. `NO_COLOR` keeps the screen without
+  colour; terminals without its symbols get plain characters
+  (`FIRENOOK_ASCII=1` asks for them).
+- **The release check** asks the npm registry for `firenook`'s version tags at
+  most once a day, in the background, and shows a newer release on the next
+  start with the install command for the project's package manager. It is off
+  in CI, in the plain output and with `FIRENOOK_NO_UPDATE_CHECK=1` or
+  `NO_UPDATE_NOTIFIER=1`.
+- **Engine.** `firenook suite --terminal-events` prints `FIRENOOK_EVENT <json>`
+  lines in place of the human lines they stand for (DESIGN.md, the terminal).
+  Refused saved data now says what changed in every output: an unfinished
+  import, another state format, another project, other buckets, another seed
+  path, or the seed's content.
+- **Journeys.** The New user journey waits for the form to empty before
+  typing the next user, which a reset on the page's answer had wiped once.
+- No emulator protocol, port, command or state format changed.
+
 # 0.2.0-next.3 — Firenook's own console, and Google's Emulator UI gone
 
 - Pin the engine to `19f2338d667e729420df12c97eee96e65cd7adb5`, the merge of
