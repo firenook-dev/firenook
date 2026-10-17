@@ -46,6 +46,7 @@ test.describe('theme', () => {
           'secondary-destructive button',
         ]),
       )
+      expect(run.checks.map((check) => check.what)).toContain('nav icon')
       const short = run.checks.filter((check) => check.ratio < check.need)
       expect(short, `below their minimum in ${mode} mode`).toEqual([])
 

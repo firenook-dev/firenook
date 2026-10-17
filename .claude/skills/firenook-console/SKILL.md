@@ -90,7 +90,13 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
   overlays the content. (Kumo 2.14's context memo omits `peekable`, so
   never flip that prop, or `contained`, at runtime; both are constant
   here.) The expanded width is 15.5rem through `--sidebar-width` on the
-  provider.
+  provider. Collapsed, `--sidebar-width-icon` is one square button and its
+  gutters (`calc(2.125rem + 2 * 11px + 1px)`): Kumo's 57 px rail is drawn
+  for a 16 px root, and at the console's 14 px it left 34 by 30 buttons
+  with every icon 2.5 px off centre. The top bar's mark is centred over
+  that column (17 px in). Nav icons are `NavIconWithDot` at 50 %, not
+  Kumo's 40 %, which was 2.55:1 on the light rail; `shell-theme.spec.ts`
+  holds 3:1 and `console.spec.ts` the rail's geometry.
 - The section panel is a second column beside the content (`PANEL_WIDTH`,
   264 px). A section fills it by rendering `<SectionPanel label="…">` (a
   portal into the shell's slot, so the section's providers reach it). The

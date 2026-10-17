@@ -1,12 +1,13 @@
 // The theme half of the kit harness: every Kumo button variant, an
-// underline tab bar, a link, a status word and an input with a placeholder,
+// underline tab bar, a link, a nav icon and an input with a placeholder,
 // drawn with the console's own theme, and `measureTheme`, which reads back
 // what the browser paints and works out each contrast ratio (WCAG 2) the
 // way a reader meets it. The journeys in `e2e/shell-theme.spec.ts` hold the
 // numbers; `src/theme.css` says why each colour is what it is.
 
 import { Button, Input, Tabs } from '@cloudflare/kumo'
-import { PlusIcon, TrashIcon } from '@phosphor-icons/react'
+import { GaugeIcon, PlusIcon, TrashIcon } from '@phosphor-icons/react'
+import { NavIconWithDot } from '@/components/kit'
 import type { ThemeRun } from './runs'
 
 const VARIANTS = [
@@ -66,6 +67,9 @@ export function ThemeHarness() {
           Open the engine’s details
         </a>
         <Input aria-label="Filter" placeholder="provider:google.com is:disabled" />
+        <span data-testid="theme-nav-icon">
+          <NavIconWithDot icon={GaugeIcon} />
+        </span>
       </div>
     </div>
   )
@@ -175,6 +179,19 @@ export function measureTheme(): ThemeRun {
   const input = root.querySelector('input')!
   const placeholder = srgb(getComputedStyle(input, '::placeholder').color, root).rgb
   checks.push({ what: 'placeholder', ratio: ratio(placeholder, groundOf(input)), need: 4.5 })
+
+  // Collapsed, a nav icon is all a page is told apart by. It is drawn at an
+  // opacity over the navigation's ground, Kumo's `--sidebar-bg`: the base.
+  const icon = root.querySelector('[data-testid="theme-nav-icon"] svg')!
+  let opacity = 1
+  for (let node: Element | null = icon; node && node !== root; node = node.parentElement)
+    opacity *= Number(getComputedStyle(node).opacity)
+  const base = surface('base')
+  const iconInk = srgb(getComputedStyle(icon).color, root).rgb
+  const iconDrawn = iconInk.map(
+    (value, index) => value * opacity + (base[index] ?? 0) * (1 - opacity),
+  ) as [number, number, number]
+  checks.push({ what: 'nav icon', ratio: ratio(iconDrawn, base), need: 3 })
 
   const underline = root.querySelector('.kumo-tabs-list .bg-kumo-brand')!
   const flame = srgb('var(--color-firenook-flame)', root).rgb

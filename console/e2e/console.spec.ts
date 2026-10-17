@@ -1,3 +1,4 @@
+import type { Locator } from '@playwright/test'
 import { expect, test } from './fixtures'
 import { ENGINE_REVISION, RELEASE_VERSION } from './engine'
 
@@ -144,6 +145,13 @@ test('client routes deep-link through the engine and navigate in place', async (
   await expect(page.getByText('not running', { exact: true })).toBeVisible()
 })
 
+/** Where an element is drawn, and its middle across. */
+async function box(locator: Locator) {
+  const rect = await locator.boundingBox()
+  if (!rect) throw new Error('not on the page')
+  return { ...rect, centre: rect.x + rect.width / 2 }
+}
+
 test('the navigation collapses to icons that peek on hover, and remembers it', async ({ page }) => {
   await page.goto(`${origin()}/console/tasks`)
   const nav = page.locator('aside[data-sidebar="sidebar"]')
@@ -153,6 +161,26 @@ test('the navigation collapses to icons that peek on hover, and remembers it', a
   // Collapsed: icons only, and the choice survives a reload.
   await page.getByTestId('nav-toggle').click()
   await expect(nav).toHaveAttribute('data-state', 'collapsed')
+
+  // The rail is one square button wide, each icon in the middle of its
+  // button, and the brand's mark over that column. Kumo draws the rail for
+  // a 16 px root; at the console's 14 px its buttons were 34 by 30 with the
+  // icon 2.5 px left of centre (`NAV_WIDTH`).
+  await page.mouse.move(900, 400)
+  await expect
+    .poll(() => nav.evaluate((element) => element.getBoundingClientRect().width))
+    .toBeLessThan(56)
+  const functions = page.getByTestId('nav-functions')
+  const geometry = {
+    button: await box(functions),
+    icon: await box(functions.locator('svg').first()),
+    toggle: await box(page.getByTestId('nav-toggle')),
+    mark: await box(page.getByTestId('top-bar-home').locator('svg > g').first()),
+  }
+  expect(Math.abs(geometry.button.width - geometry.button.height)).toBeLessThan(1)
+  expect(Math.abs(geometry.icon.centre - geometry.button.centre)).toBeLessThan(1)
+  expect(Math.abs(geometry.toggle.centre - geometry.button.centre)).toBeLessThan(1)
+  expect(Math.abs(geometry.mark.centre - geometry.button.centre)).toBeLessThan(1)
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Cloud Tasks', level: 1 })).toBeVisible()
   await expect(nav).toHaveAttribute('data-state', 'collapsed')

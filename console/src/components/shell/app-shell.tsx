@@ -118,12 +118,24 @@ export function hrefOf(link: SectionLink): string {
 export const PANEL_WIDTH = 264
 
 /**
- * The navigation's expanded width, 248 px. Kumo's default is 16.25rem; the
+ * The navigation's widths. Expanded, 248 px: Kumo's default is 16.25rem; the
  * labels here are short (the longest is "Authentication"), so the nav gives
  * a little back to the data. 14rem fit the labels but crowded them against
  * a section's count and chevron, and left the version at its foot no room.
+ *
+ * Collapsed to icons, a rail as wide as one square button and its gutters.
+ * Kumo's rail is 57 px with 11 px gutters, fixed, around a button sized in
+ * rem; drawn for a 16 px root, the button is a 34 px square with its icon
+ * in the middle. Here the root is 14 px, so the button shrank to 30 px tall
+ * and its icon to 14 px while the rail kept its width: every highlight was
+ * a 34 by 30 box with the icon 2.5 px left of its centre. The button's
+ * height (2.125rem), both gutters and the rail's border make it square
+ * again, with the icon centred.
  */
-const NAV_WIDTH: CSSProperties = { '--sidebar-width': '15.5rem' } as CSSProperties
+const NAV_WIDTH: CSSProperties = {
+  '--sidebar-width': '15.5rem',
+  '--sidebar-width-icon': 'calc(2.125rem + 2 * 11px + 1px)',
+} as CSSProperties
 
 /** A page label as a test id's tail: "All functions" → `all-functions`. */
 function slug(label: string): string {
@@ -281,7 +293,7 @@ function Navigation() {
         <Sidebar.Group>
           <Sidebar.Menu>
             <Sidebar.MenuButton
-              icon={GaugeIcon}
+              icon={<NavIconWithDot icon={GaugeIcon} />}
               tooltip="Overview"
               href="/console"
               active={isActive('/')}
@@ -553,13 +565,15 @@ function TopBar() {
   // left (Firenook, which opens the Overview, then the project and the way
   // to connect an app to it), and at the end what is wrong with the live
   // channel when something is, search, help and the theme. Its `data-live`
-  // is the channel's state, said or not. The brand's mark sits over the
-  // navigation's icons, so collapsing the navigation moves nothing here.
+  // is the channel's state, said or not. The brand's mark is centred over
+  // the collapsed navigation's column of icons (17 px in, an 18 px mark, a
+  // rail whose buttons centre 26 px in), so collapsing the navigation moves
+  // nothing here.
   // The section panel's toggle is the section's (`PanelToggle`), placed in
   // the panel and in the section's toolbar.
   return (
     <header
-      className="flex h-12 shrink-0 items-center gap-3 border-b border-kumo-line bg-kumo-base pr-3 pl-[18px]"
+      className="flex h-12 shrink-0 items-center gap-3 border-b border-kumo-line bg-kumo-base pr-3 pl-[17px]"
       data-testid="top-bar"
       data-live={updated ? 'updated' : live}
     >
