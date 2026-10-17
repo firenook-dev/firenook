@@ -89,9 +89,10 @@ struct Inner {
     instances: RwLock<BTreeMap<String, InstanceState>>,
     /// One per configured instance, created up front.
     locks: BTreeMap<String, Arc<Mutex<()>>>,
-    /// Files the console wrote, with the hash each holds now (`None`:
-    /// removed).
-    self_writes: std::sync::Mutex<BTreeMap<PathBuf, Option<[u8; 32]>>>,
+    /// Each parameter file's content as the console last wrote it or an
+    /// edit last reloaded it (`None`: removed). A notice of the same bytes
+    /// again is not an edit.
+    known: std::sync::Mutex<BTreeMap<PathBuf, Option<[u8; 32]>>>,
     dropped: Vec<DroppedExtension>,
     runtime: ConsoleHandle,
     monitor: Monitor,
@@ -145,7 +146,7 @@ impl ExtensionsControl {
                 config,
                 instances: RwLock::new(instances),
                 locks,
-                self_writes: std::sync::Mutex::new(BTreeMap::new()),
+                known: std::sync::Mutex::new(BTreeMap::new()),
                 dropped: outcome.dropped.clone(),
                 runtime,
                 monitor,
@@ -392,13 +393,13 @@ impl ExtensionsControl {
     }
 
     fn note_writes(&self, files: impl IntoIterator<Item = (PathBuf, Option<[u8; 32]>)>) {
-        let mut writes = self
+        let mut known = self
             .inner
-            .self_writes
+            .known
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         for (path, hash) in files {
-            writes.insert(written_key(&path), hash);
+            known.insert(written_key(&path), hash);
         }
     }
 
@@ -419,7 +420,8 @@ impl ExtensionsControl {
 
     /// The suite's env-file watcher reports changed files: each instance
     /// whose `extensions/<id>.env*` or `.secret.local` changed to content
-    /// the console did not write reloads, under its lock.
+    /// the console did not write and no edit has loaded reloads, under its
+    /// lock, once the files hold still.
     pub async fn files_changed(&self, paths: Vec<PathBuf>) {
         let mut by_instance: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
         for path in paths {
@@ -443,21 +445,18 @@ impl ExtensionsControl {
             }
             let mut changed = false;
             for path in &paths {
-                let current = tokio::fs::read(path)
-                    .await
-                    .ok()
-                    .map(|bytes| content_hash(&bytes));
+                let current = settled_hash(path).await;
                 let key = written_key(path);
-                let mut writes = self
+                let mut known = self
                     .inner
-                    .self_writes
+                    .known
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if writes.get(&key).copied() != Some(current) {
-                    // The file moved on from what the console wrote: an
-                    // edit. Forget the write, so the same bytes written
-                    // again later by someone else are an edit too.
-                    writes.remove(&key);
+                if known.get(&key).copied() != Some(current) {
+                    // The file moved on from what the console wrote or the
+                    // last edit loaded: an edit. Remember it, so another
+                    // notice of the same bytes reloads nothing.
+                    known.insert(key, current);
                     changed = true;
                 }
             }
@@ -484,6 +483,35 @@ impl ExtensionsControl {
             }
         }
     }
+}
+
+/// How long a parameter file must hold still before it is read for an edit.
+const SETTLE: std::time::Duration = std::time::Duration::from_millis(50);
+/// Reads before a file that never holds still is taken as it is (a second).
+const SETTLE_READS: usize = 20;
+
+/// A parameter file's content hash once it holds still: read again after a
+/// short pause until two reads agree. A writer that truncates and then
+/// writes (Node's `writeFileSync`, most editors' plain save) leaves the file
+/// empty for a moment; caught then, the instance would reload with every
+/// value at its default and load again a second later.
+async fn settled_hash(path: &std::path::Path) -> Option<[u8; 32]> {
+    let read = || async {
+        tokio::fs::read(path)
+            .await
+            .ok()
+            .map(|bytes| content_hash(&bytes))
+    };
+    let mut last = read().await;
+    for _ in 0..SETTLE_READS {
+        tokio::time::sleep(SETTLE).await;
+        let now = read().await;
+        if now == last {
+            break;
+        }
+        last = now;
+    }
+    last
 }
 
 /// The key a written file is remembered under: its directory's canonical

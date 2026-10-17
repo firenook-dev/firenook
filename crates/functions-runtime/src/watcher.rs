@@ -2,6 +2,11 @@
 //! logs, `node_modules`, `venv` and the configured `ignore` globs left out,
 //! debounced one second like the official chokidar setup), and the same
 //! watcher non-recursive with a path filter for env files.
+//!
+//! The debounce waits for one second of quiet after the last change, as the
+//! official setup's trailing `debounce` does, not one second after the
+//! first: a write that lands as a window closes (truncate, then the new
+//! bytes) is read whole, once it is done, rather than half written.
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,6 +17,9 @@ use notify::{RecursiveMode, Watcher as _};
 use crate::RuntimeError;
 
 const DEBOUNCE: Duration = Duration::from_secs(1);
+/// The longest a burst that never goes quiet (a build writing for minutes)
+/// holds its changes back.
+const LONGEST_WAIT: Duration = Duration::from_secs(5);
 
 /// Whether a watch covers subdirectories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,8 +76,9 @@ impl SourceWatcher {
                 while !stopped_for_thread.load(Ordering::SeqCst) {
                     match receiver.recv_timeout(Duration::from_millis(500)) {
                         Ok(first) => {
-                            // Debounce: collect every notification for one
-                            // second after the first, then fire once.
+                            // Debounce: collect notifications until a second
+                            // passes without one (at most `LONGEST_WAIT` after
+                            // the first), then fire once.
                             let mut changed: Vec<PathBuf> = Vec::new();
                             let mut add = |paths: Vec<PathBuf>| {
                                 for path in paths {
@@ -79,15 +88,21 @@ impl SourceWatcher {
                                 }
                             };
                             add(first);
-                            let deadline = std::time::Instant::now() + DEBOUNCE;
+                            let began = std::time::Instant::now();
+                            let mut quiet_from = began;
                             loop {
-                                let remaining =
-                                    deadline.saturating_duration_since(std::time::Instant::now());
+                                let now = std::time::Instant::now();
+                                let remaining = (quiet_from + DEBOUNCE)
+                                    .min(began + LONGEST_WAIT)
+                                    .saturating_duration_since(now);
                                 if remaining.is_zero() {
                                     break;
                                 }
                                 match receiver.recv_timeout(remaining) {
-                                    Ok(paths) => add(paths),
+                                    Ok(paths) => {
+                                        add(paths);
+                                        quiet_from = std::time::Instant::now();
+                                    }
                                     Err(_) => break,
                                 }
                             }
@@ -349,6 +364,54 @@ mod tests {
             })
             .collect();
         assert_eq!(names, [".env"]);
+        watcher.stop();
+    }
+
+    /// Changes 300 ms apart for longer than the debounce are one burst,
+    /// reported after the last of them: the second counts from the newest
+    /// change, not the first.
+    #[tokio::test]
+    async fn a_burst_that_keeps_going_arrives_once_after_it_ends() {
+        let directory = tempfile::tempdir().expect("a directory");
+        let root = directory.path().canonicalize().expect("canonical");
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let watcher = SourceWatcher::start(
+            &root,
+            WatchMode::NonRecursive,
+            |path| {
+                path.file_name()
+                    .is_some_and(|name| is_env_file(&name.to_string_lossy()))
+            },
+            move |paths| {
+                let _ = sender.send(paths);
+            },
+        )
+        .expect("watching");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let names = [".env.a", ".env.b", ".env.c", ".env.d", ".env.e", ".env.f"];
+        for name in names {
+            std::fs::write(root.join(name), "A=1\n").expect("written");
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        let changed = tokio::time::timeout(Duration::from_secs(10), receiver.recv())
+            .await
+            .expect("a burst")
+            .expect("paths");
+        let mut reported: Vec<String> = changed
+            .iter()
+            .filter_map(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+            .collect();
+        reported.sort();
+        assert_eq!(reported, names);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(1500), receiver.recv())
+                .await
+                .is_err(),
+            "one burst"
+        );
         watcher.stop();
     }
 }

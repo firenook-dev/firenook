@@ -303,6 +303,46 @@ async fn a_save_through_a_linked_project_path_reloads_once() {
 }
 
 #[tokio::test]
+async fn an_edit_reloads_once_however_often_it_is_reported() {
+    let setup = setup().await;
+    let env = setup.project.join("extensions/greeter.env");
+    std::fs::write(&env, "LOCATION=us-central1\nGREETING=edited\n").unwrap();
+    setup.control.files_changed(vec![env.clone()]).await;
+    assert_eq!(loads(&setup.monitor), 2);
+    // The watcher may report one save twice (a rename and a write, or two
+    // bursts): the bytes are the ones already loaded.
+    setup.control.files_changed(vec![env]).await;
+    assert_eq!(loads(&setup.monitor), 2);
+    setup.runtime.shutdown().await;
+}
+
+/// A save that truncates the file and then writes it, reported while the
+/// file is still empty, loads what was written, not every value at its
+/// default.
+#[tokio::test]
+async fn a_file_caught_half_written_is_read_once_it_is_whole() {
+    let setup = setup().await;
+    let env = setup.project.join("extensions/greeter.env");
+    std::fs::File::create(&env).unwrap();
+    let writer = {
+        let env = env.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            std::fs::write(&env, "LOCATION=us-central1\nGREETING=whole\n").unwrap();
+        })
+    };
+    setup.control.files_changed(vec![env]).await;
+    writer.join().unwrap();
+    assert_eq!(loads(&setup.monitor), 2);
+    let state = setup.control.instance("greeter").await.expect("running");
+    assert_eq!(
+        state.loaded.expect("loaded").backend.env["GREETING"],
+        "whole"
+    );
+    setup.runtime.shutdown().await;
+}
+
+#[tokio::test]
 async fn values_that_do_not_load_are_put_back_byte_for_byte() {
     let setup = setup().await;
     let env = setup.project.join("extensions/greeter.env.local");
