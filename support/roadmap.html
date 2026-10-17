@@ -758,6 +758,11 @@ const DATA = {
 ],
   backlog: [
   {
+    "item": "Start-up speed",
+    "why": "Keep Firestore's document count instead of decoding every document at each open (2.5 minutes on a 2.7-million-document store), and load Functions while the data opens (about 7 s); every saved-data start gets faster",
+    "size": "days"
+  },
+  {
     "item": "App Check",
     "why": "Debug-token exchange and enforcement on Functions, Firestore and Storage; with Auth complete in next.8 this is the last common parity request from app teams",
     "size": "1–2 weeks"
