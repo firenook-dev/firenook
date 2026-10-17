@@ -15,8 +15,17 @@ body,
   height: 100%;
 }
 
+/* The ground under the shell is the canvas, not the browser's white, so
+   nothing white ever shows around it. The window itself never needs to
+   scroll: the shell fills it and each page scrolls inside its own column
+   (`main` contains its scrolling, so a flick past the end of a column is
+   not handed on to the window), and nothing hangs below it (the copy
+   text's announcement, below). Not `overscroll-behavior` or `overflow:
+   hidden` on the root: in Chromium either stops a drag from selecting text
+   inside an input, as in the grid's cell editor. */
 body {
   margin: 0;
+  background-color: var(--color-kumo-canvas);
 }
 
 /* A row the live channel just touched settles from the success tint (or the
@@ -84,6 +93,16 @@ body {
   [data-kumo-component='InlineCopyText'][aria-label='Copied'] > svg {
     animation: copied-in 200ms ease-out;
   }
+}
+
+/* Its "Copied" announcement is an `sr-only` span, absolutely placed. Without
+   a positioned ancestor its containing block is the page, so it is not
+   clipped by the column it scrolls in and hangs below the window at the
+   copy text's place in the column: twelve addresses down the Overview made
+   the document 1,200 px taller than the window. Each copy text holds its
+   own announcement. */
+[data-kumo-component='InlineCopyText'] {
+  position: relative;
 }
 
 /* Toasts float above the bottom band of the page instead of on it. Kumo's

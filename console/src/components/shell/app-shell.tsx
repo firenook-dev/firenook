@@ -1,33 +1,37 @@
-// The shell: primary navigation on the left, the bar with the project and
-// the engine on top, and beneath it two columns: the section panel (the
-// column a section can fill through `SectionPanel`) and the content. The
-// navigation is expanded or collapsed to icons; collapsed, it slides its
-// labels out over the page while the pointer is on it. The control at its
+// The shell: one bar across the whole window on top — Firenook, the
+// project and "Connect your app" (`connect/`), and at its end the live
+// channel's trouble when it has any, help, search and the theme — and
+// beneath it
+// three columns: the primary navigation, the section panel (the column a
+// section can fill through `SectionPanel`) and the content. The navigation
+// is expanded or collapsed to icons under the bar; collapsed, it slides its
+// labels out over the page while the pointer is on it, and never over the
+// bar (Kumo's `contained`, which places the peek inside its column). The control at its
 // foot and `[` flip it; `t` hides and shows the panel. The shell also holds
 // the console's one keydown listener (`lib/shortcuts.ts`): its own keys,
 // ⌘K, `[`, `t` and `?`, and every page's, go through the same registry;
 // and its one live subscription (`lib/live/shell.ts`), whose channel the
 // engine badge speaks for: the whole console shares one connection, so a
-// drop is said once, there, not again on every page. The badge leads to the
-// Overview's engine section (`/#engine`), where the engine's facts are
-// drawn once. The navigation draws
+// drop is said once, there, not again on every page, and a channel that is
+// simply live says nothing. The badge and the engine's version, written
+// small at the navigation's foot, lead to the Overview's engine section
+// (`/#engine`), where the engine's facts are drawn once. The navigation draws
 // each section's state from the engine's status (absent sections dimmed,
 // starting ones with a pulsing dot) and its badges; a section's own shell
 // piece (`shellMount`) and the suite jobs watch mount here, lazily, so no
 // section edits this file.
 
 import {
-  Badge,
-  Button,
   InlineCopyText,
   Sidebar,
   Text,
   Toasty,
   Tooltip,
   TooltipProvider,
+  cn,
   useSidebar,
 } from '@cloudflare/kumo'
-import { CommandIcon, GaugeIcon } from '@phosphor-icons/react'
+import { CubeIcon, GaugeIcon, MagnifyingGlassIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import type {
@@ -41,11 +45,12 @@ import { Suspense, lazy, useEffect, useState } from 'react'
 import type { SectionStatus } from '@/api/generated/SectionStatus'
 import { statusQuery } from '@/api/queries'
 import { useNavBadge } from '@/lib/badges'
-import { engineBuild, engineVersion } from '@/lib/engine'
-import { Kbd, NavBadge, NavIconWithDot } from '@/components/kit'
+import { ConnectButton } from '@/connect/connect-button'
+import { engineBuild, engineVersion, engineVersionShort } from '@/lib/engine'
+import { FirenookLogo, Kbd, NavBadge, NavIconWithDot } from '@/components/kit'
 import { NARROW_BELOW, panelShown, useLayout } from '@/lib/layout'
 import { useLiveStatus } from '@/lib/live/channel'
-import { useBadges, useShellLive } from '@/lib/live/shell'
+import { useShellLive } from '@/lib/live/shell'
 import {
   AREA_LABELS,
   type ConsoleSection,
@@ -57,6 +62,8 @@ import {
 import { useConsoleUi } from '@/lib/store'
 import { SHELL_SCOPE, describeKey, useShortcutListener, useShortcuts } from '@/lib/shortcuts'
 import { consoleToasts } from '@/lib/toasts'
+import { HelpButton } from './help-button'
+import { LIVE_BADGE, LiveBadgeFace, liveTrouble } from './live-badge'
 import { ENGINE_DETAILS_HREF, openOverviewPart } from './overview-parts'
 import { ThemePicker } from './theme-picker'
 
@@ -77,6 +84,9 @@ const ShortcutsDialog = lazy(() =>
 const CommandPalette = lazy(() =>
   import('./command-palette').then((module) => ({ default: module.CommandPalette })),
 )
+
+/** The help menu, which needs Kumo's menu: its button is drawn until it arrives. */
+const HelpMenu = lazy(() => import('./help-menu').then((module) => ({ default: module.HelpMenu })))
 
 /** Toasts for suite jobs in every tab; nothing on screen needs it to start. */
 const JobsWatch = lazy(() =>
@@ -108,11 +118,24 @@ export function hrefOf(link: SectionLink): string {
 export const PANEL_WIDTH = 264
 
 /**
- * The navigation's expanded width. Kumo's default is 16.25rem; the labels
- * here are short (the longest is "Authentication"), so the nav gives the
- * width back to the data.
+ * The navigation's widths. Expanded, 248 px: Kumo's default is 16.25rem; the
+ * labels here are short (the longest is "Authentication"), so the nav gives
+ * a little back to the data. 14rem fit the labels but crowded them against
+ * a section's count and chevron, and left the version at its foot no room.
+ *
+ * Collapsed to icons, a rail as wide as one square button and its gutters.
+ * Kumo's rail is 57 px with 11 px gutters, fixed, around a button sized in
+ * rem; drawn for a 16 px root, the button is a 34 px square with its icon
+ * in the middle. Here the root is 14 px, so the button shrank to 30 px tall
+ * and its icon to 14 px while the rail kept its width: every highlight was
+ * a 34 by 30 box with the icon 2.5 px left of its centre. The button's
+ * height (2.125rem), both gutters and the rail's border make it square
+ * again, with the icon centred.
  */
-const NAV_WIDTH: CSSProperties = { '--sidebar-width': '14rem' } as CSSProperties
+const NAV_WIDTH: CSSProperties = {
+  '--sidebar-width': '15.5rem',
+  '--sidebar-width-icon': 'calc(2.125rem + 2 * 11px + 1px)',
+} as CSSProperties
 
 /** A page label as a test id's tail: "All functions" → `all-functions`. */
 function slug(label: string): string {
@@ -184,22 +207,23 @@ export function AppShell({ children }: { children: ReactNode }) {
     // stack through `consoleToasts`, under the one policy in `lib/toasts.ts`.
     <Toasty toastManager={consoleToasts}>
       <TooltipProvider>
-        <div className="flex h-full">
-          {/* Only the navigation lives inside Kumo's provider, and the
-              wrapper sits above the content so a peek overlays it. */}
-          <Sidebar.Provider
-            open={navOpen}
-            onOpenChange={setNavOpen}
-            peekable
-            collapsible="icon"
-            className="z-30 h-full w-auto shrink-0"
-            style={NAV_WIDTH}
-          >
-            <Navigation />
-          </Sidebar.Provider>
-          <div className="flex min-w-0 flex-1 flex-col bg-kumo-canvas">
-            <TopBar />
-            <div className="flex min-h-0 flex-1">
+        <div className="flex h-full flex-col">
+          <TopBar />
+          <div className="flex min-h-0 flex-1">
+            {/* Only the navigation lives inside Kumo's provider, and the
+                wrapper sits above the content so a peek overlays it. */}
+            <Sidebar.Provider
+              open={navOpen}
+              onOpenChange={setNavOpen}
+              peekable
+              contained
+              collapsible="icon"
+              className="z-30 h-full min-h-0 w-auto shrink-0"
+              style={NAV_WIDTH}
+            >
+              <Navigation />
+            </Sidebar.Provider>
+            <div className="flex min-w-0 flex-1 bg-kumo-canvas">
               <aside
                 ref={setSlot}
                 aria-label={panel.label || undefined}
@@ -211,7 +235,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 style={{ width: PANEL_WIDTH }}
                 data-testid="section-panel"
               />
-              <main className="min-h-0 min-w-0 flex-1 overflow-auto">{children}</main>
+              <main className="relative min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
+                {children}
+              </main>
             </div>
           </div>
         </div>
@@ -263,22 +289,11 @@ function Navigation() {
       data-testid="primary-nav"
       contentClassName="group-data-[state=peeking]/sidebar:shadow-lg"
     >
-      <Sidebar.Header>
-        <div className="flex min-w-0 items-center gap-2 px-2 py-1">
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-kumo-brand text-kumo-inverse">
-            <GaugeIcon size={14} weight="bold" />
-          </span>
-          <span className="flex min-w-0 items-center gap-2 transition-opacity duration-(--sidebar-animation-duration) group-data-[state=collapsed]/sidebar:opacity-0">
-            <Text bold>Firenook</Text>
-            <Text variant="secondary">console</Text>
-          </span>
-        </div>
-      </Sidebar.Header>
       <Sidebar.Content>
         <Sidebar.Group>
           <Sidebar.Menu>
             <Sidebar.MenuButton
-              icon={GaugeIcon}
+              icon={<NavIconWithDot icon={GaugeIcon} />}
               tooltip="Overview"
               href="/console"
               active={isActive('/')}
@@ -317,6 +332,7 @@ function Navigation() {
       </Sidebar.Content>
       <Sidebar.Footer>
         <NavToggle />
+        <NavVersion />
       </Sidebar.Footer>
     </Sidebar>
   )
@@ -499,136 +515,174 @@ function NavToggle() {
   )
 }
 
+/**
+ * The engine's version at the navigation's foot, small, with the build in
+ * its tooltip: it matters when something has to be reported or traced, not
+ * while working. It leads to the Overview's engine section, where the
+ * engine's facts are. Collapsed to icons, the navigation leaves it out.
+ */
+function NavVersion() {
+  const navigate = useNavigate()
+  const status = useQuery(statusQuery)
+  if (!status.data) return null
+  const { engine } = status.data
+  return (
+    <Tooltip
+      content={
+        <span className="grid gap-0.5">
+          <span data-testid="nav-version-build">
+            {engineBuild(engine) ?? `Firenook ${engineVersion(engine)}`}
+          </span>
+          <span className="text-kumo-subtle">Opens the engine’s details</span>
+        </span>
+      }
+      side="top"
+      render={
+        <a
+          href={ENGINE_DETAILS_HREF}
+          onClick={(event) => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+            event.preventDefault()
+            openOverviewPart(navigate, 'engine')
+          }}
+          className="ml-auto min-w-0 truncate rounded font-mono text-[11px] text-kumo-subtle outline-none hover:text-kumo-default focus-visible:ring-2 focus-visible:ring-kumo-focus group-data-[state=collapsed]/sidebar:hidden"
+          data-testid="nav-version"
+        >
+          {engineVersionShort(engine)}
+        </a>
+      }
+    />
+  )
+}
+
 function TopBar() {
   const status = useQuery(statusQuery)
+  const live = useLiveStatus((state) => state.status)
+  const updated = useLiveStatus((state) => state.engineUpdated)
   const setPaletteOpen = useConsoleUi((state) => state.setPaletteOpen)
-  // The console's own bar. The section panel's toggle is the section's
-  // (`PanelToggle`), placed in the panel and in the section's toolbar.
+  const go = useGo()
+  // The console's own bar, across the whole window: where you are on the
+  // left (Firenook, which opens the Overview, then the project and the way
+  // to connect an app to it), and at the end what is wrong with the live
+  // channel when something is, search, help and the theme. Its `data-live`
+  // is the channel's state, said or not. The brand's mark is centred over
+  // the collapsed navigation's column of icons (17 px in, an 18 px mark, a
+  // rail whose buttons centre 26 px in), so collapsing the navigation moves
+  // nothing here.
+  // The section panel's toggle is the section's (`PanelToggle`), placed in
+  // the panel and in the section's toolbar.
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-kumo-line bg-kumo-base px-4">
-      <div className="flex min-w-0 items-center gap-2">
-        <Text variant="secondary" size="sm">
-          Project
-        </Text>
-        {status.data ? (
-          <InlineCopyText value={status.data.projectId} className="font-mono text-[0.9em]">
-            {status.data.projectId}
-          </InlineCopyText>
-        ) : (
-          <Text variant="mono-secondary">…</Text>
-        )}
+    <header
+      className="flex h-12 shrink-0 items-center gap-3 border-b border-kumo-line bg-kumo-base pr-3 pl-[17px]"
+      data-testid="top-bar"
+      data-live={updated ? 'updated' : live}
+    >
+      <div className="flex min-w-0 items-center gap-2.5">
+        <a
+          href="/console"
+          onClick={go({ to: '/' })}
+          className="flex shrink-0 items-center rounded-md outline-none focus-visible:ring focus-visible:ring-kumo-focus focus-visible:ring-offset-2"
+          aria-label="Firenook console: Overview"
+          data-testid="top-bar-home"
+        >
+          <FirenookLogo className="h-[24px] w-auto" />
+        </a>
+        <Slash />
+        <span className="flex min-w-0 items-center gap-2" data-testid="top-bar-project">
+          <CubeIcon size={15} className="shrink-0 text-kumo-subtle" aria-hidden />
+          {status.data ? (
+            <InlineCopyText
+              value={status.data.projectId}
+              variant="body"
+              size="sm"
+              className="min-w-0 font-mono text-kumo-default"
+            >
+              {status.data.projectId}
+            </InlineCopyText>
+          ) : (
+            <Text variant="mono-secondary">…</Text>
+          )}
+        </span>
+        <ConnectButton />
       </div>
       <div className="ml-auto flex items-center gap-2">
         <EngineBadge />
-        <ThemePicker />
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={<CommandIcon />}
+        <Suspense fallback={<HelpButton />}>
+          <HelpMenu />
+        </Suspense>
+        <button
+          type="button"
           onClick={() => setPaletteOpen(true)}
           aria-label="Open the command palette"
+          className="flex h-8 w-56 items-center gap-2 rounded-lg bg-kumo-base px-2.5 text-[13px] text-kumo-subtle ring ring-kumo-line outline-none hover:ink focus-visible:ring-2 focus-visible:ring-kumo-focus max-md:w-auto"
+          data-testid="top-bar-search"
         >
-          <span className="flex items-center gap-1.5">
-            Search
-            {/* ⌘K on a Mac, Ctrl+K elsewhere: the key the registry listens for. */}
-            <Kbd className="text-inherit">{describeKey('Mod+k')}</Kbd>
-          </span>
-        </Button>
+          <MagnifyingGlassIcon size={14} aria-hidden className="shrink-0" />
+          <span className="max-md:hidden">Search…</span>
+          {/* ⌘K on a Mac, Ctrl+K elsewhere: the key the registry listens for. */}
+          <Kbd className="ml-auto text-inherit max-md:hidden">{describeKey('Mod+k')}</Kbd>
+        </button>
+        <ThemePicker />
       </div>
     </header>
   )
 }
 
-/**
- * The engine, as the live channel knows it: its version while live; amber
- * while reconnecting, red the moment it says it is stopping (or 30 s after
- * it vanished without a word), amber when it already serves as many console
- * connections as it takes. A red dot rides on it while requests name a
- * project that is not this emulator's (the shell banner says which). An
- * engine of another build than this page's says so; the shell banners ask
- * for the reload. It is a link to the Overview's engine section.
- */
-function EngineBadge() {
-  const navigate = useNavigate()
+/** The bar's separator between where you are and what is in it, as a path is written. */
+function Slash() {
   return (
-    <a
-      href={ENGINE_DETAILS_HREF}
-      className="flex items-center rounded-md outline-none focus-visible:ring focus-visible:ring-kumo-focus"
-      aria-label="Engine details"
-      onClick={(event) => {
-        if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
-        event.preventDefault()
-        openOverviewPart(navigate, 'engine')
-      }}
-      data-testid="engine-badge-button"
+    <svg
+      viewBox="0 0 12 24"
+      className="h-5 w-2.5 shrink-0 text-kumo-line"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      aria-hidden
     >
-      <EngineBadgeFace />
-    </a>
+      <path d="M9.5 3.5 2.5 20.5" strokeLinecap="round" />
+    </svg>
   )
 }
 
-function EngineBadgeFace() {
+/**
+ * The live channel, in the bar only when something is wrong with it: amber
+ * while reconnecting, red the moment the engine says it is stopping (or 30 s
+ * after it vanished without a word), amber when it already serves as many
+ * console connections as it takes, and a reload when the engine was updated
+ * under the page (the shell banners ask for it). Live, it says nothing: the
+ * pages show changes as they happen, and the engine's version is at the
+ * navigation's foot. Shaped like the bar's other controls, and a link to the
+ * Overview's engine section.
+ */
+function EngineBadge() {
+  const navigate = useNavigate()
   const status = useQuery(statusQuery)
   const live = useLiveStatus((state) => state.status)
   const updated = useLiveStatus((state) => state.engineUpdated)
-  const foreign = useBadges((state) => (state.badges.get('shell.foreign')?.count ?? 0) > 0)
-  const face = (
-    variant: 'warning' | 'error' | 'neutral' | 'success',
-    label: string,
-    title?: string,
-  ) => (
-    <span
-      className="relative flex items-center"
-      title={title}
-      data-testid="engine-badge"
-      data-state={updated ? 'updated' : live}
-      data-foreign={foreign || undefined}
-    >
-      <Badge variant={variant} appearance="dot">
-        {label}
-      </Badge>
-      {foreign && (
-        <span
-          className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-kumo-danger ring-2 ring-kumo-base"
-          aria-label="Requests name another project"
-          role="img"
-          data-testid="engine-badge-foreign"
-        />
-      )}
-    </span>
-  )
-  const said = (variant: 'warning' | 'error' | 'neutral', label: string, why: string) => (
-    <Tooltip content={why} render={face(variant, label)} />
-  )
-  if (updated)
-    return said('neutral', 'engine updated', 'The engine was updated. Reload to get its console.')
-  if (live === 'reconnecting')
-    return said(
-      'warning',
-      'reconnecting',
-      'Live updates are reconnecting, so what is on screen may be out of date.',
-    )
-  if (live === 'offline')
-    return said(
-      'error',
-      'engine stopped',
-      'The engine stopped. The console reconnects by itself when it is back.',
-    )
-  if (live === 'too-many')
-    return said(
-      'warning',
-      'too many console tabs',
-      'This engine already serves 64 console connections. Close a console tab.',
-    )
-  if (status.isError && live === 'connecting')
-    return said('error', 'engine unreachable', 'The console could not reach the engine.')
-  if (!status.data || live === 'connecting')
-    return said('neutral', 'connecting', 'Connecting to the engine…')
-  // The engine source commit is the detail, not the headline: it only
-  // matters when a version has to be traced back to a build.
-  return face(
-    'success',
-    `engine ${engineVersion(status.data.engine)}`,
-    engineBuild(status.data.engine),
+  const trouble = liveTrouble(live, updated, status.isError)
+  if (!trouble) return null
+  return (
+    <Tooltip
+      content={trouble.why}
+      render={
+        <a
+          href={ENGINE_DETAILS_HREF}
+          className={cn(
+            LIVE_BADGE,
+            'outline-none hover:ink focus-visible:ring-2 focus-visible:ring-kumo-focus',
+          )}
+          aria-label={`${trouble.label}: engine details`}
+          onClick={(event) => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+            event.preventDefault()
+            openOverviewPart(navigate, 'engine')
+          }}
+          data-testid="engine-badge"
+          data-state={updated ? 'updated' : live}
+        >
+          <LiveBadgeFace trouble={trouble} />
+        </a>
+      }
+    />
   )
 }

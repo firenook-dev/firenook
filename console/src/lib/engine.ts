@@ -19,3 +19,15 @@ export function engineBuild(engine: EngineInfo | undefined): string | undefined 
   if (!engine?.revision) return undefined
   return `${engine.name} ${engineVersion(engine)}, engine source ${engine.revision.slice(0, 12)}`
 }
+
+/**
+ * The version as the sidebar's foot writes it: `v0.2.0-next.2`. A local
+ * build's commit suffix (`0.2.0-local.gfd8c2e181cf7`, as `git describe`
+ * writes it) is left to the tooltip beside it; a build with no release
+ * says so in words.
+ */
+export function engineVersionShort(engine: EngineInfo | undefined): string {
+  const version = engineVersion(engine)
+  if (!/^\d/.test(version)) return version
+  return `v${version.replace(/\.g[0-9a-f]{7,40}$/, '')}`
+}

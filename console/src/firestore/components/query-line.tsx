@@ -137,7 +137,7 @@ export function QueryLine() {
                   placeholder='where("status", "==", "paid").orderBy("createdAt", "desc").limit(50)'
                   spellCheck={false}
                   autoComplete="off"
-                  className="h-full min-w-0 flex-1 bg-transparent px-1.5 font-mono text-[12px] text-kumo-default outline-none placeholder:text-kumo-inactive"
+                  className="h-full min-w-0 flex-1 bg-transparent px-1.5 font-mono text-[12px] text-kumo-default outline-none placeholder:text-kumo-placeholder"
                   aria-label="Query"
                   data-testid="query-input"
                 />

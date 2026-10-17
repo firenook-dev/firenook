@@ -1,4 +1,4 @@
-// The host the Overview's connection snippets use, chosen per browser: the
+// The host "Connect your app" puts in its snippets, chosen per browser: the
 // engine's connect host, the address this page was opened at when that
 // differs, the Android emulator's `10.0.2.2` (all offered by
 // `lib/connect.ts`), or a host the developer types ("Custom…"). The choice

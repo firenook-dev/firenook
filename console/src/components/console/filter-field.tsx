@@ -501,7 +501,7 @@ export function FilterField({
                   handled()
                 }
               }}
-              className={`relative h-full min-w-0 flex-1 bg-transparent text-kumo-default outline-none placeholder:font-sans placeholder:text-kumo-inactive ${TEXT}`}
+              className={`relative h-full min-w-0 flex-1 bg-transparent text-kumo-default outline-none placeholder:font-sans placeholder:text-kumo-placeholder ${TEXT}`}
               data-testid={`${ids}-input`}
             />
           </span>

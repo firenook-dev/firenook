@@ -229,7 +229,7 @@ test('S3 one account per email decides whether a provider sign-in makes a second
   }
 })
 
-test('S4 Settings leads to the Overview’s snippets, which point an app at this Auth emulator', async ({
+test('S4 Settings opens Connect’s snippets, which point an app at this Auth emulator', async ({
   page,
   engine,
 }) => {
@@ -239,21 +239,19 @@ test('S4 Settings leads to the Overview’s snippets, which point an app at this
   )
   const auth = status.services.find((service) => service.name === 'auth')!
   await page.goto(settings(engine, { section: 'connect' }))
-  await page.getByTestId('settings-connect-overview').click()
-  await expect(page).toHaveURL(/\/console\/?\?connect=web/)
-  const snippet = page.getByTestId('overview-connect-snippet')
+  // Over the settings page itself: closing it leaves the reader where they were.
+  await page.getByTestId('settings-connect-open').click()
+  await expect(page).toHaveURL(/\/console\/auth\/settings\?.*connect=web/)
+  const snippet = page.getByTestId('connect-snippet')
   await expect(snippet).toBeInViewport()
   await expect(snippet).toContainText(`connectAuthEmulator(`)
   await expect(snippet).toContainText(`http://${auth.host}:${auth.port}`)
   // An Android emulator reaches this machine at 10.0.2.2.
-  await page.getByTestId('overview-host').getByRole('combobox').click()
+  await page.getByTestId('connect-host').getByRole('combobox').click()
   await page.getByRole('option', { name: /10\.0\.2\.2/ }).click()
-  await page.getByTestId('overview-connect-tabs').getByRole('tab', { name: 'Android' }).click()
+  await page.getByTestId('connect-tabs').getByRole('tab', { name: 'Android' }).click()
   await expect(snippet).toContainText(`Firebase.auth.useEmulator("10.0.2.2", ${auth.port})`)
-  await page
-    .getByTestId('overview-connect-tabs')
-    .getByRole('tab', { name: 'Environment variables' })
-    .click()
+  await page.getByTestId('connect-tabs').getByRole('tab', { name: 'Environment variables' }).click()
   await expect(snippet).toContainText('FIREBASE_AUTH_EMULATOR_HOST=')
   await expect(snippet).toContainText(`:${auth.port}`)
 })

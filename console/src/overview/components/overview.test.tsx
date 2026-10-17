@@ -9,15 +9,15 @@ import type { OverviewState } from '@/api/generated/observe/OverviewState'
 import { statusQuery } from '@/api/queries'
 import { renderInConsole } from '@/test/render'
 import { sectionEntry, testStatus } from '@/test/status'
-import { sectionCards } from '../model'
+import { sectionCards, sharedHost, suiteHealth } from '../model'
 import { createNoticeStore } from '../notices'
 import type { SnapshotView } from '../snapshot'
-import { ConnectSection } from './connect'
-import { DataCards } from './data-section'
+import { DataCard } from './data-section'
 import { EngineDetails } from './engine-details'
 import { Notices } from './notices'
+import { OverviewHeader } from './overview-header'
 import { RecentProblems } from './problems'
-import { SectionCard } from './section-card'
+import { ServiceTile } from './service-tile'
 
 const services = [
   { name: 'firestore', host: '127.0.0.1', port: 8080, listening: true, pid: null },
@@ -68,29 +68,40 @@ afterEach(cleanup)
 
 const figure = () => screen.getByTestId('overview-figure-firestore-documents')
 
-/** The Firestore card, drawn from the status in the query cache as the page draws it. */
-function LiveCard() {
+/** The Firestore tile, drawn from the status in the query cache as the page draws it. */
+function LiveTile() {
   const status = useQuery(statusQuery).data
-  const [card] = status ? sectionCards(status, new Map()) : []
-  return card && status ? <SectionCard card={card} tick={status} onConnect={() => {}} /> : null
+  const cards = status ? sectionCards(status, new Map()) : []
+  const [card] = cards
+  return card && status ? <ServiceTile card={card} host={sharedHost(cards)} tick={status} /> : null
 }
 
-describe('a section card', () => {
-  it('shows the address, the figures the section counts, its links and its health', async () => {
+describe('a section tile', () => {
+  it('opens its section, and shows its port, its figures and nothing more while it runs', async () => {
     const status = withDocuments(1596)
-    const [card] = sectionCards(status, new Map())
+    const cards = sectionCards(status, new Map())
+    const [card] = cards
     if (!card) throw new Error('no card')
-    await renderInConsole(() => <SectionCard card={card} tick={status} onConnect={() => {}} />, {
-      status,
-    })
+    await renderInConsole(
+      () => <ServiceTile card={card} host={sharedHost(cards)} tick={status} />,
+      { status },
+    )
     const article = screen.getByTestId('overview-card-firestore')
+    // The host is written once above the grid; the tile names the port, and copies the whole address.
     expect(within(article).getByTestId('overview-card-firestore-address')).toHaveTextContent(
-      '127.0.0.1:8080',
+      /^:8080$/,
     )
     expect(screen.getByTestId('overview-figure-firestore-documents')).toHaveTextContent('1,596')
-    expect(within(article).getByText('Databases')).toBeInTheDocument()
-    expect(within(article).getByRole('link', { name: 'Open Firestore' })).toBeInTheDocument()
-    expect(within(article).getByRole('link', { name: 'Rules' })).toBeInTheDocument()
+    expect(screen.getByTestId('overview-figure-firestore-databases')).toHaveTextContent('1')
+    expect(within(article).getByRole('link', { name: 'Firestore' })).toHaveAttribute(
+      'href',
+      '/firestore',
+    )
+    // Running is the dot alone; the word is there for a screen reader.
+    expect(screen.getByTestId('overview-card-firestore-health')).toHaveAttribute(
+      'data-tone',
+      'success',
+    )
     expect(screen.getByTestId('overview-card-firestore-health')).toHaveTextContent('Running')
     expect(screen.queryByTestId('overview-card-firestore-holds')).not.toBeInTheDocument()
   })
@@ -103,17 +114,51 @@ describe('a section card', () => {
     })
     const [card] = sectionCards(status, new Map())
     if (!card) throw new Error('no card')
-    await renderInConsole(() => <SectionCard card={card} tick={status} onConnect={() => {}} />, {
+    await renderInConsole(() => <ServiceTile card={card} host={undefined} tick={status} />, {
       status,
     })
     expect(screen.getByTestId('overview-card-firestore-holds')).toHaveTextContent(
       'Documents in every database, and the rules that guard them.',
     )
     expect(screen.queryByTestId('overview-card-firestore-figures')).not.toBeInTheDocument()
+    // Without a shared host, the tile shows its whole address.
+    expect(screen.getByTestId('overview-card-firestore-address')).toHaveTextContent(
+      '127.0.0.1:8080',
+    )
+  })
+
+  it('keeps an absent section’s place, with the engine’s reason, and opens its gate', async () => {
+    const status = testStatus({
+      projectId: 'demo-overview',
+      services,
+      sections: [
+        sectionEntry('storage', {
+          state: 'absent',
+          reason: 'excluded-by-only',
+          detail: 'This engine was started with --only firestore.',
+        }),
+      ],
+    })
+    const [card] = sectionCards(status, new Map())
+    if (!card) throw new Error('no card')
+    await renderInConsole(() => <ServiceTile card={card} host={undefined} tick={status} />, {
+      status,
+    })
+    const article = screen.getByTestId('overview-card-storage')
+    expect(article).toHaveAttribute('data-state', 'absent')
+    expect(screen.getByTestId('overview-card-storage-health')).toHaveTextContent('Not running')
+    expect(screen.getByTestId('overview-card-storage-detail')).toHaveTextContent(
+      'This engine was started with --only firestore.',
+    )
+    expect(within(article).getByRole('link', { name: 'Storage' })).toHaveAttribute(
+      'href',
+      '/storage',
+    )
+    expect(screen.queryByTestId('overview-card-storage-address')).not.toBeInTheDocument()
   })
 
   it('flashes a figure that changed, and only once in a burst of changes', async () => {
-    const view = await renderInConsole(() => <LiveCard />, { status: withDocuments(10) })
+    const view = await renderInConsole(() => <LiveTile />, { status: withDocuments(10) })
     expect(figure()).toHaveAttribute('data-flashes', '0')
     const set = (documents: number) =>
       act(() => {
@@ -128,42 +173,21 @@ describe('a section card', () => {
     await waitFor(() => expect(figure()).toHaveTextContent('13'))
     expect(figure()).toHaveAttribute('data-flashes', '1')
   })
+})
 
-  it('offers its snippet in "Connect your app"', async () => {
-    const user = userEvent.setup()
-    const onConnect = vi.fn()
+describe('the header', () => {
+  it('says the whole suite in one line', async () => {
     const status = withDocuments(1)
-    const [card] = sectionCards(status, new Map())
-    if (!card) throw new Error('no card')
-    await renderInConsole(() => <SectionCard card={card} tick={status} onConnect={onConnect} />, {
-      status,
-    })
-    await user.click(screen.getByTestId('overview-card-firestore-connect'))
-    expect(onConnect).toHaveBeenCalledWith('web')
-  })
-
-  it('opens the Functions output in Logs from the Functions card, and from no other', async () => {
-    const status = testStatus({
-      projectId: 'demo-overview',
-      services: [
-        ...services,
-        { name: 'functions', host: '127.0.0.1', port: 5001, listening: true, pid: null },
-      ],
-      sections: [sectionEntry('firestore'), sectionEntry('functions'), sectionEntry('logs')],
-    })
-    const cards = sectionCards(status, new Map())
     await renderInConsole(
-      () =>
-        cards.map((card) => (
-          <SectionCard key={card.section.id} card={card} tick={status} onConnect={() => {}} />
-        )),
+      () => (
+        <OverviewHeader status={status} health={suiteHealth(sectionCards(status, new Map()))} />
+      ),
       { status },
     )
-    expect(screen.getByTestId('overview-card-functions-logs')).toHaveAttribute(
-      'href',
-      '/logs?q=service%3Afunctions',
+    expect(screen.getByTestId('overview-health')).toHaveTextContent('All 1 service running')
+    expect(screen.getByTestId('overview-data')).toHaveTextContent(
+      'In memory, gone when the engine stops',
     )
-    expect(screen.queryByTestId('overview-card-firestore-logs')).not.toBeInTheDocument()
   })
 })
 
@@ -326,41 +350,6 @@ it('says when the engine stopped keeping the recent problems current', async () 
   expect(screen.getByTestId('overview-live-notice')).toHaveAttribute('data-state', 'ended')
 })
 
-describe('connect your app', () => {
-  it('prints the web snippet for this engine, and hands a picked tab to the page', async () => {
-    const user = userEvent.setup()
-    const onParam = vi.fn()
-    const status = withDocuments(1)
-    await renderInConsole(
-      () => (
-        <ConnectSection status={status} engine={undefined} param={undefined} onParam={onParam} />
-      ),
-      { status },
-    )
-    const snippet = screen.getByTestId('overview-connect-snippet')
-    expect(snippet).toHaveTextContent(
-      "connectFirestoreEmulator(getFirestore(app), '127.0.0.1', 8080)",
-    )
-    expect(snippet).toHaveTextContent(
-      "initializeApp({ projectId: 'demo-overview', apiKey: 'demo-api-key' })",
-    )
-    await user.click(screen.getByRole('tab', { name: 'Flutter' }))
-    expect(onParam).toHaveBeenCalledWith('flutter')
-  })
-
-  it('prints the tab the address names, with the engine’s bucket', async () => {
-    const status = withDocuments(1)
-    await renderInConsole(
-      () => <ConnectSection status={status} engine={undefined} param="env" onParam={() => {}} />,
-      { status },
-    )
-    const snippet = screen.getByTestId('overview-connect-snippet')
-    expect(snippet).toHaveTextContent('FIRESTORE_EMULATOR_HOST=127.0.0.1:8080')
-    expect(snippet).toHaveTextContent('FIREBASE_EMULATOR_HUB=127.0.0.1:4400')
-    expect(screen.getByTestId('overview-connect-note')).toHaveTextContent('emulators:exec')
-  })
-})
-
 /** A suite job three seconds in. */
 const job = (overrides: Partial<Job>): Job => ({
   id: 'job-1',
@@ -392,13 +381,13 @@ const view = (overrides: Partial<SnapshotView> = {}): SnapshotView => ({
   ...overrides,
 })
 
-describe('the data cards', () => {
-  it('follow a running reset and hold back every control that would start another job', async () => {
+describe('the data card', () => {
+  it('follows a running reset and holds back every control that would start another job', async () => {
     const status = withDocuments(1596)
     const running = job({})
     await renderInConsole(
       () => (
-        <DataCards
+        <DataCard
           status={status}
           snapshot={view({ running, job: running })}
           onDialog={() => {}}
@@ -413,10 +402,10 @@ describe('the data cards', () => {
     // Kumo turns a disabled button's title into its tooltip: why it waits.
     expect(screen.getByTestId('overview-snapshot-download')).toBeDisabled()
     expect(screen.getByTestId('overview-snapshot-save')).toBeDisabled()
-    expect(screen.getByTestId('overview-reset-firestore-open')).toBeDisabled()
+    expect(await screen.findByTestId('overview-reset-open')).toBeDisabled()
   })
 
-  it('follow a snapshot being saved on the engine’s machine on the Snapshot card, with no Cancel', async () => {
+  it('follows a snapshot being saved on the engine’s machine in its Snapshot half, with no Cancel', async () => {
     const status = withDocuments(1596)
     const saving = job({
       kind: 'suite.export',
@@ -426,7 +415,7 @@ describe('the data cards', () => {
     })
     await renderInConsole(
       () => (
-        <DataCards
+        <DataCard
           status={status}
           snapshot={view({ running: saving, job: saving })}
           onDialog={() => {}}
@@ -440,10 +429,10 @@ describe('the data cards', () => {
     // The hub's export is one command: it cannot be stopped once it runs.
     expect(screen.queryByTestId('overview-job-cancel')).toBeNull()
     expect(within(screen.getByTestId('overview-reset')).queryByTestId('overview-job')).toBeNull()
-    expect(screen.getByTestId('overview-reset-firestore-open')).toBeDisabled()
+    expect(await screen.findByTestId('overview-reset-open')).toBeDisabled()
   })
 
-  it('offer a prepared snapshot for download, and open a reset for its row', async () => {
+  it('offers a prepared snapshot for download, and opens a reset from its menu', async () => {
     const user = userEvent.setup()
     const status = withDocuments(1596)
     const onReset = vi.fn()
@@ -458,7 +447,7 @@ describe('the data cards', () => {
     })
     await renderInConsole(
       () => (
-        <DataCards
+        <DataCard
           status={status}
           snapshot={view({
             job: done,
@@ -476,12 +465,21 @@ describe('the data cards', () => {
     )
     await user.click(screen.getByTestId('overview-snapshot-ready-download'))
     expect(download).toHaveBeenCalledOnce()
-    await user.click(screen.getByTestId('overview-reset-firestore-open'))
+    // The menu's code follows the first paint; until then the same button stands in for it.
+    await waitFor(
+      () => expect(screen.getByTestId('overview-reset-open')).toHaveAttribute('aria-haspopup'),
+      { timeout: 5000 },
+    )
+    await user.click(screen.getByTestId('overview-reset-open'))
+    // Each section says what it holds; the reset itself is the dialog's.
+    const firestore = await screen.findByTestId('overview-reset-firestore')
+    expect(firestore).toHaveTextContent('1596 documents · 1 database')
+    await user.click(firestore)
     expect(onReset).toHaveBeenCalledWith({ kind: 'section', id: 'firestore' })
   })
 })
 
-describe('the engine section', () => {
+describe('the engine card', () => {
   /** The engine details before `/overview/engine` has answered: the data facts alone. */
   const unanswered = {
     data: undefined,
@@ -498,15 +496,17 @@ describe('the engine section', () => {
     },
   })
 
-  it('says where the data lives, how writes reach the disk, and where it goes on exit', async () => {
+  it('says where the data lives and how writes reach the disk, and the rest under Show all', async () => {
+    const user = userEvent.setup()
     await renderInConsole(() => <EngineDetails status={disk} details={unanswered} />, {
       status: disk,
     })
-    expect(screen.getByTestId('engine-data')).toHaveTextContent('On disk·resumed·/work/app/state')
-    expect(screen.getByTestId('engine-writes')).toHaveTextContent(
-      'per-commit(each commit reaches the disk before it answers)',
-    )
+    expect(screen.getByTestId('engine-data')).toHaveTextContent('On disk·resumed/work/app/state')
+    expect(screen.getByTestId('engine-writes')).toHaveTextContent('per-commit')
+    expect(screen.queryByTestId('engine-export-on-exit')).toBeNull()
+    await user.click(screen.getByTestId('overview-engine-all'))
     expect(screen.getByTestId('engine-export-on-exit')).toHaveTextContent('/work/app/export')
+    expect(screen.getByTestId('overview-engine-all')).toHaveTextContent('Show less')
   })
 
   it('in memory, says the data is gone when the engine stops and has no writes to describe', async () => {
@@ -518,5 +518,18 @@ describe('the engine section', () => {
       'In memory(gone when the engine stops)',
     )
     expect(screen.queryByTestId('engine-writes')).toBeNull()
+  })
+
+  it('opens whole when the address names it', async () => {
+    window.history.replaceState(null, '', '/#engine')
+    try {
+      await renderInConsole(() => <EngineDetails status={disk} details={unanswered} />, {
+        status: disk,
+      })
+      expect(screen.getByTestId('overview-engine-details')).toHaveAttribute('data-all', 'true')
+      expect(screen.getByTestId('engine-export-on-exit')).toBeInTheDocument()
+    } finally {
+      window.history.replaceState(null, '', '/')
+    }
   })
 })

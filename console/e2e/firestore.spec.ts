@@ -423,10 +423,10 @@ test('a dropped live channel says so once, in the engine badge, and replays what
   const row = page.getByTestId('grid-row').filter({ hasText: 't_real' })
   await expect(row).toBeVisible()
   const badge = page.getByTestId('engine-badge')
-  await expect(badge).toHaveText(/^engine /)
+  await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live')
 
   await dropLive(page)
-  await expect(badge).toHaveText('reconnecting', { timeout: 3_000 })
+  await expect(badge).toHaveText('Reconnecting', { timeout: 3_000 })
   await badge.hover()
   await expect(page.locator('.kumo-tooltip-popup')).toContainText(
     'so what is on screen may be out of date',
@@ -435,7 +435,7 @@ test('a dropped live channel says so once, in the engine badge, and replays what
   // there and nowhere else: the toolbar keeps quiet.
   await expect(page.getByTestId('live-state')).toHaveCount(0)
   // Gone long enough, it says the engine stopped.
-  await expect(badge).toHaveText('engine stopped', { timeout: 5_000 })
+  await expect(badge).toHaveText('Engine stopped', { timeout: 5_000 })
 
   // A write while the channel is down: nobody hears it now, and the
   // channel replays it when it is back, so the grid catches up without a
@@ -459,7 +459,9 @@ test('a dropped live channel says so once, in the engine badge, and replays what
   await expect(row).not.toContainText(seats)
 
   await restoreLive(page)
-  await expect(badge).toHaveText(/^engine /, { timeout: 15_000 })
+  await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live', {
+    timeout: 15_000,
+  })
   await expect(row).toContainText(seats, { timeout: 5_000 })
 })
 
@@ -3923,8 +3925,10 @@ test('the root landing keeps its recents to one row, in the cards’ columns', a
 
   // A long path is cut from the front: where a column has room for the
   // id, the id shows whole, and the path before it still reads left to
-  // right up to it.
-  await page.setViewportSize({ width: 1440, height: 800 })
+  // right up to it. At 1200 a column has room for the id and some of the
+  // path; at 1440 it has room for the id alone, which then reads "…" and
+  // the id.
+  await page.setViewportSize({ width: 1200, height: 800 })
   await page.reload()
   const chip = page.getByTestId('recent').first()
   const label = chip.locator('span[dir="rtl"]')

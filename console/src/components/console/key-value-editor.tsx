@@ -111,7 +111,7 @@ export function rowProblems(
  * stylesheet's order wins, not the class list's.
  */
 const BOX =
-  'h-7 min-w-0 rounded-md px-2 font-mono text-[12px] ring outline-none placeholder:font-sans placeholder:text-kumo-inactive focus:ring-kumo-focus'
+  'h-7 min-w-0 rounded-md px-2 font-mono text-[12px] ring outline-none placeholder:font-sans placeholder:text-kumo-placeholder focus:ring-kumo-focus'
 /** The add line's boxes: the same shape, quieter, since nothing is in them yet. */
 const ADDING = 'bg-transparent text-kumo-default ring-kumo-hairline'
 /** A row's box at rest. */
@@ -235,7 +235,7 @@ export function KeyValueEditor({
             spellCheck={false}
             aria-label={`${label}, one per line`}
             placeholder={`${keyPlaceholder}: ${valuePlaceholder}`}
-            className="min-h-0 resize-y rounded-md bg-kumo-control px-2 py-1.5 font-mono text-[12px] leading-5 text-kumo-default ring ring-kumo-line outline-none placeholder:font-sans placeholder:text-kumo-inactive focus:ring-kumo-focus"
+            className="min-h-0 resize-y rounded-md bg-kumo-control px-2 py-1.5 font-mono text-[12px] leading-5 text-kumo-default ring ring-kumo-line outline-none placeholder:font-sans placeholder:text-kumo-placeholder focus:ring-kumo-focus"
             data-testid={`${ids}-text`}
           />
           <p className="m-0 text-[12px] text-kumo-subtle">

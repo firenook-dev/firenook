@@ -47,12 +47,21 @@ async function documentsOf(engine: ObservedEngine): Promise<number | null | unde
     ?.summary?.figures.find((figure) => figure.label === 'Documents')?.value
 }
 
+/** Opens the Data card's reset menu, once its code has arrived. */
+async function openResetMenu(page: Page) {
+  const button = page.getByTestId('overview-reset-open')
+  await expect(button).toHaveAttribute('aria-haspopup', 'menu')
+  await button.click()
+  await expect(page.getByTestId('overview-reset-menu')).toBeVisible()
+}
+
 /**
- * Opens Firestore's reset from the Overview's Reset card and presses Reset;
+ * Opens Firestore's reset from the Data card's menu and presses Reset;
  * the dialog hands the reset to the card once the engine has started it.
  */
 async function resetFirestore(page: Page, options: { runTriggers?: boolean } = {}) {
-  await page.getByTestId('overview-reset-firestore-open').click()
+  await openResetMenu(page)
+  await page.getByTestId('overview-reset-firestore').click()
   const dialog = page.getByTestId('reset-dialog')
   await expect(dialog).toBeVisible()
   await expect(dialog).toContainText('Every document in every database is deleted')
@@ -89,34 +98,43 @@ dedicated.describe('the Overview with engines of their own', () => {
   // Each journey starts and seeds an engine of its own first.
   dedicated.describe.configure({ timeout: 90_000 })
 
-  dedicated('what does not run says why, and the exact fix', async ({ page, dedicatedEngine }) => {
-    // The data profile ships no Functions codebase, yet Functions is asked for.
-    const engine = await dedicatedEngine('data', { only: 'firestore,auth,functions', seed: false })
-    await page.goto(`${engine.origin}/console`)
-    const absent = page.getByTestId('overview-not-running')
-    await expect(absent).toBeVisible()
-    const functions = page.getByTestId('overview-absent-functions')
-    await expect(functions).toContainText(
-      'firebase.json configures no Functions codebase and no Extensions.',
-    )
-    const storage = page.getByTestId('overview-absent-storage')
-    await expect(storage).toBeVisible()
-    // Every fix is a block that copies as typed.
-    const fixes = absent.locator('[data-testid^="overview-absent-"][data-kind]')
-    await expect(fixes.first()).toBeVisible()
-    const functionsFix = absent.locator('[data-testid^="overview-absent-functions-fix-"]').first()
-    await expect(functionsFix).toContainText('"functions"')
-    await functionsFix.getByTestId(/-copy$/).click()
-    const copied = await page.evaluate(() =>
-      (
-        globalThis as unknown as { navigator: { clipboard: { readText(): Promise<string> } } }
-      ).navigator.clipboard.readText(),
-    )
-    expect(copied).toContain('"functions"')
-    const storageFix = absent.locator('[data-testid^="overview-absent-storage-fix-"]').first()
-    await expect(storageFix).toBeVisible()
-    await expect(storageFix).toContainText(/storage/)
-  })
+  dedicated(
+    'what does not run says why, and leads to the exact fix',
+    async ({ page, dedicatedEngine }) => {
+      // The data profile ships no Functions codebase, yet Functions is asked for.
+      const engine = await dedicatedEngine('data', {
+        only: 'firestore,auth,functions',
+        seed: false,
+      })
+      await page.goto(`${engine.origin}/console`)
+      // Every section keeps its tile; one the engine does not run says why.
+      const functions = page.getByTestId('overview-card-functions')
+      await expect(functions).toHaveAttribute('data-state', 'absent')
+      await expect(page.getByTestId('overview-card-functions-detail')).toContainText(
+        'firebase.json configures no Functions codebase and no Extensions.',
+      )
+      await expect(page.getByTestId('overview-card-storage')).toHaveAttribute(
+        'data-state',
+        'absent',
+      )
+      await expect(page.getByTestId('overview-health')).toContainText('running')
+      // The tile opens the section's gate, where the fix copies as typed.
+      await functions.click()
+      await expect(page).toHaveURL(/\/console\/functions/)
+      const fixes = page.getByTestId('section-fixes')
+      await expect(fixes).toContainText('"functions"')
+      await fixes
+        .getByTestId(/-copy$/)
+        .first()
+        .click()
+      const copied = await page.evaluate(() =>
+        (
+          globalThis as unknown as { navigator: { clipboard: { readText(): Promise<string> } } }
+        ).navigator.clipboard.readText(),
+      )
+      expect(copied).toContain('"functions"')
+    },
+  )
 
   dedicated('a snapshot downloads as a standard export', async ({ page, dedicatedEngine }) => {
     const engine = await dedicatedEngine('observe')
@@ -257,9 +275,12 @@ dedicated.describe('the Overview with engines of their own', () => {
       expect(topic.ok, `topic → ${topic.status}`).toBe(true)
       await page.goto(`${engine.origin}/console`)
       await expect(page.getByTestId('overview-reset')).toBeVisible()
-      const rows = page.getByTestId('overview-reset-rows').locator(':scope > [data-testid]')
-      await expect(rows.first()).toBeVisible()
-      const sections = (await rows.evaluateAll((found) =>
+      // The menu lists every section a reset can name, each with what it holds.
+      await openResetMenu(page)
+      const items = page
+        .getByTestId('overview-reset-menu')
+        .locator('[data-testid^="overview-reset-"]:not([data-testid="overview-reset-everything"])')
+      const sections = (await items.evaluateAll((found) =>
         found.map((row) => row.getAttribute('data-testid')?.replace(/^overview-reset-/, '') ?? ''),
       )) as string[]
       // Firestore's seed and the topic made above, at least.
@@ -275,15 +296,18 @@ dedicated.describe('the Overview with engines of their own', () => {
       await confirm.click()
       await expect(page.getByTestId('reset-dialog')).toHaveCount(0)
       await expect(page.getByText(/^Clear .+: done$/)).toBeVisible({ timeout: 60_000 })
-      // Every section it named holds nothing now, on its row and its card.
-      for (const id of sections) {
-        await expect(page.getByTestId(`overview-reset-${id}`)).toContainText('Empty', {
-          timeout: 10_000,
-        })
+      // Every section it named holds nothing now, on its tile and in the menu.
+      for (const id of sections)
         await expect(page.locator(`[data-testid^="overview-figure-${id}-"]`).first()).toHaveText(
           '0',
+          { timeout: 10_000 },
         )
+      await openResetMenu(page)
+      for (const id of sections) {
+        await expect(page.getByTestId(`overview-reset-${id}`)).toContainText('Empty')
+        await expect(page.getByTestId(`overview-reset-${id}`)).toHaveAttribute('data-disabled')
       }
+      await page.keyboard.press('Escape')
       // One marker per section in Logs, each saying what it deleted.
       await expect
         .poll(async () => (await facetsOf(engine, { q: 'kind:data.reset' })).matched)

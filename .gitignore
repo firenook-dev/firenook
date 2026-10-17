@@ -35,3 +35,6 @@
 /console/design-system/kit/dist/
 /console/design-system/kit/docs/
 /console/.design-sync/*.log
+# The brand kit's build environment (brand/source/README: Rebuilding).
+/brand/source/.venv/
+__pycache__/

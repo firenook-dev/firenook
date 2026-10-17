@@ -533,7 +533,7 @@ function NameInput({
       // `field-sizing: content` is floored by the `size` attribute, whose
       // default is twenty characters.
       size={1}
-      className={`h-8 w-auto max-w-40 min-w-10 shrink-0 rounded bg-transparent px-1.5 text-[13px] font-medium text-kumo-default outline-none field-sizing-content placeholder:font-normal placeholder:text-kumo-inactive focus:bg-kumo-control focus:ring focus:ring-kumo-focus ${
+      className={`h-8 w-auto max-w-40 min-w-10 shrink-0 rounded bg-transparent px-1.5 text-[13px] font-medium text-kumo-default outline-none field-sizing-content placeholder:font-normal placeholder:text-kumo-placeholder focus:bg-kumo-control focus:ring focus:ring-kumo-focus ${
         invalid ? 'ring ring-kumo-danger' : ''
       }`}
       aria-label={node.name ? `${node.name} name` : 'Field name'}

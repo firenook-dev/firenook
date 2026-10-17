@@ -20,8 +20,8 @@ import {
   BracketsCurlyIcon,
   CaretDownIcon,
   CaretRightIcon,
-  CommandIcon,
   CopyIcon,
+  CubeIcon,
   DatabaseIcon,
   DownloadSimpleIcon,
   FolderIcon,
@@ -38,11 +38,13 @@ import {
   PhoneIcon,
   PlusIcon,
   ShieldCheckIcon,
-  SquareHalfIcon,
   TrashIcon,
   WarningIcon,
   XIcon,
+  PlugsConnectedIcon,
 } from '@phosphor-icons/react'
+import { FirenookLogo } from '@/components/kit'
+import { HelpButton } from '@/components/shell/help-button'
 import type { CSSProperties, ReactNode } from 'react'
 import { AREA_LABELS, SECTIONS, type ServiceArea } from '@/lib/services'
 import { defineCards } from '../registry'
@@ -80,7 +82,7 @@ function SchemaTreeRows({ rows }: { rows: typeof SHELL_SHAPE }) {
           <div
             className={`flex h-7 items-center rounded-md pr-1.5 ${
               'current' in node && node.current
-                ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-kumo-brand)]'
+                ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-firenook-flame)]'
                 : ''
             }`}
           >
@@ -141,139 +143,138 @@ function Shell() {
   return (
     <TooltipProvider>
       <div className="grid gap-4">
-        <div className="flex h-[640px] w-full overflow-hidden rounded-lg ring ring-kumo-hairline">
-          <Sidebar.Provider
-            contained
-            defaultOpen
-            className="h-full w-auto shrink-0 min-h-0!"
-            style={{ '--sidebar-width': '14rem' } as CSSProperties}
-          >
-            <Sidebar>
-              <Sidebar.Header>
-                <div className="flex items-center gap-2 px-2 py-1">
-                  <span className="flex size-6 items-center justify-center rounded-md bg-kumo-brand text-white">
-                    <GaugeIcon size={14} weight="bold" />
-                  </span>
-                  <Text bold>Firenook</Text>
-                  <Text variant="secondary">console</Text>
-                </div>
-              </Sidebar.Header>
-              <Sidebar.Content>
-                <Sidebar.Group>
-                  <Sidebar.Menu>
-                    <Sidebar.MenuButton icon={GaugeIcon}>Overview</Sidebar.MenuButton>
-                  </Sidebar.Menu>
-                </Sidebar.Group>
-                {AREAS.map((area) => (
-                  <Sidebar.Group key={area}>
-                    <Sidebar.GroupLabel>{AREA_LABELS[area]}</Sidebar.GroupLabel>
+        <div className="flex h-[640px] w-full flex-col overflow-hidden rounded-lg ring ring-kumo-hairline">
+          <header className="flex h-12 shrink-0 items-center gap-3 border-b border-kumo-line bg-kumo-base pr-3 pl-[18px]">
+            <FirenookLogo className="h-[24px] w-auto" />
+            <span className="text-[18px] font-light text-kumo-line">/</span>
+            <span className="flex min-w-0 items-center gap-2">
+              <CubeIcon size={15} className="shrink-0 text-kumo-subtle" />
+              <InlineCopyText
+                value="demo-shop-local"
+                variant="body"
+                size="sm"
+                className="font-mono text-kumo-default"
+              >
+                demo-shop-local
+              </InlineCopyText>
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<PlugsConnectedIcon size={14} />}
+              className="h-8 rounded-lg px-2.5 text-[13px]"
+            >
+              Connect
+            </Button>
+            <div className="ml-auto flex items-center gap-2">
+              <HelpButton />
+              <span className="flex h-8 w-56 items-center gap-2 rounded-lg bg-kumo-base px-2.5 text-[13px] text-kumo-subtle ring ring-kumo-line">
+                <MagnifyingGlassIcon size={14} />
+                Search…
+                <kbd className="ml-auto rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">
+                  ⌘K
+                </kbd>
+              </span>
+            </div>
+          </header>
+          <div className="flex min-h-0 flex-1">
+            <Sidebar.Provider
+              contained
+              defaultOpen
+              className="h-full w-auto shrink-0 min-h-0!"
+              style={{ '--sidebar-width': '15.5rem' } as CSSProperties}
+            >
+              <Sidebar>
+                <Sidebar.Content>
+                  <Sidebar.Group>
                     <Sidebar.Menu>
-                      {SECTIONS.filter((section) => section.area === area).map((section) => (
-                        <Sidebar.MenuButton
-                          key={section.to}
-                          icon={section.icon}
-                          active={section.to === '/firestore'}
-                        >
-                          {section.label}
-                        </Sidebar.MenuButton>
-                      ))}
+                      <Sidebar.MenuButton icon={GaugeIcon}>Overview</Sidebar.MenuButton>
                     </Sidebar.Menu>
                   </Sidebar.Group>
-                ))}
-              </Sidebar.Content>
-              <Sidebar.Footer>
-                <Sidebar.Trigger />
-              </Sidebar.Footer>
-            </Sidebar>
-          </Sidebar.Provider>
-          <div className="flex min-w-0 flex-1 flex-col bg-kumo-canvas">
-            <header className="flex h-12 shrink-0 items-center gap-3 border-b border-kumo-line bg-kumo-base pr-4 pl-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                shape="square"
-                icon={<SquareHalfIcon />}
-                aria-label="Hide the schema panel"
-                className="text-kumo-default"
-              />
-              <div className="flex min-w-0 items-center gap-2">
-                <Text variant="secondary" size="sm">
-                  Project
-                </Text>
-                <InlineCopyText value="demo-shop-local" className="font-mono text-[0.9em]">
-                  demo-shop-local
-                </InlineCopyText>
-              </div>
-              <div className="ml-auto flex items-center gap-2">
-                <Badge variant="success" appearance="dot">
-                  engine 0.2.0
-                </Badge>
-                <Button variant="ghost" size="sm" icon={<CommandIcon />}>
-                  <span className="flex items-center gap-1.5">
-                    Search
-                    <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">
-                      ⌘K
-                    </kbd>
+                  {AREAS.map((area) => (
+                    <Sidebar.Group key={area}>
+                      <Sidebar.GroupLabel>{AREA_LABELS[area]}</Sidebar.GroupLabel>
+                      <Sidebar.Menu>
+                        {SECTIONS.filter((section) => section.area === area).map((section) => (
+                          <Sidebar.MenuButton
+                            key={section.to}
+                            icon={section.icon}
+                            active={section.to === '/firestore'}
+                          >
+                            {section.label}
+                          </Sidebar.MenuButton>
+                        ))}
+                      </Sidebar.Menu>
+                    </Sidebar.Group>
+                  ))}
+                </Sidebar.Content>
+                <Sidebar.Footer>
+                  <Sidebar.Trigger />
+                  <span className="ml-auto truncate font-mono text-[11px] text-kumo-subtle">
+                    v0.2.0
                   </span>
-                </Button>
-              </div>
-            </header>
-            <div className="flex min-h-0 flex-1">
-              <aside className="flex w-[264px] shrink-0 flex-col border-r border-kumo-line bg-kumo-base">
-                <PanelHead />
-                <div className="min-h-0 flex-1 overflow-hidden">
-                  <SchemaTreeRows rows={SHELL_SHAPE} />
-                </div>
-                <div className="grid shrink-0 gap-0.5 border-t border-kumo-line px-3 py-1.5">
-                  <span className="font-mono text-[11px] text-kumo-subtle">users/*/orders</span>
-                  <span className="text-[12px] text-kumo-default tabular-nums">
-                    12,340 documents{' '}
-                    <span className="text-kumo-subtle">
-                      in 4,100 of 211,260 <span className="font-mono text-[11px]">users</span>
+                </Sidebar.Footer>
+              </Sidebar>
+            </Sidebar.Provider>
+            <div className="flex min-w-0 flex-1 flex-col bg-kumo-canvas">
+              <div className="flex min-h-0 flex-1">
+                <aside className="flex w-[264px] shrink-0 flex-col border-r border-kumo-line bg-kumo-base">
+                  <PanelHead />
+                  <div className="min-h-0 flex-1 overflow-hidden">
+                    <SchemaTreeRows rows={SHELL_SHAPE} />
+                  </div>
+                  <div className="grid shrink-0 gap-0.5 border-t border-kumo-line px-3 py-1.5">
+                    <span className="font-mono text-[11px] text-kumo-subtle">users/*/orders</span>
+                    <span className="text-[12px] text-kumo-default tabular-nums">
+                      12,340 documents{' '}
+                      <span className="text-kumo-subtle">
+                        in 4,100 of 211,260 <span className="font-mono text-[11px]">users</span>
+                      </span>
                     </span>
-                  </span>
-                </div>
-              </aside>
-              <main className="flex min-w-0 flex-1 flex-col">
-                <div className="flex h-11 shrink-0 items-center gap-1 border-b border-kumo-line bg-kumo-base pr-2 pl-3">
-                  <PathSegment label="(default)" />
-                  <span className="px-0.5 text-kumo-inactive">/</span>
-                  <PathSegment label="users" count="211,260" />
-                  <span className="px-0.5 text-kumo-inactive">/</span>
-                  <span className="px-1.5 font-mono text-[13px] text-kumo-inactive">*</span>
-                  <span className="px-0.5 text-kumo-inactive">/</span>
-                  <PathSegment label="orders" count="12,340" current />
-                  <span className="ml-auto flex items-center gap-1">
-                    <Button variant="primary" size="sm">
-                      group
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      shape="square"
-                      icon={<CopyIcon />}
-                      aria-label="Copy the path"
-                    />
-                    <span className="mx-1.5 h-5 w-px bg-kumo-line" />
-                    <LiveDot />
-                    <Button variant="primary" size="sm" icon={<PlusIcon />} className="ml-1">
-                      New
-                    </Button>
-                  </span>
-                </div>
-                <div className="flex flex-1 items-center justify-center bg-kumo-base">
-                  <Text variant="secondary">
-                    The grid, edge to edge; the inspector opens beside it.
-                  </Text>
-                </div>
-              </main>
+                  </div>
+                </aside>
+                <main className="flex min-w-0 flex-1 flex-col">
+                  <div className="flex h-11 shrink-0 items-center gap-1 border-b border-kumo-line bg-kumo-base pr-2 pl-3">
+                    <PathSegment label="(default)" />
+                    <span className="px-0.5 text-kumo-inactive">/</span>
+                    <PathSegment label="users" count="211,260" />
+                    <span className="px-0.5 text-kumo-inactive">/</span>
+                    <span className="px-1.5 font-mono text-[13px] text-kumo-inactive">*</span>
+                    <span className="px-0.5 text-kumo-inactive">/</span>
+                    <PathSegment label="orders" count="12,340" current />
+                    <span className="ml-auto flex items-center gap-1">
+                      <Button variant="primary" size="sm">
+                        group
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        shape="square"
+                        icon={<CopyIcon />}
+                        aria-label="Copy the path"
+                      />
+                      <span className="mx-1.5 h-5 w-px bg-kumo-line" />
+                      <LiveDot />
+                      <Button variant="primary" size="sm" icon={<PlusIcon />} className="ml-1">
+                        New
+                      </Button>
+                    </span>
+                  </div>
+                  <div className="flex flex-1 items-center justify-center bg-kumo-base">
+                    <Text variant="secondary">
+                      The grid, edge to edge; the inspector opens beside it.
+                    </Text>
+                  </div>
+                </main>
+              </div>
             </div>
           </div>
         </div>
         <Text variant="secondary" size="sm">
-          The navigation is Kumo's sidebar, expanded or collapsed to icons; collapsed, the labels
-          slide out over the page while the pointer is on it and go back when it leaves. The control
-          at its foot and{' '}
+          One bar runs across the top: the logo, the project, the engine and search. The navigation
+          under it is Kumo's sidebar, expanded or collapsed to icons; collapsed, the labels slide
+          out over the page while the pointer is on it and go back when it leaves. The control at
+          its foot and{' '}
           <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">[</kbd>{' '}
           flip it, and the choice is kept per browser. The panel beside the content is the section's
           own column: Firestore fills it with the database, a filter and the schema tree; the button

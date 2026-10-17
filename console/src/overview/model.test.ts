@@ -2,12 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { Badge } from '@/api/generated/live/Badge'
 import { sectionEntry, testStatus } from '@/test/status'
 import {
-  absentGroups,
-  absentSections,
   addressOf,
-  cardConnect,
   dataWords,
-  engineName,
   figureText,
   holdsNothing,
   infrastructure,
@@ -19,6 +15,10 @@ import {
   resetConsequence,
   resettableSections,
   sectionCards,
+  sharedHost,
+  shortPath,
+  suiteHealth,
+  tileAddress,
   uptime,
 } from './model'
 
@@ -76,23 +76,27 @@ const STATUS = testStatus({
   ],
 })
 
-describe('section cards', () => {
-  it('are drawn for every section that runs or starts, in the sidebar order, with its address', () => {
+describe('section tiles', () => {
+  it('are drawn for every section, absent ones in their place, in the sidebar order', () => {
     const cards = sectionCards(STATUS, badges())
-    expect(cards.map((card) => card.section.id)).toEqual([
-      'firestore',
-      'functions',
-      'extensions',
-      'logs',
+    expect(cards.map((card) => [card.section.id, card.health.label])).toEqual([
+      ['firestore', 'Running'],
+      ['auth', 'Not running'],
+      ['storage', 'Not running'],
+      ['functions', 'Starting'],
+      ['extensions', 'Running'],
+      ['logs', 'Running'],
     ])
     expect(cards[0]?.address && addressOf(cards[0].address)).toBe('127.0.0.1:8080')
-    expect(cards[3]?.address && addressOf(cards[3].address)).toBe('127.0.0.1:4500')
+    expect(cards[5]?.address && addressOf(cards[5].address)).toBe('127.0.0.1:4500')
+    // A section the engine does not run has no address to show.
+    expect(cards[1]?.address).toBeUndefined()
   })
 
-  it('say when a card shows an address another one already does', () => {
-    const [, functions, extensions] = sectionCards(STATUS, badges())
-    expect(functions?.sharedWith).toBeUndefined()
-    expect(extensions?.sharedWith?.id).toBe('functions')
+  it('say when a tile shows an address another one already does', () => {
+    const cards = sectionCards(STATUS, badges())
+    expect(cards[3]?.sharedWith).toBeUndefined()
+    expect(cards[4]?.sharedWith?.id).toBe('functions')
   })
 
   it('count only the section’s gauges above zero that are not neutral as its problems', () => {
@@ -115,7 +119,7 @@ describe('section cards', () => {
       },
     ])
     expect(firestore?.health).toEqual({ tone: 'warning', label: '1 problem', pulse: false })
-    expect(cards[3]?.problems).toEqual([])
+    expect(cards[5]?.problems).toEqual([])
   })
 
   it('link a gauge no page carries to the section itself', () => {
@@ -134,34 +138,64 @@ describe('section cards', () => {
   })
 
   it('show a starting section as starting, with no problems and the engine’s detail', () => {
-    const functions = sectionCards(STATUS, badges(gauge('functions.load', 1)))[1]
+    const functions = sectionCards(STATUS, badges(gauge('functions.load', 1)))[3]
     expect(functions?.health).toEqual({ tone: 'neutral', label: 'Starting', pulse: true })
     expect(functions?.problems).toEqual([])
     expect(functions?.status.detail).toBe('Discovering functions in 2 codebases…')
   })
 
-  it('send the Functions card to its lines in Logs while Logs runs, and no other card', () => {
+  it('show the port alone when the host is the one every tile shares', () => {
     const cards = sectionCards(STATUS, badges())
-    expect(cards.find((card) => card.section.id === 'functions')?.logs).toEqual({
-      to: '/logs',
-      search: { q: 'service:functions' },
+    expect(sharedHost(cards)).toBe('127.0.0.1')
+    const firestore = service('firestore', 8080)
+    expect(tileAddress(firestore, '127.0.0.1')).toBe(':8080')
+    expect(tileAddress(firestore, undefined)).toBe('127.0.0.1:8080')
+    const split = sectionCards(
+      testStatus({
+        services: [service('firestore', 8080), service('functions', 5001, '::1')],
+        sections: [sectionEntry('firestore'), sectionEntry('functions')],
+      }),
+      badges(),
+    )
+    expect(sharedHost(split)).toBeUndefined()
+    expect(tileAddress(service('functions', 5001, '::1'), undefined)).toBe('[::1]:5001')
+  })
+})
+
+describe('the suite in one line', () => {
+  const tiles = (...sections: Parameters<typeof sectionEntry>[]) =>
+    sectionCards(testStatus({ sections: sections.map((args) => sectionEntry(...args)) }), badges())
+
+  it('says every service runs only when none is missing', () => {
+    expect(suiteHealth(tiles(['firestore'], ['auth']))).toEqual({
+      tone: 'success',
+      label: 'All 2 services running',
+      pulse: false,
     })
-    for (const card of cards.filter((entry) => entry.section.id !== 'functions'))
-      expect(card.logs).toBeNull()
-    const absent = testStatus({
-      sections: [sectionEntry('functions'), sectionEntry('logs', { state: 'absent' })],
-    })
-    expect(sectionCards(absent, badges())[0]?.logs).toBeNull()
+    expect(suiteHealth(tiles(['firestore'], ['auth', { state: 'absent' }])).label).toBe(
+      '1 service running',
+    )
   })
 
-  it('link a section’s later pages', () => {
-    const cards = sectionCards(STATUS, badges())
-    expect(cards[0]?.pages).toEqual([
-      expect.objectContaining({ to: '/firestore/rules', label: 'Rules' }),
-    ])
-    expect(cards[1]?.pages).toEqual([
-      expect.objectContaining({ to: '/functions/invocations', label: 'Invocations' }),
-    ])
+  it('says what starts, and then what needs attention', () => {
+    expect(suiteHealth(tiles(['firestore'], ['functions', { state: 'starting' }]))).toEqual({
+      tone: 'neutral',
+      label: '1 running, 1 starting',
+      pulse: true,
+    })
+    const troubled = sectionCards(
+      testStatus({ sections: [sectionEntry('firestore'), sectionEntry('auth')] }),
+      badges(gauge('firestore.rules', 1)),
+    )
+    expect(suiteHealth(troubled)).toEqual({
+      tone: 'warning',
+      label: '2 running · 1 service needs attention',
+      pulse: false,
+    })
+  })
+
+  it('says nothing runs when nothing does', () => {
+    expect(suiteHealth(tiles(['firestore', { state: 'absent' }])).label).toBe('No services running')
   })
 })
 
@@ -183,8 +217,8 @@ describe('figures', () => {
   })
 })
 
-describe('infrastructure and absent sections', () => {
-  it('list the hub, this UI, the logging feed and the requests socket that the engine runs', () => {
+describe('the engine card', () => {
+  it('lists the hub, this UI, the logging feed and the requests socket that the engine runs', () => {
     expect(
       infrastructure(STATUS).map((entry) => [entry.label, entry.address, entry.thisPage]),
     ).toEqual([
@@ -196,53 +230,14 @@ describe('infrastructure and absent sections', () => {
     expect(addressOf({ host: '::1', port: 4000 })).toBe('[::1]:4000')
   })
 
-  it('give every absent section the engine’s sentence, or a plain one', () => {
-    expect(
-      absentSections(STATUS).map((entry) => [
-        entry.section.id,
-        entry.detail,
-        entry.status.fixes.length,
-      ]),
-    ).toEqual([
-      ['auth', 'This engine was started without Authentication.', 1],
-      ['storage', 'This engine does not run Storage.', 0],
-    ])
-  })
-})
-
-describe('absent sections that one fix turns on', () => {
-  it('share it, printed once, in the order each group first appears', () => {
-    const functions = {
-      label: 'Add it to firebase.json',
-      kind: 'firebase-json' as const,
-      text: '"functions": [{ "source": "functions" }]',
-    }
-    const status = testStatus({
-      sections: [
-        sectionEntry('storage', {
-          state: 'absent',
-          fixes: [
-            { label: 'Add it to firebase.json', kind: 'firebase-json', text: '"storage": {}' },
-          ],
-        }),
-        sectionEntry('functions', { state: 'absent', fixes: [functions] }),
-        sectionEntry('extensions', { state: 'absent', fixes: [functions] }),
-        sectionEntry('pubsub', { state: 'absent' }),
-        sectionEntry('eventarc', { state: 'absent', fixes: [functions] }),
-        sectionEntry('tasks', { state: 'absent' }),
-      ],
-    })
-    expect(
-      absentGroups(status).map((group) => [
-        group.sections.map((entry) => entry.section.id),
-        group.fixes.length,
-      ]),
-    ).toEqual([
-      [['storage'], 1],
-      [['functions', 'extensions', 'eventarc'], 1],
-      [['pubsub'], 0],
-      [['tasks'], 0],
-    ])
+  it('takes the middle out of a long path, keeping the folders that name it', () => {
+    expect(shortPath('/work/clients/acme/shop/apps/web-firebase')).toBe(
+      '/work/…/shop/apps/web-firebase',
+    )
+    expect(shortPath('/work/shop/firebase.json')).toBe('/work/shop/firebase.json')
+    expect(shortPath('C:\\Users\\dev\\work\\shop\\apps\\web')).toBe('C:\\…\\shop\\apps\\web')
+    expect(shortPath('relative/a/b/c/d')).toBe('relative/a/b/c/d')
+    expect(shortPath('relative/a/b/c/d/e')).toBe('relative/…/c/d/e')
   })
 })
 
@@ -286,12 +281,6 @@ describe('resets', () => {
 })
 
 describe('the header', () => {
-  it('names the engine’s release, or says it has none', () => {
-    const engine = { name: 'Firenook', version: '0.2.0-next.3', revision: null, consoleBuild: 'x' }
-    expect(engineName(engine)).toBe('Firenook 0.2.0-next.3')
-    expect(engineName({ ...engine, version: null })).toBe('Firenook, unreleased build')
-  })
-
   it('says how long the engine has run, to the minute', () => {
     const start = '2026-10-12T10:00:00.000Z'
     const at = (ms: number) => Date.parse(start) + ms
@@ -388,12 +377,5 @@ describe('recent problems', () => {
     })
     expect(logsEntryLink('ab.1', absent)).toBeNull()
     expect(logsProblemsLink(absent)).toBeNull()
-  })
-
-  it('send each card’s Connect to the snippet its app is written with', () => {
-    expect(cardConnect('firestore')).toBe('web')
-    expect(cardConnect('pubsub')).toBe('node')
-    expect(cardConnect('tasks')).toBe('env')
-    expect(cardConnect('logs')).toBeUndefined()
   })
 })

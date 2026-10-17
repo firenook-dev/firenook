@@ -52,6 +52,7 @@ import {
   WarningIcon,
   XIcon,
 } from '@phosphor-icons/react'
+import { FirenookLogo } from '@/components/kit'
 import { useEffect, useRef, useState } from 'react'
 import { defineCards } from '../registry'
 import { Row, Section, Stack } from './shared'
@@ -891,11 +892,8 @@ function SidebarCard() {
             <Sidebar.Provider contained defaultOpen className="h-full min-h-0!">
               <Sidebar>
                 <Sidebar.Header>
-                  <div className="flex items-center gap-2 px-2 py-1">
-                    <span className="flex size-6 items-center justify-center rounded-md bg-kumo-brand text-white">
-                      <GaugeIcon size={14} weight="bold" />
-                    </span>
-                    <Text bold>Firenook</Text>
+                  <div className="flex items-center px-2 py-1">
+                    <FirenookLogo className="h-[22px] w-auto" />
                   </div>
                 </Sidebar.Header>
                 <Sidebar.Content>

@@ -8,7 +8,6 @@
 // prop, or drawn from the parts the component itself uses.
 
 import {
-  Badge,
   Button,
   Sidebar,
   Text,
@@ -83,6 +82,12 @@ import { JsonView } from '@/components/console/json-view'
 import { KeyValueEditor, type KeyValueRow } from '@/components/console/key-value-editor'
 import { KeyValueList } from '@/components/console/key-value-list'
 import { LiveNotice, liveNoticeText } from '@/components/console/live-notice'
+import {
+  LIVE_BADGE,
+  LiveBadgeFace,
+  type LiveTrouble,
+  liveTrouble,
+} from '@/components/shell/live-badge'
 import { LogLine, type LogLineLevel } from '@/components/console/log-line'
 import { MaskedValue } from '@/components/console/masked-value'
 import { MatchCount } from '@/components/console/match-count'
@@ -1436,29 +1441,32 @@ function NavCard() {
 
 // ---- live-channel-states -------------------------------------------------
 
-/** The engine badge as the top bar draws it in each state. */
-function EngineFace({
-  variant,
-  label,
-  why,
-}: {
-  variant: 'success' | 'warning' | 'error'
-  label: string
-  why: string
-}) {
+/** The top bar's live badge in one state, with what its tooltip says. */
+function EngineFace({ trouble }: { trouble: LiveTrouble }) {
   return (
     <div className="flex items-center gap-4">
-      <span className="w-48 shrink-0">
-        <Badge variant={variant} appearance="dot">
-          {label}
-        </Badge>
+      <span className="w-52 shrink-0">
+        <span className={cn(LIVE_BADGE, 'w-fit')}>
+          <LiveBadgeFace trouble={trouble} />
+        </span>
       </span>
       <Text variant="secondary" size="sm">
-        {why}
+        {trouble.why}
       </Text>
     </div>
   )
 }
+
+/** Each state the bar says, from the shell's own list. */
+const LIVE_TROUBLES = (
+  [
+    ['reconnecting', false, false],
+    ['offline', false, false],
+    ['too-many', false, false],
+    ['connecting', false, true],
+    ['live', true, false],
+  ] as const
+).flatMap(([live, updated, unreachable]) => liveTrouble(live, updated, unreachable) ?? [])
 
 /** The restart toast, in a box of its own so it is drawn where the card is. */
 function RestartToastSample() {
@@ -1529,26 +1537,13 @@ function LiveChannelCard() {
     <Kit>
       <Stack>
         <Section
-          title="The engine badge"
-          note="One connection per browser; its state is said once, in the top bar, and nowhere else on the page."
+          title="The live badge"
+          note="One connection per browser. While it is live the top bar says nothing about it; when it is not, it says so once, there, and nowhere else on the page."
         >
           <div className="grid gap-3">
-            <EngineFace variant="success" label="engine 0.2.0" why="Live: the engine's version." />
-            <EngineFace
-              variant="warning"
-              label="reconnecting"
-              why="Live updates are reconnecting, so what is on screen may be out of date."
-            />
-            <EngineFace
-              variant="error"
-              label="engine stopped"
-              why="The engine stopped. The console reconnects by itself when it is back."
-            />
-            <EngineFace
-              variant="warning"
-              label="too many console tabs"
-              why="This engine already serves 64 console connections. Close a console tab."
-            />
+            {LIVE_TROUBLES.map((trouble) => (
+              <EngineFace key={trouble.label} trouble={trouble} />
+            ))}
           </div>
         </Section>
         <Section
@@ -2111,7 +2106,7 @@ defineCards([
     group: 'Patterns',
     name: 'Live channel states',
     subtitle:
-      'The engine badge’s four states (live, reconnecting, engine stopped, too many tabs), LiveNotice for an ended subscription, the restart toast',
+      'The live badge’s states (reconnecting, engine stopped, too many tabs, unreachable, updated), LiveNotice for an ended subscription, the restart toast',
     width: 880,
     surface: 'canvas',
     render: () => <LiveChannelCard />,

@@ -6,19 +6,15 @@
 
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import type { DataFacts } from '@/api/generated/DataFacts'
-import type { EngineInfo } from '@/api/generated/EngineInfo'
 import type { Badge } from '@/api/generated/live/Badge'
 import type { OverviewProblem } from '@/api/generated/observe/OverviewProblem'
-import type { SectionFix } from '@/api/generated/SectionFix'
 import type { SectionStatus } from '@/api/generated/SectionStatus'
 import type { SectionSummary } from '@/api/generated/SectionSummary'
 import type { ServiceStatus } from '@/api/generated/ServiceStatus'
 import type { SummaryFigure } from '@/api/generated/SummaryFigure'
 import { formatBytes, formatCount, formatDuration, formatNumber } from '@/lib/format'
 import { linkTo } from '@/lib/links'
-import { linkToLogs } from '@/lib/sections/logs'
 import { type ConsoleSection, type SectionId, type SectionLink, sectionById } from '@/lib/services'
-import type { ConnectParam } from '@/lib/connect-tabs'
 
 /** A card's state: the dot and the word beside the section's name. */
 export interface CardHealth {
@@ -38,24 +34,16 @@ export interface CardProblem {
   link: SectionLink
 }
 
-/** A running section, as its card draws it. */
+/** A section, as its tile on the Overview draws it. */
 export interface SectionCard {
   section: ConsoleSection
   status: SectionStatus
   /** Where an app reaches the section's service; absent when the engine lists no port for it. */
   address: ServiceStatus | undefined
-  /** The card before it that already shows this address (Extensions run in the Functions runtime). */
+  /** The tile before it that already shows this address (Extensions run in the Functions runtime). */
   sharedWith: ConsoleSection | undefined
   problems: CardProblem[]
   health: CardHealth
-  /** The section's pages after its first, as links on the card ("Rules"). */
-  pages: readonly { to: string; label: string }[]
-  /**
-   * The section's own lines in Logs: the Functions card's "Logs", as the
-   * official Functions card linked to the log viewer. `null` for every
-   * other section, and while Logs does not run.
-   */
-  logs: SectionLink | null
 }
 
 const PROBLEM = { one: 'problem', other: 'problems' }
@@ -90,15 +78,21 @@ export function cardProblems(
   return problems
 }
 
-/** Starting, a count of problems, or running. */
+/** Not running, starting, a count of problems, or running. */
 export function cardHealth(status: SectionStatus, problems: readonly CardProblem[]): CardHealth {
+  if (status.state === 'absent') return { tone: 'neutral', label: 'Not running', pulse: false }
   if (status.state === 'starting') return { tone: 'neutral', label: 'Starting', pulse: true }
   if (problems.length > 0)
     return { tone: 'warning', label: formatCount(problems.length, PROBLEM), pulse: false }
   return { tone: 'success', label: 'Running', pulse: false }
 }
 
-/** A card for every section the engine runs or is starting, in the sidebar's order. */
+/**
+ * A tile for every section, in the sidebar's order: the ones the engine
+ * runs or is starting, and the ones it does not, which keep their place so
+ * the grid is the same shape on every engine and an absent section reads as
+ * a gap in a known set rather than a missing card.
+ */
 export function sectionCards(
   status: ConsoleStatus,
   badges: ReadonlyMap<string, Badge>,
@@ -106,10 +100,9 @@ export function sectionCards(
   const cards: SectionCard[] = []
   const shown = new Map<string, ConsoleSection>()
   for (const entry of status.sections) {
-    if (entry.state === 'absent') continue
     const section = sectionById(entry.id)
     if (!section) continue
-    const service = section.services[0]
+    const service = entry.state === 'absent' ? undefined : section.services[0]
     const address =
       service === undefined
         ? undefined
@@ -124,12 +117,58 @@ export function sectionCards(
       sharedWith,
       problems,
       health: cardHealth(entry, problems),
-      pages: (section.pages ?? []).slice(1),
-      logs:
-        entry.id === 'functions' && logsOpen(status) ? linkToLogs({ service: 'functions' }) : null,
     })
   }
   return cards
+}
+
+/** The whole suite in one line, for the page's header. */
+export interface SuiteHealth {
+  tone: CardHealth['tone']
+  /** "All 9 services running", "8 running, 1 starting", "9 running · 1 needs attention". */
+  label: string
+  pulse: boolean
+}
+
+const SERVICE = { one: 'service', other: 'services' }
+
+export function suiteHealth(cards: readonly SectionCard[]): SuiteHealth {
+  const running = cards.filter((card) => card.status.state === 'ready').length
+  const starting = cards.filter((card) => card.status.state === 'starting').length
+  const absent = cards.filter((card) => card.status.state === 'absent').length
+  const troubled = cards.filter((card) => card.problems.length > 0).length
+  if (starting > 0)
+    return { tone: 'neutral', label: `${running} running, ${starting} starting`, pulse: true }
+  if (troubled > 0)
+    return {
+      tone: 'warning',
+      label: `${running} running · ${formatCount(troubled, SERVICE)} ${troubled === 1 ? 'needs' : 'need'} attention`,
+      pulse: false,
+    }
+  if (running === 0) return { tone: 'neutral', label: 'No services running', pulse: false }
+  return {
+    tone: 'success',
+    label:
+      absent === 0
+        ? `All ${formatCount(running, SERVICE)} running`
+        : `${formatCount(running, SERVICE)} running`,
+    pulse: false,
+  }
+}
+
+/**
+ * The host every tile's address shares, so each tile can show its port
+ * alone and the host is written once; `undefined` when they differ (a
+ * service bound elsewhere), and each tile then shows its whole address.
+ */
+export function sharedHost(cards: readonly SectionCard[]): string | undefined {
+  const hosts = new Set(cards.flatMap((card) => (card.address ? [card.address.host] : [])))
+  return hosts.size === 1 ? [...hosts][0] : undefined
+}
+
+/** What a tile shows for its address: the port alone when the host is the shared one. */
+export function tileAddress(service: ServiceStatus, host: string | undefined): string {
+  return service.host === host ? `:${service.port}` : addressOf(service)
 }
 
 /** A figure as the card writes it: grouped, bytes as a size, "—" while it is still being counted. */
@@ -184,60 +223,6 @@ export function infrastructure(status: ConsoleStatus): InfrastructureEntry[] {
     const service = status.services.find((candidate) => candidate.name === entry.name)
     return service ? [{ ...entry, address: addressOf(service), thisPage: entry.name === 'ui' }] : []
   })
-}
-
-/** A section this engine does not run, and the engine's words on why. */
-export interface AbsentSection {
-  section: ConsoleSection
-  status: SectionStatus
-  /** The engine's sentence, or a plain one when it gave none. */
-  detail: string
-}
-
-export function absentSections(status: ConsoleStatus): AbsentSection[] {
-  return status.sections.flatMap((entry) => {
-    const section = entry.state === 'absent' ? sectionById(entry.id) : undefined
-    return section
-      ? [
-          {
-            section,
-            status: entry,
-            detail: entry.detail ?? `This engine does not run ${section.label}.`,
-          },
-        ]
-      : []
-  })
-}
-
-/** Absent sections that the same fixes turn on, and those fixes. */
-export interface AbsentGroup {
-  sections: AbsentSection[]
-  fixes: SectionFix[]
-}
-
-/**
- * The absent sections, those with the very same fixes together, in the order
- * each group first appears: Functions, Extensions, Eventarc and Cloud Tasks
- * all come back with one `"functions"` entry, which is printed once under
- * the four reasons rather than four times. A section without a fix stands
- * alone.
- */
-export function absentGroups(status: ConsoleStatus): AbsentGroup[] {
-  const groups: AbsentGroup[] = []
-  const byFixes = new Map<string, AbsentGroup>()
-  for (const entry of absentSections(status)) {
-    const fixes = entry.status.fixes
-    const key = fixes.map((fix) => `${fix.kind}\u0000${fix.label}\u0000${fix.text}`).join('\u0001')
-    const known = fixes.length > 0 ? byFixes.get(key) : undefined
-    if (known) {
-      known.sections.push(entry)
-      continue
-    }
-    const group = { sections: [entry], fixes }
-    groups.push(group)
-    if (fixes.length > 0) byFixes.set(key, group)
-  }
-  return groups
 }
 
 /**
@@ -322,26 +307,6 @@ export function cardHolds(id: SectionId): string {
   return CARD_HOLDS[id]
 }
 
-/** The snippet a card's "Connect" opens: what an app of that section is written with. */
-const CARD_CONNECT: Partial<Record<SectionId, ConnectParam>> = {
-  firestore: 'web',
-  auth: 'web',
-  storage: 'web',
-  functions: 'web',
-  pubsub: 'node',
-  eventarc: 'env',
-  tasks: 'env',
-}
-
-export function cardConnect(id: SectionId): ConnectParam | undefined {
-  return CARD_CONNECT[id]
-}
-
-/** "Firenook 0.2.0-next.3", or the build that has no release to name. */
-export function engineName(engine: EngineInfo): string {
-  return engine.version ? `${engine.name} ${engine.version}` : `${engine.name}, unreleased build`
-}
-
 /** How long the engine has run, to the minute: "under a minute", "14 min", "2 h 14 min". */
 export function uptime(startedAt: string, now: number): string {
   const started = Date.parse(startedAt)
@@ -349,6 +314,21 @@ export function uptime(startedAt: string, now: number): string {
   const ms = Math.max(0, now - started)
   if (ms < 60_000) return 'under a minute'
   return formatDuration(ms - (ms % 60_000))
+}
+
+/**
+ * A long path with its middle taken out, so the end — the folder that
+ * names it — stays in sight: `/work/…/apps/web-firebase`. The first
+ * segment and the last `keep` are kept; a path that short is returned
+ * whole. Shown only; a copy takes the whole path.
+ */
+export function shortPath(path: string, keep = 3): string {
+  const separator = path.includes('\\') && !path.includes('/') ? '\\' : '/'
+  const parts = path.split(separator)
+  // A rooted path starts with an empty segment: keep the root and the one after it.
+  const head = parts[0] === '' ? 2 : 1
+  if (parts.length <= head + keep + 1) return path
+  return [...parts.slice(0, head), '…', ...parts.slice(-keep)].join(separator)
 }
 
 /** Where the data lives, in words: "on disk, resumed", "in memory". */

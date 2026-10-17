@@ -1,3 +1,4 @@
+import type { Locator } from '@playwright/test'
 import { expect, test } from './fixtures'
 import { ENGINE_REVISION, RELEASE_VERSION } from './engine'
 
@@ -11,29 +12,83 @@ const project = () => process.env.FIRENOOK_CONSOLE_PROJECT ?? 'demo-console-e2e'
 test('the overview shows what the engine runs, where, and what it does not', async ({ page }) => {
   await page.goto(`${origin()}/console`)
   await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible()
-  await expect(page.getByTestId('overview-project')).toHaveText(project())
-  // A card per running section, each with the address an app connects to.
+  // The project is the top bar's, on every page; the header says the suite in one line.
+  await expect(page.getByTestId('top-bar-project')).toHaveText(project())
+  await expect(page.getByTestId('overview-health')).toContainText('running')
+  // A tile per section, each with the port an app connects to on the shared host.
   const firestore = page.getByTestId('overview-card-firestore')
-  await expect(firestore.getByTestId('overview-card-firestore-address')).toHaveText(
-    /^127\.0\.0\.1:\d+$/,
-  )
+  await expect(firestore.getByTestId('overview-card-firestore-address')).toHaveText(/^:\d+$/)
+  await expect(page.getByTestId('overview-host-shared')).toContainText('127.0.0.1')
   await expect(firestore.getByTestId('overview-card-firestore-health')).toHaveText('Running')
   await expect(page.getByTestId('overview-card-auth')).toBeVisible()
-  await expect(page.getByTestId('overview-infrastructure')).toContainText('Hub')
-  // This profile starts Firestore and Authentication only: Storage says why it is missing.
-  await expect(page.getByTestId('overview-absent-storage')).toBeVisible()
+  // This profile starts Firestore and Authentication only: Storage keeps its place and says why.
+  const storage = page.getByTestId('overview-card-storage')
+  await expect(storage).toHaveAttribute('data-state', 'absent')
+  await expect(page.getByTestId('overview-card-storage-health')).toHaveText('Not running')
   // The release the launcher declared, not the placeholder crate version:
   // the engine is built from a pinned commit and cannot know what it ships
   // as, so a wrong number here means the handoff is broken.
-  const badge = page.getByTestId('engine-badge')
-  await expect(badge).toHaveText(`engine ${RELEASE_VERSION}`)
-  await expect(badge).toHaveAttribute(
-    'title',
+  // It is written small at the navigation's foot, in full in its tooltip.
+  const build = `Firenook ${RELEASE_VERSION}, engine source ${ENGINE_REVISION.slice(0, 12)}`
+  await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live')
+  const version = page.getByTestId('nav-version')
+  await expect(version).toHaveText(`v${RELEASE_VERSION}`)
+  await version.hover()
+  await expect(page.getByTestId('nav-version-build')).toHaveText(build)
+  await expect(page.getByTestId('engine-version')).toHaveText(
+    `${RELEASE_VERSION}·${ENGINE_REVISION.slice(0, 12)}`,
+  )
+  // The hub and the other ports no section owns are on the engine card, under "Show all".
+  await page.getByTestId('overview-engine-all').click()
+  await expect(page.getByTestId('overview-infrastructure')).toContainText('Hub')
+})
+
+test('the top bar: Connect over the page on screen, and help', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore`)
+  await page.getByTestId('top-bar-connect').click()
+  const connect = page.getByRole('dialog', { name: 'Connect your app' })
+  await expect(connect).toBeVisible()
+  await expect(page).toHaveURL(/\/console\/firestore\?connect=web$/)
+  await page.keyboard.press('Escape')
+  await expect(connect).toHaveCount(0)
+  await expect(page).toHaveURL(/\/console\/firestore$/)
+
+  // Help: the shortcuts, and the ways out, an issue already naming this engine.
+  await page.getByTestId('top-bar-help').click()
+  const repository = 'https://github.com/firenook-dev/firenook'
+  await expect(page.getByTestId('help-docs')).toHaveAttribute('href', `${repository}#readme`)
+  await expect(page.getByTestId('help-docs')).toHaveAttribute('target', '_blank')
+  // An unpublished build has no release page of its own: the list.
+  await expect(page.getByTestId('help-releases')).toHaveAttribute('href', `${repository}/releases`)
+  const issue = new URL((await page.getByTestId('help-issue').getAttribute('href')) ?? '')
+  expect(`${issue.origin}${issue.pathname}`).toBe(`${repository}/issues/new`)
+  expect(issue.searchParams.get('body')).toContain(
     `Firenook ${RELEASE_VERSION}, engine source ${ENGINE_REVISION.slice(0, 12)}`,
   )
-  await expect(page.getByTestId('overview-engine')).toHaveText(
-    `Firenook ${RELEASE_VERSION} (engine ${ENGINE_REVISION.slice(0, 12)})`,
-  )
+  await page.getByTestId('help-shortcuts').click()
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible()
+})
+
+test('the tab carries Firenook’s icon, and the console installs as an app', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore`)
+  // Links under the console's base path, from any page however deep.
+  const icons = await page
+    .locator('link[rel="icon"], link[rel="apple-touch-icon"], link[rel="manifest"]')
+    .evaluateAll((links) => links.map((link) => (link as unknown as { href: string }).href))
+  expect(icons.length).toBe(4)
+  for (const href of icons) {
+    const response = await page.request.get(href)
+    expect(response.status(), href).toBe(200)
+    expect(response.headers()['content-type'], href).not.toContain('text/html')
+  }
+  const manifest = (await (
+    await page.request.get(`${origin()}/console/site.webmanifest`)
+  ).json()) as { start_url: string; icons: { src: string }[] }
+  for (const icon of manifest.icons)
+    expect((await page.request.get(new URL(icon.src, `${origin()}/console/`).href)).status()).toBe(
+      200,
+    )
+  await expect(page.getByTestId('firenook-logo')).toBeVisible()
 })
 
 test('the theme is light, dark or the system\u2019s, and it is remembered', async ({ browser }) => {
@@ -90,6 +145,13 @@ test('client routes deep-link through the engine and navigate in place', async (
   await expect(page.getByText('not running', { exact: true })).toBeVisible()
 })
 
+/** Where an element is drawn, and its middle across. */
+async function box(locator: Locator) {
+  const rect = await locator.boundingBox()
+  if (!rect) throw new Error('not on the page')
+  return { ...rect, centre: rect.x + rect.width / 2 }
+}
+
 test('the navigation collapses to icons that peek on hover, and remembers it', async ({ page }) => {
   await page.goto(`${origin()}/console/tasks`)
   const nav = page.locator('aside[data-sidebar="sidebar"]')
@@ -99,6 +161,26 @@ test('the navigation collapses to icons that peek on hover, and remembers it', a
   // Collapsed: icons only, and the choice survives a reload.
   await page.getByTestId('nav-toggle').click()
   await expect(nav).toHaveAttribute('data-state', 'collapsed')
+
+  // The rail is one square button wide, each icon in the middle of its
+  // button, and the brand's mark over that column. Kumo draws the rail for
+  // a 16 px root; at the console's 14 px its buttons were 34 by 30 with the
+  // icon 2.5 px left of centre (`NAV_WIDTH`).
+  await page.mouse.move(900, 400)
+  await expect
+    .poll(() => nav.evaluate((element) => element.getBoundingClientRect().width))
+    .toBeLessThan(56)
+  const functions = page.getByTestId('nav-functions')
+  const geometry = {
+    button: await box(functions),
+    icon: await box(functions.locator('svg').first()),
+    toggle: await box(page.getByTestId('nav-toggle')),
+    mark: await box(page.getByTestId('top-bar-home').locator('svg > g').first()),
+  }
+  expect(Math.abs(geometry.button.width - geometry.button.height)).toBeLessThan(1)
+  expect(Math.abs(geometry.icon.centre - geometry.button.centre)).toBeLessThan(1)
+  expect(Math.abs(geometry.toggle.centre - geometry.button.centre)).toBeLessThan(1)
+  expect(Math.abs(geometry.mark.centre - geometry.button.centre)).toBeLessThan(1)
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Cloud Tasks', level: 1 })).toBeVisible()
   await expect(nav).toHaveAttribute('data-state', 'collapsed')

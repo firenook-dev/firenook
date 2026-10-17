@@ -6,6 +6,7 @@ import { lazy } from 'react'
 import { AppShell } from '@/components/shell/app-shell'
 import { Page } from '@/components/shell/page'
 import { RouteError } from '@/components/shell/route-error'
+import { rootSearchSchema } from '@/connect/search'
 
 export interface RouterContext {
   queryClient: QueryClient
@@ -15,7 +16,9 @@ const Devtools = import.meta.env.DEV
   ? lazy(() => import('@/components/shell/devtools').then((m) => ({ default: m.Devtools })))
   : () => null
 
+// Every page takes `?connect=`, the top bar's "Connect your app" (`connect/search.ts`).
 export const Route = createRootRouteWithContext<RouterContext>()({
+  validateSearch: rootSearchSchema,
   component: RootLayout,
   notFoundComponent: NotFound,
   errorComponent: RouteError,

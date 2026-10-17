@@ -473,7 +473,7 @@ function Row({
     )
   const line = `group/row relative flex min-h-5 items-start pr-2 font-mono text-[12px] leading-5 ${
     cursor
-      ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-kumo-brand)]'
+      ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-firenook-flame)]'
       : active
         ? 'bg-kumo-tint'
         : 'hover:ink'

@@ -4,7 +4,7 @@
 // last part of the page), lifting the whole shell — top bar included — off
 // the top of the window. So only the column is scrolled.
 //
-// A link names a part by its hash (`/#engine`, the engine badge's link;
+// A link names a part by its hash (`/#engine`, the navigation's version;
 // `/#data`, where ⌘K's snapshot download is followed): the page brings it
 // into view when it opens on it, and again each time the part is asked for
 // while it is open (`components/shell/overview-parts.ts`).
@@ -34,7 +34,9 @@ export function reveal(element: HTMLElement | null): void {
     column.getBoundingClientRect().top +
     column.scrollTop -
     GAP
-  column.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+  // Smooth, unless the reader asked the system for less motion.
+  const reduced = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  column.scrollTo({ top: Math.max(0, top), behavior: reduced ? 'auto' : 'smooth' })
 }
 
 /** `reveal` by the part's id. */
@@ -56,8 +58,13 @@ export function useRevealHash(): void {
   const router = useRouter()
   useEffect(() => {
     revealHash(router.state.location.hash)
-    return useOverviewAsks.subscribe((state) => {
-      if (state.part) revealHash(state.part)
+    useOverviewAsks.setState({ shown: true })
+    const unsubscribe = useOverviewAsks.subscribe((state, previous) => {
+      if (state.part && state.asks !== previous.asks) revealHash(state.part)
     })
+    return () => {
+      unsubscribe()
+      useOverviewAsks.setState({ shown: false })
+    }
   }, [router])
 }

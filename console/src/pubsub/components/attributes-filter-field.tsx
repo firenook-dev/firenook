@@ -187,7 +187,7 @@ export function AttributesFilterField({
           aria-invalid={invalid || undefined}
           className={cn(
             TEXT,
-            'col-start-1 row-start-1 h-full min-w-0 bg-transparent text-kumo-default outline-none placeholder:text-kumo-inactive',
+            'col-start-1 row-start-1 h-full min-w-0 bg-transparent text-kumo-default outline-none placeholder:text-kumo-placeholder',
           )}
           data-testid={`${testId}-input`}
         />

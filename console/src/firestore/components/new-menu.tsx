@@ -81,7 +81,8 @@ export function NewMenu() {
             )}
           </>
         )}
-        <DropdownMenu.Separator />
+        {/* A divider separates two groups; at the root there is only the one. */}
+        {(collection || selected) && <DropdownMenu.Separator />}
         <DropdownMenu.Item
           icon={FolderPlusIcon}
           onClick={() => open({ kind: 'collection', parent: '' })}

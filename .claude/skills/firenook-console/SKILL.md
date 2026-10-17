@@ -44,15 +44,59 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 
 ## The shell (`src/components/shell/`)
 
+- **One bar across the whole window, then the columns under it** (since
+  2026-10-17, after the Supabase dashboard's shape): the top bar is 48 px,
+  full width — Firenook's logo (a link to the Overview), a slash, the
+  project id (copyable) and **Connect** ("Connect your app", `src/connect/`),
+  and at its end the live badge (only when the channel has trouble), help
+  ("?"), the search field (⌘K) and the theme. The logo is `FirenookLogo` (`components/kit`), the
+  brand's flat horizontal file with its paths unchanged and its viewBox
+  cropped to the artwork; the wordmark takes `--color-firenook-wordmark`
+  (charcoal, white in dark). It is 24 px tall in `px`, not rem: the root is
+  14 px here, so `h-6` is 21 px. Its flames sit between the navigation's
+  expanded and collapsed icon columns (they differ by 4 px), so collapsing
+  the navigation moves nothing in the bar. The navigation carries no brand
+  of its own. The favicons, app icons and `site.webmanifest` are the
+  brand's set in `console/public`, linked from `index.html` from the root
+  (`/favicon.svg`): Vite puts the `/console/` base in front, in development
+  and in the build alike, while `%BASE_URL%` got it twice in development;
+  `console.spec.ts` fetches each from the engine.
+- **The bar says only what every page needs.** A live channel says
+  nothing (the user asked why a steady "Live" pill was there at all); the
+  live badge appears only with trouble ("Reconnecting", "Engine stopped",
+  "Too many console tabs", "Engine unreachable", "Engine updated":
+  `live-badge.tsx`), as a chip shaped like the search field (`LIVE_BADGE`),
+  never a round pill. The channel's state is the bar's `data-live` either
+  way, which the journeys wait on. The engine's version is written small at
+  the navigation's foot beside the collapse control (`NavVersion`,
+  `engineVersionShort`: `v0.2.0-next.2`, a local build's `.g<commit>` left
+  to the tooltip), hidden while collapsed, and links to `/#engine`. Help is a
+  menu (`help-menu.tsx`, lazy; `help-button.tsx` stands in until it
+  arrives, since Kumo's menu is not in the first route): the shortcuts,
+  then the documentation, this release's notes and a new issue with the
+  version filled in (`lib/project-links.ts`). No account, project switcher
+  or notifications: a local emulator has one project and no users, and the
+  sidebar's badges and the shell banners already carry what needs a look.
 - Primary navigation is Kumo's `Sidebar`, expanded or collapsed
   (`useLayout.navOpen`, localStorage), always `peekable`: collapsed, the
   labels slide out over the page on hover, as on kumo-ui.com. The foot of
   the nav is Kumo's own `Sidebar.Trigger` (icon only, in a tooltip); `[`
   flips it; ⌘K offers it under "Layout". Only the navigation sits inside
-  `Sidebar.Provider`, and the provider's wrapper is `z-30 w-auto shrink-0`
-  so the fixed peek overlays the content. (Kumo 2.14's context memo omits
-  `peekable`, so never flip that prop at runtime; it is constant here.) The
-  expanded width is 14rem through `--sidebar-width` on the provider.
+  `Sidebar.Provider`, which is `contained`: Kumo then places the collapsed
+  and peeking nav `absolute` inside its own column instead of `fixed` to
+  the window, which would lay the peek over the top bar, and drops the
+  provider's `min-h-svh`, which would push the column 48 px past the
+  window. The provider's wrapper is `z-30 w-auto shrink-0` so the peek
+  overlays the content. (Kumo 2.14's context memo omits `peekable`, so
+  never flip that prop, or `contained`, at runtime; both are constant
+  here.) The expanded width is 15.5rem through `--sidebar-width` on the
+  provider. Collapsed, `--sidebar-width-icon` is one square button and its
+  gutters (`calc(2.125rem + 2 * 11px + 1px)`): Kumo's 57 px rail is drawn
+  for a 16 px root, and at the console's 14 px it left 34 by 30 buttons
+  with every icon 2.5 px off centre. The top bar's mark is centred over
+  that column (17 px in). Nav icons are `NavIconWithDot` at 50 %, not
+  Kumo's 40 %, which was 2.55:1 on the light rail; `shell-theme.spec.ts`
+  holds 3:1 and `console.spec.ts` the rail's geometry.
 - The section panel is a second column beside the content (`PANEL_WIDTH`,
   264 px). A section fills it by rendering `<SectionPanel label="…">` (a
   portal into the shell's slot, so the section's providers reach it). The
@@ -75,7 +119,7 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 - The content column has no padding of its own. Document-like pages wrap
   themselves in `<Page>` (`page.tsx`, the reading gutter); workbenches fill
   it edge to edge with their own toolbar and borders.
-- The top bar's engine badge says the live channel's state and is a link to
+- The navigation's version (and the live badge, when it shows) is a link to
   the Overview's engine section (`/#engine`, `components/shell/overview-parts.ts`):
   the engine's facts (version, where the data lives, how writes reach the
   disk, folders, switches) are drawn once, there. Its popover, with its own
@@ -94,9 +138,10 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
   budget" is never by itself a reason to refuse something a route loads
   lazily. Check the manifest before claiming it; the rules editor carried
   that wrong claim in a header comment for months. The Overview's dialogs
-  (save, reset) load when first asked for, which kept the
-  dropdown, dialog, radio, checkbox and danger-confirm chunks off the
-  landing route.
+  (save, reset) and the top bar's Connect load when first asked for, and
+  the reset and help menus right after the first paint (the same button stands in until it
+  has), which keeps the dropdown, dialog, radio, checkbox and
+  danger-confirm chunks off the landing route.
 - Every script, stylesheet and SVG over 1 KB gets a gzip copy at build time
   (`precompress` in `vite.config.ts`); the engine serves it when the
   request accepts gzip, with `Vary: accept-encoding` (`serve` in
@@ -586,7 +631,7 @@ defaults never in the URL):
 | `pubsub.rejected`, `pubsub.dead-lettered` | counter | attention | Pub/Sub › Topics |
 | `tasks.failed` | counter | danger | Cloud Tasks |
 | `logs.errors` | counter | attention | Logs |
-| `shell.foreign` | gauge | danger | the shell banner and the engine badge's dot |
+| `shell.foreign` | gauge | danger | the shell banner |
 
 **Entity kinds** (`EntityRef`, keys split at the first `|`):
 `firestore.collection` `<db>|<pattern>` · `firestore.document` `<db>|<path>` ·
@@ -698,8 +743,11 @@ stream, loaded by glob). A few behaviours worth knowing:
   hover); a fact's age is `RelativeTime`. Never slice a formatted time.
 - "Connect your app" has one tab list, `CONNECT_TABS` in
   `lib/connect-tabs.ts` (each tab's `?connect=` value, generator target,
-  label and title; data only, because the Overview's route schema reads
-  it in the first route). `connectSnippet(target, …)` writes one snippet;
+  label and title; data only, because the root route's schema reads it in
+  the first route). The dialog is the top bar's (`src/connect/`): `?connect=`
+  is every page's (`connect/search.ts`, on the root route), so a link or
+  ⌘K opens it over the page on screen, and closing it drops the parameter
+  and leaves the page as it was (`navigateConnect`, `to: '.'`). `connectSnippet(target, …)` writes one snippet;
   `connectDialects(status, { services, params? })` in `lib/connect.ts`
   gives a `CodeBlock` its tabs from that list (an empty section shows
   `EMPTY_CONNECT`: web, node, python, go).
@@ -838,11 +886,29 @@ Follow the `kumo-design` skill (vendored Kumo rules) and `console/AGENTS.md`.
 Semantic tokens only (`bg-kumo-base`, `text-kumo-subtle`, `ring-kumo-line`),
 14 px content text, sentence-case headings, `font-semibold` not `font-bold`,
 no colour transitions on hover, dialogs always mounted and toggled with
-`open`. Firenook's identity lives in `src/theme.css` alone: the ember accent
-(`--color-kumo-brand` and the link colour) and the type pair (Inter for
-the interface, the face Kumo's docs render in; IBM Plex Mono for data),
-self-hosted from `public/fonts`. The sans face is registered as
-`InterVariable`, not `Inter`: the TanStack devtools inject a document-level
+`open`. Firenook's identity lives in `src/theme.css` alone: the brand kit's
+colours split by job, and the type pair (Inter for the interface, the face
+Kumo's docs render in; IBM Plex Mono for data), self-hosted from
+`public/fonts`. **Blue** (a cobalt, `oklch(0.49 0.2 263)`; rings and dots
+take a lighter `#4c8eef` in dark mode) is `--color-kumo-brand`: the primary
+button, links, focus rings, progress, an in-flight state, the unsaved dot.
+Charcoal, the logo's amber and a rust orange were tried on buttons and set
+aside; blue is what flame-logo consoles (Firebase, Cloudflare) press with.
+**Flame** (the logo's vermilion `#F23818`, `bg-firenook-flame`) marks
+where you are and nothing else: the active tab's underline, the selected
+row's bar in a tree, a table or the schema, the open document, the current
+sort, a checked menu item, a drop target; `text-kumo-brand` (those icons)
+takes it darkened for text. Never a link: a vermilion "See why" beside an
+`error` and a `warn` read as a third problem. The flame never fills a button or colours a state,
+because vermilion is the danger red within ten degrees and amber is the
+warning. A feed's selected row (Logs, events) keeps a blue bar: a log
+line's left edge is its level's. A primary button is the cobalt in both
+modes (Kumo's own `#056dff` fails under its white label), a Delete button
+fills deeper than Kumo's red so its white label reads, and secondary,
+warning and placeholder text and the warning fill are set darker where
+Kumo's measure below AA; `e2e/shell-theme.spec.ts` holds every one of
+those ratios in both modes on the kit harness. The sans face is registered
+as `InterVariable`, not `Inter`: the TanStack devtools inject a document-level
 `@font-face` named Inter in dev builds, and the last declared face wins, so
 a face named Inter would render the devtools' build on the dev server.
 Light, dark, or the operating system's choice: `lib/color-mode.ts` holds
@@ -1594,9 +1660,9 @@ text right and break the value column the whole layout exists for.
 Remember that `html` is 14 px here, so `max-w-40` is 140 px, not 160.
 
 Once a panel is that quiet, **the footer's count needs somewhere to point**:
-a field the next Save will write carries a small ember dot beside its name.
-That is the accent doing the job it is reserved for — Save is the row's
-primary action and this is what it is about to write.
+a field the next Save will write carries a small blue dot beside its name,
+in the primary's own colour: Save is the row's primary action and this is
+what it is about to write.
 
 `TypeBadge` takes `menu` where the chip opens the type menu, and the two
 places differ on purpose: in a grid header it is a label in a dense row and
@@ -2045,8 +2111,8 @@ is almost always "what happened to *this*?".
 
 **What is left in its place:** the console has **one live connection per
 browser** (`src/lib/live`), so a dropped channel is said **once, by the
-engine badge in the top bar** (amber "reconnecting", red "engine stopped"
-the moment the engine says it is stopping, amber "too many console tabs"),
+live badge in the top bar** (amber "Reconnecting", red "Engine stopped"
+the moment the engine says it is stopping, amber "Too many console tabs"),
 with a tooltip saying what is on screen may be out of date. The grid is
 kept current by that channel, so a dropped channel is a grid that looks
 fresh and is not — the one thing a dev tool must not do quietly. While it
@@ -3463,21 +3529,22 @@ ones are the palette's Suite group, `suiteItems` in `command-palette.tsx`). Jour
   ⌘K's "Download a snapshot") downloads it by itself. A snapshot download
   holds every service the engine runs; choosing services is the save's.
 - **A data job's progress is shown once.** On the Overview its Data card
-  follows it (snapshot and save on the Snapshot card, a reset on the Reset
-  card, with Cancel when it can stop): each dialog closes once the engine
+  follows it (snapshot and save in its Snapshot half, a reset in its Reset
+  half, with Cancel when it can stop): each dialog closes once the engine
   has started the job, and the shell's job toasts (`JobsWatch`, `jobToast`)
   leave a running suite job alone while the Overview is on screen. Every
   other page and tab follows it in the toast; how it ended is toasted
   everywhere.
-- **The Overview's links.** Other pages lead here with `/?connect=<tab>`
-  (Connect on that tab, in view), `/?dialog=reset&section=<id>` (that
+- **The Overview's links.** Other pages lead here with `/?dialog=reset&section=<id>` (that
   section's reset, nothing while it cannot be reset), `/?dialog=save`, and
   the hashes `#engine` and `#data` (`useRevealHash`, which reveals in the
   column, never `scrollIntoView`, and again on each ask while the page is
   open, since a link to the address shown changes nothing the router sees).
+  `#engine` also opens the engine card whole, as "Show all" does.
   ⌘K's Suite group (`suiteItems`) holds the suite-wide actions once, from
-  any page; the Overview's own palette adds "Connect your app" and the
-  snippet copies.
+  any page, "Connect your app" among them; Connect adds a row per
+  platform's snippet copy once something is typed (`connect/palette.tsx`).
+  (`?connect=<tab>` is every page's, not the Overview's: the top bar's.)
 - **The `overview` topic ignores plain output.** Its generation is the
   problems and warnings logged and the minute, and it follows the log's
   `notable_changes` watch (warnings, errors, problems), not every line: an
@@ -3491,15 +3558,42 @@ ones are the palette's Suite group, `suiteItems` in `command-palette.tsx`). Jour
   once at its start and once at its end (`announce_rebuilt`; two in 100 ms
   are one). Every new trigger-like `CommitObserver` must ignore
   `CommitOrigin::Maintenance`.
-- **The data cards draw from what they are given.** `DataCards` takes the
+- **The data card draws from what it is given.** `DataCard` takes the
   status and a `SnapshotView`; `DataSection` keeps the hooks (the jobs topic)
   and the three dialogs. Keep it that way: a design-system card cannot
   subscribe, so a component that both subscribes and draws cannot be shown
   there.
-- **Figures above 14 px.** The Overview's headline figures are 16 px mono
-  medium — the only figures above 14 px, because each is its card's
-  subject; their labels are 12 px sans. A card without figures says what its
-  section holds in one line (`cardHolds`), never a made-up zero.
+- **Figures above 14 px.** A tile's headline figure (its section's first)
+  is 22 px semibold with tabular digits, its name 12 px under it — the only
+  figures above 14 px, because each is its tile's subject; up to two more
+  sit beside it as 12 px name and mono value, on the headline's own lines:
+  the last on its name's, a second on its number's (one grid, aligned on
+  baselines, so no figure floats between lines). The port's copy glyph
+  shows on its left, so the port ends where the figures under it end. A
+  tile without figures says what its section holds in one line
+  (`cardHolds`), never a made-up zero.
+- **The Overview is four parts, in the order a visit asks.** Redesigned on
+  2026-10-16 after the page was found cluttered (nine cards each carrying
+  an address and up to six links, an infrastructure row, a not-running
+  list, a code block and a fourteen-row engine table, all at one weight).
+  The header says the whole suite in one line (`suiteHealth`); Connect your
+  app, once the header's button, is the top bar's on every page since
+  2026-10-17 (a dialog: platforms down the side by who runs the code).
+  Services are a tile per section in a fixed grid
+  (`@container` columns: three whenever the column is 768 px or wider);
+  the whole tile is the link (a stretched title link, the port's copy
+  above it), running is the green dot alone, and a section the engine does
+  not run keeps its place as a dashed outline with the engine's reason,
+  opening its gate, which has the fix. The host every tile shares is
+  written once above the grid (`sharedHost`), so a tile shows its port.
+  Then the recent problems, one line a row whatever the length of what it
+  names. Last, the Data card (snapshot, and a reset menu saying what each
+  section holds) beside the engine card, which holds the five facts asked
+  most at rest and the rest under "Show all": the other ports, the files,
+  the switches. Paths there lose their middle (`shortPath`), never their
+  end. The project, the engine's state and Connect are the top bar's, and
+  the version the navigation's foot; none is said again. A part that is not the answer to one of those questions does not
+  go back on the page.
 - **Import `@/observe/live` for its effect.** `import '@/observe/live'`, never
   `import type` alone: the `declareTopic` calls would not run and `overview`
   would resume as `replay` (one engine subscription per subscriber, no

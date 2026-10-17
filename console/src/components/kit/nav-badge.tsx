@@ -41,9 +41,11 @@ const DOT: Record<BadgeTone | 'starting', string> = {
 }
 
 /**
- * A nav icon, drawn as Kumo's menu button draws its own (16 px at 40 %),
+ * A nav icon, drawn as Kumo's menu button draws its own but at 50 %, not 40,
  * with a 6 px dot at its top right: a badge's tone, seen only while the nav
- * is collapsed, or `starting`, a pulsing dot seen always.
+ * is collapsed, or `starting`, a pulsing dot seen always. Collapsed, the
+ * icon is all a page has to be told apart by, and at 40 % it was 2.55:1 on
+ * the light rail, under the 3:1 an icon that carries meaning needs.
  */
 export function NavIconWithDot({
   icon: IconComponent,
@@ -56,7 +58,7 @@ export function NavIconWithDot({
 }) {
   return (
     <span className="relative flex size-4 shrink-0 items-center justify-center">
-      <IconComponent className="size-4 opacity-40" />
+      <IconComponent className="size-4 opacity-50" />
       {tone && (
         <span
           className={cn(

@@ -554,7 +554,7 @@ export function Composer({
                 }
                 aria-label="Message data"
                 className={cn(
-                  'max-h-[50vh] min-h-[calc(8*1.25rem+16px)] w-full resize-y rounded-md bg-kumo-control p-2 font-mono text-[12px] leading-5 text-kumo-default ring outline-none placeholder:text-kumo-inactive focus:ring-kumo-focus',
+                  'max-h-[50vh] min-h-[calc(8*1.25rem+16px)] w-full resize-y rounded-md bg-kumo-control p-2 font-mono text-[12px] leading-5 text-kumo-default ring outline-none placeholder:text-kumo-placeholder focus:ring-kumo-focus',
                   problem ? 'ring-kumo-danger' : 'ring-kumo-line',
                 )}
                 data-testid="composer-data-text"

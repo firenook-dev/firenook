@@ -295,13 +295,15 @@ test('I7 what arrives while the channel is down comes back quietly', async ({ pa
   await expect(navInbox(page).getByRole('img')).toHaveCount(0)
 
   await dropLive(page)
-  await expect(page.getByTestId('engine-badge')).toHaveText('reconnecting', { timeout: 5_000 })
+  await expect(page.getByTestId('engine-badge')).toHaveText('Reconnecting', { timeout: 5_000 })
   const base = String(Date.now()).slice(-6)
   const phones = Array.from({ length: 5 }, (_, index) => `+1555${index}${base}`)
   for (const phone of phones) await sendSms(engine, phone)
   const last = await newestFor(engine, phones.at(-1)!)
   await restoreLive(page)
-  await expect(page.getByTestId('engine-badge')).toHaveText(/^engine /, { timeout: 15_000 })
+  await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live', {
+    timeout: 15_000,
+  })
 
   // The badge counts all five.
   await expect(navInbox(page)).toHaveAccessibleName(/5 new codes and links since you last opened/)

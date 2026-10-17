@@ -285,12 +285,14 @@ test('J-PS-17 a dropped channel is said once, and the table catches up after', a
     await expect(rows).toHaveCount(1)
     const badge = page.getByTestId('engine-badge')
     await dropLive(page)
-    await expect(badge).toHaveText('reconnecting', { timeout: 3_000 })
+    await expect(badge).toHaveText('Reconnecting', { timeout: 3_000 })
     // Said by the engine badge, and nowhere on this page.
     await expect(page.getByTestId('pubsub-live')).toHaveCount(0)
     await publishOverPort(engine, topic, [{ data: { n: 2 } }])
     await restoreLive(page)
-    await expect(badge).toHaveText(/^engine /, { timeout: 15_000 })
+    await expect(page.getByTestId('top-bar')).toHaveAttribute('data-live', 'live', {
+      timeout: 15_000,
+    })
     await expect(rows).toHaveCount(2, { timeout: 10_000 })
   } finally {
     await deleteTopic(engine, topic)

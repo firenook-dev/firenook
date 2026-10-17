@@ -224,6 +224,7 @@ describe('⌘K’s Suite group', () => {
     go: (link: SectionLink) => () => {
       opened.push(link)
     },
+    connect: vi.fn(),
     openPart: vi.fn(),
     download: vi.fn(),
     setBackground: vi.fn(),
@@ -240,6 +241,7 @@ describe('⌘K’s Suite group', () => {
       'suite:snapshot',
       'suite:save',
       'suite:reset',
+      'suite:connect',
       'suite:env',
       'suite:engine',
     ])
@@ -250,8 +252,10 @@ describe('⌘K’s Suite group', () => {
     expect(opened.at(-1)).toEqual({ to: '/', search: { dialog: 'save' } })
     run('suite:reset')
     expect(opened.at(-1)).toEqual({ to: '/', search: { dialog: 'reset' } })
+    run('suite:connect')
+    expect(wired.connect).toHaveBeenLastCalledWith()
     run('suite:env')
-    expect(opened.at(-1)).toEqual({ to: '/', search: { connect: 'env' } })
+    expect(wired.connect).toHaveBeenLastCalledWith('env')
     run('suite:engine')
     expect(wired.openPart).toHaveBeenCalledWith('engine')
     run('suite:background')
@@ -264,9 +268,14 @@ describe('⌘K’s Suite group', () => {
       services: [service('pubsub')],
       sections: [sectionEntry('pubsub')],
     })
-    expect(ids(suiteItems(pubsub, actions()))).toEqual(['suite:reset', 'suite:env', 'suite:engine'])
+    expect(ids(suiteItems(pubsub, actions()))).toEqual([
+      'suite:reset',
+      'suite:connect',
+      'suite:env',
+      'suite:engine',
+    ])
     // Logs alone: nothing to snapshot or reset.
     const logs = testStatus({ services: [service('logging')], sections: [sectionEntry('logs')] })
-    expect(ids(suiteItems(logs, actions()))).toEqual(['suite:env', 'suite:engine'])
+    expect(ids(suiteItems(logs, actions()))).toEqual(['suite:connect', 'suite:env', 'suite:engine'])
   })
 })

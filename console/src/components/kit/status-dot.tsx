@@ -25,13 +25,14 @@ const TEXT: Record<StatusTone, string> = {
   warning: 'text-kumo-warning',
   danger: 'text-kumo-danger',
   neutral: 'text-kumo-subtle',
-  brand: 'text-kumo-brand',
+  brand: 'text-kumo-default',
 }
 
 export function StatusDot({
   tone,
   label,
   pulse = false,
+  hideLabel = false,
   className,
   testId,
 }: {
@@ -39,6 +40,8 @@ export function StatusDot({
   label: string
   /** A state that is on its way (starting, running): the dot breathes. */
   pulse?: boolean
+  /** The dot alone, its word kept for a screen reader: where the usual state needs no word. */
+  hideLabel?: boolean
   className?: string
   testId?: string
 }) {
@@ -63,7 +66,7 @@ export function StatusDot({
       </span>
       {/* The word ends in an ellipsis when a caller lets the dot shrink
           (`min-w-0 shrink`); the dot itself never does. */}
-      <span className="min-w-0 truncate">{label}</span>
+      <span className={hideLabel ? 'sr-only' : 'min-w-0 truncate'}>{label}</span>
     </span>
   )
 }

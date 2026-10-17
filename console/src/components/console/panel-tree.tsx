@@ -309,7 +309,7 @@ function TreeRowView({
         // The accent is a bar of its own: an inset shadow on a rounded box
         // follows the corners and bends into a bracket.
         current
-          ? "bg-kumo-tint before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-kumo-brand before:content-['']"
+          ? "bg-kumo-tint before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-firenook-flame before:content-['']"
           : 'hover:ink',
       )}
       style={{ transform: `translateY(${top}px)` }}
