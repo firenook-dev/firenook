@@ -1082,5 +1082,34 @@ stood, which left the store to a full repair at the next start, shown only as
   second time after the Firebase JS SDK build was caught mid-write; registry
   integrity equal to the release assets for all six packages, provenance
   attestations verified on a fresh install).
-- [ ] Follow-up: an open counts every document to size Firestore's memory
-  accounting, most of a large store's opening time; keep the count instead.
+- [ ] Follow-up: see "Start-up speed" below.
+
+## Start-up speed (planned)
+
+After 0.2.0-next.5 a resumed start no longer reads its seed, and what is left
+is the data itself and the order the steps run in. Measured on resumed starts
+with every service: a 4.3 GB store of 211,000 documents spends about 12 s
+opening Firestore, Auth and Storage and 7.5 s loading about 20 functions; a
+32.6 GB store of 2.7 million documents spends about 2.5 minutes opening the
+data and 7 s on 21 functions.
+
+- [ ] **Keep Firestore's document count.** Every open decodes every document
+  to size the memory accounting (entries and logical bytes); on the larger
+  store that is the 2.5 minutes. Save the count and size in the store's
+  metadata with each durable commit and on a clean close, adjust it during
+  journal replay, and read it instead. A store without it, or one just
+  repaired, counts once and saves it. Target: an open in seconds.
+- [ ] **Load Functions while the data opens.** Loading codebases needs Node
+  and the code, not the data, so it can run beside Firestore, Auth and
+  Storage instead of after them. Conditions: bind every port first and hold
+  data requests until the data is ready (code that queries Firestore while
+  it loads must get an answer, not a refused connection); opening or
+  importing data fires no triggers; Auth's blocking functions are registered
+  before any sign-up is admitted, which readiness already guarantees.
+  Pub/Sub's schedules come from the Functions inventory, so they still follow
+  it (2 ms). Saves the Functions row (about 7 s with 20 functions).
+- [ ] **Measure the store's size.** 32.6 GB for 2.7 million documents is about
+  12 KB a document; find how much is free pages that redb keeps after
+  deletes, and whether compacting (`Database::compact`) on request is worth
+  offering.
+
