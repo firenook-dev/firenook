@@ -192,6 +192,9 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   const tally = figures => figures.map(([figure, words]) => `${count(figure)} ${dim(words)}`).join(DOT);
   const value = flag => { const at = launch.args.indexOf(flag); return at === -1 ? undefined : launch.args[at + 1]; };
   const stateDir = value('--state-dir');
+  // A start without --state-dir keeps its data in its own run directory,
+  // which no later start reads.
+  const ephemeral = !stateDir || /[\\/]\.firenook[\\/]runs[\\/]session-[^\\/]+[\\/]state$/.test(stateDir);
   const exportDir = value('--export-on-exit');
   const host = value('--host') || '127.0.0.1';
   const update = pendingUpdate(version, cwd, {env, platform});
@@ -213,7 +216,6 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     raw: [],
     loadedAt: undefined,
     task: undefined,
-    exit: undefined,
   };
   const selected = new Set(launch.services);
   for (const id of ROWS) {
@@ -227,8 +229,9 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
       : opening.kind === 'import' ? `first start, importing the seed "${basename(opening.seed ?? '')}"`
         : 'a fresh start';
     const project = demo ? projectId : `${projectId} ${yellow('(a real project id)')}`;
-    return [`${bold('firenook')}  ${dim(version)}`, `${project}${DOT}${dim(how)}`,
-      dim([`Node ${process.versions.node}`, `data in ${shortPath(stateDir, cwd) || 'this run'}`].join(G.dot))];
+    // A start without --state-dir keeps its data in its own run directory.
+    const where = ephemeral ? `data in ${shortPath(dirname(stateDir ?? ''), cwd)}, for this run` : `data in ${shortPath(stateDir, cwd)}`;
+    return [`${bold('firenook')}  ${dim(version)}`, `${project}${DOT}${dim(how)}`, dim([`Node ${process.versions.node}`, where].join(G.dot))];
   };
   const banner = () => {
     const words = bannerWords();
@@ -324,9 +327,6 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   // A failure says what went wrong, what to do about it and what became of
   // the data, in that order, and Firenook exits with code 1.
   const problem = lines => section(divider(`${red(G.fail)} ${bold(red('Firenook could not start'))}`), lines.map(inside));
-  // A start without --state-dir keeps its data in its own run directory,
-  // which no later start reads.
-  const ephemeral = !stateDir || /[\\/]\.firenook[\\/]runs[\\/]session-/.test(stateDir);
   const dataLine = () => (model.opening.kind === 'resume' ? `nothing was changed: ${shortPath(stateDir, cwd)} is as you left it`
     : model.opening.kind === 'import' && launch.args.includes('--resume-state') ? `the seed was imported into ${shortPath(stateDir, cwd)}; the next start picks it up`
       : ephemeral ? 'nothing of yours was changed' : `the data in ${shortPath(stateDir, cwd)} is kept`);
@@ -388,10 +388,15 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   const THREADS = {debug: dim, info: dim, warn: yellow, error: red};
   // A function's own output keeps its level: info in full ink, warnings
   // yellow, errors red, debug dimmed; its logger's fields follow it.
+  // A line of output longer than this many screen lines shows its start and
+  // a count of the rest: the whole of it is in the console.
+  const LONGEST = 30;
   function entryLines({level = 'info', text, fields}) {
     const room = t.streamRoom();
     const paint = LEVELS[level] ?? LEVELS.info;
-    const lines = wrap(text, room).map(part => paint(part));
+    let parts = wrap(text, room);
+    if (parts.length > LONGEST) parts = [...parts.slice(0, LONGEST), dim(`+ ${count(parts.length - LONGEST)} more lines`)];
+    const lines = parts.map(part => paint(part));
     if (fields) {
       const listed = Object.entries(fields).map(([key, field]) => `${dim(key)} ${typeof field === 'string' ? field : JSON.stringify(field)}`).join(DOT);
       if (width(lines.at(-1)) + 3 + width(listed) <= room) lines[lines.length - 1] += `   ${listed}`;
@@ -449,12 +454,12 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     const lines = held?.lines ?? [];
     screen.emit(() => callLines(call, lines, at));
   }
-  // Calls still running after HOLD show their first line and their output so
-  // far, and later output as it comes.
+  // Calls still running after HOLD, or that have printed a lot already, show
+  // their first line and their output so far, and later output as it comes.
   function releaseHeld() {
     const now = Date.now();
     for (const held of model.calls.values()) {
-      if (held.shown || now - held.since < HOLD) continue;
+      if (held.shown || (now - held.since < HOLD && held.lines.length < 200)) continue;
       held.shown = true;
       const at = clock();
       const call = held.call;
@@ -478,6 +483,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
       const held = model.calls.get(event.execution);
       if (held && !held.shown) {
         held.lines.push(line);
+        if (held.lines.length >= 200) releaseHeld();
         return;
       }
       if (held?.shown) {
@@ -708,6 +714,15 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
 
   async function showFailure(failure) {
     clearInterval(startupTicker);
+    if (model.ready) {
+      // Running, not starting: a service failed under it. The log keeps its
+      // place; the card says what stopped and what became of the data.
+      clearInterval(runningTicker);
+      const lines = await problemLines(failure);
+      screen.live(() => []);
+      screen.emit(() => ['', top(), ...air(), inside(`${red(G.fail)} ${bold(red('Firenook stopped'))}`), ...air(), ...lines.map(inside), ...air(), bottom()]);
+      return;
+    }
     const row = failure.kind === 'port' ? LISTENERS[failure.service]?.row : failure.kind === 'state' ? 'data' : undefined;
     for (const step of model.steps.values()) {
       if (step.id === row) Object.assign(step, {state: 'failed', message: failure.kind === 'port' ? `port ${failure.port} is taken` : step.message ?? 'refused'});
@@ -814,7 +829,8 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     const at = clock();
     if (requestedStop && (outcome.code === 0 || outcome.signal || !model.ready)) {
       const ms = model.stopping ? Date.now() - model.stopping.since : null;
-      const kept = exportDir ? `exported to ${shortPath(exportDir, cwd)}` : stateDir ? `everything is kept in ${shortPath(stateDir, cwd)}` : 'stopped cleanly';
+      const kept = exportDir ? `exported to ${shortPath(exportDir, cwd)}`
+        : ephemeral ? `this run's data stays in ${shortPath(dirname(stateDir ?? ''), cwd)}` : `everything is kept in ${shortPath(stateDir, cwd)}`;
       const early = !model.ready ? `${DOT}${dim('before it was ready')}` : '';
       screen.live(() => []);
       screen.emit(() => [open(cells(dim(at), green(G.ok), `${nameCell('stopped')}${timed(ms, `${dim(kept)}${early}`)}`)), '']);

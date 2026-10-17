@@ -295,8 +295,13 @@ export function createScreen(out, ink, size) {
   let used = 0;
   let closed = false;
   // Every printed entry keeps the function that drew it, so a resized window
-  // can be laid out again at its new size.
+  // can be laid out again at its new size; the newest are enough to fill it.
   const history = [];
+  const KEEP = 2000;
+  // Lines printed in one burst (a function logging thousands of lines a
+  // second) go out together, at most every few milliseconds.
+  let pending = [];
+  let scheduled;
   const room = () => size.columns() - 2;
   const write = text => { if (!closed) out.write(text); };
   const pad = content => {
@@ -311,6 +316,12 @@ export function createScreen(out, ink, size) {
     return lines.length > most ? lines.slice(lines.length - most) : lines;
   };
   function frame(permanent = []) {
+    if (pending.length) {
+      permanent = [...pending, ...permanent];
+      pending = [];
+    }
+    clearTimeout(scheduled);
+    scheduled = undefined;
     used += permanent.length;
     const lines = current();
     const next = lines.join('\n');
@@ -333,7 +344,9 @@ export function createScreen(out, ink, size) {
     // Prints lines that stay; `render` is kept to lay them out again later.
     emit(render) {
       history.push(render);
-      frame(render());
+      if (history.length > KEEP) history.splice(0, history.length - KEEP);
+      pending.push(...render());
+      scheduled ??= setTimeout(() => frame(), 8);
     },
     live(render) {
       live = render;
@@ -345,6 +358,7 @@ export function createScreen(out, ink, size) {
     // fits, then the live region. Lines already in the scrollback keep the
     // width they were printed at; only a full-screen app avoids that.
     relayout() {
+      pending = [];
       const lines = history.flatMap(render => render());
       const keep = Math.max(0, size.rows() - live().length);
       const tail = lines.slice(Math.max(0, lines.length - keep));

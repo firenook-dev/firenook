@@ -234,3 +234,19 @@ test('a start whose functions do not load still runs, and says so', async () => 
   const shown = text();
   for (const expected of ['Your functions did not load', 'functions/index.js:3', '}}', 'except your functions', 'functions not loaded']) shows(shown, expected);
 });
+
+test('a service that fails after readiness stops the session with a card that says so', async () => {
+  const {out, text} = screen();
+  const {spawner} = engine(async ({send}) => {
+    send({type: 'step', id: 'firestore', state: 'done', ms: 5, figures: [[0, 'documents']]});
+    send({type: 'ready', ms: 50, console: null, ports: {firestore: 8080}, functions: 0, warnings: []});
+    await tick(40);
+    send({type: 'failed', kind: 'other', message: 'the firestore listener failed: connection reset'});
+    return 1;
+  });
+  const code = await runInteractive(launch(), {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input: keyboard(), env, platform: 'darwin', spawner});
+  assert.equal(code, 1);
+  const shown = text();
+  for (const expected of ['All emulators ready', 'Firenook stopped', 'the firestore listener failed: connection reset', 'Data']) shows(shown, expected);
+  assert.ok(!shown.includes('Firenook could not start'));
+});
