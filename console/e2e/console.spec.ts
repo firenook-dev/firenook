@@ -183,7 +183,15 @@ test('the navigation collapses to icons that peek on hover, and remembers it', a
   await expect
     .poll(() => nav.evaluate((element) => element.getBoundingClientRect().width))
     .toBeLessThan(56)
+  // The rail narrows over a transition: measured on its way, a button is
+  // not yet square. Wait for it to settle, then measure.
   const functions = page.getByTestId('nav-functions')
+  await expect
+    .poll(async () => {
+      const button = await box(functions)
+      return Math.abs(button.width - button.height)
+    })
+    .toBeLessThan(1)
   const geometry = {
     button: await box(functions),
     icon: await box(functions.locator('svg').first()),
