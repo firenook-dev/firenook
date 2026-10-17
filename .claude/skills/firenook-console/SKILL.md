@@ -3560,8 +3560,12 @@ ones are the palette's Suite group, `suiteItems` in `command-palette.tsx`). Jour
 - **Figures above 14 px.** A tile's headline figure (its section's first)
   is 22 px semibold with tabular digits, its name 12 px under it — the only
   figures above 14 px, because each is its tile's subject; up to two more
-  sit beside it as 12 px name and mono value. A tile without figures says
-  what its section holds in one line (`cardHolds`), never a made-up zero.
+  sit beside it as 12 px name and mono value, on the headline's own lines:
+  the last on its name's, a second on its number's (one grid, aligned on
+  baselines, so no figure floats between lines). The port's copy glyph
+  shows on its left, so the port ends where the figures under it end. A
+  tile without figures says what its section holds in one line
+  (`cardHolds`), never a made-up zero.
 - **The Overview is four parts, in the order a visit asks.** Redesigned on
   2026-10-16 after the page was found cluttered (nine cards each carrying
   an address and up to six links, an infrastructure row, a not-running

@@ -87,9 +87,12 @@ export function ServiceTile({
             }
             render={
               <span className="relative z-10 ml-auto flex min-w-0">
+                {/* The copy glyph shows on the port's left, so the port ends
+                    where the figures under it end: after it, its hidden
+                    glyph held the port 18 px short of that edge. */}
                 <CopyField
                   value={addressOf(address)}
-                  className="text-kumo-subtle"
+                  className="flex-row-reverse text-kumo-subtle"
                   testId={`${id}-address`}
                 >
                   {tileAddress(address, host)}
@@ -123,19 +126,25 @@ export function ServiceTile({
             {status.detail ?? 'Starting…'}
           </p>
         ) : primary ? (
-          <div
-            className="flex min-w-0 items-end justify-between gap-4"
+          // One grid for every figure, its rows aligned on their baselines:
+          // a second figure reads on the line of the headline's number, the
+          // last on the line of its name. Two stacks side by side, each
+          // aligned to its own bottom, put neither on a line of the other.
+          <dl
+            className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-0.5"
             data-testid={`${id}-figures`}
           >
             <Headline figure={primary} tick={tick} section={section.id} />
-            {secondary.length > 0 && (
-              <dl className="grid min-w-0 justify-items-end gap-0.5 text-right">
-                {secondary.map((figure) => (
-                  <Secondary key={figure.label} figure={figure} tick={tick} section={section.id} />
-                ))}
-              </dl>
-            )}
-          </div>
+            {secondary.map((figure, index) => (
+              <Secondary
+                key={figure.label}
+                figure={figure}
+                tick={tick}
+                section={section.id}
+                line={index === secondary.length - 1 ? 'name' : 'number'}
+              />
+            ))}
+          </dl>
         ) : (
           <p
             className="line-clamp-2 text-[13px] leading-5 text-kumo-subtle"
@@ -185,7 +194,7 @@ function Headline({
       // A new key restarts the flash.
       key={flashes}
       className={cn(
-        '-mx-1 w-fit rounded px-1 text-[22px] leading-7 font-semibold tracking-tight text-kumo-default tabular-nums',
+        'col-start-1 row-start-1 -mx-1 w-fit rounded px-1 text-[22px] leading-7 font-semibold tracking-tight text-kumo-default tabular-nums',
         flashes > 0 && FLASH,
       )}
       data-flashes={flashes}
@@ -195,11 +204,13 @@ function Headline({
     </dd>
   )
   return (
-    <dl className="grid min-w-0 content-end gap-0.5">
+    <div className="contents">
       {/* The name reads under the figure, and comes first for a screen reader. */}
-      <dt className="order-last truncate text-[12px] text-kumo-subtle">{figure.label}</dt>
+      <dt className="col-start-1 row-start-2 min-w-0 truncate text-[12px] leading-5 text-kumo-subtle">
+        {figure.label}
+      </dt>
       {figure.value === null ? <Tooltip content="Still counting" render={value} /> : value}
-    </dl>
+    </div>
   )
 }
 
@@ -208,14 +219,22 @@ function Secondary({
   figure,
   tick,
   section,
+  line,
 }: {
   figure: SummaryFigure
   tick: unknown
   section: string
+  /** Which of the headline's lines it reads on. */
+  line: 'number' | 'name'
 }) {
   const flashes = useFlash(figure.value, tick)
   return (
-    <div className="flex min-w-0 items-baseline gap-2 text-[12px] leading-5">
+    <div
+      className={cn(
+        'col-start-2 flex min-w-0 items-baseline justify-end gap-2 text-[12px] leading-5',
+        line === 'number' ? 'row-start-1' : 'row-start-2',
+      )}
+    >
       <dt className="min-w-0 truncate text-kumo-subtle">{figure.label}</dt>
       <dd
         key={flashes}
