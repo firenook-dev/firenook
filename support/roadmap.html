@@ -235,8 +235,8 @@ const DATA = {
   },
   {
     "name": "Google Emulator UI 1.15.0",
-    "status": "asset",
-    "note": "The one asset firenook setup still downloads; served by Firenook until an own UI ships (backlog #3)."
+    "status": "gone",
+    "note": "Not downloaded or served since 0.2.0-next.3: the console at /console is part of the engine, and the UI port's root and the official UI's addresses lead to it. firenook setup does nothing now."
   },
   {
     "name": "Extensions registry (Google)",
@@ -550,10 +550,10 @@ const DATA = {
   },
   {
     "name": "Emulator UI",
-    "status": "partial",
-    "note": "Google's 1.15.0 bundle served by Firenook; upstream HTTPS data-browser defect inherited",
-    "remaining": "Own UI (removes setup and the last Google asset)",
-    "size": "weeks"
+    "status": "done",
+    "note": "Firenook's own console at /console covers every service the suite runs (support/console-parity.md), and the root leads there; it works through HTTPS aliases and proxies, where the Google UI's data browsers did not",
+    "remaining": "Test Firebase Alerts, with alert delivery",
+    "size": "—"
   },
   {
     "name": "Logging emulator",
@@ -609,8 +609,8 @@ const DATA = {
   {
     "name": "setup / doctor / binary-path",
     "status": "done",
-    "note": "setup fetches only the UI zip; doctor lists every Extensions instance with its source and whether it starts offline",
-    "remaining": "setup disappears with an own UI",
+    "note": "setup downloads nothing since 0.2.0-next.3 and is kept so scripts that run it pass; doctor lists every Extensions instance with its source and whether it starts offline",
+    "remaining": "—",
     "size": "—"
   },
   {
@@ -757,11 +757,6 @@ const DATA = {
   }
 ],
   backlog: [
-  {
-    "item": "Own Emulator UI (Phase N, next.10)",
-    "why": "Removes the last Google asset and firenook setup; fixes the inherited HTTPS data-browser defect; the only remaining partial service row",
-    "size": "4–6 weeks"
-  },
   {
     "item": "Terminal launch experience (with Phase N)",
     "why": "First impression; keeps the 'All emulators ready' contract; the only remaining CLI row",

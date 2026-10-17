@@ -527,8 +527,9 @@ The emulator's own UI replaces the served Google 1.15.0 bundle and the
 `firenook setup` download, and is the product surface later deployments
 share. It lives in `console/` (client-only React, Vite, TanStack, Kumo on
 Base UI, Tailwind) and is embedded into the binary by `crates/console-front`,
-mounted under `/console` on the UI port next to the Google UI, which stays
-served until every section has landed.
+mounted under `/console` on the UI port. The Google UI was served beside it
+at the port's root until every section had landed; since `0.2.0-next.3` the
+root leads to the console.
 
 - [x] (Shipped in `0.2.0-next.2`.) Stack, shell, command palette, overview and
   the Console API's first route with Rust-generated TypeScript types; unit,
@@ -981,11 +982,16 @@ served until every section has landed.
   triggers unless asked to — it commits as maintenance, which the trigger
   observer ignores and every listener still sees — and open Firestore pages
   reload once at its start and once at its end.
-- [ ] Parity checklist against the Google UI (`support/console-parity.md`):
-  every feature of the 1.15 bundle with the console screen that covers it.
-  When every row is ticked, remove the archive and `setup` (the root `/`
-  keeps serving the Google UI until then; its index is pinned by the
-  `ui-config-logging-and-websocket` fixture).
+- [x] Parity checklist against the Google UI (`support/console-parity.md`):
+  every feature of the 1.15 bundle with the console screen that covers it,
+  every row ticked. The Google UI is gone with it: the engine neither
+  verifies nor serves the archive, `firenook setup` downloads nothing (it
+  stays, so scripts that run it pass), the UI port's root and the official
+  UI's page addresses (`/firestore/…`, `/auth`, `/storage/…`, `/logs?q=…`)
+  lead to the console's page for the same thing, and `/api/config`, the
+  logging feed and the Requests socket are unchanged. The install fetches
+  nothing. Test Firebase Alerts, the one feature of the old UI the console
+  lacks, waits on alert delivery (above).
 - [ ] A write log, and perhaps an undo with it. Built and then taken out
   again, which is the useful part of the entry: the engine can keep a
   bounded window of commits with the document as it was and as it became,

@@ -22,8 +22,9 @@ interactive release-owner operations.
   in the package. CLI source fixture precedes implementation.
 - Keep native disk/WAL and explicit resume behavior; preserve working state
   after failure and never delete/overwrite a user's seed as installer cleanup.
-- Dependency checks are read-only. Download public compatibility assets only
-  after an explicit setup command, with pinned size/hash and atomic publication.
+- Dependency checks are read-only. The package downloads nothing: no
+  postinstall, no setup step, no compatibility asset (the console is part of
+  the engine since `0.2.0-next.3`).
 - CI tests unit contracts, actual packed installation with scripts disabled,
   missing/tampered/wrong-platform packages, signal/exit behavior and a tiny
   real-engine write/read/reopen smoke. It does not substitute for private
