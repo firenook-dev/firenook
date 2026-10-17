@@ -48,7 +48,7 @@ use firenook_storage_front::{
 };
 use firenook_suite_front::{
     BackgroundRequest, EngineRelease, ExportCommand, HubConfig, HubRuntime, LoggingRuntime,
-    ServiceInfo, SuiteDirectory, UiConfig, requests_router, requests_router_with_log, ui_router,
+    ServiceInfo, SuiteDirectory, requests_router, requests_router_with_log, ui_router,
 };
 use firenook_tasks_front::TasksRuntime;
 use firenook_webchannel_front::{FirestoreBackend, router as webchannel_router};
@@ -293,7 +293,6 @@ pub struct SuiteConfig {
     /// vendored in the project or present in the shared cache with their
     /// registry sidecar.
     pub offline: bool,
-    pub ui_archive: PathBuf,
     pub state_dir: PathBuf,
     pub resume_state: bool,
     pub firestore_in_memory: bool,
@@ -1020,29 +1019,58 @@ async fn prepare_native_suite(
     Ok((guard, prepared))
 }
 
-/// The UI port's application: the official Emulator UI at the root and the
-/// console under [`CONSOLE_PATH`], which shares the port so that its assets
-/// and API are same-origin with the page that loads them; `run` mounts the
-/// console once every service it shows exists. The console's
-/// canonical address has no trailing slash; the slashed form is not claimed
-/// by `nest` and would otherwise fall through to the official UI's index.
-async fn ui_application(
-    config: &SuiteConfig,
-    directory: SuiteDirectory,
-    client_directory: PathBuf,
-) -> Result<Router, SuiteRuntimeError> {
-    // The directory is what the official UI's `/api/config` advertises.
-    let official = ui_router(UiConfig {
-        directory: directory.clone(),
-        archive: config.ui_archive.clone(),
-        client_directory,
-    })
-    .await
-    .map_err(|error| failure(format!("UI failed to start: {error}")))?;
-    Ok(official.route(
-        concat!("/console", "/"),
-        get(|uri: axum::http::Uri| async move { console_slash_redirect(&uri) }),
-    ))
+/// The UI port's application: `/api/config`, and the console under
+/// [`CONSOLE_PATH`], which shares the port so that its assets and API are
+/// same-origin with the page that loads them; `run` mounts the console once
+/// every service it shows exists. The console's canonical address has no
+/// trailing slash, and the slashed form is not claimed by `nest`, so it is
+/// sent there. Every other address is one the Google Emulator UI answered
+/// at this port's root until 0.2.0-next.3, and leads to the console's page
+/// for the same thing.
+fn ui_application(directory: SuiteDirectory) -> Router {
+    ui_router(directory)
+        .route(
+            concat!("/console", "/"),
+            get(|uri: axum::http::Uri| async move { console_slash_redirect(&uri) }),
+        )
+        .fallback(legacy_ui_redirect)
+}
+
+/// A request for one of the Google Emulator UI's addresses: a page is sent
+/// to the console's, anything else (a write, an asset's method) is not here.
+async fn legacy_ui_redirect(
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+    if method == axum::http::Method::GET || method == axum::http::Method::HEAD {
+        Redirect::temporary(&legacy_location(&uri)).into_response()
+    } else {
+        axum::http::StatusCode::NOT_FOUND.into_response()
+    }
+}
+
+/// Where an address of the Google Emulator UI now leads: the console's page
+/// for the same thing, so a bookmark or a link a tool prints still lands.
+/// A log query keeps its `?q=`, whose official keys the console reads.
+fn legacy_location(uri: &axum::http::Uri) -> String {
+    let mut segments = uri.path().split('/').filter(|segment| !segment.is_empty());
+    let page = match segments.next() {
+        Some("firestore") if segments.any(|segment| segment == "requests") => "/firestore/rules",
+        Some("firestore") => "/firestore",
+        Some("auth") => "/auth",
+        Some("storage") => "/storage",
+        Some("extensions") => "/extensions",
+        Some("functions") => "/functions",
+        Some("logs") => {
+            return match uri.query() {
+                Some(query) if !query.is_empty() => format!("{CONSOLE_PATH}/logs?{query}"),
+                _ => format!("{CONSOLE_PATH}/logs"),
+            };
+        }
+        _ => "",
+    };
+    format!("{CONSOLE_PATH}{page}")
 }
 
 /// `/console/` sent to the console's canonical address with its query kept:
@@ -1061,11 +1089,6 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
         .await
         .map_err(|error| failure(format!("failed to create suite state: {error}")))?;
     let logging = prepare_logging(config)?;
-    let ui_client = if config.ui_enabled {
-        Some(prepare_ui(config).await?)
-    } else {
-        None
-    };
     let store = open_store(config)?;
     let triggers = TriggerRegistry::default();
     let functions_endpoint = format!("{}/", config.origin(config.ports.functions));
@@ -1125,12 +1148,7 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
         background: Some(background_sender.clone()),
     })
     .map_err(|error| failure(format!("Hub failed to start: {error}")))?;
-    let ui = match ui_client {
-        Some(client_directory) => {
-            Some(ui_application(config, directory.clone(), client_directory).await?)
-        }
-        None => None,
-    };
+    let ui = config.ui_enabled.then(|| ui_application(directory.clone()));
     Ok(PreparedSuite {
         store,
         triggers,
@@ -1480,9 +1498,6 @@ fn validate_config(config: &SuiteConfig) -> Result<(), SuiteRuntimeError> {
     ];
     if config.services.functions {
         required.push(("Node", &config.node));
-    }
-    if config.ui_enabled {
-        required.push(("UI archive", &config.ui_archive));
     }
     for (name, path) in required {
         if !path.exists() {
@@ -1856,53 +1871,6 @@ fn startup_log_messages(config: &SuiteConfig) -> Vec<String> {
         })
         .map(|(name, port)| format!("{name} configured at {}", config.endpoint(port)))
         .collect()
-}
-
-async fn prepare_ui(config: &SuiteConfig) -> Result<PathBuf, SuiteRuntimeError> {
-    let root = config.state_dir.join("ui-v1.15.0");
-    let client = root.join("client");
-    if client.join("index.html").is_file() {
-        return Ok(client);
-    }
-    let archive = config.ui_archive.clone();
-    let root_for_extract = root.clone();
-    tokio::task::spawn_blocking(move || extract_zip(&archive, &root_for_extract))
-        .await
-        .map_err(|error| failure(format!("UI extraction task failed: {error}")))??;
-    Ok(client)
-}
-
-fn extract_zip(archive: &Path, destination: &Path) -> Result<(), SuiteRuntimeError> {
-    std::fs::create_dir_all(destination)
-        .map_err(|error| failure(format!("failed to create UI directory: {error}")))?;
-    let file = std::fs::File::open(archive)
-        .map_err(|error| failure(format!("failed to open UI archive: {error}")))?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|error| failure(format!("invalid UI archive: {error}")))?;
-    for index in 0..archive.len() {
-        let mut entry = archive
-            .by_index(index)
-            .map_err(|error| failure(format!("invalid UI entry: {error}")))?;
-        let relative = entry
-            .enclosed_name()
-            .ok_or_else(|| failure("UI archive entry escapes destination"))?;
-        let output = destination.join(relative);
-        if entry.is_dir() {
-            std::fs::create_dir_all(&output)
-                .map_err(|error| failure(format!("failed to create UI directory: {error}")))?;
-        } else {
-            if let Some(parent) = output.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| {
-                    failure(format!("failed to create UI asset directory: {error}"))
-                })?;
-            }
-            let mut file = std::fs::File::create(&output)
-                .map_err(|error| failure(format!("failed to create UI asset: {error}")))?;
-            std::io::copy(&mut entry, &mut file)
-                .map_err(|error| failure(format!("failed to extract UI asset: {error}")))?;
-        }
-    }
-    Ok(())
 }
 
 struct ListenerSet(std::collections::BTreeMap<&'static str, TcpListener>);
@@ -2698,6 +2666,35 @@ mod tests {
             location("/console/?connect=env&dialog=snapshot"),
             format!("{CONSOLE_PATH}?connect=env&dialog=snapshot")
         );
+    }
+
+    #[test]
+    fn the_google_ui_addresses_lead_to_the_console() {
+        let location = |uri: &str| legacy_location(&uri.parse().expect("uri"));
+        assert_eq!(location("/"), CONSOLE_PATH);
+        assert_eq!(
+            location("/firestore/default/data/users/u1"),
+            format!("{CONSOLE_PATH}/firestore")
+        );
+        assert_eq!(
+            location("/firestore/default/requests"),
+            format!("{CONSOLE_PATH}/firestore/rules")
+        );
+        assert_eq!(location("/auth"), format!("{CONSOLE_PATH}/auth"));
+        assert_eq!(
+            location("/storage/demo.appspot.com/files"),
+            format!("{CONSOLE_PATH}/storage")
+        );
+        assert_eq!(
+            location("/extensions/greeter"),
+            format!("{CONSOLE_PATH}/extensions")
+        );
+        assert_eq!(location("/logs"), format!("{CONSOLE_PATH}/logs"));
+        assert_eq!(
+            location("/logs?q=metadata.emulator.name%3D%22functions%22"),
+            format!("{CONSOLE_PATH}/logs?q=metadata.emulator.name%3D%22functions%22")
+        );
+        assert_eq!(location("/database/demo/data"), CONSOLE_PATH);
     }
 
     #[test]

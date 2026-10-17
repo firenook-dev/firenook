@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { assets, verifyAsset } from '../packages/cli/src/assets.mjs';
 import { manifest, platformKey, release, sha256, verifyBinary } from '../packages/cli/src/binary.mjs';
 import { canonical, inspectProject, launchContext, loadProject, parseOptions } from '../packages/cli/src/options.mjs';
 import { prepareLaunch, supervise } from '../packages/cli/src/runtime.mjs';
@@ -34,15 +33,14 @@ function launchFor(dir, options, mode = 'start', typed = []) {
   const original = console.error;
   console.error = (...args) => lines.push(args.join(' '));
   try {
-    const diagnostic = {project:loadProject(options, dir), binary:'/fake', files:{ui:'/ui'}};
+    const diagnostic = {project:loadProject(options, dir), binary:'/fake'};
     return {...prepareLaunch(diagnostic, options, mode, typed), stderr:lines.join('\n')};
   } finally { console.error = original; }
 }
 const flagValue = (args, flag) => args[args.indexOf(flag) + 1];
 
-test('CLI source oracle pins asset hashes and export conventions', () => {
+test('CLI source oracle pins export conventions', () => {
   const oracle = JSON.parse(readFileSync(new URL('fixtures/firebase-cli-15.22.0.json', import.meta.url)));
-  for (const asset of assets) { assert.equal(asset.sha256,oracle[asset.name].sha256); assert.equal(asset.bytes,oracle[asset.name].bytes); }
   assert.equal(oracle.exportWithoutImportOrDestination,'reject');
 });
 test('registry-only exact dependencies; no lifecycle scripts or source-build installer', () => {
@@ -209,7 +207,7 @@ test('ui.enabled, --ui, exec mode and singleProjectMode map to engine flags', ()
   assert.equal(flagValue(launch.args,'--single-project-mode'),'false');
   const forced = launchFor(dir,{...options,ui:true});
   assert.ok(forced.args.includes('--no-ui'), 'the engine reads ui.enabled itself, so --ui cannot re-enable a disabled UI');
-  assert.match(forced.stderr,/--ui cannot enable the Emulator UI/);
+  assert.match(forced.stderr,/--ui cannot enable the console/);
   const receipt = JSON.parse(readFileSync(join(launch.run,'launch.json'),'utf8'));
   assert.deepEqual(receipt.services,['firestore','auth','storage','functions','pubsub']);
   assert.deepEqual(receipt.project,{id:'demo-fixture',demo:true});
@@ -287,7 +285,7 @@ test('export default, parent/symlink safety and resume isolation', () => {
 test('state and credential isolation stay outside original config and seed', () => {
   const {dir,options} = project();
   const before = readFileSync(join(dir,'firebase.json'),'utf8');
-  const diagnostic = {project:loadProject(options,dir),binary:'/fake',toolsRoot:'/tools',files:{ui:'/ui'}};
+  const diagnostic = {project:loadProject(options,dir),binary:'/fake',toolsRoot:'/tools'};
   const launch = prepareLaunch(diagnostic,options);
   assert.equal(readFileSync(join(dir,'firebase.json'),'utf8'),before);
   assert.ok(launch.args.includes('--state-dir'));
@@ -360,13 +358,6 @@ test('start and exec accept --allowed-hosts', () => {
     assert.equal(refused.status,1);
     assert.match(refused.stderr,new RegExp(`--recursive is not an option of firenook ${action}`), refused.stderr);
   }
-});
-test('asset verification refuses corrupt data without changing it', async () => {
-  const dir = mkdtempSync(join(tmpdir(),'firenook-asset-test-'));
-  const file = join(dir,'test'); writeFileSync(file,'okay');
-  await verifyAsset(file,{bytes:4,sha256:sha256('okay')});
-  await assert.rejects(verifyAsset(file,{bytes:4,sha256:'wrong'}),/Checksum/);
-  assert.equal(readFileSync(file,'utf8'),'okay');
 });
 test('exec waits for child readiness and graceful shutdown, preserves test status', async () => {
   const launch = {binary:process.execPath,args:['-e', `const stop=()=>setTimeout(()=>process.exit(0),60); process.on('SIGINT',stop); if(process.platform==='win32') process.stdin.on('data',stop); console.log('All emulators ready'); setInterval(()=>{},1000)`],cwd:process.cwd(),env:process.env};

@@ -186,18 +186,19 @@ const INFRASTRUCTURE: readonly { name: string; label: string; about: string }[] 
   },
   {
     name: 'ui',
-    label: 'Emulator UI',
-    about: 'This console, with the Google Emulator UI still served at its root.',
+    label: 'Console',
+    about:
+      'This console. The root of the port leads here, and so do the Google Emulator UI’s old addresses.',
   },
   {
     name: 'logging',
     label: 'Logging feed',
-    about: 'The official log stream, a WebSocket the Google Emulator UI reads.',
+    about: 'The official log stream, a WebSocket kept for the tools that read it.',
   },
   {
     name: 'firestore.websocket',
     label: 'Firestore requests',
-    about: 'The rules requests stream, a WebSocket the Google Emulator UI reads.',
+    about: 'The official rules requests stream, a WebSocket kept for the tools that read it.',
   },
 ]
 

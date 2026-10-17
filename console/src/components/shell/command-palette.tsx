@@ -9,7 +9,6 @@
 import { CommandPalette as KumoCommandPalette } from '@cloudflare/kumo'
 import {
   ArrowCounterClockwiseIcon,
-  ArrowSquareOutIcon,
   CpuIcon,
   DownloadSimpleIcon,
   FloppyDiskIcon,
@@ -350,13 +349,6 @@ export function CommandPalette() {
         run: () =>
           toast({ key: `unsupported:${service.name}`, title: service.detail, tone: 'info' }),
       })
-    items.push({
-      id: 'legacy-ui',
-      title: 'Open the Google Emulator UI',
-      keywords: 'legacy official firebase',
-      icon: <ArrowSquareOutIcon size={16} />,
-      run: () => window.open('/', '_blank', 'noopener'),
-    })
     return items
   }, [go, status.data])
 

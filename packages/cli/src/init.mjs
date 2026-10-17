@@ -124,7 +124,7 @@ export function scaffold(options, cwd = process.cwd(), log = console) {
   if (functions) plan.push(file('functions/package.json', functionsPackage()), file('functions/index.js', FUNCTIONS_INDEX), file('functions/.gitignore', 'node_modules/\n*.local\n'));
   const gitignore = gitignoreAddition(directory);
   if (gitignore) plan.push({path:gitignore.path, content:gitignore.content, skip:false});
-  const next = [...(functions ? ['cd functions && npm install'] : []), 'firenook setup', `firenook emulators:start --project ${project}`];
+  const next = [...(functions ? ['cd functions && npm install'] : []), `firenook emulators:start --project ${project}`];
   const dry = Boolean(options['dry-run']);
   if (options.json) log.log(JSON.stringify({directory, project, functions, files:plan.map(item => ({path:item.path, action:item.skip ? 'keep' : 'write'})), applied:!dry, next}));
   else {

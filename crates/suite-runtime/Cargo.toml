@@ -37,7 +37,6 @@ time.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "process", "signal"] }
 tokio-stream = { workspace = true, features = ["net", "sync"] }
 tonic.workspace = true
-zip.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true

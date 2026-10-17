@@ -396,8 +396,6 @@ struct SuiteArgs {
     /// shared cache with its registry sidecar.
     #[arg(long)]
     offline: bool,
-    #[arg(long = "ui-archive")]
-    ui_archive: PathBuf,
     #[arg(long = "state-dir")]
     state_dir: PathBuf,
     /// Reuse a validated native disk state, importing the seed only on first boot.
@@ -803,7 +801,6 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
             || std::env::var("FIRENOOK_OFFLINE")
                 .is_ok_and(|value| matches!(value.as_str(), "1" | "true")),
         node: absolute_path(&arguments.node)?,
-        ui_archive: absolute_path(&arguments.ui_archive)?,
         state_dir: absolute_path(&arguments.state_dir)?,
         resume_state: arguments.resume_state,
         firestore_in_memory: arguments.firestore_memory,
@@ -1911,8 +1908,6 @@ mod tests {
             "node_modules/firebase-tools",
             "--node",
             "node",
-            "--ui-archive",
-            "ui.zip",
             "--state-dir",
             "state",
             "--storage-bucket",
@@ -1961,8 +1956,6 @@ mod tests {
                 "demo-launch",
                 "--node",
                 "node",
-                "--ui-archive",
-                "ui.zip",
                 "--state-dir",
                 &state,
                 "--launch-context",

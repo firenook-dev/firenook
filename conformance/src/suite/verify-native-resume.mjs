@@ -49,7 +49,7 @@ const env=Object.fromEntries(['HOME','USER','LOGNAME','LANG','TZ','PATH','JAVA_H
 Object.assign(env,{PATH:dirname(process.execPath)+':'+env.PATH,GOOGLE_APPLICATION_CREDENTIALS:output+'/demo-adc.json',CLOUDSDK_CONFIG:output+'/gcloud',GCLOUD_PROJECT:project,GOOGLE_CLOUD_PROJECT:project});
 const shared=['suite','--host','127.0.0.1','--project-dir',output,'--project-id',project,
   '--storage-bucket','default='+bucket,'--firebase-tools-root',dependencies+'/node_modules/firebase-tools',
-  '--node',process.execPath,'--ui-archive',cache+'/ui-v1.15.0.zip'];
+  '--node',process.execPath];
 for(const [service,port] of Object.entries(ports))shared.push('--'+service+'-port',String(port));
 for(const server of reservations)await new Promise(resolve=>server.close(resolve));
 let active=null,browser=null,web=null;const launches=[],pageErrors=[];
@@ -67,12 +67,13 @@ const request=async(service,path,method='GET',body)=>{
 const docPath=collection=>`/v1/projects/${project}/databases/(default)/documents/${collection}/unicode`;
 const put=async value=>{for(const collection of ['items','other'])await request('firestore',docPath(collection),'PATCH',{fields:{value:{integerValue:String(value)},text:{stringValue:'火🔥 café'}}});};
 // Engines before 0.1.0-next.7 evaluated Storage rules through the Java runtime
-// and require its location; the current engine rejects those arguments.
-const javaArguments=['--java',process.env.JAVA_HOME?process.env.JAVA_HOME+'/bin/java':'/usr/bin/java',
-  '--storage-rules-jar',cache+'/cloud-storage-rules-runtime-v1.1.3.jar'];
+// and require its location, and engines before 0.2.0-next.3 served Google's
+// Emulator UI from its archive; the current engine rejects all three.
+const legacyArguments=['--java',process.env.JAVA_HOME?process.env.JAVA_HOME+'/bin/java':'/usr/bin/java',
+  '--storage-rules-jar',cache+'/cloud-storage-rules-runtime-v1.1.3.jar','--ui-archive',cache+'/ui-v1.15.0.zip'];
 async function launch(name,extra,engine=binary){
   const started=performance.now();
-  const legacy=engine!==binary?javaArguments:[];
+  const legacy=engine!==binary?legacyArguments:[];
   const child=spawn(engine,[...shared,...legacy,...extra],{cwd:output,env,stdio:['ignore','pipe','pipe']});
   const handle={child,name,log:'',done:false};active=handle;
   handle.finished=new Promise((yes,no)=>{child.once('error',no);child.once('exit',(code,signal)=>{handle.done=true;yes({code,signal});});});

@@ -28,7 +28,6 @@ Use the actual host package name from the receipt. For a Bun consumer:
 ```sh
 bun install --ignore-scripts
 bun run firenook --version
-bun run firenook setup
 bun run firenook emulators:start --project demo-my-app
 ```
 

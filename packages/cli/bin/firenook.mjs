@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { binaryPath, manifest, release } from '../src/binary.mjs';
-import { setupAssets } from '../src/assets.mjs';
 import { parseOptions } from '../src/options.mjs';
 import { diagnose, prepareLaunch, supervise, vendorExtensions } from '../src/runtime.mjs';
 import { nativeEnvironment, requestNativeStop } from '../src/processes.mjs';
@@ -19,7 +18,7 @@ Project
   firenook use [alias|projectId] [--add ID [--alias NAME]] [--unalias NAME] [--clear]   .firebaserc aliases
   firenook target:apply storage NAME BUCKET...            Map a Storage target to buckets in .firebaserc
   firenook target:clear storage NAME
-  firenook setup                                          Download the verified Emulator UI asset
+  firenook setup                                          Nothing to download; kept for scripts that still run it
   firenook doctor [options]                               Read-only package/runtime/config checks (JSON)
 
 Emulators
@@ -100,7 +99,9 @@ async function main() {
   if (!action || ['--help', '-h', 'help'].includes(action)) { console.log(help); return 0; }
   if (['--version', '-v'].includes(action)) { console.log(`${manifest.version} (engine source ${release.engineRevision})`); return 0; }
   if (action === 'binary-path') { if (args.length) throw new Error('binary-path takes no arguments'); console.log(binaryPath()); return 0; }
-  if (action === 'setup') { if (args.length) throw new Error('setup takes no arguments'); binaryPath(); await setupAssets(); return 0; }
+  // Until 0.2.0-next.3 this downloaded Google's Emulator UI. The console is
+  // in the binary now, so there is nothing to fetch; scripts that run it pass.
+  if (action === 'setup') { if (args.length) throw new Error('setup takes no arguments'); binaryPath(); console.log('Nothing to set up: the console is part of the engine, and Firenook downloads nothing.'); return 0; }
   if (action === 'native') {
     if (!args.length) throw new Error('native requires a native command');
     const child = spawn(binaryPath(), args, {env:nativeEnvironment(),detached:process.platform === 'win32',windowsHide:true,stdio:[process.platform === 'win32' ? 'pipe' : 'inherit','inherit','inherit']});

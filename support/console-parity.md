@@ -1,10 +1,12 @@
 # Console parity with the Google Emulator UI 1.15
 
-Every feature of the Google Emulator UI 1.15 (the bundle the UI port's root
-`/` still serves) with the console screen that covers it. When every row is
-ticked, the archive and `setup` go; until then the root keeps serving the
-Google UI, and its index stays pinned by the
-`ui-config-logging-and-websocket` fixture.
+Every feature of the Google Emulator UI 1.15 with the console screen that
+covers it. Every row is ticked, so since `0.2.0-next.3` the engine serves no
+Google UI: the archive and the `setup` download are gone, the UI port's root
+leads to the console, and the official UI's page addresses lead to the
+console's page for the same thing. The `ui-config-logging-and-websocket`
+fixture keeps recording what the official emulator serves there; the one
+feature the console does not have yet is under Known differences.
 
 A row is ticked (`[x]`) when its screen works end to end against a real
 engine and a journey covers it. Each table is kept by the stream that owns
@@ -101,7 +103,7 @@ The official files page (`components/Storage/*`).
 | Upload: button and drag and drop | Storage › Upload (files, a folder, with options), a drop on the list or a folder of the tree, a pasted image; the tray with progress, cancel, retry and the taken-names question | storage | [x] |
 | Create a folder | Storage › New folder (`n`, ⌘K), a zero-byte marker shown as an empty folder | storage | [x] |
 | Delete selected | Storage › ticked rows › Delete: the dry run's counts in DangerConfirm, then a job with progress and cancel | storage | [x] |
-| Delete all | Storage › bucket menu › "Empty the bucket…" (the same delete job), and Overview › Data › Reset data › Storage | storage | [ ] until a journey empties a bucket (the folder-delete journey covers the job path) |
+| Delete all | Storage › bucket menu › "Empty the bucket…" (the same delete job, once the bucket's name is typed), and Overview › Data › Reset data › Storage | storage | [x] |
 | Table: name, size, type, modified | Storage › the list: name, size, type, last changed, metadata keys, tokens (and Access as a client); folders first with their figures; sort and filter in the engine; the grid | storage | [x] |
 | Multiple selection | Storage › ticks, Shift ranges, ⌘A, "Select all N" for the whole listing | storage | [x] |
 | Side panel with a preview | Storage › the inspector's Details and Quick Look: images, video, audio, PDF, text, JSON, CSV and HTML; any other bytes, a zip among them, as hex with what their first bytes say | storage | [x] |
@@ -124,14 +126,6 @@ The official extensions pages (`components/Extensions/*`).
 | Detail: related links | Extensions › an instance › Overview (source URL, author) | compute | [x] |
 | Zero state | Extensions › the empty state | compute | [x] |
 
-## FireAlerts
-
-The official alerts page (`components/Firealerts/*`).
-
-| Feature (Google UI 1.15) | Where in the console | Owner | Status |
-| --- | --- | --- | --- |
-| Send a test Firebase Alerts event to functions | Not built: alerts are not delivered (Eventarc's "without alert delivery there is no Alerts page"; ROADMAP keeps the line open) | compute | [ ] |
-
 ## Out of scope
 
 | Feature (Google UI 1.15) | Why |
@@ -142,6 +136,11 @@ The official alerts page (`components/Firealerts/*`).
 
 ## Known differences
 
+- The official UI's FireAlerts page (`components/Firealerts/*`) sends a test
+  Firebase Alerts event to functions. Firenook does not deliver alerts to
+  functions yet, so on Firenook that page had nothing to reach either; the
+  console's Alerts page comes with alert delivery (ROADMAP, "Firebase Alerts
+  through the Eventarc emulator's native channel").
 - The official logging feed marks a function's console output with level
   `user`; Firenook's feed writes `info` for stdout and `warn` for stderr,
   unchanged until an oracle capture of a function's console line pins the

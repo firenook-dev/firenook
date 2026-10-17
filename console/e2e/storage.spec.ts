@@ -1134,6 +1134,37 @@ test('a folder is deleted as a job: counted first, followed while it runs, found
   await expect(row(page, 'doomed-again/')).toHaveCount(0)
 })
 
+test('the bucket menu empties a bucket as one job, once its name is typed', async ({
+  page,
+  engine,
+}) => {
+  // A bucket of its own, so the seed's buckets stay whole for the others.
+  const bucket = `${engine.project}-emptied`
+  const names = ['a.txt', 'nested/b.txt', 'nested/deeper/c.txt']
+  for (const name of names)
+    await putFile(engine, { bucket, name, size: 8, contentType: 'text/plain' })
+  await openFiles(page, engine, { bucket })
+  await expect(row(page, 'a.txt')).toBeVisible()
+
+  await page.getByTestId('bucket-menu').click()
+  await page.getByTestId('bucket-empty').click()
+  const danger = page.getByTestId('storage-danger')
+  await expect(danger).toContainText('Empty the bucket')
+  // Nothing goes until the bucket's own name is typed.
+  const confirm = page.getByTestId('storage-danger-confirm')
+  await expect(confirm).toBeDisabled()
+  await danger.getByTestId('storage-danger-type').fill(bucket)
+  await expect(confirm).toBeEnabled()
+  await confirm.click()
+  await expect(danger.getByTestId('storage-danger-progress')).toContainText(
+    `Done: ${figure(names.length)} of ${figure(names.length)} deleted`,
+    { timeout: 30_000 },
+  )
+  await page.keyboard.press('Escape')
+  await expect(rows(page)).toHaveCount(0)
+  expect(await existing(engine, bucket, names)).toEqual([])
+})
+
 test('files download by name, a selection as a zip, and an interrupted zip can be asked for again', async ({
   page,
   engine,

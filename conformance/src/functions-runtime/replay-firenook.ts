@@ -135,7 +135,6 @@ const node24 = requireEnv("NODE24");
 const adminRoot = join(dirname(functionsRoot), "firebase-admin");
 const functionsPackage = JSON.parse(await readFile(join(functionsRoot, "package.json"), "utf8")) as { version: string };
 const adminPackage = JSON.parse(await readFile(join(adminRoot, "package.json"), "utf8")) as { version: string };
-const uiArchive = join(process.env.HOME ?? "", ".cache/firebase/emulators/ui-v1.15.0.zip");
 const fixture = JSON.parse(await readFile(fixturePath, "utf8")) as { profiles: ReadonlyArray<{ id: string; programs: RecordedProgram[]; skipped?: string }> };
 const runRoot = await mkdtemp(join(tmpdir(), "firenook-phase-h-replay-"));
 const shortTmp = await mkdtemp("/tmp/fsphr-");
@@ -240,8 +239,6 @@ async function replayProfile(profile: Profile, recordedPrograms: readonly Record
     join(projectDir, "state"),
     "--node",
     node24,
-    "--ui-archive",
-    uiArchive,
     "--firestore-port",
     String(ports.firestore),
     "--auth-port",

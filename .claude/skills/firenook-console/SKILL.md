@@ -7,7 +7,8 @@ description: How the Firenook console (console/ and crates/console-front) is bui
 
 The console is the emulator's own UI: a client-only React app in `console/`,
 built with Vite, embedded into the engine binary by `crates/console-front`
-and mounted under `/console` on the Emulator UI port. It is one product
+and mounted under `/console` on the UI port, whose root leads there (the
+Google Emulator UI was served at that root until `0.2.0-next.3`). It is one product
 surface for three deployments (local emulator, self-hosted, cloud), so nothing
 in it may assume localhost, a port number or an anonymous operator.
 
@@ -2325,7 +2326,8 @@ indenting: paste instead (`pasteRules`).
   same service) and Identity Toolkit at `/console/api/v1/auth/...`; the
   rules page's decisions are the `firestore.decisions` topic. The official
   Requests websocket stays mounted at `/console/api/v1/firestore/requests`
-  for the Google Emulator UI; the console does not read it. Never reach
+  for tools that read the official feed through this origin; the console
+  does not read it. Never reach
   the service ports from the browser.
 - Live: the `firestore.changes` topic on the console's one live channel
   (`useLiveTopic`, `src/lib/live`), fed by the store's commit observer

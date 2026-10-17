@@ -11,7 +11,7 @@
 // it whole.
 
 import { Button, Tooltip } from '@cloudflare/kumo'
-import { ArrowSquareOutIcon, CaretDownIcon, CaretUpIcon } from '@phosphor-icons/react'
+import { CaretDownIcon, CaretUpIcon } from '@phosphor-icons/react'
 import type { UseQueryResult } from '@tanstack/react-query'
 import { type ReactNode, useEffect, useState } from 'react'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
@@ -258,18 +258,6 @@ export function EngineDetails({
                   <Path value={config.node} />
                 </Row>
               )}
-              <Row label="Google Emulator UI" testId="engine-google-ui">
-                <a
-                  href="/"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-kumo-link underline-offset-2 hover:underline"
-                >
-                  Open
-                  <ArrowSquareOutIcon size={12} aria-hidden />
-                </a>
-                <Note>still served at the root of this port</Note>
-              </Row>
             </>
           )}
         </dl>

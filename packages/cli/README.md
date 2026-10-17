@@ -3,7 +3,7 @@
 Prebuilt Rust local emulator, with the same Firebase client/Admin SDKs. It
 serves Firestore, Auth, Storage, Functions and Pub/Sub (any subset, selected
 by `firebase.json` and `--only`) with the supporting hub, Eventarc, Tasks,
-logging and Emulator UI listeners. Realtime Database, Hosting, App Hosting and
+logging and UI (console) listeners. Realtime Database, Hosting, App Hosting and
 Data Connect are not provided.
 
 Install the unscoped `firenook` package; the `@firenook/cli-<platform>`
@@ -16,7 +16,6 @@ the root project README for the currently published version.
 
 ```sh
 npm install --save-dev --save-exact firenook@0.2.0-next.2
-npx firenook setup
 npx firenook init                      # new project: firebase.json, rules, a Functions codebase
 npx firenook init --adopt              # existing project: check it, add what Firenook needs
 npx firenook doctor --project demo-my-app
@@ -44,9 +43,10 @@ platform binary. Lock the version in your project. No automatic upgrades.
   official emulator's behaviour for HTTP/callable/streaming, Firestore, Storage,
   Auth (including blocking functions), Pub/Sub, schedules, Eventarc custom
   events, dotenv/secret files, reload and background controls.
-- `setup` explicitly downloads the pinned public Emulator UI asset and verifies
-  size/SHA-256. Ordinary installation/start does not download it. `doctor` is
-  read-only and names missing dependencies.
+- Nothing is downloaded: no postinstall step and no setup step; the console
+  is part of the engine. `setup`, which fetched Google's Emulator UI until
+  `0.2.0-next.3`, does nothing now, so scripts that still run it pass.
+  `doctor` is read-only and names missing dependencies.
 - The existing `firebase.json`, `.firebaserc` (aliases, Storage targets) and
   rules/index files are read as the official CLI reads them; see
   [Configuration](#configuration). No app SDK replacement is needed.
@@ -72,7 +72,7 @@ firenook init --adopt [--dry-run] [--json]        # adapt an existing firebase.j
 firenook use [alias|projectId] [--add ID [--alias NAME]] [--unalias NAME] [--clear]
 firenook target:apply storage NAME BUCKET...      # .firebaserc Storage targets
 firenook target:clear storage NAME
-firenook setup                                    # verified Emulator UI asset
+firenook setup                                    # nothing to download; kept for old scripts
 firenook doctor [options]                         # read-only checks, JSON
 firenook emulators:start [options]
 firenook emulators:exec [options] "npm test"      # script through the shell
@@ -133,7 +133,7 @@ agent; see [Model Context Protocol](#model-context-protocol).
 
 ## Console
 
-Firenook has its own console at `/console` on the Emulator UI port —
+Firenook has its own console at `/console` on the UI port —
 `http://127.0.0.1:4000/console` with the default port (`emulators.ui.port` in
 `firebase.json` sets another). It covers every service the suite runs:
 Firestore data and security rules, Authentication (users, activity, the
@@ -144,8 +144,13 @@ recent problems, snapshots and resets. It follows the engine live over one
 connection per browser, links a thing in one section to where it shows in
 another, and works without network access.
 
-The official Emulator UI is still served at `/` until every row of the
-[console parity checklist](../../support/console-parity.md) is ticked.
+Google's Emulator UI is not served since `0.2.0-next.3`. The port's root
+sends the browser to the console, and the official UI's addresses
+(`/firestore/…`, `/auth`, `/storage/…`, `/extensions/…`, `/logs?q=…`) lead
+to the console's page for the same thing; `/api/config`, the logging
+WebSocket and the Firestore Requests socket are unchanged for the tools that
+read them. The [parity checklist](../../support/console-parity.md) maps every
+feature of the official UI to the console screen that covers it.
 
 The console answers only for `localhost`, `127.0.0.1`, `::1` and the
 `--host` address. Reached by another name — through a reverse proxy, a
@@ -182,10 +187,11 @@ any host name.
   extensions are configured and selected; otherwise the CLI passes `0`, and
   the engine drops Functions (with Eventarc and Tasks) with a notice when
   `firebase.json` has no `functions` codebase and no `extensions`.
-- **UI.** `emulators.ui.enabled: false` disables the Emulator UI (and the
-  logging listener, as in the official suite); `--ui` cannot re-enable it.
-  `emulators:exec` keeps the UI off unless `--ui` is given or `ui.enabled` is
-  explicitly `true`; `emulators:start` keeps it on unless disabled.
+- **UI.** `emulators.ui.enabled: false` turns off the UI port, and with it
+  the console and the logging listener, as in the official suite; `--ui`
+  cannot re-enable it. `emulators:exec` keeps it off unless `--ui` is given or
+  `ui.enabled` is explicitly `true`; `emulators:start` keeps it on unless
+  disabled.
   `emulators.singleProjectMode` (default `true`) is passed through.
 - **Host.** `--host` or `emulators.<name>.host` binds every listener; clients
   are pointed at the connectable address (`0.0.0.0` → `127.0.0.1`, `::` →
@@ -409,7 +415,6 @@ can still reach external services. Pub/Sub is a full emulator since
 `0.1.0-next.8` (pull, streaming pull, push, ordering, filters, dead-letter,
 seek, snapshots, Avro schemas); Protocol Buffer schemas, IAM and export
 subscriptions are not, and neither are Realtime Database, Hosting, App Hosting
-and Data Connect. The [console](#console) covers every service the suite runs;
-the official Emulator UI at `/` is kept until the parity checklist is complete.
+and Data Connect. The [console](#console) covers every service the suite runs.
 Windows power-loss durability and network filesystems have not been qualified;
 the native Windows checks cover local-disk writes, reopen, export and import.

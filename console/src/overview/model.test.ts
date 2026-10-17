@@ -223,7 +223,7 @@ describe('the engine card', () => {
       infrastructure(STATUS).map((entry) => [entry.label, entry.address, entry.thisPage]),
     ).toEqual([
       ['Hub', '127.0.0.1:4400', false],
-      ['Emulator UI', '127.0.0.1:4000', true],
+      ['Console', '127.0.0.1:4000', true],
       ['Logging feed', '127.0.0.1:4500', false],
       ['Firestore requests', '127.0.0.1:9150', false],
     ])
