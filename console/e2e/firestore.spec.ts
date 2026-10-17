@@ -3925,8 +3925,10 @@ test('the root landing keeps its recents to one row, in the cards’ columns', a
 
   // A long path is cut from the front: where a column has room for the
   // id, the id shows whole, and the path before it still reads left to
-  // right up to it.
-  await page.setViewportSize({ width: 1440, height: 800 })
+  // right up to it. At 1200 a column has room for the id and some of the
+  // path; at 1440 it has room for the id alone, which then reads "…" and
+  // the id.
+  await page.setViewportSize({ width: 1200, height: 800 })
   await page.reload()
   const chip = page.getByTestId('recent').first()
   const label = chip.locator('span[dir="rtl"]')

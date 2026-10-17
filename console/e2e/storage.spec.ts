@@ -538,6 +538,9 @@ test('an image opens in the inspector with its bytes, where it lives and its tok
   expect((await objectOf(engine, bucket, avatar)).downloadTokens).toHaveLength(1)
 
   // The inspector's width is the reader's, remembered under its own key.
+  // At 1280 it is already within 30 px of its widest (the list keeps 360
+  // px beside the navigation and the folders), so the drag has room at 1440.
+  await page.setViewportSize({ width: 1440, height: 900 })
   const grip = page.getByTestId('file-inspector-resize')
   const box = (await grip.boundingBox())!
   const before = Math.round((await panel.boundingBox())!.width)
