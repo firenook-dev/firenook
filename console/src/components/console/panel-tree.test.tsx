@@ -128,7 +128,8 @@ describe('PanelTree', () => {
       />,
     )
     expect(item('dead').querySelector('[data-tone]')).toBeNull()
-    expect(item('dead').className).toContain('before:bg-kumo-brand')
+    // Where you are is marked in the logo's flame, not the blue of an action.
+    expect(item('dead').className).toContain('before:bg-firenook-flame')
     expect(item('dead').className).not.toContain('shadow-[inset')
   })
 
