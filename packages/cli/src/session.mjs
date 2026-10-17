@@ -40,6 +40,9 @@ const SEVERITY = {DEBUG: 'debug', INFO: 'info', NOTICE: 'info', WARNING: 'warn',
 // A call shows once it ends; one still running after this long shows its
 // lines as they come.
 const HOLD = 2000;
+// A start that says nothing for this long is stopped (keeping the data); one
+// that keeps reporting, such as a long repair, is not.
+const QUIET_LIMIT = 20 * 60 * 1000;
 
 // A path as the developer would type it: under the project, relative to it;
 // under the home directory, with ~.
@@ -270,9 +273,9 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     const verb = dim(step.verb || 'starting');
     // A step that finishes quickly shows only its spinner: a bar appears
     // once it has run for 400 ms, so a resumed start never flashes one.
-    if (spent < 400 || done === undefined) return row(spinner(), spent, `${verb}${detail ? `  ${dim(detail)}` : ''}`);
+    if (spent < 400 || done == null) return row(spinner(), spent, `${verb}${detail ? `  ${dim(detail)}` : ''}`);
     if (!total) return row(spinner(), spent, `${verb}  ${count(done)} ${dim(UNITS[step.id] ?? '')}`);
-    const figure = `${count(done)} / ${count(total)}`;
+    const figure = step.unit === 'percent' ? `${step.verb}  ${Math.floor((done / total) * 100)}%` : `${count(done)} / ${count(total)}`;
     // A narrow window drops the step's name before the bar shrinks too far.
     const room = t.bodyRoom() - 6 - 4 - figure.length;
     const named = detail && room - width(detail) - 2 >= 12;
@@ -331,6 +334,37 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   // A failure says what went wrong, what to do about it and what became of
   // the data, in that order, and Firenook exits with code 1.
   const problem = lines => section(divider(`${red(G.fail)} ${bold(red('Firenook could not start'))}`), lines.map(inside));
+  // A command to type, never cut: on one line when it fits, else one part a
+  // line, joined the way the shell continues a line.
+  const command = parts => {
+    const whole = parts.join(' ');
+    if (width(whole) <= t.bodyRoom()) return [cells('', '', bold(whole))];
+    const more = platform === 'win32' ? ' ^' : ' \\';
+    return parts.map((part, at) => cells('', '', bold(`${at ? '  ' : ''}${part}${at < parts.length - 1 ? more : ''}`)));
+  };
+  // The seed the saved data came from changed: the files that did (or why
+  // they cannot be named), then both ways on, as commands to type.
+  const seedProblem = change => {
+    const seed = value('--import');
+    const typed = path => (/[\s"'$`]/.test(path) ? JSON.stringify(path) : path);
+    const lines = [...field(dim('Problem'), `the seed ${shortPath(seed, cwd)} changed after it was imported, so Firenook will not pick up ${shortPath(stateDir, cwd)}`), ...space()];
+    const [changed, added, removed] = change.counts ?? [0, 0, 0];
+    const listed = [];
+    for (const [what, names, total] of [['changed', change.changed, changed], ['added', change.added, added], ['removed', change.removed, removed]]) {
+      for (const name of names ?? []) listed.push(cells(listed.length ? '' : dim('Changed'), '', `${name}  ${dim(what)}`));
+      if (total > (names ?? []).length) listed.push(cells('', '', dim(`and ${total - names.length} more ${what}`)));
+    }
+    if (change.whole) {
+      listed.push(...field(dim('Changed'), 'which files cannot be said: the data was saved by an earlier Firenook, which kept one fingerprint for the whole seed', dim));
+      for (const name of change.finder ?? []) listed.push(cells('', '', `${shortPath(join(seed, name), cwd)}  ${dim('(Finder writes this file)')}`));
+    }
+    lines.push(...listed, ...space());
+    lines.push(...field(dim('Fix'), 'to import the changed seed, start with a new --state-dir; this one stays as it is', dim));
+    lines.push(...field('', 'to keep this data with the seed as it is now:', dim));
+    lines.push(...command(['firenook state:adopt-seed', `--state-dir ${typed(shortPath(stateDir, cwd))}`, `--import ${typed(shortPath(seed, cwd))}`]));
+    lines.push(...space(), ...field(dim('Data'), `nothing was deleted: ${shortPath(stateDir, cwd)} is untouched`, dim));
+    return lines;
+  };
   const dataLine = () => (model.opening.kind === 'resume' ? `nothing was changed: ${shortPath(stateDir, cwd)} is as you left it`
     : model.opening.kind === 'import' && launch.args.includes('--resume-state') ? `the seed was imported into ${shortPath(stateDir, cwd)}; the next start picks it up`
       : ephemeral ? 'nothing of yours was changed' : `the data in ${shortPath(stateDir, cwd)} is kept`);
@@ -349,6 +383,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
       lines.push(...space(), ...field(dim('Data'), dataLine(), dim));
       return lines;
     }
+    if (failure.kind === 'state' && model.seed) return seedProblem(model.seed);
     if (failure.kind === 'state') {
       const seed = value('--import');
       let reason = String(failure.reason ?? failure.message);
@@ -656,6 +691,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   const child = spawner(launch.binary, args, {cwd: launch.cwd, env: launch.env, detached: platform === 'win32', windowsHide: true, stdio: ['pipe', 'pipe', 'pipe']});
   child.stdin?.on('error', () => {});
   let requestedStop = false;
+  let lastHeard = Date.now();
   const stop = signal => {
     if (requestedStop) return;
     requestedStop = true;
@@ -663,14 +699,20 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     try { if (child.exitCode === null) requestNativeStop(child, signal, platform); } catch { /* already gone */ }
     if (!screen.closed) screen.live(stoppingLive);
   };
-  const stoppingLive = () => ['', open(cells('', spinner(), `${nameCell('stopping')}${timed(Date.now() - model.stopping.since, dim(exportDir ? `exporting to ${shortPath(exportDir, cwd)}` : 'saving your data'))}`))];
+  const stoppingWhat = () => (!model.ready ? 'closing the data cleanly first'
+    : exportDir ? `exporting to ${shortPath(exportDir, cwd)}` : 'saving your data');
+  const stoppingLive = () => ['', open(cells('', spinner(), `${nameCell('stopping')}${timed(Date.now() - model.stopping.since, dim(stoppingWhat()))}`))];
 
   let resolveFailure;
   const failureShown = new Promise(done => { resolveFailure = done; });
   async function handle(event) {
+    lastHeard = Date.now();
     switch (event.type) {
       case 'opening':
         model.opening = {...model.opening, ...event};
+        return;
+      case 'seed':
+        model.seed = event;
         return;
       case 'step': {
         const step = model.steps.get(event.id) ?? {id: event.id};
@@ -789,12 +831,12 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   process.on('exit', restore);
   out.on?.('resize', onResize);
   out.on?.('error', () => { screen.end(); stop('SIGTERM'); });
-  const timeout = setTimeout(() => {
-    if (!model.ready) {
-      model.raw.push('Emulator readiness exceeded 20 minutes; requesting graceful shutdown and preserving state.');
+  const timeout = setInterval(() => {
+    if (!model.ready && Date.now() - lastHeard > QUIET_LIMIT) {
+      model.raw.push('The engine said nothing for 20 minutes while starting; requesting graceful shutdown and preserving state.');
       stop('SIGTERM');
     }
-  }, 20 * 60 * 1000);
+  }, 60 * 1000);
 
   // Lines from the engine: events, and anything else it prints as it is.
   const reader = () => {
@@ -833,11 +875,13 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     const at = clock();
     if (requestedStop && (outcome.code === 0 || outcome.signal || !model.ready)) {
       const ms = model.stopping ? Date.now() - model.stopping.since : null;
-      const kept = exportDir ? `exported to ${shortPath(exportDir, cwd)}`
-        : ephemeral ? `this run's data stays in ${shortPath(dirname(stateDir ?? ''), cwd)}` : `everything is kept in ${shortPath(stateDir, cwd)}`;
-      const early = !model.ready ? `${DOT}${dim('before it was ready')}` : '';
+      const kept = model.stopped?.beforeReady ? (ephemeral ? 'nothing of yours was changed' : `the data in ${shortPath(stateDir, cwd)} is as it was`)
+        : exportDir ? `exported to ${shortPath(exportDir, cwd)}`
+          : ephemeral ? `this run's data stays in ${shortPath(dirname(stateDir ?? ''), cwd)}` : `everything is kept in ${shortPath(stateDir, cwd)}`;
+      // Before readiness, what it did comes first: the place may not fit.
+      const said = model.ready ? dim(kept) : `${dim('before it was ready')}${DOT}${dim(kept)}`;
       screen.live(() => []);
-      screen.emit(() => [open(cells(dim(at), green(G.ok), `${nameCell('stopped')}${timed(ms, `${dim(kept)}${early}`)}`)), '']);
+      screen.emit(() => [open(cells(dim(at), green(G.ok), `${nameCell('stopped')}${timed(ms, said)}`)), '']);
       screen.end();
       return outcome.code === 0 ? 0 : 130;
     }
@@ -849,7 +893,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     screen.end();
     return outcome.code === 0 ? 1 : (outcome.code ?? (outcome.signal === 'SIGINT' ? 130 : 1));
   } finally {
-    clearTimeout(timeout);
+    clearInterval(timeout);
     clearInterval(startupTicker);
     clearInterval(runningTicker);
     process.off('SIGINT', onInt);

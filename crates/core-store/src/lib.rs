@@ -26,7 +26,7 @@ mod lazy;
 
 pub use disk::{
     DEFAULT_REDB_CACHE_SIZE_BYTES, DEFAULT_WRITE_BEHIND_INTERVAL, DiskBulkCommit, DiskDurability,
-    DiskError, DiskOptions, DiskStore, adopt_legacy_files, field_indexes_from_env,
+    DiskError, DiskOptions, DiskStore, OpenWatch, adopt_legacy_files, field_indexes_from_env,
 };
 pub use lazy::{EncodedDocument, LazyDocument};
 use lazy::{decode_stored_document, encode_stored_document, stored_scalar_fields};
@@ -933,7 +933,17 @@ impl Store {
 
     /// Opens or creates a durable store inside `directory`.
     pub fn open_disk(directory: impl AsRef<Path>, options: DiskOptions) -> Result<Self, DiskError> {
-        DiskStore::open(directory, options).map(|store| Self {
+        Self::open_disk_watched(directory, options, None)
+    }
+
+    /// [`Store::open_disk`], reporting a repair to `watch` and stopping when
+    /// it asks; see [`DiskStore::open_watched`].
+    pub fn open_disk_watched(
+        directory: impl AsRef<Path>,
+        options: DiskOptions,
+        watch: Option<&Arc<dyn OpenWatch>>,
+    ) -> Result<Self, DiskError> {
+        DiskStore::open_watched(directory, options, watch).map(|store| Self {
             backend: StoreBackend::Disk(store),
             memory_accounting: RuntimeMemoryAccounting::default(),
             commit_observers: Arc::new(Mutex::new(Vec::new())),

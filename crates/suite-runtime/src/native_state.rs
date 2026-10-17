@@ -1,14 +1,19 @@
 //! Fail-closed native-state reuse. This is working data, never a disposable cache.
 
+mod seed;
+
 use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read as _, Write as _};
+use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
+use serde_json::json;
 
-use crate::{SuiteConfig, SuiteRuntimeError, failure};
+use crate::{SuiteConfig, SuiteRuntimeError, failure, terminal};
 
 const LOCK: &str = ".firenook-suite.lock";
 const RECEIPT: &str = "native-state.json";
@@ -24,6 +29,9 @@ struct Identity {
     default_bucket: String,
     buckets: Vec<String>,
     seed_path: PathBuf,
+    /// The whole-seed fingerprint, in the format every engine computes, so
+    /// that saved data stays readable by earlier ones. This engine compares
+    /// the seed through its record (`native-seed.json`) instead.
     seed_sha256: String,
 }
 
@@ -34,11 +42,21 @@ struct Receipt {
     identity: Identity,
 }
 
+/// A first import under way: the seed's files as they were when it began,
+/// and the read that hashes them meanwhile.
+struct Import {
+    seed: PathBuf,
+    before: Vec<seed::Found>,
+    hashing: Option<JoinHandle<Result<seed::Hashed, String>>>,
+    cancel: Arc<AtomicBool>,
+}
+
 pub(super) struct NativeState {
     _lock: File,
     root: PathBuf,
     identity: Option<Identity>,
     reusing: bool,
+    import: Option<Import>,
 }
 
 impl NativeState {
@@ -55,24 +73,12 @@ impl NativeState {
             }
         }
         fs::create_dir_all(&root).map_err(io_error)?;
-        let lock_path = root.join(LOCK);
-        if lock_path.exists() {
-            require_file(&lock_path)?;
-        }
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(lock_path)
-            .map_err(io_error)?;
-        lock.try_lock()
-            .map_err(|error| refused(format!("suite state is locked: {error}")))?;
         let mut guard = Self {
-            _lock: lock,
+            _lock: lock(&root)?,
             root,
             identity: None,
             reusing: false,
+            import: None,
         };
         let receipt_path = guard.root.join(RECEIPT);
         if !config.resume_state {
@@ -96,23 +102,22 @@ impl NativeState {
         };
         buckets.sort();
         buckets.dedup();
-        let identity = Identity {
+        let mut identity = Identity {
             format: FORMAT,
             project: config.project_id.clone(),
             default_bucket: config.default_bucket.clone(),
             buckets,
-            seed_sha256: fingerprint(&seed)?,
             seed_path: seed,
+            seed_sha256: String::new(),
         };
         if receipt_path.exists() {
-            require_file(&receipt_path)?;
-            let receipt: Receipt =
-                serde_json::from_slice(&fs::read(&receipt_path).map_err(io_error)?)
-                    .map_err(|error| refused(format!("invalid completion receipt: {error}")))?;
+            let receipt = read_receipt(&guard.root)?;
             if let Some(reason) = mismatch(&receipt, &identity) {
                 return Err(refused(reason));
             }
+            check_seed(&guard.root, &receipt.identity)?;
             validate_files(&guard.root)?;
+            identity.seed_sha256 = receipt.identity.seed_sha256;
             guard.reusing = true;
         } else {
             for entry in fs::read_dir(&guard.root).map_err(io_error)? {
@@ -120,6 +125,20 @@ impl NativeState {
                     return Err(refused("nonempty state has no completion receipt"));
                 }
             }
+            // The seed is read once, beside the import: its files' details
+            // now, their hashes meanwhile, and a second look at the end
+            // catches a seed edited while it was being imported.
+            let before = seed::scan(&identity.seed_path).map_err(refused)?;
+            let cancel = Arc::new(AtomicBool::new(false));
+            let hashing = {
+                let seed = identity.seed_path.clone();
+                let found = before.clone();
+                let cancel = Arc::clone(&cancel);
+                std::thread::Builder::new()
+                    .name("firenook-seed".to_owned())
+                    .spawn(move || seed::hash_all(&seed, &found, &cancel, false))
+                    .map_err(io_error)?
+            };
             write_receipt(
                 &guard.root,
                 &Receipt {
@@ -127,6 +146,12 @@ impl NativeState {
                     identity: identity.clone(),
                 },
             )?;
+            guard.import = Some(Import {
+                seed: identity.seed_path.clone(),
+                before,
+                hashing: Some(hashing),
+                cancel,
+            });
         }
         guard.identity = Some(identity);
         Ok(guard)
@@ -137,25 +162,225 @@ impl NativeState {
     }
 
     pub(super) fn complete(&mut self) -> Result<(), SuiteRuntimeError> {
-        let Some(identity) = &self.identity else {
+        let Some(identity) = &mut self.identity else {
             return Ok(());
         };
         validate_files(&self.root)?;
-        if !self.reusing {
-            // Catch a seed edited while the initial import was being read.
-            if fingerprint(&identity.seed_path)? != identity.seed_sha256 {
-                return Err(refused("seed changed during import"));
+        let Some(mut import) = self.import.take() else {
+            return Ok(());
+        };
+        let hashing = import
+            .hashing
+            .take()
+            .ok_or_else(|| refused("seed read lost"))?;
+        // A large seed may still be reading after a quick import.
+        let waiting = (!hashing.is_finished()).then(|| terminal::Step::begin("data", "recording"));
+        let hashed = hashing
+            .join()
+            .map_err(|_| refused("the seed read panicked"))?
+            .map_err(refused)?;
+        let after = seed::scan(&import.seed).map_err(refused)?;
+        if seed::details(&after) != seed::details(&import.before) {
+            if let Some(step) = waiting {
+                step.failed("the seed changed");
             }
-            write_receipt(
-                &self.root,
-                &Receipt {
-                    complete: true,
-                    identity: identity.clone(),
-                },
-            )?;
+            return Err(refused("seed changed during import"));
+        }
+        let record = seed::Record::new(&import.before, &hashed.files, &hashed.whole);
+        record.write(&self.root).map_err(refused)?;
+        identity.seed_sha256 = hashed.whole;
+        write_receipt(
+            &self.root,
+            &Receipt {
+                complete: true,
+                identity: identity.clone(),
+            },
+        )?;
+        if let Some(step) = waiting {
+            step.done(&[(record.files() as u64, "seed files")], None);
         }
         Ok(())
     }
+}
+
+impl Drop for NativeState {
+    fn drop(&mut self) {
+        // An import that never completed stops reading its seed.
+        if let Some(import) = &mut self.import {
+            import.cancel.store(true, Ordering::Relaxed);
+            if let Some(hashing) = import.hashing.take() {
+                let _ = hashing.join();
+            }
+        }
+    }
+}
+
+fn lock(root: &Path) -> Result<File, SuiteRuntimeError> {
+    let lock_path = root.join(LOCK);
+    if lock_path.exists() {
+        require_file(&lock_path)?;
+    }
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path)
+        .map_err(io_error)?;
+    lock.try_lock()
+        .map_err(|error| refused(format!("suite state is locked: {error}")))?;
+    Ok(lock)
+}
+
+fn read_receipt(root: &Path) -> Result<Receipt, SuiteRuntimeError> {
+    let path = root.join(RECEIPT);
+    require_file(&path)?;
+    serde_json::from_slice(&fs::read(&path).map_err(io_error)?)
+        .map_err(|error| refused(format!("invalid completion receipt: {error}")))
+}
+
+/// Whether the seed is still the one the saved data came from. With a
+/// record, only the files whose details changed are read; without one (data
+/// an earlier engine saved), the seed is read once and the record written.
+fn check_seed(root: &Path, saved: &Identity) -> Result<(), SuiteRuntimeError> {
+    // A stop asked for meanwhile ends the read: nothing was opened yet.
+    let cancel = crate::control::stop_flag();
+    let read_failed = |error: String| {
+        if crate::control::stop_requested() {
+            crate::stopped_while_starting()
+        } else {
+            refused(error)
+        }
+    };
+    let seed = &saved.seed_path;
+    let found = seed::scan(seed).map_err(refused)?;
+    let record = seed::Record::read(root).filter(|record| record.seed_sha256 == saved.seed_sha256);
+    if let Some(record) = record {
+        return match seed::compare(seed, &record, &found, cancel).map_err(read_failed)? {
+            seed::Verdict::Same(retaken) => {
+                // Only details taken again: keeping the old record costs a
+                // re-read next time, never a wrong answer.
+                if let Some(retaken) = retaken {
+                    let _ = retaken.write(root);
+                }
+                Ok(())
+            }
+            seed::Verdict::Changed(changes) => {
+                terminal::emit(&json!({
+                    "type": "seed", "whole": false,
+                    "changed": first(&changes.changed), "added": first(&changes.added),
+                    "removed": first(&changes.removed),
+                    "counts": [changes.changed.len(), changes.added.len(), changes.removed.len()],
+                    "finder": [],
+                }));
+                Err(refused_seed(
+                    &format!(
+                        "the seed {} changed after it was imported: {}",
+                        seed.display(),
+                        summary(&changes)
+                    ),
+                    root,
+                    seed,
+                ))
+            }
+        };
+    }
+    let hashed = seed::hash_all(seed, &found, cancel, true).map_err(read_failed)?;
+    // The whole-seed fingerprint is accepted with or without the files an
+    // operating system wrote since: no importer reads them.
+    if saved.seed_sha256 != hashed.whole && saved.seed_sha256 != hashed.whole_without_junk {
+        let finder = found
+            .iter()
+            .filter(|file| file.junk)
+            .map(|file| file.path.clone())
+            .collect::<Vec<_>>();
+        terminal::emit(&json!({
+            "type": "seed", "whole": true, "changed": [], "added": [], "removed": [],
+            "counts": [0, 0, 0], "finder": first(&finder),
+        }));
+        let mut reason = format!(
+            "the seed {} changed after it was imported (the data was saved by an earlier Firenook, which kept one fingerprint for the whole seed, so the files that changed cannot be named",
+            seed.display()
+        );
+        if let Some(file) = finder.first() {
+            let _ = write!(reason, "; the seed holds {file}, which Finder writes");
+        }
+        reason.push(')');
+        return Err(refused_seed(&reason, root, seed));
+    }
+    seed::Record::new(&found, &hashed.files, &saved.seed_sha256)
+        .write(root)
+        .map_err(refused)
+}
+
+/// The first few names of a list.
+fn first(names: &[String]) -> &[String] {
+    &names[..names.len().min(3)]
+}
+
+/// `2 changed (a, b), 1 added (c)`, for the plain log.
+fn summary(changes: &seed::Changes) -> String {
+    [
+        ("changed", &changes.changed),
+        ("added", &changes.added),
+        ("removed", &changes.removed),
+    ]
+    .into_iter()
+    .filter(|(_, names)| !names.is_empty())
+    .map(|(what, names)| {
+        let more = names.len() - first(names).len();
+        let mut listed = first(names).join(", ");
+        if more > 0 {
+            let _ = write!(listed, " and {more} more");
+        }
+        format!("{} {what} ({listed})", names.len())
+    })
+    .collect::<Vec<_>>()
+    .join(", ")
+}
+
+/// What `firenook state:adopt-seed` did.
+#[derive(Debug)]
+pub struct AdoptedSeed {
+    pub previous_seed: PathBuf,
+    pub seed: PathBuf,
+    pub files: usize,
+    pub backup: PathBuf,
+}
+
+/// Records the seed as it is now as the one the saved data came from,
+/// keeping the data: the way out when the seed changed in a way that does not
+/// matter to it. The previous receipt is kept beside the new one.
+pub fn adopt_seed(state_dir: &Path, seed: &Path) -> Result<AdoptedSeed, SuiteRuntimeError> {
+    let root = fs::canonicalize(state_dir)
+        .map_err(|error| refused(format!("no saved data at {}: {error}", state_dir.display())))?;
+    let _lock = lock(&root)?;
+    let mut receipt = read_receipt(&root)?;
+    if !receipt.complete {
+        return Err(refused(
+            "the import that made it did not finish, and adopting a seed cannot finish it",
+        ));
+    }
+    let seed = validate_seed(seed)?;
+    reject_overlap(&root, &seed)?;
+    let found = seed::scan(&seed).map_err(refused)?;
+    let hashed = seed::hash_all(&seed, &found, &AtomicBool::new(false), false).map_err(refused)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    let backup = root.join(format!("{RECEIPT}.before-adopt-{stamp}"));
+    fs::copy(root.join(RECEIPT), &backup).map_err(io_error)?;
+    let record = seed::Record::new(&found, &hashed.files, &hashed.whole);
+    record.write(&root).map_err(refused)?;
+    let previous_seed = std::mem::replace(&mut receipt.identity.seed_path, seed.clone());
+    receipt.identity.seed_sha256 = hashed.whole;
+    write_receipt(&root, &receipt)?;
+    Ok(AdoptedSeed {
+        previous_seed,
+        seed,
+        files: record.files(),
+        backup,
+    })
 }
 
 fn seed_path(config: &SuiteConfig) -> Result<PathBuf, SuiteRuntimeError> {
@@ -163,6 +388,11 @@ fn seed_path(config: &SuiteConfig) -> Result<PathBuf, SuiteRuntimeError> {
         .import
         .as_ref()
         .ok_or_else(|| refused("--resume-state requires --import as seed identity"))?;
+    validate_seed(seed)
+}
+
+/// The seed's canonical path, once its manifest is known to point inside it.
+fn validate_seed(seed: &Path) -> Result<PathBuf, SuiteRuntimeError> {
     let seed = fs::canonicalize(seed).map_err(io_error)?;
     require_file(&seed.join("firebase-export-metadata.json"))?;
     let manifest = crate::read_export_metadata(&seed)?;
@@ -287,54 +517,7 @@ fn mismatch(receipt: &Receipt, identity: &Identity) -> Option<String> {
             identity.seed_path.display()
         ));
     }
-    if saved.seed_sha256 != identity.seed_sha256 {
-        let mut reason = format!(
-            "the seed {} changed after it was imported",
-            identity.seed_path.display()
-        );
-        // Finder writes a .DS_Store into every folder it shows: the most
-        // common change to a seed nobody meant to change.
-        if let Some(finder) = finder_files(&identity.seed_path).first() {
-            let shown = identity
-                .seed_path
-                .parent()
-                .and_then(|parent| finder.strip_prefix(parent).ok())
-                .unwrap_or(finder);
-            let _ = write!(
-                reason,
-                " (it holds {}, which Finder writes; if nothing else changed, deleting it restores the seed)",
-                shown.display()
-            );
-        }
-        return Some(reason);
-    }
     None
-}
-
-/// The `.DS_Store` files under `root`, at most a few.
-fn finder_files(root: &Path) -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(directory) = pending.pop() {
-        let Ok(entries) = fs::read_dir(&directory) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            match entry.file_type() {
-                Ok(kind) if kind.is_dir() => pending.push(path),
-                Ok(kind) if kind.is_file() && entry.file_name() == ".DS_Store" => {
-                    found.push(path);
-                    if found.len() == 3 {
-                        return found;
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    found.sort();
-    found
 }
 
 fn require_file(path: &Path) -> Result<(), SuiteRuntimeError> {
@@ -343,60 +526,6 @@ fn require_file(path: &Path) -> Result<(), SuiteRuntimeError> {
             "required regular file missing: {}",
             path.display()
         )));
-    }
-    Ok(())
-}
-
-fn fingerprint(root: &Path) -> Result<String, SuiteRuntimeError> {
-    let mut digest = Sha256::new();
-    hash_directory(root, root, &mut digest)?;
-    let mut hex = String::with_capacity(64);
-    for byte in digest.finalize() {
-        write!(&mut hex, "{byte:02x}").map_err(|error| failure(error.to_string()))?;
-    }
-    Ok(hex)
-}
-
-fn hash_directory(
-    root: &Path,
-    directory: &Path,
-    digest: &mut Sha256,
-) -> Result<(), SuiteRuntimeError> {
-    let mut entries = fs::read_dir(directory)
-        .map_err(io_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(io_error)?;
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-    for entry in entries {
-        let path = entry.path();
-        let kind = entry.file_type().map_err(io_error)?;
-        if kind.is_dir() {
-            hash_directory(root, &path, digest)?;
-        } else if kind.is_file() {
-            let relative = path
-                .strip_prefix(root)
-                .map_err(|error| refused(error.to_string()))?;
-            let name = relative
-                .to_str()
-                .ok_or_else(|| refused("seed paths must be UTF-8"))?;
-            digest.update((name.len() as u64).to_le_bytes());
-            digest.update(name.as_bytes());
-            let mut file = File::open(&path).map_err(io_error)?;
-            digest.update(file.metadata().map_err(io_error)?.len().to_le_bytes());
-            let mut buffer = vec![0_u8; 64 * 1024];
-            loop {
-                let length = file.read(&mut buffer).map_err(io_error)?;
-                if length == 0 {
-                    break;
-                }
-                digest.update(&buffer[..length]);
-            }
-        } else {
-            return Err(refused(format!(
-                "seed contains a symlink or special file: {}",
-                path.display()
-            )));
-        }
     }
     Ok(())
 }
@@ -420,6 +549,24 @@ fn write_receipt(root: &Path, receipt: &Receipt) -> Result<(), SuiteRuntimeError
         .and_then(|directory| directory.sync_all())
         .map_err(io_error)?;
     Ok(())
+}
+
+/// A seed that changed: both ways on, as the developer would type them.
+fn refused_seed(reason: &str, state: &Path, seed: &Path) -> SuiteRuntimeError {
+    failure(format!(
+        "native state refused: {reason}; existing data preserved. Import the changed seed with a NEW --state-dir, or keep this data with the seed as it is now: firenook state:adopt-seed --state-dir {} --import {}",
+        quoted(state),
+        quoted(seed)
+    ))
+}
+
+fn quoted(path: &Path) -> String {
+    let text = path.display().to_string();
+    if text.contains(|character: char| character.is_whitespace() || "\"'$`".contains(character)) {
+        format!("{text:?}")
+    } else {
+        text
+    }
 }
 
 fn io_error(error: impl std::fmt::Display) -> SuiteRuntimeError {

@@ -406,6 +406,21 @@ async fn imports_are_recorded_as_the_system_and_send_nothing() {
     source.drain_dispatches();
     let export = source.root.join("export");
     source.runtime.export(&export).await.expect("export");
+    // What macOS writes beside each file on a volume without extended
+    // attributes: not an object, and never read as one.
+    let metadata = std::fs::read_dir(export.join("metadata"))
+        .expect("metadata")
+        .next()
+        .expect("one object")
+        .expect("entry")
+        .file_name();
+    std::fs::write(
+        export
+            .join("metadata")
+            .join(format!("._{}", metadata.to_string_lossy())),
+        [0_u8, 5, 22, 7],
+    )
+    .expect("apple double");
 
     let mut harness = start("import", StorageOptions::default(), None).await;
     let mut events = harness.runtime.console().subscribe();

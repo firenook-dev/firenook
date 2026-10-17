@@ -40,6 +40,15 @@ export function vendorExtensions(binary, project, instances = []) {
   return result.status ?? 1;
 }
 
+// Records the seed as it is now as the one saved data came from, keeping
+// the data; the engine prints what it did.
+export function adoptSeed(binary, stateDir, seed) {
+  const result = spawnSync(binary, ['state', 'adopt-seed', '--state-dir', stateDir, '--import', seed],
+    {env:nativeEnvironment(), stdio:'inherit', windowsHide:true});
+  if (result.error) throw result.error;
+  return result.status ?? 1;
+}
+
 // Builds the native suite invocation. `mode` is 'start' or 'exec': like the
 // official CLI, exec keeps the console off unless --ui is given or
 // firebase.json enables it explicitly. `typed` is the command's arguments as
@@ -138,12 +147,16 @@ export async function supervise(launch, command) {
   const onTerm = () => stop('SIGTERM');
   process.on('SIGINT', onInt);
   process.on('SIGTERM', onTerm);
-  const timeout = setTimeout(() => {
-    startupError = new Error('Emulator readiness exceeded 20 minutes; requesting graceful shutdown and preserving state.');
+  // A start that prints nothing for 20 minutes is stopped, keeping the data;
+  // one that keeps reporting (a long repair prints as it goes) is not.
+  const quiet = () => setTimeout(() => {
+    startupError = new Error('The engine printed nothing for 20 minutes while starting; requesting graceful shutdown and preserving state.');
     stop('SIGTERM');
   }, 20 * 60 * 1000);
+  let timeout = quiet();
   function output(chunk, destination) {
     destination.write(chunk);
+    if (!ready) { clearTimeout(timeout); timeout = quiet(); }
     tail = (tail + chunk.toString()).slice(-4096);
     if (!ready && /(?:^|\n)All emulators ready\r?\n/.test(tail)) {
       ready = true;
