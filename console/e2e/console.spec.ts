@@ -69,7 +69,9 @@ test('the top bar: Connect over the page on screen, and help', async ({ page }) 
   await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible()
 })
 
-test('a press on Help while its menu is still loading opens the menu when it arrives', async ({ page }) => {
+test('a press on Help while its menu is still loading opens the menu when it arrives', async ({
+  page,
+}) => {
   // The menu's code is held back, as on a slow first load.
   await page.route(/help-menu-[^/]+\.js$/, async (route) => {
     await new Promise((done) => setTimeout(done, 1500))
