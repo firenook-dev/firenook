@@ -1,3 +1,43 @@
+# 0.2.0-next.5 — saved data: a quick seed check, quick repairs, clean stops
+
+- Pin the engine to `18becb031bed1459133a5307790edb0afe19b0ca`, the merge of
+  [PR #85](https://github.com/firenook-dev/firenook/pull/85) (the
+  seed record, quick repairs, clean stops while starting) on 0.2.0-next.4. Its
+  tree is the PR head's, `2651940`, which passed CI
+  ([run 39048498837](https://github.com/firenook-dev/firenook/actions/runs/39048498837))
+  and the five-platform packed-install matrix
+  ([run 39048498797](https://github.com/firenook-dev/firenook/actions/runs/39048498797)).
+- **The seed check reads file details.** Saved data (`--state-dir` with
+  `--resume-state`) is picked up after comparing each seed file's size and
+  times with the record made at the import (`native-seed.json`, beside the
+  receipt); only a file whose details changed is read. On a 7.8 GB seed the
+  check went from 23 to 26 s to under a second.
+- **Files operating systems write never block a start**: `.DS_Store`, `._*`,
+  `Thumbs.db`, `desktop.ini`, `__MACOSX` and the like are ignored, and the
+  Storage import skips `._*` files.
+- **A first import hashes the seed beside the import**, on worker threads,
+  instead of reading it twice in full around it.
+- **A changed seed names its files**, and `firenook state:adopt-seed
+  --state-dir DIR --import DIR` keeps the data with the seed as it is now
+  (the previous receipt is kept beside the new one).
+- **Quick repairs.** The store's durable commits save what a repair needs,
+  so a start after a crash or a killed process repairs in moments instead of
+  reading the whole store. `--durability per-commit` leaves it out to keep
+  its commit latency.
+- **A repair shows its progress**: the Firestore row reads `repairing NN%`
+  with the store's size, and the plain log prints how far it has got.
+- **A stop while starting closes the data cleanly.** Ctrl-C, SIGTERM, a
+  closed terminal and the launcher's pipe are listened for from the first
+  moment: a seed check or a repair is abandoned with nothing opened, an
+  import into a fresh run's directory ends at once, one into saved data
+  finishes first. Nothing is exported before the emulators served anything.
+- **The start-up limit counts quiet time**: a start that reports as it goes,
+  such as a long repair, is not stopped after 20 minutes.
+- **Saved data from 0.2.0-next.4 and earlier** is checked in full once, then
+  recorded; data saved by 0.2.0-next.5 stays readable by 0.2.0-next.4. The
+  state format is unchanged: the record is a new file beside the receipt.
+- No emulator protocol or port changed.
+
 # 0.2.0-next.4 — the terminal UI
 
 - Pin the engine to `8cf0bab1f16469b0c996e3d12d266feec8d87130`, the merge of
