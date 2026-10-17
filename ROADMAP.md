@@ -1099,6 +1099,23 @@ data and 7 s on 21 functions.
   metadata with each durable commit and on a clean close, adjust it during
   journal replay, and read it instead. A store without it, or one just
   repaired, counts once and saves it. Target: an open in seconds.
+  - The count itself is quick on a warm cache (211,000 documents in under
+    1.5 s); it is slow because it reads the whole file from a cold disk at
+    every start. With a saved count that read moves to the first requests,
+    and only for what they touch: readiness comes in seconds, and a client
+    that reads most of the data right after the start pays part of it
+    there. Still a large net gain on big stores.
+  - The saved count records the store revision it belongs to. A store
+    written meanwhile by an engine that does not keep the count (going back a
+    release and forward again), a full repair, or a missing count means one
+    recount. Journal replay after a crash adjusts it write by write.
+  - A wrong count would only misreport figures (the console Overview's data
+    size, the stop summary, memory reports), never the data; confirm before
+    building that nothing enforces a limit from it.
+  - Not at first: a background recount after readiness to check the saved
+    figure. It would compete with the first requests for the disk.
+  - Tests as for the seed record: crash and replay, going back a release,
+    repair, and a count that does not match its revision.
 - [ ] **Load Functions while the data opens.** Loading codebases needs Node
   and the code, not the data, so it can run beside Firestore, Auth and
   Storage instead of after them. Conditions: bind every port first and hold
