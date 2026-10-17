@@ -1053,7 +1053,7 @@ The last row of the CLI surface: what a developer sees in the terminal from
   before publication; the local and CI verification is in the CHANGELOG
   entries of both releases.
 
-## Saved data: the seed record, quick repairs, safe stops (unreleased)
+## Saved data: the seed record, quick repairs, safe stops (`0.2.0-next.5`)
 
 Saved data (`--state-dir` with `--resume-state`) checked its seed by reading
 every byte on every start (26 s for a 7.8 GB seed), and a `.DS_Store` that
@@ -1076,4 +1076,11 @@ stood, which left the store to a full repair at the next start, shown only as
   progress.
 - [x] Stops are listened for from the first moment: a stop while starting
   closes the data cleanly, and the start-up limit counts quiet time only.
-
+- [x] Published as `firenook@0.2.0-next.5` with `@firenook/cli-<platform>` ×5
+  on 2026-10-18 (PR #85, release PR #86, tag `npm-v0.2.0-next.5` on d7764ca,
+  engine 18becb0, release run 39050978077 with its SDK browser gate run a
+  second time after the Firebase JS SDK build was caught mid-write; registry
+  integrity equal to the release assets for all six packages, provenance
+  attestations verified on a fresh install).
+- [ ] Follow-up: an open counts every document to size Firestore's memory
+  accounting, most of a large store's opening time; keep the count instead.

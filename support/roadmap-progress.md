@@ -1,6 +1,6 @@
 # Scoped roadmap progress
 
-Updated 2026-10-17 UTC (`firenook@0.2.0-next.3` published: the console for every service, Google's Emulator UI gone; `firenook@0.2.0-next.4` published: the terminal UI, now `latest`). The A–F roadmap remains active; no full-release,
+Updated 2026-10-18 UTC (`firenook@0.2.0-next.5` published: the seed record, quick repairs, clean stops while starting). The A–F roadmap remains active; no full-release,
 universal-compatibility, publication or performance-win claim is made here.
 
 | Phase | Current state | Remaining qualification |
@@ -100,6 +100,7 @@ checks on its exact combined candidate instead of substituting older binaries.
 | Read path and field index | Published as `firenook@0.2.0-next.2` (2026-10-03): PRs #62, #66 and #67 on engine 63d554c, release run 37123335020, registry integrity and provenance verified; workspace tests, packaging tests and the Firestore conformance suite in memory and disk modes on the candidate; upgrade from and downgrade to `0.2.0-next.1` exercised locally | Acceptance-host lanes on this engine |
 | Console | Published as `firenook@0.2.0-next.3` (2026-10-17): PRs #64, #74, #76, #78, #79 and #80 on engine 19f2338, release run 39031389689, registry integrity and provenance verified; every section of the emulator, the parity checklist ticked, Google's Emulator UI removed; Playwright journeys against a real engine in CI; a state written by `0.2.0-next.2` picked up and handed back | Acceptance-host lanes on this engine |
 | Terminal UI | Published as `firenook@0.2.0-next.4` (2026-10-17): PR #82 on engine 8cf0bab, release run 39035262983, registry integrity and provenance verified, `latest` → 0.2.0-next.4; the engine's terminal events, the npm package's screen, packaged on five platforms with a terminal run in the suite smoke | Acceptance-host lanes on this engine |
+| Saved data | Published as `firenook@0.2.0-next.5` (2026-10-18): PR #85 on engine 18becb0, release run 39050978077, registry integrity and provenance verified; the seed checked by file details (`native-seed.json`), operating-system files ignored, `state:adopt-seed`, quick repairs with progress shown, stops while starting closed cleanly; data saved by it stays readable by 0.2.0-next.4 | Keep the document count instead of counting at every open |
 
 The public preview compatibility document continues to describe the installed
 release. Merged but unpublished source improvements must not be presented as
