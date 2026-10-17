@@ -3,6 +3,8 @@ import { spawn } from 'node:child_process';
 import { binaryPath, manifest, release } from '../src/binary.mjs';
 import { parseOptions } from '../src/options.mjs';
 import { diagnose, prepareLaunch, supervise, vendorExtensions } from '../src/runtime.mjs';
+import { runInteractive } from '../src/session.mjs';
+import { interactive } from '../src/terminal.mjs';
 import { nativeEnvironment, requestNativeStop } from '../src/processes.mjs';
 import { exportEmulators, firestoreDelete } from '../src/hub.mjs';
 import { invokeFunction } from '../src/invoke.mjs';
@@ -47,7 +49,7 @@ Start/exec: --only auth,functions,firestore,storage,pubsub (extensions=functions
   --storage-bucket target=bucket (repeatable), --host HOST, --allowed-hosts NAME,..., --ui,
   --minimum-functions N, --inspect-functions[=PORT], --offline, --durability write-behind|per-commit,
   --no-diagnostics, --firestore-websocket-port N, --hub-port N, --logging-port N, --eventarc-port N,
-  --tasks-port N.
+  --tasks-port N, --plain (the plain log instead of the terminal UI, as a pipe or CI gets it).
 
 firebase.json service subsets, storage {rules} or targets, several Firestore databases, ui.enabled and
 singleProjectMode are honoured; database/hosting/dataconnect/apphosting entries are skipped with a
@@ -58,7 +60,7 @@ deploy/login command (never intercepted). Disk/WAL state by default; runs are ke
 `;
 
 const common = ['project', 'config', 'help', 'non-interactive', 'json', 'debug', 'log-verbosity'];
-const launch = [...common, 'import', 'export-on-exit', 'only', 'state-dir', 'resume-state', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'inspect-functions', 'offline', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'no-diagnostics', 'ui'];
+const launch = [...common, 'import', 'export-on-exit', 'only', 'state-dir', 'resume-state', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'inspect-functions', 'offline', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'no-diagnostics', 'ui', 'plain'];
 const accepted = {
   doctor:[...launch, 'instance'], 'emulators:start':launch, 'emulators:exec':launch, 'ext:vendor':[...common, 'instance', 'offline'],
   'emulators:export':[...common, 'force', 'only', 'hub-port'],
@@ -135,9 +137,17 @@ async function main() {
   if (action === 'init') { noPositionals(action, positionals); return options.adopt ? adopt(options) : scaffold(options); }
   if (action === 'mcp') { noPositionals(action, positionals); return serveMcp(options); }
   const testCommand = action === 'emulators:exec' ? execCommand(action, parsed) : noPositionals(action, positionals);
-  const diagnostic = await diagnose(options);
+  // In a terminal, emulators:start draws its own UI; everything else, and
+  // any pipe, CI or log file, gets the plain line protocol.
+  const drawn = action === 'emulators:start' && interactive({plain:Boolean(options.plain)});
+  const diagnostic = await diagnose(options, process.cwd(), {quiet:drawn});
   if (action === 'doctor') { console.log(JSON.stringify(diagnostic, null, 2)); return 0; }
   if (action === 'ext:vendor') return vendorExtensions(diagnostic.binary, diagnostic.project, options.instance);
+  if (drawn) {
+    const project = diagnostic.project;
+    return runInteractive(prepareLaunch(diagnostic, options, 'start', args, {quiet:true}),
+      {version:manifest.version, projectId:project.project, demo:project.demo, warnings:project.warnings, cwd:process.cwd()});
+  }
   return supervise(prepareLaunch(diagnostic, options, action === 'emulators:exec' ? 'exec' : 'start', args), testCommand);
 }
 try { process.exitCode = await main(); }

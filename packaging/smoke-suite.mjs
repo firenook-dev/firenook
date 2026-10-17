@@ -1,10 +1,12 @@
 // Tiny synthetic complete-suite adapter check. Never uses consumer env/data.
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
+import { Writable } from 'node:stream';
+import { pathToFileURL } from 'node:url';
 import { packageManager } from './package-manager.mjs';
 
 const [directoryArgument] = process.argv.slice(2);
@@ -86,6 +88,51 @@ async function run(mode, imported, exported, state) {
 }
 await run('write',undefined,'export','state');
 await run('reopen','export','export-after-reopen','state-after-reopen');
+
+// The terminal UI: emulators:start as a terminal runs it, through the
+// installed package's own session against the packaged engine, with the
+// keyboard and the screen stood in for. It draws the start-up and the
+// ready summary, shows a call, and q stops it export-first.
+async function terminal() {
+  const pkg = join(receipt.consumer,'node_modules/firenook');
+  const load = file => import(pathToFileURL(join(pkg,'src',file)).href);
+  const [{runInteractive},{diagnose,prepareLaunch},{parseOptions}] = await Promise.all([load('session.mjs'),load('runtime.mjs'),load('options.mjs')]);
+  const typed = ['--project',project,'--minimum-functions','1','--firestore-websocket-port',String(ports.websocket),'--state-dir','state-terminal'];
+  const {options} = parseOptions(typed);
+  const previous = process.env.FIRENOOK_NO_UPDATE_CHECK;
+  process.env.FIRENOOK_NO_UPDATE_CHECK = '1';
+  const diagnostic = await diagnose(options, root, {quiet:true});
+  const launch = prepareLaunch(diagnostic, options, 'start', typed, {quiet:true});
+  let screen = '';
+  const out = new Writable({write(chunk,_encoding,done) { screen += chunk; done(); }});
+  Object.assign(out, {isTTY:true, columns:100, rows:40});
+  const input = new EventEmitter();
+  Object.assign(input, {isTTY:true, isRaw:false, setRawMode(on) { this.isRaw = on; }, resume() {}, pause() {}});
+  const shown = () => screen.replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\]8;;.*?\x1b\\/g,'');
+  const session = runInteractive(launch, {version:receipt.version, projectId:project, demo:true, cwd:root, out, input, env:{...process.env, FIRENOOK_NO_UPDATE_CHECK:'1'}});
+  const until = async (test, what) => {
+    for (let waited = 0; !test(); waited += 100) {
+      assert.ok(waited < 120000, `the terminal never showed ${what}:\n${shown()}`);
+      await new Promise(done => setTimeout(done, 100));
+    }
+  };
+  try {
+    await until(() => shown().includes('All emulators ready'), 'readiness');
+    const response = await fetch(`http://127.0.0.1:${ports.functions}/${project}/us-central1/echo`);
+    assert.equal(response.status,200);
+    await until(() => /echo\s+\d+ ms\s+http/.test(shown()), 'the call');
+  } finally {
+    input.emit('data', Buffer.from('q'));
+  }
+  const code = await session;
+  if (previous === undefined) delete process.env.FIRENOOK_NO_UPDATE_CHECK; else process.env.FIRENOOK_NO_UPDATE_CHECK = previous;
+  writeFileSync(join(root,'terminal.log'),shown());
+  assert.equal(code,0,`the terminal session ended with ${code}:\n${shown()}`);
+  for (const expected of ['Start-up','Firestore','Functions','All emulators ready',`http://127.0.0.1:${ports.ui}/console`,'stopped']) assert.ok(shown().includes(expected),`${expected} in:\n${shown()}`);
+  assert.ok(!shown().includes('FIRENOOK_EVENT'),'no event line reaches the screen');
+  assert.equal(input.isRaw,false,'the keyboard is given back');
+}
+await terminal();
 writeFileSync(join(directory,'suite-smoke.json'),JSON.stringify({passed:true,version:receipt.version,engineRevision:receipt.engineRevision,
-  checks:['packaged full-profile setup','doctor dependencies via start','exec readiness','Firestore Unicode write/read','Functions HTTP','Auth create and re-import login','Storage rules/upload/download/re-import','PubSub create/publish','UI serving','export-first shutdown','official-format re-import','second export'],root,completedAt:new Date().toISOString()},null,2)+'\n');
+  checks:['packaged full-profile setup','doctor dependencies via start','exec readiness','Firestore Unicode write/read','Functions HTTP','Auth create and re-import login','Storage rules/upload/download/re-import','PubSub create/publish','UI serving','export-first shutdown','official-format re-import','second export','terminal UI start, call and stop'],root,completedAt:new Date().toISOString()},null,2)+'\n');
 console.log(`Complete-suite adapter smoke passed: ${root}`);

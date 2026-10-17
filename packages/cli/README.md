@@ -131,6 +131,50 @@ also injects the background events the shell would), and every deploy/login
 command (never intercepted). `firenook mcp` serves the running suite to an
 agent; see [Model Context Protocol](#model-context-protocol).
 
+## The terminal
+
+In a terminal, `firenook emulators:start` draws its own screen:
+
+- a card with the start-up, one row per service, filling in with how long
+  each took and what it holds (documents, users, objects, functions);
+- the ready summary: the console's address, the ports, any start-up
+  warnings, and a newer release when one is out;
+- the log below it, one line per call with how long it took and what caused
+  it, the function's own output under it, and reloads as you save;
+- a footer that stays on the window's last line, with the keys.
+
+| Key | Does |
+| --- | --- |
+| `o` | opens the console in your browser |
+| `r` | reloads your functions |
+| `e` | exports a snapshot of the data to `.firenook/exports/<time>` |
+| `w` | lists the start-up warnings |
+| `?` | shows the keys |
+| `q` or Ctrl-C | stops Firenook, saving the data first |
+
+When Firenook cannot start, the card says what went wrong, how to fix it and
+what became of the data, and the command exits with code 1. A port someone
+else holds names the program and its process id, with the command that
+stops it and a free port for `firebase.json`. Saved data refused because its
+seed changed names the change, and a `.DS_Store` that Finder wrote is named
+as such. When your functions do not load, everything else keeps running: the
+card shows the error and the code around it, and the next save loads them
+again.
+
+Pipes, CI, log files and `emulators:exec` get the plain line protocol, the
+same lines as before, `All emulators ready` alone on its line. So do
+`--plain`, `FIRENOOK_PLAIN=1` and `TERM=dumb`. `NO_COLOR` keeps the screen
+and drops the colour. Terminals that cannot draw its symbols (the Windows
+console outside Windows Terminal, the Linux text console, or
+`FIRENOOK_ASCII=1`) get plain characters instead.
+
+The release check asks the npm registry for `firenook`'s version tags at
+most once a day, in the background. The answer shows on the next start, so
+the check never slows a start down. It follows the channel of the version
+you have (`next` or `latest`) and writes the install command for your
+project's package manager. It is off in CI, in the plain output, and with
+`FIRENOOK_NO_UPDATE_CHECK=1` or `NO_UPDATE_NOTIFIER=1`.
+
 ## Console
 
 Firenook has its own console at `/console` on the UI port —
