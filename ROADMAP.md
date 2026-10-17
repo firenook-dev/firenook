@@ -1125,8 +1125,61 @@ data and 7 s on 21 functions.
   before any sign-up is admitted, which readiness already guarantees.
   Pub/Sub's schedules come from the Functions inventory, so they still follow
   it (2 ms). Saves the Functions row (about 7 s with 20 functions).
-- [ ] **Measure the store's size.** 32.6 GB for 2.7 million documents is about
-  12 KB a document; find how much is free pages that redb keeps after
-  deletes, and whether compacting (`Database::compact`) on request is worth
-  offering.
+- [x] **Measure the store's size.** See "Store size" below.
+
+## Store size (planned)
+
+Measured on 2026-10-18 on a copy of the 32.6 GB store above, kept in daily
+development for weeks after importing a seed that a fresh import stores in
+4.3 GB (211,000 documents):
+
+| Part of the file | Size |
+| --- | --- |
+| Documents' keys and values | 7.5 GB |
+| Unused room in the pages holding them | 10.0 GB |
+| Free pages kept after deletes and rewrites | 8.6 GB |
+| Field index (20 million entries) | 3.5 GB |
+| Collection and collection-group indexes | 2.9 GB |
+
+The growth itself is the application's: 2.5 million documents written after
+the import, two-thirds of them event records of about 600 bytes. The store
+around them is what Firenook can improve. An import writes in key order and
+packs pages tightly, 1.47 bytes of file per byte of data; weeks of live
+writes, inserted in every order and rewritten while they grow, leave 2.34.
+A value larger than a page sits alone in a page of the next power of two
+(8 KB up to 512 KB). And the file never shrinks: redb reuses freed pages but
+does not return them. The legacy `documents_v1` table was empty, so its
+leftover copy (below) played no part here. Repairing the copy took 10 s with
+the quick repair of 0.2.0-next.5. The per-table figures are redb's own table
+statistics; the per-collection ones come from one pass over the documents.
+
+- [ ] **`firenook state:compact`.** With the emulator stopped, redb's
+  `Database::compact` moves pages into free space and truncates the file.
+  Lossless: each step is an ordinary commit and every document stays as it
+  is. An interrupted compaction leaves the next start a full repair (redb
+  does not use quick repair for it yet), so take a copy first (a
+  copy-on-write clone where the file system has one), print the sizes before
+  and after, and refuse while the state is in use. Gains up to the free
+  pages (8.6 GB above), not the part-filled ones.
+- [ ] **Repack.** Write a new file table by table in key order, as an import
+  does; check it against the old one (entry counts and a digest of every key
+  and value per table); swap it in; keep the old file until the check
+  passes. Gains the free pages and most of the part-filled ones, and the
+  count at each open reads less. Estimated 16–17 GB for the store above, to
+  be measured. Needs free disk for the new file; perhaps
+  `state:compact --repack`.
+- [ ] **Pack better while running.** Find what keeps live pages part-filled,
+  and whether large values belong out of line or compressed (measure the
+  ratio on real documents first). Any change to the stored format keeps the
+  rule of 0.2.0-next.5: the previous release still opens the data.
+- [ ] **Clear the old documents table after its migration.**
+  `migrate_legacy_documents` copies `documents_v1` into `documents_v2` and
+  the scope indexes but leaves `documents_v1` in place, so a store first
+  written before that layout keeps a dead copy of every document. Every
+  release since 0.1.0-next.3 reads only `documents_v2`, so clearing it costs
+  no supported compatibility; compaction then returns the space. Test with a
+  store holding both tables.
+- [ ] **Show the size.** A `state:inspect` that prints the table above for a
+  stopped store, and the file size and free pages on the console Overview
+  beside the data size, so growth shows before a start slows down.
 
