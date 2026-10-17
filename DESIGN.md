@@ -742,6 +742,41 @@ to a dead-letter topic reaches the functions listening there (and drains their
 `emulator-sub-*` subscription), as any publish does, until a capture of the
 official emulator confirms or corrects it.
 
+## The terminal
+
+The npm package draws the terminal for `emulators:start` when both its
+output and its input are a terminal (and not CI, `TERM=dumb`, `--plain` or
+`FIRENOOK_PLAIN`). The engine never sees the terminal: it runs with stdout
+and stderr piped as always, and with `--terminal-events` it prints, in place
+of the human lines they stand for, one `FIRENOOK_EVENT <json>` line per fact:
+
+- `opening` (resume with when the data was saved, import with its seed, or
+  fresh), then `step` per start-up row (`data`, `firestore`, `auth`,
+  `storage`, `functions`, `pubsub`): running with its verb and progress,
+  done with its figures, or failed;
+- `ready` with the console's address, the ports and the warnings said before
+  readiness, once, instead of along the log;
+- `codebase` and `call`: the Functions runtime's own records, as the
+  console's Functions and Invocations pages show them, taken from a second
+  reader of its monitor beside the console's;
+- `log` for every other line, a function's output with its execution, so the
+  terminal prints it under the call that wrote it;
+- `failed` (`port`, `state` or `other`), then `stopping` and `stopped`.
+
+A line with no event (one the switch does not cover yet) still prints, and
+the terminal shows it as it is. One thread writes the event lines, so the
+Functions monitor, which hands them over under its lock, never waits on the
+terminal reading.
+
+Without the switch nothing changes: pipes, CI, `emulators:exec` and every
+harness get the same lines, `All emulators ready` alone on its line. In the
+terminal the phrase is the ready title, whole, so a tool that watches a
+terminal for it (mprocs, an editor's task runner) still finds it.
+
+Start-up counts are cheap by design. Firestore's is the documents table's
+own length (redb keeps it in the table's header), Auth's and Storage's are
+in memory, and an import counts what it brought in.
+
 ## Distribution and trust boundaries
 
 ### Failed export still drains the owned suite

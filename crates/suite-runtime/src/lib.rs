@@ -73,6 +73,7 @@ mod native_state;
 mod project_scope;
 mod rules_watch;
 mod shutdown_io;
+pub mod terminal;
 pub use control::wait_for_shutdown;
 pub use launch::{LaunchContext, LaunchReason};
 
@@ -552,7 +553,9 @@ async fn verify_functions_readiness(
     }
     let receipt_line =
         serde_json::to_string(&receipt).map_err(|error| failure(error.to_string()))?;
-    println!("FIRENOOK_FUNCTIONS_HOST_READY {receipt_line}");
+    if !terminal::enabled() {
+        println!("FIRENOOK_FUNCTIONS_HOST_READY {receipt_line}");
+    }
     logging.record(
         "INFO",
         Some("functions"),
@@ -650,9 +653,15 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         .then(|| requests_router_with_log(request_history, shutdown.subscribe(), &logging));
     let allowed_hosts = AllowedHosts::new(&config.host, &config.allowed_hosts);
     if ui.is_some() && allowed_hosts.accepts_any() {
-        eprintln!(
-            "firenook: the console answers requests for any host name because every listener is bound to {}; pass --allowed-hosts with the names it is reached by to refuse the others",
+        let message = format!(
+            "the console answers requests for any host name because every listener is bound to {}; pass --allowed-hosts with the names it is reached by to refuse the others",
             config.host
+        );
+        terminal::print(
+            "WARN",
+            "firenook",
+            &message,
+            &format!("firenook: {message}"),
         );
     }
     // The sections whose services start after the console: compute's parts
@@ -760,6 +769,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         backends: Vec::new(),
     };
     if config.services.functions {
+        let functions_step = terminal::Step::begin("functions", "loading");
         let mut console = FunctionsConsoleOptions::default();
         console_wiring::functions_options(&hooks, &mut console);
         let runtime = start_functions_runtime(&config, triggers.clone(), &logging, console).await?;
@@ -772,6 +782,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         )?;
         (inventory, function_count) =
             verify_functions_readiness(&config, &runtime, &logging).await?;
+        functions_step.done(&terminal::functions_figures(&runtime, function_count), None);
         if let Some(auth) = &auth {
             auth.set_blocking_functions(Arc::new(BlockingBridge(runtime.blocking_handle())));
         }
@@ -789,10 +800,8 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             &inventory,
             &config.origin(config.ports.functions),
             Arc::new(move |level: &str, text: &str| {
-                if level == "WARN" || level == "ERROR" {
-                    eprintln!("firenook tasks: {text}");
-                } else if level != "DEBUG" {
-                    println!("firenook tasks: {text}");
+                if level != "DEBUG" {
+                    terminal::print(level, "tasks", text, &format!("firenook tasks: {text}"));
                 }
                 tasks_logging.record(level, Some("tasks"), text.to_owned());
             }),
@@ -825,6 +834,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
     let mut scheduler = None;
     let mut schedule_count = 0;
     if config.services.pubsub {
+        let pubsub_step = terminal::Step::begin("pubsub", "scheduling");
         let runtime = pubsub_router(
             &config.project_id,
             &inventory,
@@ -836,6 +846,17 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             runtime
                 .start_scheduler()
                 .map_err(|error| failure(format!("scheduler failed to start: {error}")))?,
+        );
+        pubsub_step.done(
+            &[(
+                u64::try_from(schedule_count).unwrap_or(u64::MAX),
+                if schedule_count == 1 {
+                    "schedule"
+                } else {
+                    "schedules"
+                },
+            )],
+            None,
         );
         // gRPC (the client libraries with `PUBSUB_EMULATOR_HOST`) and HTTP/JSON
         // share the Pub/Sub port, as on the official emulator.
@@ -866,7 +887,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         ..hooks
     });
 
-    announce_ready(&logging, function_count);
+    announce_ready(&config, &logging, function_count);
 
     let failure_reason = tokio::select! {
         signal = wait_for_shutdown() => signal.err().map(|error| error.to_string()),
@@ -907,13 +928,20 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
     .await
 }
 
-fn announce_ready(logging: &LoggingRuntime, function_count: usize) {
+fn announce_ready(config: &SuiteConfig, logging: &LoggingRuntime, function_count: usize) {
     logging.record(
         "INFO",
         Some("hub"),
         format!("All emulators ready; {function_count} functions discovered"),
     );
-    println!("All emulators ready");
+    if terminal::enabled() {
+        let console = config
+            .ui_enabled
+            .then(|| format!("{}{CONSOLE_PATH}", config.origin(config.ports.ui)));
+        terminal::ready(console.as_deref(), &listener_plan(config), function_count);
+    } else {
+        println!("All emulators ready");
+    }
 }
 
 /// Follows Functions reloads (refreshing Pub/Sub schedules, Cloud Tasks
@@ -990,18 +1018,42 @@ async fn follow_functions_inventory(
         );
         // Announce completion on stdout so a supervisor or harness can wait
         // for native delivery readiness after a reload.
-        println!("firenook functions routing refreshed: {count} registered functions");
+        if !terminal::enabled() {
+            println!("firenook functions routing refreshed: {count} registered functions");
+        }
     }
 }
 
 async fn prepare_native_suite(
     config: &SuiteConfig,
 ) -> Result<(native_state::NativeState, PreparedSuite), SuiteRuntimeError> {
-    let mut guard = native_state::NativeState::acquire(config)?;
+    // Picking saved data up checks the seed it came from, file by file.
+    let checking = config
+        .resume_state
+        .then(|| terminal::Step::begin("data", "checking"));
+    let mut guard = match native_state::NativeState::acquire(config) {
+        Ok(guard) => guard,
+        Err(error) => {
+            if let Some(step) = checking {
+                step.failed(if error.to_string().contains("suite state is locked") {
+                    "in use by another Firenook"
+                } else {
+                    "refused"
+                });
+            }
+            return Err(error);
+        }
+    };
     let mut startup = config.clone();
     if guard.reusing() {
         startup.import = None;
-        eprintln!("firenook resuming validated native state (seed import skipped)");
+        if !terminal::enabled() {
+            eprintln!("firenook resuming validated native state (seed import skipped)");
+        }
+    }
+    terminal::emit(&terminal::opening(config, guard.reusing()));
+    if let Some(step) = checking {
+        step.done(&[], None);
     }
     let prepared = prepare_suite(&startup).await?;
     if config.resume_state {
@@ -1089,6 +1141,7 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
         .await
         .map_err(|error| failure(format!("failed to create suite state: {error}")))?;
     let logging = prepare_logging(config)?;
+    let [firestore_step, auth_step, storage_step] = begin_data_steps(config);
     let store = open_store(config)?;
     let triggers = TriggerRegistry::default();
     let functions_endpoint = format!("{}/", config.origin(config.ports.functions));
@@ -1120,7 +1173,21 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
     } else {
         None
     };
-    import_suite(config, &store, auth.as_deref(), storage.as_deref()).await?;
+    let imported = import_suite(
+        config,
+        &store,
+        auth.as_deref(),
+        storage.as_deref(),
+        firestore_step.as_ref(),
+    )
+    .await?;
+    finish_data_steps(
+        [firestore_step, auth_step, storage_step],
+        &imported,
+        &store,
+        auth.as_deref(),
+        storage.as_deref(),
+    );
 
     let foreign = ForeignProjects::default();
     let (firestore_routes, console_firestore, request_history) =
@@ -1180,11 +1247,7 @@ fn forward_auth_log(auth: &AuthRuntime, logging: &LoggingRuntime) {
             "BULLET" | "SUCCESS" => "INFO",
             other => other,
         };
-        if level == "WARN" || level == "ERROR" {
-            eprintln!("firenook auth: {text}");
-        } else {
-            println!("firenook auth: {text}");
-        }
+        terminal::print(level, "auth", text, &format!("firenook auth: {text}"));
         auth_logging.record(level, Some("auth"), text.to_owned());
     }));
 }
@@ -1209,11 +1272,7 @@ fn prepare_logging(config: &SuiteConfig) -> Result<LoggingRuntime, SuiteRuntimeE
         logging.emit(console_wiring::observe::configured_input(message));
     }
     for (level, message) in startup_banner(config) {
-        if level == "WARN" {
-            eprintln!("firenook: {message}");
-        } else {
-            println!("firenook: {message}");
-        }
+        terminal::print(level, "firenook", &message, &format!("firenook: {message}"));
         logging.emit(console_wiring::observe::banner_input(level, message));
     }
     Ok(logging)
@@ -1338,6 +1397,7 @@ async fn finish_suite(
     mut suite: ShutdownSuite,
     failure_reason: Option<String>,
 ) -> Result<SuiteOutcome, SuiteRuntimeError> {
+    terminal::stopping(suite.config.export_on_exit.as_deref());
     let mut failures: Vec<String> = failure_reason.iter().cloned().collect();
     if failure_reason.is_none()
         && let Some(destination) = &suite.config.export_on_exit
@@ -1382,7 +1442,9 @@ async fn finish_suite(
     if let Some(functions) = suite.functions {
         // The same line the former Node host printed: harnesses read it as the
         // proof that Functions got an orderly stop even when export failed.
-        println!("firenook functions host: stopping after the suite shutdown request");
+        if !terminal::enabled() {
+            println!("firenook functions host: stopping after the suite shutdown request");
+        }
         functions.shutdown().await;
     }
     let _ = suite.shutdown.send(true);
@@ -1454,9 +1516,8 @@ fn without_absent_functions(mut config: SuiteConfig) -> Result<SuiteConfig, Suit
         .and_then(serde_json::Value::as_object)
         .is_some_and(|instances| !instances.is_empty());
     if codebases.is_empty() && !extensions {
-        eprintln!(
-            "firenook: firebase.json configures no Functions codebase and no Extensions; the Functions emulator (with Eventarc and Tasks) is not started"
-        );
+        let message = "firebase.json configures no Functions codebase and no Extensions; the Functions emulator (with Eventarc and Tasks) is not started";
+        terminal::print("INFO", "firenook", message, &format!("firenook: {message}"));
         config.services.functions = false;
         config.minimum_functions = 0;
     }
@@ -1650,9 +1711,11 @@ fn suite_query_policy(indexes: Option<&str>) -> Result<QueryPolicy, SuiteRuntime
 /// hot-reload route then governs only databases without an entry.
 fn firestore_rules(config: &SuiteConfig) -> Result<RulesRuntime, SuiteRuntimeError> {
     let runtime = if config.diagnostics {
-        eprintln!(
-            "firenook local diagnostics enabled: bounded request/coverage values may include document data and decoded auth claims; do not publish consumer reports"
-        );
+        if !terminal::enabled() {
+            eprintln!(
+                "firenook local diagnostics enabled: bounded request/coverage values may include document data and decoded auth claims; do not publish consumer reports"
+            );
+        }
         RulesRuntime::with_request_history(RequestHistory::default())
     } else {
         RulesRuntime::default()
@@ -1698,11 +1761,13 @@ fn install_firestore_rules(
                     path.display()
                 ))
             })?;
-        println!(
-            "firenook firestore: database \"{}\" rules {}",
-            entry.database_id,
-            path.display()
-        );
+        if !terminal::enabled() {
+            println!(
+                "firenook firestore: database \"{}\" rules {}",
+                entry.database_id,
+                path.display()
+            );
+        }
     }
     Ok(())
 }
@@ -1742,9 +1807,15 @@ async fn start_storage(
             content: read_rules(path)?,
         }),
         StorageRulesConfig::OpenDefault => {
-            eprintln!(
-                "firenook storage: no storage rules configured for demo project \"{}\", using a default (open) rules configuration.",
+            let message = format!(
+                "no storage rules configured for demo project \"{}\", using a default (open) rules configuration.",
                 config.project_id
+            );
+            terminal::print(
+                "WARN",
+                "storage",
+                &message,
+                &format!("firenook storage: {message}"),
             );
             RulesSource::Single(RulesFile {
                 name: "emulators/default_storage.rules".to_owned(),
@@ -2019,9 +2090,15 @@ pub async fn serve_until_shutdown(
     let overdue = tokio::spawn(async move {
         while !*stopping.borrow() && stopping.changed().await.is_ok() {}
         tokio::time::sleep(DRAIN_GRACE).await;
-        eprintln!(
-            "firenook: the {label} listener still had a connection open {}s after the stop request; closing it",
+        let message = format!(
+            "the {label} listener still had a connection open {}s after the stop request; closing it",
             DRAIN_GRACE.as_secs()
+        );
+        terminal::print(
+            "WARN",
+            "firenook",
+            &message,
+            &format!("firenook: {message}"),
         );
         let _ = closing.send(true);
     });
@@ -2171,6 +2248,9 @@ async fn start_functions_runtime(
         },
         |parts| parts.monitor().clone(),
     );
+    if terminal::enabled() {
+        let _ = monitor.set_tap(Arc::new(terminal::FunctionsTap));
+    }
     FunctionsRuntime::start_with(
         runtime_config,
         triggers,
@@ -2368,14 +2448,76 @@ fn spawn_exporter(
     })
 }
 
+/// Opens the terminal's start-up rows for the selected data services.
+fn begin_data_steps(config: &SuiteConfig) -> [Option<terminal::Step>; 3] {
+    let verb = if config.import.is_some() {
+        "importing"
+    } else if config.resume_state {
+        "resuming"
+    } else {
+        "starting"
+    };
+    let services = config.services;
+    [
+        ("firestore", services.firestore),
+        ("auth", services.auth),
+        ("storage", services.storage),
+    ]
+    .map(|(id, selected)| selected.then(|| terminal::Step::begin(id, verb)))
+}
+
+/// Closes the terminal's Firestore, Auth and Storage rows with what each
+/// holds now, or what the import brought in.
+fn finish_data_steps(
+    [firestore_step, auth_step, storage_step]: [Option<terminal::Step>; 3],
+    imported: &Imported,
+    store: &Store,
+    auth: Option<&AuthRuntime>,
+    storage: Option<&StorageRuntime>,
+) {
+    let held = |count: usize| u64::try_from(count).unwrap_or(u64::MAX);
+    let words = |imported: Option<u64>, held: &'static str, brought: &'static str| {
+        if imported.is_some() { brought } else { held }
+    };
+    if let Some(step) = firestore_step {
+        let count = imported.firestore.unwrap_or_else(|| store.document_total());
+        let words = words(imported.firestore, "documents", "documents imported");
+        step.done(&[(count, words)], None);
+    }
+    if let (Some(step), Some(auth)) = (auth_step, auth) {
+        let count = imported.auth.unwrap_or_else(|| held(auth.user_count()));
+        step.done(
+            &[(count, words(imported.auth, "users", "users imported"))],
+            None,
+        );
+    }
+    if let (Some(step), Some(storage)) = (storage_step, storage) {
+        let count = imported
+            .storage
+            .unwrap_or_else(|| held(storage.object_count()));
+        let words = words(imported.storage, "objects", "objects imported");
+        step.done(&[(count, words)], None);
+    }
+}
+
+/// What an import brought in, per service; `None` for one it did not.
+#[derive(Default)]
+struct Imported {
+    firestore: Option<u64>,
+    auth: Option<u64>,
+    storage: Option<u64>,
+}
+
 async fn import_suite(
     config: &SuiteConfig,
     store: &Store,
     auth: Option<&AuthRuntime>,
     storage: Option<&StorageRuntime>,
-) -> Result<(), SuiteRuntimeError> {
+    firestore_step: Option<&terminal::Step>,
+) -> Result<Imported, SuiteRuntimeError> {
+    let mut imported = Imported::default();
     let Some(root) = &config.import else {
-        return Ok(());
+        return Ok(imported);
     };
     let metadata = read_export_metadata(root)?;
     // A component recorded in the export but not selected is skipped, as the
@@ -2383,9 +2525,12 @@ async fn import_suite(
     if let Some(firestore) = metadata.firestore {
         if config.services.firestore {
             let path = root.join(firestore.metadata_file);
-            let count = seed_store(store, &path, &config.project_id)?;
-            eprintln!("firenook imported {count} Firestore documents");
-        } else {
+            let count = seed_store(store, &path, &config.project_id, firestore_step)?;
+            imported.firestore = Some(count);
+            if !terminal::enabled() {
+                eprintln!("firenook imported {count} Firestore documents");
+            }
+        } else if !terminal::enabled() {
             eprintln!("firenook: firestore export not imported (service not started)");
         }
     }
@@ -2394,8 +2539,11 @@ async fn import_suite(
             let count = auth
                 .import_directory(&root.join(auth_metadata.path))
                 .map_err(|error| failure(format!("Auth import failed: {error}")))?;
-            eprintln!("firenook imported {count} Auth users");
-        } else {
+            imported.auth = Some(u64::try_from(count).unwrap_or(u64::MAX));
+            if !terminal::enabled() {
+                eprintln!("firenook imported {count} Auth users");
+            }
+        } else if !terminal::enabled() {
             eprintln!("firenook: auth export not imported (service not started)");
         }
     }
@@ -2405,12 +2553,15 @@ async fn import_suite(
                 .import(&root.join(storage_metadata.path))
                 .await
                 .map_err(|error| failure(format!("Storage import failed: {error}")))?;
-            eprintln!("firenook imported {count} Storage objects");
-        } else {
+            imported.storage = Some(u64::try_from(count).unwrap_or(u64::MAX));
+            if !terminal::enabled() {
+                eprintln!("firenook imported {count} Storage objects");
+            }
+        } else if !terminal::enabled() {
             eprintln!("firenook: storage export not imported (service not started)");
         }
     }
-    Ok(())
+    Ok(imported)
 }
 
 #[derive(Deserialize)]
@@ -2441,7 +2592,12 @@ fn read_export_metadata(root: &Path) -> Result<ExportMetadata, SuiteRuntimeError
         .map_err(|error| failure(format!("invalid suite export metadata: {error}")))
 }
 
-fn seed_store(store: &Store, path: &Path, project: &str) -> Result<u64, SuiteRuntimeError> {
+fn seed_store(
+    store: &Store,
+    path: &Path,
+    project: &str,
+    progress: Option<&terminal::Step>,
+) -> Result<u64, SuiteRuntimeError> {
     let reader = ExportReader::open(path)
         .map_err(|error| failure(format!("Firestore import failed: {error}")))?
         .into_background();
@@ -2470,6 +2626,9 @@ fn seed_store(store: &Store, path: &Path, project: &str) -> Result<u64, SuiteRun
                 .map_err(|error| failure(error.to_string()))?;
             writes.clear();
             batch_logical_bytes = 0;
+            if let Some(step) = progress {
+                step.progress(count, None, None);
+            }
         }
         writes.push(Write::Set {
             key,
@@ -2789,7 +2948,7 @@ mod tests {
         );
 
         let restored = Store::default();
-        let count = seed_store(&restored, written.overall_metadata_path(), project)
+        let count = seed_store(&restored, written.overall_metadata_path(), project, None)
             .expect("import should restore every database");
         assert_eq!(count, 3);
         let snapshot = restored.snapshot();

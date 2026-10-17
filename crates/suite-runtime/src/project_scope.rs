@@ -90,7 +90,12 @@ async fn warn(
                 "Multiple projectIds are not recommended in single project mode. Requested project ID {project}, but the emulator is configured for {}. To opt-out of single project mode add/set the '\"singleProjectMode\": false' property in the firebase.json emulators config.",
                 scope.configured
             );
-            eprintln!("firenook: {message}");
+            crate::terminal::print(
+                "WARN",
+                "firenook",
+                &message,
+                &format!("firenook: {message}"),
+            );
             scope.logging.record("WARN", Some("hub"), message);
         }
     }

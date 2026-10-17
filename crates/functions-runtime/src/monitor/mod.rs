@@ -158,6 +158,9 @@ struct Inner {
     /// Held for microseconds; never across an await.
     state: Mutex<State>,
     sink: OnceLock<Arc<dyn LiveSink>>,
+    /// A second reader of the same changes (the terminal's), beside the
+    /// console's sink.
+    tap: OnceLock<Arc<dyn LiveSink>>,
     /// Invocation ids whose lines, response chunks or end changed.
     touched: broadcast::Sender<Arc<str>>,
 }
@@ -669,6 +672,7 @@ impl Monitor {
                 nonce: fresh_nonce(),
                 state: Mutex::new(State::default()),
                 sink: OnceLock::new(),
+                tap: OnceLock::new(),
                 touched,
                 limits,
             }),
@@ -703,6 +707,12 @@ impl Monitor {
     /// handed back.
     pub fn set_live_sink(&self, sink: Arc<dyn LiveSink>) -> Result<(), Arc<dyn LiveSink>> {
         self.inner.sink.set(sink)
+    }
+
+    /// Installs a tap: every change the live sink is handed, handed to it
+    /// too, whether or not a live sink is installed. One per monitor.
+    pub fn set_tap(&self, tap: Arc<dyn LiveSink>) -> Result<(), Arc<dyn LiveSink>> {
+        self.inner.tap.set(tap)
     }
 
     /// Runs `read` under the monitor's lock, so a caller reads the state and
@@ -1588,11 +1598,20 @@ impl Monitor {
         drop(state);
     }
 
-    /// Hands an event to the live sink; called under the lock. The event is
-    /// built only when a sink is installed.
+    /// Hands an event to the live sink and the tap; called under the lock.
+    /// The event is built only when one of them is installed.
     fn push(&self, event: impl FnOnce() -> MonitorEvent) {
-        if let Some(sink) = self.inner.sink.get() {
-            sink.push(&Arc::new(event()));
+        let sink = self.inner.sink.get();
+        let tap = self.inner.tap.get();
+        if sink.is_none() && tap.is_none() {
+            return;
+        }
+        let event = Arc::new(event());
+        if let Some(sink) = sink {
+            sink.push(&event);
+        }
+        if let Some(tap) = tap {
+            tap.push(&event);
         }
     }
 

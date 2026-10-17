@@ -1110,6 +1110,16 @@ impl Store {
         }
     }
 
+    /// How many documents the store holds, across its databases, without
+    /// reading any.
+    #[must_use]
+    pub fn document_total(&self) -> u64 {
+        match &self.backend {
+            StoreBackend::Memory(inner) => lock(inner).documents.len() as u64,
+            StoreBackend::Disk(store) => store.document_total(),
+        }
+    }
+
     /// Number of replay changes currently retained.
     #[must_use]
     pub fn retained_change_count(&self) -> usize {
@@ -3111,6 +3121,36 @@ mod tests {
             );
             assert_eq!(store.revision().get(), 2);
             assert_eq!(store.snapshot().documents(&database("(default)")).len(), 2);
+        }
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn the_document_total_counts_every_database_on_both_backends() {
+        let directory = temporary_directory("document-total");
+        let disk = Store::open_disk(&directory, DiskOptions::default()).expect("disk store");
+        for store in [Store::default(), disk] {
+            assert_eq!(store.document_total(), 0);
+            for (database_id, path) in [
+                ("(default)", "items/one"),
+                ("(default)", "items/one/parts/a"),
+                ("other", "items/two"),
+            ] {
+                store
+                    .commit(&[Write::Create {
+                        key: key(&database(database_id), path),
+                        fields: fields(Value::Integer(1)),
+                    }])
+                    .expect("committed");
+            }
+            assert_eq!(store.document_total(), 3);
+            store
+                .commit(&[Write::Delete {
+                    key: key(&database("other"), "items/two"),
+                    precondition: Precondition::None,
+                }])
+                .expect("deleted");
+            assert_eq!(store.document_total(), 2);
         }
         let _ = std::fs::remove_dir_all(&directory);
     }

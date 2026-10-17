@@ -234,10 +234,11 @@ pub(crate) fn spawn(
     let sink = logging.clone();
     let report: Report = Arc::new(move |service, level, message| {
         let line = format!("firenook {service}: {message}");
-        match level {
-            Level::Info => println!("{line}"),
-            Level::Warn => eprintln!("{line}"),
-        }
+        let level_name = match level {
+            Level::Info => "INFO",
+            Level::Warn => "WARN",
+        };
+        crate::terminal::print(level_name, service, &message, &line);
         // The same record as always, with its kind for the console.
         sink.emit(crate::console_wiring::observe::rules_file_input(
             service,

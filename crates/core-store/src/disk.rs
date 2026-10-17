@@ -14,7 +14,7 @@ use std::time::Duration;
 use bincode::{Decode, Encode, config};
 use redb::{
     Builder, Database, Durability, ReadOnlyTable, ReadTransaction, ReadableDatabase, ReadableTable,
-    TableDefinition, WriteTransaction,
+    ReadableTableMetadata as _, TableDefinition, WriteTransaction,
 };
 
 use super::{
@@ -396,6 +396,20 @@ impl DiskStore {
     #[must_use]
     pub fn retained_change_count(&self) -> usize {
         self.state().memory.change_log.len()
+    }
+
+    /// How many documents the store holds, from the table's own count: no
+    /// document is read.
+    #[must_use]
+    pub fn document_total(&self) -> u64 {
+        let state = self.state();
+        state
+            .database
+            .begin_read()
+            .ok()
+            .and_then(|transaction| transaction.open_table(DOCUMENTS).ok())
+            .and_then(|table| table.len().ok())
+            .unwrap_or(0)
     }
 
     pub(crate) fn memory_usage(
