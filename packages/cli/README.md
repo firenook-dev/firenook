@@ -133,6 +133,8 @@ agent; see [Model Context Protocol](#model-context-protocol).
 
 ## The terminal
 
+![The terminal UI: the start-up card, the ready summary and the log](https://raw.githubusercontent.com/firenook-dev/firenook/main/support/terminal.gif)
+
 In a terminal, `firenook emulators:start` draws its own screen:
 
 - a card with the start-up, one row per service, filling in with how long
