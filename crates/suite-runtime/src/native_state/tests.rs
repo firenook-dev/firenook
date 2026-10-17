@@ -258,3 +258,38 @@ fn seed_symlinks_and_export_aliases_cannot_bypass_guards() {
     .unwrap();
     assert!(NativeState::acquire(&case.config).is_err());
 }
+
+fn refusal(config: &SuiteConfig) -> String {
+    match NativeState::acquire(config) {
+        Ok(_) => panic!("the saved state was picked up"),
+        Err(error) => error.to_string(),
+    }
+}
+
+#[test]
+fn a_refusal_says_what_changed() {
+    let case = Case::new();
+    case.imported();
+    let mut changed = case.config.clone();
+    changed.project_id = "demo-wrong-project".into();
+    assert!(
+        refusal(&changed)
+            .contains("it belongs to project demo-native-resume, not demo-wrong-project"),
+        "{}",
+        refusal(&changed)
+    );
+    let seed = case.config.import.clone().unwrap();
+    fs::write(seed.join("documents"), "edited").unwrap();
+    let edited = refusal(&case.config);
+    assert!(edited.contains("the seed"), "{edited}");
+    assert!(edited.contains("changed after it was imported"), "{edited}");
+    assert!(!edited.contains(".DS_Store"), "{edited}");
+    // Finder's own file is named, relative to the seed's folder.
+    fs::write(seed.join(".DS_Store"), b"finder").unwrap();
+    let finder = refusal(&case.config);
+    assert!(
+        finder.contains("it holds seed/.DS_Store, which Finder writes"),
+        "{finder}"
+    );
+    assert!(finder.contains("existing data preserved"), "{finder}");
+}

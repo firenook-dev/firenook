@@ -547,6 +547,9 @@ test('U9 New user makes every kind of account, and explains a taken email', asyn
     await dialog.getByTestId('create-another').click()
     await expect.poll(() => lookup(`phone:${phone}`)).toHaveLength(1)
     made.push(...(await lookup(`phone:${phone}`)))
+    // The engine has the user before the page has its answer, and the form
+    // empties itself on the answer: wait for that before typing the next.
+    await expect(dialog.getByTestId('new-phone')).toHaveValue('')
 
     // Federated.
     await kind('Federated').click()
@@ -555,6 +558,7 @@ test('U9 New user makes every kind of account, and explains a taken email', asyn
     await dialog.getByTestId('create-another').click()
     await expect.poll(() => lookup(`fed-${tag}@journey.test`)).toHaveLength(1)
     made.push(...(await lookup(`fed-${tag}@journey.test`)))
+    await expect(dialog.getByTestId('new-email')).toHaveValue('')
 
     // A custom uid.
     await kind('Custom uid').click()
@@ -563,6 +567,7 @@ test('U9 New user makes every kind of account, and explains a taken email', asyn
     await dialog.getByTestId('create-another').click()
     await expect.poll(async () => (await userDetail(engine, `custom-${tag}`)) !== null).toBe(true)
     made.push(`custom-${tag}`)
+    await expect(dialog.getByTestId('new-uid')).toHaveValue('')
 
     // Anonymous, the way an app makes one: a client sign-up. Create closes
     // the dialog and opens the new user.

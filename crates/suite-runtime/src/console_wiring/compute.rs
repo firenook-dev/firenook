@@ -130,12 +130,16 @@ pub(crate) fn inventory_refreshed(_context: &HookContext<'_>, _inventory: &Funct
 pub(crate) fn functions_log(logging: &LoggingRuntime) -> LogSink {
     let logging = logging.clone();
     LogSink::new(move |event: LogEvent| {
-        for printed in event.compatible_events() {
-            let line = format!("{}: {}", printed.label, printed.message);
-            match printed.level.as_str() {
-                "ERROR" | "WARN" => eprintln!("firenook {line}"),
-                "DEBUG" => {}
-                _ => println!("firenook {line}"),
+        if crate::terminal::enabled() {
+            crate::terminal::functions_line(&event);
+        } else {
+            for printed in event.compatible_events() {
+                let line = format!("{}: {}", printed.label, printed.message);
+                match printed.level.as_str() {
+                    "ERROR" | "WARN" => eprintln!("firenook {line}"),
+                    "DEBUG" => {}
+                    _ => println!("firenook {line}"),
+                }
             }
         }
         logging.emit(super::observe::functions_input(&event));

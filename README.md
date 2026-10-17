@@ -53,7 +53,10 @@ is not installed or loaded. Client SDKs are unchanged. The engine's own
 console, at `/console` on the UI port (whose root leads there), covers every
 service the suite runs, and nothing is downloaded to show it; the
 [CLI guide](packages/cli/README.md#console) says what it shows and when
-`--allowed-hosts` is needed.
+`--allowed-hosts` is needed. In a terminal, `emulators:start` draws the
+start-up, the ready summary and the log itself, with keys for the console,
+reloads, exports and stopping; pipes, CI and `emulators:exec` get the plain
+lines ([the terminal](packages/cli/README.md#the-terminal)).
 
 ## Development and verification
 

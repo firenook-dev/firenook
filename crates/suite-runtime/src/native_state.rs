@@ -109,10 +109,8 @@ impl NativeState {
             let receipt: Receipt =
                 serde_json::from_slice(&fs::read(&receipt_path).map_err(io_error)?)
                     .map_err(|error| refused(format!("invalid completion receipt: {error}")))?;
-            if !receipt.complete || receipt.identity != identity {
-                return Err(refused(
-                    "incomplete import or project/bucket/seed/format mismatch",
-                ));
+            if let Some(reason) = mismatch(&receipt, &identity) {
+                return Err(refused(reason));
             }
             validate_files(&guard.root)?;
             guard.reusing = true;
@@ -254,6 +252,89 @@ fn validate_files(root: &Path) -> Result<(), SuiteRuntimeError> {
     // Typed Auth/Storage loaders and the redb/WAL parser validate their own formats
     // after this structural check, before listeners open. Storage checks blobs too.
     Ok(())
+}
+
+/// Why saved state does not match this start, in the developer's terms;
+/// `None` when it does.
+fn mismatch(receipt: &Receipt, identity: &Identity) -> Option<String> {
+    let saved = &receipt.identity;
+    if !receipt.complete {
+        return Some("the import that made it did not finish".to_owned());
+    }
+    if saved.format != identity.format {
+        return Some(format!(
+            "it was written in state format {}, and this engine reads format {}",
+            saved.format, identity.format
+        ));
+    }
+    if saved.project != identity.project {
+        return Some(format!(
+            "it belongs to project {}, not {}",
+            saved.project, identity.project
+        ));
+    }
+    if saved.default_bucket != identity.default_bucket || saved.buckets != identity.buckets {
+        return Some(format!(
+            "it holds the Storage buckets {}, and this start serves {}",
+            saved.buckets.join(", "),
+            identity.buckets.join(", ")
+        ));
+    }
+    if saved.seed_path != identity.seed_path {
+        return Some(format!(
+            "it was imported from {}, not {}",
+            saved.seed_path.display(),
+            identity.seed_path.display()
+        ));
+    }
+    if saved.seed_sha256 != identity.seed_sha256 {
+        let mut reason = format!(
+            "the seed {} changed after it was imported",
+            identity.seed_path.display()
+        );
+        // Finder writes a .DS_Store into every folder it shows: the most
+        // common change to a seed nobody meant to change.
+        if let Some(finder) = finder_files(&identity.seed_path).first() {
+            let shown = identity
+                .seed_path
+                .parent()
+                .and_then(|parent| finder.strip_prefix(parent).ok())
+                .unwrap_or(finder);
+            let _ = write!(
+                reason,
+                " (it holds {}, which Finder writes; if nothing else changed, deleting it restores the seed)",
+                shown.display()
+            );
+        }
+        return Some(reason);
+    }
+    None
+}
+
+/// The `.DS_Store` files under `root`, at most a few.
+fn finder_files(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(kind) if kind.is_dir() => pending.push(path),
+                Ok(kind) if kind.is_file() && entry.file_name() == ".DS_Store" => {
+                    found.push(path);
+                    if found.len() == 3 {
+                        return found;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    found.sort();
+    found
 }
 
 fn require_file(path: &Path) -> Result<(), SuiteRuntimeError> {

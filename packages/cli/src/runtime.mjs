@@ -5,11 +5,12 @@ import { binaryPath, manifest, release } from './binary.mjs';
 import { SERVICES, connectHost, launchContext, loadProject } from './options.mjs';
 import { nativeEnvironment, requestNativeStop } from './processes.mjs';
 
-export async function diagnose(options, cwd = process.cwd()) {
+// `quiet`: the terminal UI shows the configuration findings itself.
+export async function diagnose(options, cwd = process.cwd(), {quiet = false} = {}) {
   if (Number(process.versions.node.split('.')[0]) !== 24) throw new Error(`Node 24 is required for the tested Functions workers; received ${process.versions.node}`);
   // Configuration findings first: they need no installed engine.
   const project = loadProject(options, cwd);
-  for (const warning of project.warnings) console.error(warning);
+  if (!quiet) for (const warning of project.warnings) console.error(warning);
   const binary = binaryPath();
   // Functions run on the owned runtime with Node workers; Extensions are
   // resolved natively; the console is in the binary. Neither firebase-tools,
@@ -43,7 +44,9 @@ export function vendorExtensions(binary, project, instances = []) {
 // official CLI, exec keeps the console off unless --ui is given or
 // firebase.json enables it explicitly. `typed` is the command's arguments as
 // the developer typed them, which the console reprints in its fixes.
-export function prepareLaunch(diagnostic, options, mode = 'start', typed = []) {
+// `quiet`: the terminal UI draws its own banner instead of these lines.
+export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {quiet = false} = {}) {
+  const say = quiet ? () => {} : (...line) => console.error(...line);
   const p = diagnostic.project;
   const parent = join(p.directory, '.firenook', 'runs');
   mkdirSync(parent, {recursive:true});
@@ -56,7 +59,7 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = []) {
   // The engine reads emulators.ui.enabled itself, so --ui cannot re-enable a
   // console the configuration disables; it only keeps it on for exec.
   const ui = p.ui && (mode !== 'exec' || Boolean(options.ui) || p.uiExplicit);
-  if (options.ui && !p.ui) console.error('note: --ui cannot enable the console while firebase.json sets emulators.ui.enabled to false');
+  if (options.ui && !p.ui) say('note: --ui cannot enable the console while firebase.json sets emulators.ui.enabled to false');
   const debug = Boolean(options.debug) || options['log-verbosity'] === 'DEBUG';
   const debugLog = debug ? join(run, 'firenook-debug.log') : undefined;
   const args = ['suite', '--project-dir', p.directory, '--config', p.config, '--firebase-rc', rc,
@@ -101,13 +104,13 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = []) {
   delete env.CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE;
   writeFileSync(join(run, 'launch.json'), JSON.stringify({version:manifest.version, engineRevision:release.engineRevision, args, state, exported:p.exported,
     services:p.services, ui, singleProjectMode:p.singleProjectMode, project:{id:p.project, demo:p.demo}, debugLog}, null, 2));
-  console.error(`Firenook ${manifest.version}; engine ${release.engineRevision}; disk/WAL state ${state}`);
-  console.error(`Services: ${p.services.join(', ')}; Emulator UI ${ui ? 'on' : 'off'}; host ${p.host}`);
-  if (p.demo) console.error(`Demo project ${p.project}: no cloud service is contacted, but user Functions can still reach external providers; this CLI is not a network sandbox.`);
-  else console.error(`Firenook: real project id ${p.project}; every Functions worker is started with the emulator hosts and without Google credentials, but this CLI is not a network sandbox.`);
-  if (debugLog) console.error(`Debug log: ${debugLog}`);
-  if (options['log-verbosity'] && options['log-verbosity'] !== 'DEBUG') console.error(`note: --log-verbosity ${options['log-verbosity']} is accepted for compatibility; Firenook prints its full log`);
-  console.error(`Working data and launch receipt are preserved in ${run}. No automatic deletion.`);
+  say(`Firenook ${manifest.version}; engine ${release.engineRevision}; disk/WAL state ${state}`);
+  say(`Services: ${p.services.join(', ')}; Emulator UI ${ui ? 'on' : 'off'}; host ${p.host}`);
+  if (p.demo) say(`Demo project ${p.project}: no cloud service is contacted, but user Functions can still reach external providers; this CLI is not a network sandbox.`);
+  else say(`Firenook: real project id ${p.project}; every Functions worker is started with the emulator hosts and without Google credentials, but this CLI is not a network sandbox.`);
+  if (debugLog) say(`Debug log: ${debugLog}`);
+  if (options['log-verbosity'] && options['log-verbosity'] !== 'DEBUG') say(`note: --log-verbosity ${options['log-verbosity']} is accepted for compatibility; Firenook prints its full log`);
+  say(`Working data and launch receipt are preserved in ${run}. No automatic deletion.`);
   return {binary:diagnostic.binary, args, env:nativeEnvironment(env), cwd:p.directory, run, ui, services:p.services, debugLog};
 }
 

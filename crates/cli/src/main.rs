@@ -335,6 +335,11 @@ struct SuiteArgs {
     /// Disable Requests/coverage recording; the debug endpoint reports unavailable.
     #[arg(long)]
     no_diagnostics: bool,
+    /// Print `FIRENOOK_EVENT <json>` lines for a terminal UI in place of the
+    /// log, start-up and readiness lines (the npm package passes it when it
+    /// draws the terminal itself).
+    #[arg(long = "terminal-events")]
+    terminal_events: bool,
     /// Listen address of every listener; `0.0.0.0` and `::` are accepted
     /// (clients are told the loopback address).
     #[arg(long, default_value = "127.0.0.1")]
@@ -687,6 +692,15 @@ struct FirebaseProjectTargets {
 }
 
 fn run_suite_runtime(arguments: &SuiteArgs) -> ExitCode {
+    if arguments.terminal_events {
+        firenook_suite_runtime::terminal::enable();
+    }
+    let code = run_suite_runtime_inner(arguments);
+    firenook_suite_runtime::terminal::finish();
+    code
+}
+
+fn run_suite_runtime_inner(arguments: &SuiteArgs) -> ExitCode {
     if arguments.worker_threads == 0 {
         eprintln!("--worker-threads must be at least 1");
         return ExitCode::FAILURE;
@@ -710,6 +724,13 @@ fn run_suite_runtime(arguments: &SuiteArgs) -> ExitCode {
         }
     };
     match runtime.block_on(run_suite(config)) {
+        Ok(outcome) if firenook_suite_runtime::terminal::enabled() => {
+            match serde_json::to_value(&outcome) {
+                Ok(outcome) => firenook_suite_runtime::terminal::stopped(&outcome),
+                Err(error) => eprintln!("suite outcome failed to encode: {error}"),
+            }
+            ExitCode::SUCCESS
+        }
         Ok(outcome) => match serde_json::to_string(&outcome) {
             Ok(outcome) => {
                 eprintln!("firenook suite stopped cleanly: {outcome}");
@@ -721,7 +742,11 @@ fn run_suite_runtime(arguments: &SuiteArgs) -> ExitCode {
             }
         },
         Err(error) => {
-            eprintln!("suite failed: {error}");
+            if firenook_suite_runtime::terminal::enabled() {
+                firenook_suite_runtime::terminal::failed(&error.to_string());
+            } else {
+                eprintln!("suite failed: {error}");
+            }
             ExitCode::FAILURE
         }
     }
