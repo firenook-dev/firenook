@@ -167,6 +167,60 @@ and historical snapshots, each compared between a memory store, a disk store
 without the index and one with it. Breaking the numeric canonicalization,
 reference keys, the 1,500-byte prefix or update maintenance each fails them.
 
+### Saved data and its seed
+
+`--resume-state` picks a `--state-dir` up only when it came from the same
+project, buckets, state format and seed. The receipt (`native-state.json`)
+keeps one whole-seed SHA-256, every file framed by its path and length in a
+fixed order; engines up to 0.2.0-next.4 read the seed in full to compare it.
+Beside it, `native-seed.json` records each file's size, modification time,
+inode change time and SHA-256, bound to the receipt's fingerprint. A start
+compares file details only and reads just the files whose details differ;
+a file changed within two seconds of its recording is read once more, since
+its times may not have caught a second change. The inode change time is what
+catches a copy that preserved the modification time: no tool sets it back.
+
+Files an operating system writes into folders it shows are outside the record:
+`.DS_Store`, AppleDouble `._*`, `Icon\r`, `Thumbs.db`, `ehthumbs.db`,
+`desktop.ini`, and the `__MACOSX`, `.Spotlight-V100`, `.Trashes`,
+`.fseventsd` and `.TemporaryItems` folders. No importer reads them (the
+Storage import skips `._*` metadata as well).
+
+A first import hashes the seed on worker threads while it imports: workers
+read and hash files ahead, within a 256 MB budget, and one thread folds them
+in order into the whole-seed fingerprint, so the receipt keeps a value
+earlier engines verify. A details scan before and after the import catches a
+seed edited meanwhile. Data saved by an earlier engine has no record: its
+first start reads the seed once, accepts the fingerprint with or without the
+operating system's files, and writes the record. Measured on a 7.8 GB seed of
+66,714 files on an Apple Silicon Mac: the details scan takes 0.15 to 0.25 s,
+the full parallel read 2.3 s, where the earlier one-file-at-a-time read took
+16 to 26 s.
+
+A seed that did change refuses the start and names the files. The way out is
+the developer's: import into a new `--state-dir`, or `firenook
+state:adopt-seed`, which records the seed as it is now and keeps the previous
+receipt beside the new one.
+
+### Repairs and stops while opening
+
+redb marks its file while it is open and clears the mark on a clean close; a
+file left marked is repaired at the next open, which by default walks the
+whole file. The store's durable commits (the write-behind sync, imports,
+initialisation) save redb's allocator state (`set_quick_repair`), so that
+recovery after a crash loads it instead. It doubles a durable commit (about
+4 ms to 8 ms on an Apple Silicon Mac), which the once-a-second sync does not
+notice; per-commit durability leaves it out, since every one of its writes is
+a durable commit. A full repair reports its progress to the terminal and the
+plain log.
+
+Stop signals (Ctrl-C, SIGTERM, SIGHUP) and the launcher's pipe are listened
+for from the first moment of a start. A stop during the seed check or a repair
+abandons it with nothing opened; one while documents are counted ends that
+read; an import into a fresh run's directory ends at its next batch, while an
+import into saved data finishes, since a half-imported state is never picked
+up. Whatever was opened is then closed, and the outcome says `beforeReady`.
+
 ### Seed import path
 
 A fresh start seeds the disk store through `Store::begin_bulk_commit`, not
@@ -753,7 +807,11 @@ of the human lines they stand for, one `FIRENOOK_EVENT <json>` line per fact:
 - `opening` (resume with when the data was saved, import with its seed, or
   fresh), then `step` per start-up row (`data`, `firestore`, `auth`,
   `storage`, `functions`, `pubsub`): running with its verb and progress,
-  done with its figures, or failed;
+  done with its figures, or failed; a repair after an unclean stop is the
+  Firestore row `repairing`, its progress a `percent` out of a thousand;
+- `seed` before a refusal for a changed seed: the first few files changed,
+  added and removed with their counts, or, for data an earlier engine saved,
+  that they cannot be named and which Finder files the seed holds;
 - `ready` with the console's address, the ports and the warnings said before
   readiness, once, instead of along the log;
 - `codebase` and `call`: the Functions runtime's own records, as the
@@ -761,7 +819,8 @@ of the human lines they stand for, one `FIRENOOK_EVENT <json>` line per fact:
   reader of its monitor beside the console's;
 - `log` for every other line, a function's output with its execution, so the
   terminal prints it under the call that wrote it;
-- `failed` (`port`, `state` or `other`), then `stopping` and `stopped`.
+- `failed` (`port`, `state` or `other`), then `stopping` and `stopped`
+  (whose outcome says `beforeReady` for a stop while starting).
 
 A line with no event (one the switch does not cover yet) still prints, and
 the terminal shows it as it is. One thread writes the event lines, so the
