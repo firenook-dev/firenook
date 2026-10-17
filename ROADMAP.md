@@ -521,7 +521,7 @@ Auth, Storage and the UI itself. No new service or API.
   local verification is in the CHANGELOG entry and the follow-up section of
   `support/read-path-audit.md`.
 
-## Own console (Phase N, unreleased)
+## Own console (Phase N, `0.2.0-next.3`)
 
 The emulator's own UI replaces the served Google 1.15.0 bundle and the
 `firenook setup` download, and is the product surface later deployments
@@ -530,6 +530,13 @@ Base UI, Tailwind) and is embedded into the binary by `crates/console-front`,
 mounted under `/console` on the UI port. The Google UI was served beside it
 at the port's root until every section had landed; since `0.2.0-next.3` the
 root leads to the console.
+
+- [x] Published as `firenook@0.2.0-next.3` with `@firenook/cli-<platform>` ×5
+  on 2026-10-17 (release PR #81, tag `npm-v0.2.0-next.3` on 5ee8c92, engine
+  19f2338, release run 39031389689; registry integrity equal to the release
+  assets for all six packages, provenance attestations verified on a fresh
+  install, `next` → 0.2.0-next.3). Every section below ships in it, Google's
+  UI is gone, and #80's five fixes for checks that failed now and then.
 
 - [x] (Shipped in `0.2.0-next.2`.) Stack, shell, command palette, overview and
   the Console API's first route with Rust-generated TypeScript types; unit,
@@ -1017,7 +1024,7 @@ root leads to the console.
   implementation is readable in the history rather than lost.
 
 
-## Terminal UI (unreleased)
+## Terminal UI (`0.2.0-next.4`)
 
 The last row of the CLI surface: what a developer sees in the terminal from
 `emulators:start`, keeping the `All emulators ready` contract.
@@ -1036,3 +1043,12 @@ The last row of the CLI surface: what a developer sees in the terminal from
   saved data names what changed (a `.DS_Store` from Finder by name).
 - [x] The release check: once a day, in the background, shown on the next
   start, off in CI, in the plain output and on request.
+- [x] Published as `firenook@0.2.0-next.4` with `@firenook/cli-<platform>` ×5
+  on 2026-10-17 (PR #82, release PR #83, tag `npm-v0.2.0-next.4` on 5e4e920,
+  engine 8cf0bab, release run 39035262983; registry integrity equal to the
+  release assets for all six packages, provenance attestations verified on a
+  fresh install). `latest` and `next` both point to 0.2.0-next.4, so a plain
+  `npm i firenook` installs it.
+- [ ] Acceptance-host lanes for the console and terminal engines: not run
+  before publication; the local and CI verification is in the CHANGELOG
+  entries of both releases.

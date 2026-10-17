@@ -1,6 +1,6 @@
 # Scoped roadmap progress
 
-Updated 2026-10-03 UTC (`firenook@0.2.0-next.2` published: the read path, incremental listeners and the equality field index). The A–F roadmap remains active; no full-release,
+Updated 2026-10-17 UTC (`firenook@0.2.0-next.3` published: the console for every service, Google's Emulator UI gone; `firenook@0.2.0-next.4` published: the terminal UI, now `latest`). The A–F roadmap remains active; no full-release,
 universal-compatibility, publication or performance-win claim is made here.
 
 | Phase | Current state | Remaining qualification |
@@ -98,7 +98,8 @@ checks on its exact combined candidate instead of substituting older binaries.
 | Unchanged decisions and overhead | Traced/untraced rules corpora; rotated nine-run overhead driver asserting every result and final state, with all samples retained |
 | Rename | Renamed to Firenook and published as `firenook@0.2.0-next.1` (2026-09-19): PR #58, repositories moved to `firenook-dev`, release run 35449320572, registry integrity and provenance verified, fresh-machine installs on three platforms | Consumer pin swap and gates on the installed package; then deprecate the former packages |
 | Read path and field index | Published as `firenook@0.2.0-next.2` (2026-10-03): PRs #62, #66 and #67 on engine 63d554c, release run 37123335020, registry integrity and provenance verified; workspace tests, packaging tests and the Firestore conformance suite in memory and disk modes on the candidate; upgrade from and downgrade to `0.2.0-next.1` exercised locally | Acceptance-host lanes on this engine |
-| Console (unreleased) | `console/` + `crates/console-front`: the scaffold shipped in `0.2.0-next.2` (PR #63); on top of it the Firestore workbench (path bar, typed grid, query line, inspector, view-as-user, create and delete, copy as code), the live channel, the engine's schema index and database list, and the shell's navigation and section panel; crate tests, Vitest, Playwright journeys against a real engine, bundle budget | Auth, the other sections, parity checklist; acceptance-host lanes, then a later release |
+| Console | Published as `firenook@0.2.0-next.3` (2026-10-17): PRs #64, #74, #76, #78, #79 and #80 on engine 19f2338, release run 39031389689, registry integrity and provenance verified; every section of the emulator, the parity checklist ticked, Google's Emulator UI removed; Playwright journeys against a real engine in CI; a state written by `0.2.0-next.2` picked up and handed back | Acceptance-host lanes on this engine |
+| Terminal UI | Published as `firenook@0.2.0-next.4` (2026-10-17): PR #82 on engine 8cf0bab, release run 39035262983, registry integrity and provenance verified, `latest` → 0.2.0-next.4; the engine's terminal events, the npm package's screen, packaged on five platforms with a terminal run in the suite smoke | Acceptance-host lanes on this engine |
 
 The public preview compatibility document continues to describe the installed
 release. Merged but unpublished source improvements must not be presented as
