@@ -29,8 +29,8 @@ pub use release::{ENGINE_REVISION_VARIABLE, EngineRelease, RELEASE_VERSION_VARIA
 pub use requests::{requests_router, requests_router_with_log};
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::{self, Display, Formatter, Write as _};
-use std::path::{Path as FilePath, PathBuf};
+use std::fmt::{self, Display, Formatter};
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
 use axum::extract::State;
@@ -41,15 +41,10 @@ use axum::{Json, Router};
 use firenook_functions_bridge::TriggerRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as JsonValue, json};
-use sha2::{Digest as _, Sha256};
 use tokio::sync::{mpsc, oneshot};
-use tower_http::services::{ServeDir, ServeFile};
 
 /// Pinned firebase-tools protocol version represented by Hub/export metadata.
 pub const FIREBASE_TOOLS_COMPATIBILITY_VERSION: &str = "15.22.0";
-/// Pinned official Emulator UI archive checksum.
-pub const UI_ARCHIVE_SHA256: &str =
-    "97d8c4c574e3f20c4d690a2ce8373eef76ab024da73279a062dba8517f88cf9a";
 /// Maximum in-memory log records replayed to a newly connected UI.
 pub const LOG_REPLAY_CAPACITY: usize = 1_024;
 
@@ -360,34 +355,13 @@ fn suite_failure(message: &str) -> Response {
         .into_response()
 }
 
-/// UI router configuration.
-pub struct UiConfig {
-    /// Shared service directory.
-    pub directory: SuiteDirectory,
-    /// Downloaded official UI zip used for checksum verification.
-    pub archive: PathBuf,
-    /// Extracted official UI client directory.
-    pub client_directory: PathBuf,
-}
-
-/// Verifies and serves the official Emulator UI assets.
-pub async fn ui_router(config: UiConfig) -> Result<Router, SuiteError> {
-    verify_ui_archive(&config.archive).await?;
-    let index = config.client_directory.join("index.html");
-    if !index.is_file() {
-        return Err(SuiteError(format!(
-            "official UI index is missing: {}",
-            index.display()
-        )));
-    }
-    let state = UiState {
-        directory: config.directory,
-    };
-    let files = ServeDir::new(config.client_directory).fallback(ServeFile::new(index));
-    Ok(Router::new()
+/// The UI port's own API: `/api/config`, what the official UI read about
+/// the running suite and what tools still read. The page at the port is the
+/// console (`/console`); Firenook serves no Google UI since 0.2.0-next.3.
+pub fn ui_router(directory: SuiteDirectory) -> Router {
+    Router::new()
         .route("/api/config", get(ui_config))
-        .fallback_service(files)
-        .with_state(state))
+        .with_state(UiState { directory })
 }
 
 #[derive(Clone)]
@@ -418,25 +392,6 @@ async fn ui_config(State(state): State<UiState>) -> Json<JsonValue> {
         "fdcrealtime"
     ]);
     Json(value)
-}
-
-async fn verify_ui_archive(path: &FilePath) -> Result<(), SuiteError> {
-    let bytes = tokio::fs::read(path)
-        .await
-        .map_err(|error| SuiteError(format!("failed to read UI archive: {error}")))?;
-    let actual =
-        Sha256::digest(bytes)
-            .iter()
-            .fold(String::with_capacity(64), |mut encoded, byte| {
-                write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
-                encoded
-            });
-    if actual != UI_ARCHIVE_SHA256 {
-        return Err(SuiteError(format!(
-            "official UI archive checksum mismatch: expected {UI_ARCHIVE_SHA256}, found {actual}"
-        )));
-    }
-    Ok(())
 }
 
 /// Structured log record emitted to the official UI channel.

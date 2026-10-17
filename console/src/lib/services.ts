@@ -157,7 +157,7 @@ export const SERVICE_LABELS: Record<string, string> = {
   eventarc: 'Eventarc',
   tasks: 'Cloud Tasks',
   hub: 'Emulator hub',
-  ui: 'Emulator UI',
+  ui: 'Console',
   logging: 'Logging',
 }
 

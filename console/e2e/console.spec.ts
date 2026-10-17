@@ -300,8 +300,32 @@ test('the shell never caches and hashed assets are immutable', async ({ request 
   expect((await status.json()).projectId).toBe(project())
 })
 
-test('the Google Emulator UI still answers at the root of the same port', async ({ request }) => {
-  const legacy = await request.get(`${origin()}/`)
-  expect(legacy.status()).toBe(200)
-  expect(legacy.headers()['content-type']).toContain('text/html')
+test('the root of the port, and the Google Emulator UI’s old addresses, lead to the console', async ({
+  request,
+}) => {
+  // The Google UI was served at the root until 0.2.0-next.3: its links and
+  // bookmarks land on the console's page for the same thing.
+  const query = `q=${encodeURIComponent('metadata.function.name="us-central1-hello"')}`
+  for (const [from, to] of [
+    ['/', '/console'],
+    ['/firestore/default/data/users/u_k65eq', '/console/firestore'],
+    ['/firestore/default/requests', '/console/firestore/rules'],
+    ['/auth', '/console/auth'],
+    ['/storage/demo-console-e2e.appspot.com', '/console/storage'],
+    [`/logs?${query}`, `/console/logs?${query}`],
+    ['/database/demo-console-e2e/data', '/console'],
+  ]) {
+    const response = await request.get(`${origin()}${from}`, { maxRedirects: 0 })
+    expect(response.status(), from).toBe(307)
+    expect(response.headers().location, from).toBe(to)
+  }
+  const page = await request.get(`${origin()}/`)
+  expect(page.status()).toBe(200)
+  expect(await page.text()).toContain('<title>Firenook console</title>')
+  // What tools read about the suite stays where they read it.
+  const config = await request.get(`${origin()}/api/config`)
+  expect(config.status()).toBe(200)
+  expect((await config.json()).projectId).toBe(project())
+  // Nothing is written at an old address.
+  expect((await request.post(`${origin()}/auth`)).status()).toBe(404)
 })

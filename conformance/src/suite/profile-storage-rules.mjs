@@ -40,7 +40,7 @@ for(const service of ['firestore','auth','storage','functions','pubsub','hub','u
 const env=Object.fromEntries(['HOME','USER','LOGNAME','LANG','TZ','PATH','JAVA_HOME'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]));
 Object.assign(env,{PATH:dirname(process.execPath)+':'+env.PATH,GOOGLE_APPLICATION_CREDENTIALS:join(output,'demo-adc.json'),CLOUDSDK_CONFIG:join(output,'gcloud'),GCLOUD_PROJECT:project,GOOGLE_CLOUD_PROJECT:project,FIRENOOK_CONTROL_STDIN:'1'});
 const args=['suite','--host','127.0.0.1','--project-id',project,'--project-dir',output,'--state-dir',join(output,'state'),
-  '--storage-bucket','default='+bucket,'--firebase-tools-root',tools,'--node',process.execPath,'--ui-archive',join(cache,'ui-v1.15.0.zip')];
+  '--storage-bucket','default='+bucket,'--firebase-tools-root',tools,'--node',process.execPath];
 if(javaRuntime)args.push('--java',process.env.JAVA_HOME?join(process.env.JAVA_HOME,'bin/java'):'/usr/bin/java','--storage-rules-jar',join(cache,'cloud-storage-rules-runtime-v1.1.3.jar'));
 for(const [service,port] of Object.entries(ports))args.push('--'+service+'-port',String(port));
 await Promise.all(reservations.map(listener=>new Promise(resolve=>listener.close(resolve))));

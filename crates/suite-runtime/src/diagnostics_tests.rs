@@ -155,7 +155,6 @@ pub(super) fn test_config() -> SuiteConfig {
         node: root.clone(),
         inspect_functions: None,
         offline: true,
-        ui_archive: root.clone(),
         state_dir: root.join("state"),
         resume_state: false,
         firestore_in_memory: true,

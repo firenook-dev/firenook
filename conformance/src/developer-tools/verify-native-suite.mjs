@@ -1,5 +1,9 @@
-// Short, independent suite/UI verification using the committed official UI observations.
-// node verify-native-ui.mjs binary firebase-tools-root firebase-functions-root emulator-cache output
+// Short, independent suite verification: readiness, /api/config, the Requests
+// socket's denied evaluation, a Functions call, topic reload and a clean
+// shutdown, and the UI port sending its root to the console. Until
+// 0.2.0-next.3 this also drove Google's Emulator UI, which the engine no
+// longer serves; the console's own journeys (console/e2e) cover its pages.
+// node verify-native-suite.mjs binary firebase-tools-root firebase-functions-root emulator-cache output
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -8,7 +12,6 @@ import {mkdir,readFile,writeFile,symlink} from 'node:fs/promises';
 import {createServer} from 'node:net';
 import {resolve,dirname,join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
-import {observeDeveloperUi} from './observe-ui.mjs';
 
 const topicReload=process.argv[7]==='--topic-reload';
 assert(process.argv.length===7||(process.argv.length===8&&topicReload),'binary toolsRoot sdkRoot emulator-cache fresh-output [--topic-reload]');
@@ -23,11 +26,6 @@ assert.equal(typeof rules,'string');
 await mkdir(output,{mode:0o700});
 const json=(name,value)=>writeFile(join(output,name),JSON.stringify(value,null,2)+'\n');
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
-const assets={};
-for(const [name,expected] of [
-  ['ui-v1.15.0.zip','97d8c4c574e3f20c4d690a2ce8373eef76ab024da73279a062dba8517f88cf9a'],
-  ['cloud-storage-rules-runtime-v1.1.3.jar','0cd52db6f6271d62078f805220706377c849220b73bd68aa27078d977df9c900'],
-]){assets[name]=hash(await readFile(join(cache,name)));assert.equal(assets[name],expected);}
 await mkdir(join(output,'functions/node_modules'),{recursive:true});
 await symlink(sdk,join(output,'functions/node_modules/firebase-functions'),'dir');
 await json('functions/package.json',{name:'developer-tools-fixture',version:'1.0.0',main:'index.js',engines:{node:'24'}});
@@ -48,15 +46,14 @@ for(const service of ['firestore','auth','storage','functions','pubsub','hub','u
 const env=Object.fromEntries(['HOME','USER','LOGNAME','LANG','TZ','PATH','JAVA_HOME'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]));
 Object.assign(env,{PATH:dirname(process.execPath)+':'+env.PATH,GOOGLE_APPLICATION_CREDENTIALS:join(output,'demo-adc.json'),CLOUDSDK_CONFIG:join(output,'gcloud'),GCLOUD_PROJECT:project,GOOGLE_CLOUD_PROJECT:project,FIRENOOK_CONTROL_STDIN:'1'});
 const args=['suite','--host','127.0.0.1','--project-id',project,'--project-dir',output,'--state-dir',join(output,'state'),
-  '--storage-bucket','default='+project+'.appspot.com','--firebase-tools-root',tools,'--node',process.execPath,
-  '--ui-archive',join(cache,'ui-v1.15.0.zip')];
+  '--storage-bucket','default='+project+'.appspot.com','--firebase-tools-root',tools,'--node',process.execPath];
 for(const [service,port] of Object.entries(ports))args.push('--'+service+'-port',String(port));
 await Promise.all(reservations.map(listener=>new Promise(resolve=>listener.close(resolve))));
 const child=spawn(binary,args,{cwd:output,env,stdio:['pipe','pipe','pipe']});
 const exited=once(child,'exit');let log='';
 for(const stream of [child.stdout,child.stderr])stream.on('data',chunk=>{log+=chunk;});
 const origin=service=>`http://127.0.0.1:${ports[service]}`;
-const record={passed:false,acceptance:false,syntheticOnly:true,node:process.version,assets,
+const record={passed:false,acceptance:false,syntheticOnly:true,node:process.version,
   binarySha256:hash(await readFile(binary)),driverSha256:hash(await readFile(new URL(import.meta.url))),
   oracleFixtureSha256:hash(await readFile(new URL('../../fixtures/developer-tools-v1/fixture.json',import.meta.url))),
   firebaseTools:'15.22.0',firebaseFunctions:'7.2.5'};
@@ -83,8 +80,20 @@ try{
   const deadline=Date.now()+5000;
   while(!frames.some(frame=>frame.outcome==='deny')){assert(Date.now()<deadline,'denied evaluation must reach Requests');await delay(20);}
   const denied=frames.find(frame=>frame.outcome==='deny');
+  assert.ok(denied.requestId,'a denied evaluation names its request');record.deniedRequestId=denied.requestId;
   requests.close();await once(requests,'close');requests=null;
-  record.browser=await observeDeveloperUi({origin,project,work:output,output,requestId:denied.requestId,readyLog:'All emulators ready;'});
+  // The UI port's page is the console; its root, Google's UI until
+  // 0.2.0-next.3, leads there. A binary built without the console answers
+  // with its "not built" page, which is still the console's.
+  const root=await fetch(origin('ui')+'/',{redirect:'manual',signal:AbortSignal.timeout(5000)});
+  await root.arrayBuffer();
+  assert.equal(root.status,307);assert.equal(root.headers.get('location'),'/console');
+  const page=await fetch(origin('ui')+'/console',{signal:AbortSignal.timeout(5000)});
+  const html=await page.text();
+  assert([200,503].includes(page.status),`console page ${page.status}`);
+  assert.match(page.headers.get('content-type')??'',/text\/html/);
+  assert.match(html,/<title>Firenook console<\/title>/);
+  record.console={root:root.status,location:root.headers.get('location'),page:page.status};
   const ping=await fetch(`${origin('functions')}/${project}/us-central1/ping`,{signal:AbortSignal.timeout(15000)});
   assert.equal(ping.status,200);assert.deepEqual(await ping.json(),{synthetic:true});
   if(topicReload){
@@ -118,16 +127,16 @@ try{
     await publish('added-handler','beta-topic','beta',2);
     await publish('updated-handler','alpha-topic','alpha',2);
   }
-  record.functionsPing=true;record.browserAndFunctionPassed=true;
+  record.functionsPing=true;record.consoleAndFunctionPassed=true;
 }catch(error){await json('failure.json',{message:error.message,stack:error.stack});throw error;}
 finally{
   requests?.close();
   if(child.exitCode===null&&child.signalCode===null)child.stdin.end('FIRENOOK_SHUTDOWN\n');
   const result=await Promise.race([exited,delay(20000,null,{ref:false})]);
   await writeFile(join(output,'suite.log'),log);
-  record.passed=record.browserAndFunctionPassed===true&&result?.[0]===0;
+  record.passed=record.consoleAndFunctionPassed===true&&result?.[0]===0;
   await json('result.json',{...record,shutdown:result});
   assert(result,'owned suite shutdown deadline; preserve live child for diagnosis');
   assert.equal(result[0],0,log);
 }
-console.log(JSON.stringify({passed:true,output,checks:record.browser.checks}));
+console.log(JSON.stringify({passed:true,output,console:record.console}));

@@ -13,7 +13,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -228,12 +228,8 @@ function waitForEngine(child, wait, origin) {
  */
 export async function startEngine(options = {}) {
   const binary = process.env.FIRENOOK_BINARY ?? resolve(HERE, '../../target/debug/firenook')
-  const archive =
-    process.env.FIRENOOK_UI_ARCHIVE ?? join(homedir(), '.cache/firebase/emulators/ui-v1.15.0.zip')
   if (!existsSync(binary))
     throw new Error(`engine binary missing: ${binary} (cargo build --bin firenook)`)
-  if (!existsSync(archive))
-    throw new Error(`Emulator UI archive missing: ${archive} (firenook setup)`)
 
   const profileName = options.profile ?? 'data'
   const profile = await loadProfile(profileName)
@@ -246,7 +242,6 @@ export async function startEngine(options = {}) {
   try {
     return await launch(options, {
       binary,
-      archive,
       profile,
       profileName,
       project,
@@ -264,7 +259,7 @@ export async function startEngine(options = {}) {
 /** Writes the project into `directory` and starts the engine on it; `startEngine` owns the directory. */
 async function launch(
   options,
-  { binary, archive, profile, profileName, project, only, fixtureEnv, directory },
+  { binary, profile, profileName, project, only, fixtureEnv, directory },
 ) {
   // What a real project's firebase.json holds: an emulators entry for each
   // service the profile runs, then whatever each fixture adds.
@@ -310,8 +305,6 @@ async function launch(
       HOST,
       '--node',
       process.execPath,
-      '--ui-archive',
-      archive,
       '--state-dir',
       join(directory, 'state'),
       '--minimum-functions',

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {spawn,spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {once} from 'node:events';
-import {mkdir,readFile,writeFile,symlink,cp,rm} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,symlink,rm} from 'node:fs/promises';
 import {createServer} from 'node:net';
 import {resolve,dirname,join,delimiter} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -23,11 +23,10 @@ await mkdir(output,{mode:0o700});
 const json=(name,value)=>writeFile(join(output,name),JSON.stringify(value,null,2)+'\n');
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 
-// An emulator cache holding only the UI asset: the rules runtime jar must
-// not be needed.
+// An empty emulator cache: neither the rules runtime jar nor any UI asset
+// is needed (the console is part of the engine since 0.2.0-next.3).
 const assets=join(output,'emulators');
 await mkdir(assets);
-await cp(join(cache,'ui-v1.15.0.zip'),join(assets,'ui-v1.15.0.zip'));
 
 await mkdir(join(output,'functions/node_modules'),{recursive:true});
 await symlink(sdk,join(output,'functions/node_modules/firebase-functions'),'dir');
@@ -73,7 +72,7 @@ for(const service of ['firestore','auth','storage','functions','pubsub','hub','u
   ports[service]=listener.address().port;reservations.push(listener);
 }
 const args=['suite','--host','127.0.0.1','--project-id',project,'--project-dir',output,'--state-dir',join(output,'state'),
-  '--firebase-tools-root',tools,'--node',process.execPath,'--ui-archive',join(assets,'ui-v1.15.0.zip')];
+  '--firebase-tools-root',tools,'--node',process.execPath];
 for(const [service,port] of Object.entries(ports))args.push('--'+service+'-port',String(port));
 await Promise.all(reservations.map(listener=>new Promise(resolve=>listener.close(resolve))));
 const child=spawn(binary,args,{cwd:output,env,stdio:['pipe','pipe','pipe']});
@@ -82,7 +81,7 @@ for(const stream of [child.stdout,child.stderr])stream.on('data',chunk=>{log+=ch
 const origin=service=>`http://127.0.0.1:${ports[service]}`;
 const jwt=claims=>{const encode=value=>Buffer.from(JSON.stringify(value)).toString('base64url');return `${encode({alg:'none',typ:'JWT'})}.${encode({...claims,iat:1700000000,exp:4102444800,aud:project,iss:`https://securetoken.google.com/${project}`})}.`;};
 const alice=jwt({sub:'alice',user_id:'alice'}),bob=jwt({sub:'bob',user_id:'bob'}),admin=jwt({sub:'root',user_id:'root',admin:true});
-const record={passed:false,acceptance:false,syntheticOnly:true,node:process.version,javaShimmed:true,javaHomeUnset:true,cacheAssets:['ui-v1.15.0.zip'],
+const record={passed:false,acceptance:false,syntheticOnly:true,node:process.version,javaShimmed:true,javaHomeUnset:true,cacheAssets:[],
   binarySha256:hash(await readFile(binary)),driverSha256:hash(await readFile(new URL(import.meta.url))),storageConfigShape:'single-file',steps:[]};
 const step=async(name,method,path,{auth,body,type='text/plain'}={})=>{
   const response=await fetch(origin('storage')+path,{method,headers:{...(auth?{authorization:`Bearer ${auth}`}:{}),...(body===undefined?{}:{'content-type':type})},body});

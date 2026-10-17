@@ -34,7 +34,6 @@ impl Case {
             inspect_functions: None,
             offline: true,
             node: root.clone(),
-            ui_archive: root.clone(),
             state_dir: root.join("state"),
             resume_state: true,
             firestore_in_memory: false,

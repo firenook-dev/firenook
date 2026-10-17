@@ -346,7 +346,7 @@ test('init scaffolds a runnable demo project with the official defaults and neve
   assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), 'node_modules/\n.firenook/\n*-debug.log\n');
   assert.equal(readFileSync(join(dir, 'functions/.gitignore'), 'utf8'), 'node_modules/\n*.local\n');
   assert.ok(!existsSync(join(dir, 'functions/node_modules')), 'nothing is installed');
-  assert.match(output.err.join('\n'), /Next steps:[\s\S]*cd functions && npm install[\s\S]*firenook setup[\s\S]*firenook emulators:start --project demo-my-app/);
+  assert.match(output.err.join('\n'), /Next steps:[\s\S]*cd functions && npm install[\s\S]*firenook emulators:start --project demo-my-app/);
   assert.equal(firestoreRules(new Date(Date.UTC(2026, 0, 15, 12))).includes('timestamp.date(2026, 2, 14)'), true);
   assert.throws(() => scaffold(options, dir, log()), /exists; use firenook init --adopt/);
   writeFileSync(join(dir, 'storage.rules'), 'custom');
