@@ -259,6 +259,10 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     if (step.state === 'failed') return row(red(G.fail), step.ms, red(step.message || 'failed'));
     if (step.state === 'stopped') return row(dim(G.wait), null, dim('not started'));
     if (step.state === 'waiting') return row(dim(G.wait), null, dim('waiting'));
+    // An import runs Firestore's, then Auth's, then Storage's: the later
+    // rows wait their turn rather than spin.
+    const firestore = model.steps.get('firestore');
+    if (step.verb === 'importing' && step.id !== 'firestore' && firestore?.state === 'running') return row(dim(G.wait), null, dim('waits for Firestore'));
     const spent = Date.now() - step.began;
     let {done, total, detail} = step;
     if (step.id === 'functions') ({done, total, detail} = functionsProgress());
