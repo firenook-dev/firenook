@@ -1016,3 +1016,23 @@ root leads to the console.
   always "what happened to *this*?". The removal is one commit, so the
   implementation is readable in the history rather than lost.
 
+
+## Terminal UI (unreleased)
+
+The last row of the CLI surface: what a developer sees in the terminal from
+`emulators:start`, keeping the `All emulators ready` contract.
+
+- [x] The engine prints terminal events (`--terminal-events`) in place of the
+  human lines they stand for; without the switch its output is unchanged
+  ([DESIGN.md](DESIGN.md#the-terminal)).
+- [x] In a terminal, the npm package draws a start-up card with a row per
+  service filling in, the ready summary (console, ports, warnings, a newer
+  release), the log with a line per call and its output under it, reloads
+  and failed saves with the code around the error, and a footer pinned to
+  the window's last line with the keys. Pipes, CI and `emulators:exec` keep
+  the plain lines.
+- [x] A start that cannot run says what went wrong, how to fix it and what
+  became of the data: a taken port names its holder and a free port, refused
+  saved data names what changed (a `.DS_Store` from Finder by name).
+- [x] The release check: once a day, in the background, shown on the next
+  start, off in CI, in the plain output and on request.
