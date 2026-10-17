@@ -1183,3 +1183,22 @@ statistics; the per-collection ones come from one pass over the documents.
   stopped store, and the file size and free pages on the console Overview
   beside the data size, so growth shows before a start slows down.
 
+
+## Releases (planned)
+
+- [ ] **Publish straight to `latest` when the release owner asks.** Every
+  package is published to `next`, and moving `latest` is a separate
+  `npm dist-tag add` per package with the owner's 2FA in an interactive
+  terminal; a passkey cannot answer from a non-interactive shell. The
+  workflow cannot do it for them: npm's trusted publishing (OIDC) covers
+  `npm publish` only, and the workflow keeps no stored token on purpose.
+  Plan: a dispatch input, off by default and shown in the protected
+  environment's approval, so promotion stays a reviewed decision, made at
+  dispatch. With it on, the five native packages go to `next` and are
+  verified against the release assets as now, then the CLI is published with
+  `--tag latest`: `npm i firenook` gets the release with no 2FA step and
+  still no stored token. The native packages need no `latest`, since the CLI
+  pins their exact versions. Decide first what `next` means afterwards: the
+  CLI's `next` would stay on the previous release until moved by hand, so
+  either the release notes say so or `next` is retired while every release
+  is a preview. Test with a dry run of the publish script for both settings.
