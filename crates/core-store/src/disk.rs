@@ -1433,15 +1433,21 @@ fn initialize_database(database: &Database) -> Result<(), DiskError> {
 }
 
 fn migrate_legacy_documents(database: &Database) -> Result<(), DiskError> {
-    let migrated = {
+    let (migrated, leftover) = {
         let transaction = database.begin_read().map_err(DiskError::redb)?;
         let metadata = transaction.open_table(METADATA).map_err(DiskError::redb)?;
-        metadata
-            .get(DOCUMENTS_V2_MIGRATION_KEY)
-            .map_err(DiskError::redb)?
-            .is_some()
+        let legacy = transaction
+            .open_table(LEGACY_DOCUMENTS)
+            .map_err(DiskError::redb)?;
+        (
+            metadata
+                .get(DOCUMENTS_V2_MIGRATION_KEY)
+                .map_err(DiskError::redb)?
+                .is_some(),
+            !legacy.is_empty().map_err(DiskError::redb)?,
+        )
     };
-    if migrated {
+    if migrated && !leftover {
         return Ok(());
     }
 
@@ -1450,7 +1456,7 @@ fn migrate_legacy_documents(database: &Database) -> Result<(), DiskError> {
         .set_durability(Durability::Immediate)
         .map_err(DiskError::redb)?;
     transaction.set_quick_repair(true);
-    {
+    if !migrated {
         let legacy = transaction
             .open_table(LEGACY_DOCUMENTS)
             .map_err(DiskError::redb)?;
@@ -1477,13 +1483,20 @@ fn migrate_legacy_documents(database: &Database) -> Result<(), DiskError> {
                 .insert(collection_group_key.as_slice(), encoded_key.as_slice())
                 .map_err(DiskError::redb)?;
         }
-    }
-    {
         let mut metadata = transaction.open_table(METADATA).map_err(DiskError::redb)?;
         metadata
             .insert(DOCUMENTS_V2_MIGRATION_KEY, &[1_u8][..])
             .map_err(DiskError::redb)?;
     }
+    // Every release since 0.1.0-next.3 reads documents_v2 only: the old
+    // table is a dead copy of every document, which earlier engines left in
+    // place. An empty one stays, as `initialize_database` makes it.
+    transaction
+        .delete_table(LEGACY_DOCUMENTS)
+        .map_err(DiskError::redb)?;
+    transaction
+        .open_table(LEGACY_DOCUMENTS)
+        .map_err(DiskError::redb)?;
     transaction.commit().map_err(DiskError::redb)
 }
 
@@ -3847,6 +3860,40 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["parents/legacy/tasks/migrated"]
         );
+        drop(store);
+        assert_eq!(legacy_rows(&directory), 0, "the old table is cleared");
+    }
+
+    fn legacy_rows(directory: &TestDirectory) -> u64 {
+        let database = Database::open(directory.path().join(DATABASE_FILE)).unwrap();
+        let transaction = database.begin_read().unwrap();
+        transaction
+            .open_table(LEGACY_DOCUMENTS)
+            .unwrap()
+            .len()
+            .unwrap()
+    }
+
+    #[test]
+    fn an_old_table_left_by_an_earlier_migration_is_cleared() {
+        let directory = TestDirectory::new();
+        drop(written_and_flushed(&directory));
+        // Migrated, with the copy an earlier engine left behind.
+        {
+            let database = Database::open(directory.path().join(DATABASE_FILE)).unwrap();
+            let transaction = database.begin_write().unwrap();
+            transaction
+                .open_table(LEGACY_DOCUMENTS)
+                .unwrap()
+                .insert(&b"dead copy"[..], &b"of a document"[..])
+                .unwrap();
+            transaction.commit().unwrap();
+        }
+        assert_eq!(legacy_rows(&directory), 1);
+        let store = DiskStore::open(directory.path(), DiskOptions::default()).unwrap();
+        assert!(store.snapshot().get(&key("items/kept")).is_some());
+        drop(store);
+        assert_eq!(legacy_rows(&directory), 0);
     }
 
     #[test]
