@@ -1076,13 +1076,80 @@ stood, which left the store to a full repair at the next start, shown only as
   progress.
 - [x] Stops are listened for from the first moment: a stop while starting
   closes the data cleanly, and the start-up limit counts quiet time only.
+  - Found after release (2026-10-18): a stop once the emulators are ready
+    leaves the data files marked open, and no test opened the file itself
+    after either kind of stop. See "Closing the data on stop" below.
 - [x] Published as `firenook@0.2.0-next.5` with `@firenook/cli-<platform>` ×5
   on 2026-10-18 (PR #85, release PR #86, tag `npm-v0.2.0-next.5` on d7764ca,
   engine 18becb0, release run 39050978077 with its SDK browser gate run a
   second time after the Firebase JS SDK build was caught mid-write; registry
   integrity equal to the release assets for all six packages, provenance
   attestations verified on a fresh install).
-- [ ] Follow-up: see "Start-up speed" below.
+- [ ] Follow-up: see "Next release" below.
+
+## Next release: `0.2.0-next.6` (planned)
+
+In this order, each part finished and reviewed before the next starts:
+
+1. **Closing the data on stop** (below). First: every start after a stop
+   pays for it now, the saved document count is written on a clean close,
+   and `state:compact` and `state:inspect` open the stopped file, so each
+   would begin with a repair.
+2. **Start-up speed** (below): keep Firestore's document count, and load
+   Functions while the data opens.
+3. **Store size** (below): `firenook state:compact`, clearing the old
+   documents table, and showing the size. Repack and packing better while
+   running follow in a later release.
+4. **Releases** (below): publish straight to `latest` when the release owner
+   asks, built before the release so next.6 itself can use it.
+
+Then one combined candidate, qualified as for earlier releases: CI on the
+exact head, the consumer gates and paired acceptance, and publication only
+with approval.
+
+## Closing the data on stop (planned)
+
+Found on 2026-10-18. A stop once the emulators are ready makes every commit
+durable, reports "stopped cleanly", and ends the process without closing
+Firestore's `firenook.redb`; since 0.2.0-next.4 it leaves Storage's
+`metadata.redb` open too. redb clears its "repair needed" mark only when its
+`Database` is dropped, so the next start repairs the file. No data is lost:
+the repair rebuilds redb's record of free space, and every acknowledged
+commit is already on disk. The start pays for it: with 0.2.0-next.4 a full
+repair of the 32.6 GB store measured below took about 11 minutes, shown only
+as "resuming"; the quick repair of 0.2.0-next.5 takes about 10 s on the same
+store, with a full repair still possible when the saved allocator state is
+stale.
+
+Measured with each release's engine alone (`firenook suite`, no npm CLI):
+Firestore, Auth and Storage on a fresh state directory, three writes, a
+SIGINT once ready, then the file header read and the file opened with redb:
+
+| Engine | `firestore/firenook.redb` | `storage/metadata.redb` |
+| --- | --- | --- |
+| 0.2.0-next.2 | closed | closed |
+| 0.2.0-next.3 | repair needed | closed |
+| 0.2.0-next.4 | repair needed | repair needed |
+| 0.2.0-next.5 | repair needed | repair needed |
+
+The stop sequence flushes Firestore but never releases the store, and
+Storage's `shutdown()` runs while something else still holds its metadata
+database. What keeps them alive is not found yet; the work added with the
+console (0.2.0-next.3) and the terminal UI (0.2.0-next.4) is the first place
+to look.
+
+- [ ] **Close both databases when stopping.** Find every owner of the store
+  and of Storage's metadata database that outlives the stop, end it, then
+  drop the databases before the stop summary is printed. A database that
+  cannot be closed is a failed stop, not "stopped cleanly".
+- [ ] **Test it on the file.** After a stop once ready and after a stop while
+  starting, the file opens read-only without a repair, for each service mix
+  the CLI starts. Guards the regression above.
+- [ ] **Say "stopped" only when the engine stopped.** The npm CLI shows
+  "✓ stopped … everything is kept" whenever a stop was requested and the
+  engine then ended, even by a signal (`packages/cli/src/session.mjs`). An
+  engine that was killed is reported as a failure, with what the next start
+  will do.
 
 ## Start-up speed (planned)
 
@@ -1152,6 +1219,9 @@ does not return them. The legacy `documents_v1` table was empty, so its
 leftover copy (below) played no part here. Repairing the copy took 10 s with
 the quick repair of 0.2.0-next.5. The per-table figures are redb's own table
 statistics; the per-collection ones come from one pass over the documents.
+
+0.2.0-next.6 takes the compact command, clearing the old table and showing
+the size; repack and packing better while running come after it.
 
 - [ ] **`firenook state:compact`.** With the emulator stopped, redb's
   `Database::compact` moves pages into free space and truncates the file.
