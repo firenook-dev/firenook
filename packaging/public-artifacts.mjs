@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { gunzipSync } from 'node:zlib';
 
-const cliFiles = ['LICENSE', 'NOTICE', 'README.md', 'package.json', 'release.json',
+export const cliFiles = ['LICENSE', 'NOTICE', 'README.md', 'package.json', 'release.json',
   'bin/firenook.mjs', 'src/binary.mjs', 'src/firestore-values.mjs', 'src/hub.mjs', 'src/init.mjs', 'src/invoke.mjs', 'src/mcp.mjs', 'src/options.mjs', 'src/processes.mjs', 'src/rc.mjs', 'src/runtime.mjs', 'src/session.mjs', 'src/terminal.mjs', 'src/updates.mjs'];
 const licenses = ['LICENSE', 'NOTICE'];
 
