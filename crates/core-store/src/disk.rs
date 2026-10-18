@@ -22,9 +22,9 @@ use super::{
     DiskWriteBufferMemoryUsage, Document, DocumentKey, EncodedDocument, FieldEquality,
     LazyDocument, ListenerMemoryUsage, LogicalMemoryUsage, ResetRequired, Revision, Snapshot,
     SnapshotError, State, StoreMemoryUsage, StoreOptions, Timestamp, TransactionMemoryUsage, Write,
-    WriteBufferMemoryUsage, compare_resource_paths, decode_stored_document,
-    document_entry_logical_bytes, encode_stored_document, numeric_resource_id,
-    stored_scalar_fields, usize_to_u64,
+    WriteBufferMemoryUsage, apply_document_transition, compare_resource_paths,
+    decode_stored_document, document_entry_logical_bytes, encode_stored_document,
+    numeric_resource_id, stored_scalar_fields, usize_to_u64,
 };
 
 mod field_index;
@@ -50,6 +50,9 @@ const STATE_KEY: &str = "state";
 const FIELD_INDEX_REVISION_KEY: &str = "field_equality_v1_revision";
 const DOCUMENTS_V2_MIGRATION_KEY: &str = "documents_v2_migrated";
 const ORDERED_SCOPE_INDEX_MIGRATION_KEY: &str = "ordered_scope_indexes_v2_migrated";
+/// The documents' count and logical bytes, saved with every commit; see
+/// [`PersistedUsage`].
+const DOCUMENT_USAGE_KEY: &str = "document_usage_v1";
 const DATABASE_FILE: &str = "firenook.redb";
 const JOURNAL_FILE: &str = "firenook.wal";
 // File names written by releases up to 0.1.0-next.9, before the project was renamed.
@@ -58,7 +61,9 @@ const LEGACY_JOURNAL_FILE: &str = "fireside.wal";
 const FRAME_MAGIC: [u8; 8] = *b"FSWAL001";
 const FRAME_HEADER_LEN: usize = 16;
 const MAX_WAL_RECORD_BYTES: usize = 64 * 1024 * 1024;
-type LoadedDatabase = (Revision, Timestamp, LogicalMemoryUsage);
+/// The persisted revision and commit time, the documents' usage, and
+/// whether that usage was counted at this open rather than read.
+type LoadedDatabase = (Revision, Timestamp, LogicalMemoryUsage, bool);
 
 /// Firenook's deliberate combined redb read/write page-cache budget.
 ///
@@ -275,8 +280,11 @@ impl DiskStore {
         };
 
         let stopped = || watch.is_some_and(|watch| watch.stopped());
-        let (revision, last_commit_time, current_documents) =
+        let (revision, last_commit_time, current_documents, recounted) =
             load_database(&database, counted, &stopped)?;
+        if recounted {
+            save_document_usage(&database, revision, current_documents)?;
+        }
         let memory = State::from_persisted(
             options.store,
             revision,
@@ -435,12 +443,17 @@ impl DiskStore {
             return Err(error);
         }
 
+        let mut usage = state.memory.current_documents;
+        for change in &plan.changes {
+            apply_document_transition(&mut usage, change);
+        }
         if let Err(error) = persist_record(
             &state.database,
             &record,
             &self.write_buffers,
             redb_durability(state.durability),
             state.field_indexes,
+            Some(usage),
         ) {
             state.requires_restart = true;
             return Err(error);
@@ -1308,6 +1321,7 @@ fn persist_state_durably(
         memory.last_commit_time,
         write_buffers,
         field_indexes,
+        Some(memory.current_documents),
     )?;
     transaction.commit().map_err(DiskError::redb)
 }
@@ -1343,6 +1357,17 @@ fn spawn_flusher(
 struct PersistedState {
     revision: Revision,
     last_commit_time: Timestamp,
+}
+
+/// The documents' figures for the memory accounting, saved with the
+/// revision they describe, so an open reads them instead of decoding every
+/// document. A store written since by an engine that does not keep them
+/// has a newer revision, and is counted once.
+#[derive(Debug, Encode, Decode)]
+struct PersistedUsage {
+    revision: Revision,
+    entries: u64,
+    logical_bytes: u64,
 }
 
 #[derive(Debug, Encode, Decode)]
@@ -1518,41 +1543,56 @@ fn load_database(
     // How many documents are counted between looks at `stopped`.
     const STOP_EVERY: usize = 4096;
     let transaction = database.begin_read().map_err(DiskError::redb)?;
-    let mut current_documents = counted.unwrap_or_default();
-    if counted.is_none() {
-        let table = transaction.open_table(DOCUMENTS).map_err(DiskError::redb)?;
-        let entries = table.iter().map_err(DiskError::redb)?;
-        for (index, entry) in entries.enumerate() {
-            // Only read so far: stopping here leaves the store as it was.
-            if index % STOP_EVERY == 0 && stopped() {
-                return Err(DiskError::Stopped);
-            }
-            let (key, document) = entry.map_err(DiskError::redb)?;
-            let key = decode_document_key(key.value())?;
-            let document = decode_stored_document(document.value())
-                .map_err(|error| DiskError::Encoding(error.to_string()))?;
-            current_documents.entries = current_documents.entries.saturating_add(1);
-            current_documents.logical_bytes = current_documents
-                .logical_bytes
-                .saturating_add(document_entry_logical_bytes(&key, &document));
-        }
-    }
-
-    let persisted_state: Option<PersistedState> = {
+    let (persisted_state, saved): (Option<PersistedState>, _) = {
         let table = transaction.open_table(METADATA).map_err(DiskError::redb)?;
-        table
+        let state: Option<PersistedState> = table
             .get(STATE_KEY)
             .map_err(DiskError::redb)?
             .map(|state| decode(state.value()))
-            .transpose()?
+            .transpose()?;
+        let saved = match &state {
+            Some(state) => saved_usage(&table, state.revision)?,
+            None => None,
+        };
+        (state, saved)
+    };
+    let (current_documents, recounted) = match (counted, saved) {
+        (Some(counted), _) => (counted, true),
+        (None, Some(saved)) => (saved, false),
+        (None, None) => {
+            let mut current_documents = LogicalMemoryUsage::default();
+            let table = transaction.open_table(DOCUMENTS).map_err(DiskError::redb)?;
+            let entries = table.iter().map_err(DiskError::redb)?;
+            for (index, entry) in entries.enumerate() {
+                // Only read so far: stopping here leaves the store as it was.
+                if index % STOP_EVERY == 0 && stopped() {
+                    return Err(DiskError::Stopped);
+                }
+                let (key, document) = entry.map_err(DiskError::redb)?;
+                let key = decode_document_key(key.value())?;
+                let document = decode_stored_document(document.value())
+                    .map_err(|error| DiskError::Encoding(error.to_string()))?;
+                current_documents.entries = current_documents.entries.saturating_add(1);
+                current_documents.logical_bytes = current_documents
+                    .logical_bytes
+                    .saturating_add(document_entry_logical_bytes(&key, &document));
+            }
+            (current_documents, true)
+        }
     };
 
     match persisted_state {
-        Some(state) => Ok((state.revision, state.last_commit_time, current_documents)),
+        Some(state) => Ok((
+            state.revision,
+            state.last_commit_time,
+            current_documents,
+            recounted,
+        )),
         None if current_documents.entries == 0 => Ok((
             Revision::ZERO,
             Timestamp::new(0, 0).expect("zero nanoseconds are valid"),
             current_documents,
+            recounted,
         )),
         None => Err(DiskError::Corrupt(
             "document table exists without store metadata".to_owned(),
@@ -1585,6 +1625,7 @@ fn persist_record(
     write_buffers: &WriteBufferAccounting,
     durability: Durability,
     field_indexes: bool,
+    usage: Option<LogicalMemoryUsage>,
 ) -> Result<(), DiskError> {
     let mut transaction = database.begin_write().map_err(DiskError::redb)?;
     transaction
@@ -1606,6 +1647,7 @@ fn persist_record(
         record.commit_time,
         write_buffers,
         field_indexes,
+        usage,
     )?;
     transaction.commit().map_err(DiskError::redb)
 }
@@ -1719,6 +1761,7 @@ fn persist_state(
     last_commit_time: Timestamp,
     write_buffers: &WriteBufferAccounting,
     field_indexes: bool,
+    usage: Option<LogicalMemoryUsage>,
 ) -> Result<(), DiskError> {
     let mut metadata = transaction.open_table(METADATA).map_err(DiskError::redb)?;
     let state = encode_write_buffer(
@@ -1737,7 +1780,93 @@ fn persist_state(
             .insert(FIELD_INDEX_REVISION_KEY, encode(&revision)?.as_slice())
             .map_err(DiskError::redb)?;
     }
+    // Left as it was without figures: its older revision makes the next
+    // open count.
+    if let Some(usage) = usage {
+        metadata
+            .insert(
+                DOCUMENT_USAGE_KEY,
+                encode(&PersistedUsage {
+                    revision,
+                    entries: usage.entries,
+                    logical_bytes: usage.logical_bytes,
+                })?
+                .as_slice(),
+            )
+            .map_err(DiskError::redb)?;
+    }
     Ok(())
+}
+
+/// Saves the documents' figures an open counted, so the next open reads
+/// them instead.
+fn save_document_usage(
+    database: &Database,
+    revision: Revision,
+    usage: LogicalMemoryUsage,
+) -> Result<(), DiskError> {
+    let mut transaction = database.begin_write().map_err(DiskError::redb)?;
+    transaction
+        .set_durability(Durability::Immediate)
+        .map_err(DiskError::redb)?;
+    transaction.set_quick_repair(true);
+    {
+        let mut metadata = transaction.open_table(METADATA).map_err(DiskError::redb)?;
+        metadata
+            .insert(
+                DOCUMENT_USAGE_KEY,
+                encode(&PersistedUsage {
+                    revision,
+                    entries: usage.entries,
+                    logical_bytes: usage.logical_bytes,
+                })?
+                .as_slice(),
+            )
+            .map_err(DiskError::redb)?;
+    }
+    transaction.commit().map_err(DiskError::redb)
+}
+
+/// The saved figures when they describe `revision`. One that cannot be
+/// decoded, as one a later engine laid out differently, is counted again.
+fn saved_usage<T: ReadableTable<&'static str, &'static [u8]>>(
+    metadata: &T,
+    revision: Revision,
+) -> Result<Option<LogicalMemoryUsage>, DiskError> {
+    Ok(metadata
+        .get(DOCUMENT_USAGE_KEY)
+        .map_err(DiskError::redb)?
+        .and_then(|usage| decode::<PersistedUsage>(usage.value()).ok())
+        .filter(|usage| usage.revision == revision)
+        .map(|usage| LogicalMemoryUsage::new(usage.entries, usage.logical_bytes)))
+}
+
+/// `usage` after `record`'s writes, which have not been applied yet.
+fn usage_after_record(
+    database: &Database,
+    mut usage: LogicalMemoryUsage,
+    record: &WalRecord,
+) -> Result<LogicalMemoryUsage, DiskError> {
+    let transaction = database.begin_read().map_err(DiskError::redb)?;
+    let documents = transaction.open_table(DOCUMENTS).map_err(DiskError::redb)?;
+    for mutation in &record.mutations {
+        let key = encode_document_key(&mutation.key)?;
+        if let Some(before) = documents.get(key.as_slice()).map_err(DiskError::redb)? {
+            let before = decode_stored_document(before.value())
+                .map_err(|error| DiskError::Encoding(error.to_string()))?;
+            usage.entries = usage.entries.saturating_sub(1);
+            usage.logical_bytes = usage
+                .logical_bytes
+                .saturating_sub(document_entry_logical_bytes(&mutation.key, &before));
+        }
+        if let Some(after) = &mutation.document {
+            usage.entries = usage.entries.saturating_add(1);
+            usage.logical_bytes = usage
+                .logical_bytes
+                .saturating_add(document_entry_logical_bytes(&mutation.key, after));
+        }
+    }
+    Ok(usage)
 }
 
 /// Whether the field index describes the store's persisted revision.
@@ -1909,6 +2038,7 @@ impl DiskBulkCommit<'_> {
             self.state.memory.last_commit_time,
             &self.write_buffers,
             self.state.field_indexes,
+            Some(self.state.memory.current_documents),
         )
         .and_then(|()| transaction.commit().map_err(DiskError::redb));
         if committed.is_err() {
@@ -1943,6 +2073,13 @@ fn replay_records(
     field_indexes: bool,
 ) -> Result<(), DiskError> {
     let mut state = load_persisted_state(database)?;
+    // The saved figures follow the replayed writes only from the revision
+    // they describe; otherwise the open counts.
+    let mut usage = {
+        let transaction = database.begin_read().map_err(DiskError::redb)?;
+        let metadata = transaction.open_table(METADATA).map_err(DiskError::redb)?;
+        saved_usage(&metadata, state.revision)?
+    };
     for record in records {
         if record.revision <= state.revision {
             continue;
@@ -1964,12 +2101,16 @@ fn replay_records(
                 "journal commit timestamps are not strictly increasing".to_owned(),
             ));
         }
+        if let Some(before) = usage {
+            usage = Some(usage_after_record(database, before, record)?);
+        }
         persist_record(
             database,
             record,
             write_buffers,
             Durability::Immediate,
             field_indexes,
+            usage,
         )?;
         state.revision = record.revision;
         state.last_commit_time = record.commit_time;
@@ -2756,6 +2897,7 @@ mod tests {
     fn a_stop_while_documents_are_counted_closes_the_store_cleanly() {
         let directory = TestDirectory::new();
         drop(written_and_flushed(&directory));
+        forget_saved_usage(&directory);
         let stop = Arc::new(Watched {
             stop: true,
             ..Watched::default()
@@ -2769,6 +2911,160 @@ mod tests {
         let store = open_watching(&directory, &watch).unwrap();
         assert_eq!(repairs(&watch), Vec::<f64>::new());
         assert!(store.snapshot().get(&key("items/kept")).is_some());
+    }
+
+    /// The store as an engine that keeps no saved figures leaves it.
+    fn forget_saved_usage(directory: &TestDirectory) {
+        let database = Database::open(directory.path().join(DATABASE_FILE)).unwrap();
+        let transaction = database.begin_write().unwrap();
+        transaction
+            .open_table(METADATA)
+            .unwrap()
+            .remove(DOCUMENT_USAGE_KEY)
+            .unwrap();
+        transaction.commit().unwrap();
+    }
+
+    /// Opens with a watch that stops any count, so an open that counts
+    /// fails with `Stopped` and one that reads the saved figures does not.
+    fn open_without_counting(directory: &TestDirectory) -> Result<DiskStore, DiskError> {
+        let stop = Arc::new(Watched {
+            stop: true,
+            ..Watched::default()
+        });
+        open_watching(directory, &stop)
+    }
+
+    fn usage(store: &DiskStore) -> LogicalMemoryUsage {
+        store.snapshot().logical_memory_usage()
+    }
+
+    #[test]
+    fn an_open_reads_the_saved_count_instead_of_counting() {
+        let directory = TestDirectory::new();
+        let store = written_and_flushed(&directory);
+        let before = usage(&store);
+        drop(store);
+        let reopened = open_without_counting(&directory).unwrap();
+        assert_eq!(usage(&reopened), before);
+        assert_eq!(reopened.document_total(), 1);
+    }
+
+    #[test]
+    fn the_saved_count_follows_every_kind_of_commit() {
+        let directory = TestDirectory::new();
+        let store = written_and_flushed(&directory);
+        store
+            .commit(&[
+                Write::Create {
+                    key: key("items/added"),
+                    fields: fields(Value::String("a longer value".into())),
+                },
+                Write::Set {
+                    key: key("items/kept"),
+                    fields: fields(Value::Integer(8)),
+                    transforms: Vec::new(),
+                    precondition: Precondition::None,
+                },
+            ])
+            .unwrap();
+        store
+            .commit(&[Write::Delete {
+                key: key("items/added"),
+                precondition: Precondition::None,
+            }])
+            .unwrap();
+        let mut bulk = store.begin_bulk_commit().unwrap();
+        bulk.commit(&[Write::Create {
+            key: key("items/bulk"),
+            fields: fields(Value::Integer(9)),
+        }])
+        .unwrap();
+        bulk.finish().unwrap();
+        let before = usage(&store);
+        store.close(Duration::ZERO).unwrap();
+        let reopened = open_without_counting(&directory).unwrap();
+        assert_eq!(usage(&reopened), before);
+        assert_eq!(reopened.document_total(), 2);
+    }
+
+    #[test]
+    fn writes_by_an_engine_that_keeps_no_count_are_counted_again() {
+        let directory = TestDirectory::new();
+        drop(written_and_flushed(&directory));
+        forget_saved_usage(&directory);
+        assert!(matches!(
+            open_without_counting(&directory),
+            Err(DiskError::Stopped)
+        ));
+        // Counted once, then saved.
+        let counted = DiskStore::open(directory.path(), DiskOptions::default()).unwrap();
+        let before = usage(&counted);
+        drop(counted);
+        assert_eq!(usage(&open_without_counting(&directory).unwrap()), before);
+    }
+
+    #[test]
+    fn saved_figures_for_another_revision_are_not_used() {
+        let directory = TestDirectory::new();
+        let store = written_and_flushed(&directory);
+        let before = usage(&store);
+        drop(store);
+        // A commit that saved no figures, as an earlier engine's: the saved
+        // ones describe the revision before it.
+        {
+            let database = Database::open(directory.path().join(DATABASE_FILE)).unwrap();
+            let record = WalRecord {
+                revision: Revision::from_u64(2),
+                commit_time: Timestamp::new(i64::MAX / 2, 0).unwrap(),
+                mutations: vec![PersistedMutation {
+                    key: key("items/later"),
+                    document: Some(Arc::new(Document {
+                        fields: fields(Value::Integer(3)),
+                        create_time: Timestamp::new(i64::MAX / 2, 0).unwrap(),
+                        update_time: Timestamp::new(i64::MAX / 2, 0).unwrap(),
+                    })),
+                }],
+            };
+            persist_record(
+                &database,
+                &record,
+                &WriteBufferAccounting::default(),
+                Durability::Immediate,
+                true,
+                None,
+            )
+            .unwrap();
+        }
+        assert!(matches!(
+            open_without_counting(&directory),
+            Err(DiskError::Stopped)
+        ));
+        let counted = DiskStore::open(directory.path(), DiskOptions::default()).unwrap();
+        assert_eq!(counted.document_total(), before.entries + 1);
+    }
+
+    #[test]
+    fn a_journal_replay_keeps_the_saved_count() {
+        let directory = TestDirectory::new();
+        let open = written_and_flushed(&directory);
+        open.commit(&[
+            Write::Create {
+                key: key("items/journaled"),
+                fields: fields(Value::Integer(8)),
+            },
+            Write::Delete {
+                key: key("items/kept"),
+                precondition: Precondition::None,
+            },
+        ])
+        .unwrap();
+        let before = usage(&open);
+        let copy = crashed_copy(&directory);
+        let reopened = open_without_counting(&copy).unwrap();
+        assert_eq!(usage(&reopened), before);
+        assert_eq!(reopened.document_total(), 1);
+        drop(open);
     }
 
     #[test]
@@ -3667,6 +3963,7 @@ mod tests {
                 &store.write_buffers,
                 Durability::Immediate,
                 state.field_indexes,
+                None,
             )
             .expect("redb commit should complete");
         }
