@@ -187,6 +187,9 @@ export async function supervise(launch, command) {
       await new Promise(resolveExit => testChild.once('close', resolveExit));
     }
     if (startupError) throw startupError;
+    if (requestedStop && outcome.signal && (ready || !['SIGINT', 'SIGTERM'].includes(outcome.signal))) {
+      process.stderr.write(`firenook: the engine was ended (${outcome.signal}) before it finished stopping; the next start checks the data first, and repairs it if it needs to\n`);
+    }
     if (outcome.code !== 0) return outcome.code ?? (outcome.signal === 'SIGINT' ? 130 : 1);
     if (!requestedStop) throw new Error('Emulator exited unexpectedly before requested shutdown');
     return commandStatus ?? 0;

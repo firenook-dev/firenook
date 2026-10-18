@@ -873,9 +873,13 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
       return 1;
     }
     const at = clock();
-    if (requestedStop && (outcome.code === 0 || outcome.signal || !model.ready)) {
+    // Stopped as asked: the engine finished its own stop and exited 0, or a
+    // stop signal ended it before it was listening for one, which it is
+    // before it opens any data. A kill, or any other end, is no stop.
+    const stopSignal = outcome.signal === 'SIGINT' || outcome.signal === 'SIGTERM';
+    if (requestedStop && (outcome.code === 0 || (!model.ready && stopSignal))) {
       const ms = model.stopping ? Date.now() - model.stopping.since : null;
-      const kept = model.stopped?.beforeReady ? (ephemeral ? 'nothing of yours was changed' : `the data in ${shortPath(stateDir, cwd)} is as it was`)
+      const kept = (model.stopped?.beforeReady ?? !model.ready) ? (ephemeral ? 'nothing of yours was changed' : `the data in ${shortPath(stateDir, cwd)} is as it was`)
         : exportDir ? `exported to ${shortPath(exportDir, cwd)}`
           : ephemeral ? `this run's data stays in ${shortPath(dirname(stateDir ?? ''), cwd)}` : `everything is kept in ${shortPath(stateDir, cwd)}`;
       // Before readiness, what it did comes first: the place may not fit.
@@ -885,11 +889,14 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
       screen.end();
       return outcome.code === 0 ? 0 : 130;
     }
-    // The engine ended on its own, or on a failure it could not describe.
+    // The engine ended on its own, or on a failure it could not describe,
+    // or was ended before it finished the stop asked of it.
     screen.live(() => []);
     const lines = model.raw.slice(-12);
-    screen.emit(() => ['', ...section(divider(`${red(G.fail)} ${bold(red(model.ready ? 'Firenook stopped unexpectedly' : 'Firenook could not start'))}`, dim(outcome.signal ? `signal ${outcome.signal}` : `exit code ${outcome.code}`)),
-      [...lines.flatMap(line => field('', line, dim)), ...field(dim('Data'), dataLine(), dim)].map(inside)), bottom(), '']);
+    const title = requestedStop ? 'Firenook did not finish stopping' : model.ready ? 'Firenook stopped unexpectedly' : 'Firenook could not start';
+    const data = requestedStop && stateDir && !ephemeral ? `the next start checks ${shortPath(stateDir, cwd)} first, and repairs it if it needs to` : dataLine();
+    screen.emit(() => ['', ...section(divider(`${red(G.fail)} ${bold(red(title))}`, dim(outcome.signal ? `signal ${outcome.signal}` : `exit code ${outcome.code}`)),
+      [...lines.flatMap(line => field('', line, dim)), ...field(dim('Data'), data, dim)].map(inside)), bottom(), '']);
     screen.end();
     return outcome.code === 0 ? 1 : (outcome.code ?? (outcome.signal === 'SIGINT' ? 130 : 1));
   } finally {
