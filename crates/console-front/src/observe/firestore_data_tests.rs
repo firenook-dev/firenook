@@ -67,11 +67,11 @@ async fn the_summary_counts_documents_and_databases_without_walking_on_the_calle
     store.commit(&[create("orders", "o/1")]).expect("committed");
     assert_eq!(figures(&console), (Some(4), Some(3)));
     assert_eq!(
-        firestore_summary(1, Some(1)).headline,
+        firestore_summary(1, Some(1), None).headline,
         "1 document · 1 database"
     );
     assert_eq!(
-        firestore_summary(211_260, None).headline,
+        firestore_summary(211_260, None, None).headline,
         "211,260 documents"
     );
 }
@@ -135,7 +135,7 @@ async fn another_projects_documents_are_never_counted_as_this_ones() {
 fn changes_from_before_the_seeds_snapshot_are_not_counted_twice() {
     let store = Store::default();
     let counting = Counting {
-        store,
+        store: store.downgrade(),
         project: Arc::from(PROJECT),
         fixed: BTreeSet::new(),
         written: Mutex::new(BTreeSet::new()),
@@ -441,4 +441,70 @@ async fn a_cancelled_reset_stops_at_the_next_batch() {
     assert!(left > 0, "the reset stopped before the end");
     assert_eq!(left % 500, 0, "whole batches only: {left}");
     assert_eq!(job.done, 5_000 - left);
+}
+
+/// The console's Firestore pieces observe the store's commits: none may
+/// keep the store open once every other handle is gone, or its file is left
+/// for the next start to repair.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_console_never_keeps_the_store_open() {
+    let directory =
+        std::env::temp_dir().join(format!("firenook-console-close-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    let store =
+        Store::open_disk(&directory, firenook_core_store::DiskOptions::default()).expect("store");
+    let console = firestore_console(&store);
+    let key = DocumentKey::new(
+        DatabaseName::new(PROJECT, "(default)").expect("database"),
+        "orders/o_1",
+    )
+    .expect("key");
+    store
+        .commit(&[Write::Create {
+            key,
+            fields: Fields::new(),
+        }])
+        .expect("committed");
+    // The Overview's counting starts on first use.
+    let _ = summary(&console);
+    drop(console);
+    drop(store);
+    let file = directory.join("firenook.redb");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while redb::Builder::new().open_read_only(&file).is_err() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the store's file was left open"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+/// Beside the documents' count, the store file's size: how much of it is
+/// theirs, and when it is worth a `state:compact`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_store_on_disk_shows_its_file_size() {
+    let on_disk = |summary: &SectionSummary| {
+        summary
+            .figures
+            .iter()
+            .find(|figure| figure.label == "On disk")
+            .and_then(|figure| figure.value)
+    };
+    let memory = Store::default();
+    assert_eq!(on_disk(&summary(&firestore_console(&memory))), None);
+    let directory =
+        std::env::temp_dir().join(format!("firenook-console-on-disk-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    let store =
+        Store::open_disk(&directory, firenook_core_store::DiskOptions::default()).expect("store");
+    let console = firestore_console(&store);
+    let bytes = std::fs::metadata(directory.join("firenook.redb"))
+        .expect("file")
+        .len();
+    assert_eq!(on_disk(&summary(&console)), Some(bytes));
+    drop(console);
+    drop(store);
+    let _ = std::fs::remove_dir_all(&directory);
 }

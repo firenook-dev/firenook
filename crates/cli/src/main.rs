@@ -145,6 +145,30 @@ enum StateAction {
     /// keeping the data: for a seed that changed in a way that does not
     /// matter to it. The previous receipt is kept beside the new one.
     AdoptSeed(AdoptSeedArgs),
+    /// Return the Firestore file's free pages to the disk. The emulator must
+    /// be stopped; nothing in the data changes.
+    Compact(CompactArgs),
+    /// Show what the Firestore file holds, table by table, and how much of
+    /// it is free. The emulator must be stopped.
+    Inspect(StateDirArgs),
+}
+
+#[derive(Debug, PartialEq, Eq, Args)]
+struct CompactArgs {
+    /// The saved data, as given to `--state-dir`.
+    #[arg(long = "state-dir")]
+    state_dir: PathBuf,
+    /// Compact without copying the file first. An interrupted compaction
+    /// then leaves the next start a repair that reads the whole file.
+    #[arg(long = "no-copy")]
+    no_copy: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, Args)]
+struct StateDirArgs {
+    /// The saved data, as given to `--state-dir`.
+    #[arg(long = "state-dir")]
+    state_dir: PathBuf,
 }
 
 #[derive(Debug, PartialEq, Eq, Args)]
@@ -491,7 +515,11 @@ fn main() -> ExitCode {
 }
 
 fn run_state_command(arguments: &StateArgs) -> ExitCode {
-    let StateAction::AdoptSeed(adopt) = &arguments.action;
+    let adopt = match &arguments.action {
+        StateAction::AdoptSeed(adopt) => adopt,
+        StateAction::Compact(compact) => return run_state_compact(compact),
+        StateAction::Inspect(inspect) => return run_state_inspect(&inspect.state_dir),
+    };
     match firenook_suite_runtime::adopt_seed(&adopt.state_dir, &adopt.import) {
         Ok(adopted) => {
             println!(
@@ -506,6 +534,117 @@ fn run_state_command(arguments: &StateArgs) -> ExitCode {
             println!(
                 "The saved data is as it was; the previous receipt is at {}.",
                 adopted.backup.display()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// "8.60 GB", "312 MB", "4 KB": sizes as a file manager shows them.
+fn size(bytes: u64) -> String {
+    #[allow(clippy::cast_precision_loss)]
+    let value = bytes as f64;
+    match bytes {
+        0..1_000 => format!("{bytes} B"),
+        1_000..1_000_000 => format!("{:.0} KB", value / 1e3),
+        1_000_000..1_000_000_000 => format!("{:.0} MB", value / 1e6),
+        _ => format!("{:.2} GB", value / 1e9),
+    }
+}
+
+/// "2,703,819".
+fn grouped(count: u64) -> String {
+    let digits = count.to_string();
+    let mut grouped = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    grouped
+}
+
+/// The store's own tables, in the order `state inspect` lists them, with
+/// their names for people; anything else follows under its own name.
+const LABELS: [(&str, &str); 7] = [
+    ("documents_v2", "Documents"),
+    ("field_equality_v1", "Field index"),
+    ("field_equality_v1_prefixes", "Field index names"),
+    ("collections_v2", "Collection index"),
+    ("collection_groups_v2", "Collection-group index"),
+    ("metadata_v1", "Store metadata"),
+    ("documents_v1", "Old documents table"),
+];
+
+fn run_state_inspect(state_dir: &std::path::Path) -> ExitCode {
+    eprintln!("Reading every page of the Firestore file once (minutes for tens of gigabytes)…");
+    let (file, store) = match firenook_suite_runtime::inspect_state(state_dir) {
+        Ok(inspected) => inspected,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    println!("{}: {}", file.display(), size(store.file_bytes));
+    if store.repaired {
+        println!("Its last stop did not close it, so it was repaired first, as a start would.");
+    }
+    println!();
+    let rank = |name: &str| LABELS.iter().position(|(table, _)| *table == name);
+    let mut tables: Vec<_> = store.tables.iter().collect();
+    tables.sort_by_key(|table| rank(&table.name).unwrap_or(LABELS.len()));
+    for table in tables {
+        let label = rank(&table.name).map_or(table.name.as_str(), |index| LABELS[index].1);
+        println!(
+            "  {label:<24} {:>12}   {} of keys and values in {} of pages",
+            grouped(table.entries),
+            size(table.stored_bytes),
+            size(table.page_bytes())
+        );
+    }
+    println!(
+        "  {:<24} {:>12}   {}",
+        "Free pages, redb's own",
+        "",
+        size(store.outside_tables())
+    );
+    println!();
+    println!(
+        "firenook state:compact --state-dir {} returns the free pages to the disk.",
+        state_dir.display()
+    );
+    ExitCode::SUCCESS
+}
+
+fn run_state_compact(arguments: &CompactArgs) -> ExitCode {
+    eprintln!(
+        "Compacting the Firestore file{} (minutes for tens of gigabytes)…",
+        if arguments.no_copy {
+            ""
+        } else {
+            ", after copying it"
+        }
+    );
+    let began = std::time::Instant::now();
+    match firenook_suite_runtime::compact_state(&arguments.state_dir, !arguments.no_copy) {
+        Ok(compacted) => {
+            let compaction = compacted.compaction;
+            println!(
+                "{}: {} → {} ({} back to the disk) in {} s. Every document is as it was.",
+                compacted.file.display(),
+                size(compaction.before_bytes),
+                size(compaction.after_bytes),
+                size(
+                    compaction
+                        .before_bytes
+                        .saturating_sub(compaction.after_bytes)
+                ),
+                began.elapsed().as_secs()
             );
             ExitCode::SUCCESS
         }

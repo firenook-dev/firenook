@@ -32,8 +32,9 @@ interactive release-owner operations.
 - Release builds run on GitHub-hosted runners with pinned tools/actions, clean
   builds, no secrets for PRs and no publishing on pushes/PRs. Release publishing
   needs all quality checks, exact version/tag identity and an approved GitHub
-  environment. Publish platform packages before the CLI and verify all exact
-  registry versions before moving the stable dist-tag.
+  environment. Publish platform packages before the CLI, verify every exact
+  native registry version before the CLI is uploaded, and all six before a
+  dist-tag is moved by hand.
 - A separately reviewed recovery receipt may reuse the exact artifacts from a
   failed publication whose seven quality and five platform gates already passed.
   Preserve the original tag/build, pin artifact IDs and both content hashes,
@@ -45,9 +46,15 @@ interactive release-owner operations.
   was reserved once with an engine-less `0.0.0` version; every real version is
   published by the workflow with provenance.
 - Prereleases are published to `next`. Until the first stable release the
-  release owner moves `latest` to the newest verified prerelease by hand
-  (`npx firenook` must resolve to a real engine); afterwards `latest` is for a
-  separately reviewed stable release.
+  release owner moves `latest` to the newest verified prerelease
+  (`npx firenook` must resolve to a real engine): by hand, or by dispatching
+  the release with `latest`, which publishes the CLI with `--tag latest`
+  after the native packages are verified on `next`. That choice is shown to
+  the approver before approval, and a resume must repeat the one its receipt
+  records. npm sets one tag per publish and OIDC cannot move tags, so the
+  CLI's `next` then stays on the previous release until moved by hand; the
+  release notes say so. Afterwards `latest` is for a separately reviewed
+  stable release.
   GitHub release notes carry compatibility, dependency, performance limitations,
   artifact checksums and reviewed generic compatibility evidence. Private
   application acceptance links and raw receipts are not release assets.

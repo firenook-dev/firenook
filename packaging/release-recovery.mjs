@@ -20,6 +20,15 @@ export function recoveryReceipt() {
   return receipt;
 }
 
+// The receipt records the original run's channel, copied from its authorize
+// summary: `latest: true` for a run dispatched with latest, absent or false for
+// next. A resume dispatched with the other choice is refused, before approval.
+export function validateRecoveryChannel(receipt, latest) {
+  assert.ok([undefined, true, false].includes(receipt.latest), 'Receipt latest must be a boolean');
+  const recorded = receipt.latest === true;
+  assert.equal(latest, recorded, `The receipt records the CLI on ${recorded ? 'latest' : 'next'}; dispatch the resume with latest: ${recorded}`);
+}
+
 export function validateRecoverySource(receipt, {run, jobs, artifacts}) {
   assert.equal(run.id, receipt.sourceRun);
   assert.equal(run.run_attempt, receipt.sourceAttempt, 'Original run was rerun; re-audit before recovery');

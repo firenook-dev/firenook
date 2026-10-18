@@ -14,6 +14,11 @@ on:
         required: false
         default: false
         type: boolean
+      latest:
+        description: 'Publish the CLI to latest instead of next (native packages stay on next; the CLI''s next stays on the previous release)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -43,6 +48,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_RESUME: ${{ inputs.resume }}
+          RELEASE_LATEST: ${{ inputs.latest }}
           GH_TOKEN: ${{ github.token }}
         run: |
           node --test packaging/*.test.mjs
@@ -87,6 +93,7 @@ jobs:
       - name: Publish verified platform packages, then CLI, through OIDC
         env:
           RELEASE_RESUME: ${{ inputs.resume }}
+          RELEASE_LATEST: ${{ inputs.latest }}
         run: node packaging/publish-packages.mjs dist --publish
 
   release-notes:

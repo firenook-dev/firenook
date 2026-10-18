@@ -382,6 +382,15 @@ test('help and version do not need installed binaries; deploy is not intercepted
   assert.equal(run('deploy').status,1);
   assert.equal(run('functions:shell').status,1);
 });
+test('state:inspect and state:compact need the saved data before any binary is touched', () => {
+  const cli = fileURLToPath(new URL('../packages/cli/bin/firenook.mjs',import.meta.url));
+  const run = (...args) => spawnSync(process.execPath,[cli,...args],{encoding:'utf8'});
+  const help = run('--help').stdout;
+  for (const text of ['state:inspect --state-dir DIR','state:compact --state-dir DIR [--no-copy]']) assert.ok(help.includes(text), text);
+  for (const action of ['state:inspect','state:compact']) assert.match(run(action).stderr,new RegExp(`${action} needs --state-dir`));
+  assert.match(run('state:inspect','--state-dir','x','--no-copy').stderr,/--no-copy is not an option of firenook state:inspect/);
+  assert.match(run('state:compact','extra','--state-dir','x').stderr,/Unexpected argument extra/);
+});
 test('emulators:exec argument forms are decided before any binary is touched', () => {
   const cli = fileURLToPath(new URL('../packages/cli/bin/firenook.mjs',import.meta.url));
   const {dir} = project();

@@ -76,10 +76,12 @@ mod shutdown_io;
 pub mod terminal;
 pub use control::{listen_for_shutdown, wait_for_shutdown};
 pub use launch::{LaunchContext, LaunchReason};
-pub use native_state::{AdoptedSeed, adopt_seed};
+pub use native_state::{AdoptedSeed, CompactedState, adopt_seed, compact_state, inspect_state};
 
 use console_wiring::{FunctionsConsoleOptions, HookContext};
 
+#[cfg(test)]
+mod close_tests;
 #[cfg(test)]
 mod console_rules_tests;
 #[cfg(test)]
@@ -1414,6 +1416,45 @@ impl ShutdownSuite {
     }
 }
 
+impl PreparedSuite {
+    /// The data services and trigger delivery; every other part, with the
+    /// handles to the data it holds, is dropped here.
+    fn into_data(
+        self,
+    ) -> (
+        Store,
+        Option<Arc<AuthRuntime>>,
+        Option<Arc<StorageRuntime>>,
+        DeliveryRuntime,
+    ) {
+        (self.store, self.auth, self.storage, self.delivery)
+    }
+}
+
+/// How long a stop waits for the data's other handles, held by work that
+/// is ending its own stop, to be dropped.
+const CLOSE_WAIT: Duration = Duration::from_secs(5);
+
+/// Closes Firestore's store on the blocking pool; see [`Store::close`].
+async fn close_store(store: Store) -> Result<(), String> {
+    match tokio::task::spawn_blocking(move || store.close(CLOSE_WAIT)).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(format!("Firestore did not close: {error}")),
+        Err(error) => Err(format!("Firestore close task failed: {error}")),
+    }
+}
+
+/// Stops Storage and closes its metadata; see [`StorageRuntime::close`].
+async fn close_storage(storage: Arc<StorageRuntime>) -> Result<(), String> {
+    match Arc::try_unwrap(storage) {
+        Ok(storage) => storage
+            .close()
+            .await
+            .map_err(|error| format!("Storage shutdown failed: {error}")),
+        Err(_) => Err("Storage runtime still has active owners".to_owned()),
+    }
+}
+
 /// Why a start-up step ended early when a stop was asked for.
 const STOPPED: &str = "stopped while starting";
 
@@ -1443,16 +1484,23 @@ async fn stopped_before_ready(prepared: Option<PreparedSuite>) -> SuiteOutcome {
         delivery: DeliveryOutcome::default(),
     };
     if let Some(prepared) = prepared {
-        if let Err(error) = prepared.store.flush() {
-            eprintln!("firenook: Firestore flush failed while stopping: {error}");
-        }
-        outcome.firestore_documents = prepared.store.document_total();
-        outcome.auth_users = prepared.auth.as_ref().map_or(0, |auth| auth.user_count());
-        if let Some(storage) = &prepared.storage {
+        let (store, auth, storage, delivery) = prepared.into_data();
+        outcome.firestore_documents = store.document_total();
+        outcome.auth_users = auth.as_ref().map_or(0, |auth| auth.user_count());
+        if let Some(storage) = &storage {
             outcome.storage_objects = storage.object_count();
             outcome.storage_bytes = storage.object_bytes();
         }
-        outcome.delivery = prepared.delivery.shutdown().await.into();
+        outcome.delivery = delivery.shutdown().await.into();
+        drop(auth);
+        if let Some(storage) = storage
+            && let Err(error) = close_storage(storage).await
+        {
+            eprintln!("firenook: {error}");
+        }
+        if let Err(error) = close_store(store).await {
+            eprintln!("firenook: {error}");
+        }
     }
     outcome
 }
@@ -1521,11 +1569,6 @@ async fn finish_suite(
     drop(suite.hub);
     suite.exporter.abort();
     let _ = suite.exporter.await;
-    // Every acknowledged commit is durable before this process reports a
-    // clean shutdown; the working state is resumed without a journal replay.
-    if let Err(error) = suite.store.flush() {
-        failures.push(format!("Firestore flush failed: {error}"));
-    }
     let auth_users = suite.auth.as_ref().map_or(0, |auth| auth.user_count());
     let firestore_documents = suite.store.snapshot().logical_memory_usage().entries;
     let storage_objects = suite
@@ -1536,15 +1579,25 @@ async fn finish_suite(
         .storage
         .as_ref()
         .map_or(0, |storage| storage.object_bytes());
-    if let Some(storage) = suite.storage {
-        match Arc::try_unwrap(storage) {
-            Ok(storage) => {
-                if let Err(error) = storage.shutdown().await {
-                    failures.push(format!("Storage shutdown failed: {error}"));
-                }
-            }
-            Err(_) => failures.push("Storage runtime still has active owners".to_owned()),
-        }
+    // The parts that may still hold a handle to the data go first, so the
+    // data can close below.
+    drop(suite.compute);
+    drop(suite.pubsub);
+    drop(suite.jobs);
+    drop(suite.triggers);
+    drop(suite.logging);
+    drop(suite.auth);
+    // Every acknowledged commit is durable before this process reports a
+    // clean shutdown, and the files are closed: the working state resumes
+    // with neither a journal replay nor a repair. Storage first: its rules
+    // hold a handle to Firestore.
+    if let Some(storage) = suite.storage
+        && let Err(error) = close_storage(storage).await
+    {
+        failures.push(error);
+    }
+    if let Err(error) = close_store(suite.store).await {
+        failures.push(error);
     }
     if !failures.is_empty() {
         return Err(failure(failures.join("; ")));

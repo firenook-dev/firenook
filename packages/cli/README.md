@@ -407,6 +407,22 @@ The previous receipt is kept beside the new one. Data saved by 0.2.0-next.4 or
 earlier is checked in full once, then recorded; it stays readable by those
 versions.
 
+The documents' count is saved with the data, so a start reads it instead of
+counting every document; data an earlier release wrote since is counted once.
+Saved data's Firestore file grows with use and never shrinks by itself:
+deleted and rewritten documents leave free pages behind. With the emulator
+stopped, `state:inspect` shows what the file holds, table by table, and how
+much of it is free, and `state:compact` returns the free pages to the disk.
+Every document stays as it is. The file is copied first (a copy-on-write
+clone where the file system has one), and the copy is removed once the
+compaction succeeds; `--no-copy` skips it. The console Overview shows the
+file's size on disk.
+
+```sh
+firenook state:inspect --state-dir ./local-state
+firenook state:compact --state-dir ./local-state
+```
+
 Writes are acknowledged as soon as they are journaled and are synced to the
 drive once a second and on shutdown (write-behind durability). Killing the
 emulator loses nothing; only a kernel crash or power cut can lose the last

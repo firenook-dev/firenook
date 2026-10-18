@@ -146,11 +146,13 @@ function engine(play) {
     spawned.push({binary, args});
     const send = event => child.stdout.write(`${EVENT_PREFIX}${JSON.stringify(event)}\n`);
     (async () => {
-      const code = await play({send, say: line => child.stderr.write(`${line}\n`), stopping});
-      child.exitCode = code;
+      // A number is an exit code; {signal} ends the engine by that signal.
+      const ended = await play({send, say: line => child.stderr.write(`${line}\n`), stopping});
+      const [code, signal] = typeof ended === 'object' ? [null, ended.signal] : [ended, null];
+      Object.assign(child, {exitCode: code, signalCode: signal});
       child.stdout.end();
       child.stderr.end();
-      setTimeout(() => child.emit('close', code, null), 5);
+      setTimeout(() => child.emit('close', code, signal), 5);
     })();
     return child;
   };
@@ -306,6 +308,26 @@ test('data an earlier engine saved, whose seed cannot be proven, points to adopt
   const shown = text();
   // Joined the platform's way: backslashes on Windows.
   for (const expected of ['kept one fingerprint for the whole seed', `${join('/tmp/firenook-terminal-seed', '.DS_Store')} (Finder writes this file)`, 'firenook state:adopt-seed']) shows(shown, expected);
+});
+
+test('a stop the engine never finished is no stop: the card says so and what the next start does', async () => {
+  const {out, text} = screen(150);
+  const input = keyboard();
+  const {spawner} = engine(async ({send, stopping}) => {
+    send({type: 'step', id: 'firestore', state: 'done', ms: 12, figures: [[3, 'documents']]});
+    send({type: 'ready', ms: 20, console: 'http://127.0.0.1:4000/console', ports: {firestore: 8080}, functions: 0, warnings: []});
+    await stopping;
+    send({type: 'stopping'});
+    // Killed while saving: no stopped event.
+    return {signal: 'SIGKILL'};
+  });
+  const running = runInteractive(launch(['--resume-state']), {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input, env, platform: 'darwin', spawner});
+  for (let i = 0; i < 100 && !text().includes('All emulators ready'); i += 1) await tick(20);
+  input.emit('data', Buffer.from('q'));
+  assert.equal(await running, 1);
+  const shown = text();
+  for (const expected of ['Firenook did not finish stopping', 'signal SIGKILL', 'the next start checks /tmp/firenook-terminal-state first, and repairs it if it needs to']) shows(shown, expected);
+  assert.ok(!flat(shown).includes('everything is kept'), 'a killed engine is never reported as stopped');
 });
 
 test('a stop before the emulators are ready closes the data cleanly and says so', async () => {

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { authenticationFailure, verifyPublishingAuth, verifyMissingPublishingAuth } from './publishing-auth.mjs';
 
 const env = { GITHUB_ACTIONS: 'true', ACTIONS_ID_TOKEN_REQUEST_URL: 'synthetic-url', ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'synthetic-identity' };
-const records = [['@firenook/cli-darwin-arm64', 'darwin-arm64'], ['firenook', 'cli']].map(([name, file]) => ({ name, path: `/synthetic/${file}.tgz` }));
+const records = [['@firenook/cli-darwin-arm64', 'darwin-arm64'], ['firenook', 'cli']].map(([name, file]) => ({ name, path: `/synthetic/${file}.tgz`, tag: 'next' }));
 const success = { status: 0, stdout: '', stderr: 'npm verbose oidc Successfully retrieved and set token\n' };
 function executor(reply, calls = []) {
   return (command, args, options) => {
@@ -25,6 +25,13 @@ test('each package authenticates without uploading, running scripts or logging c
     assert.equal(options.stdio, undefined);
     assert.equal(options.timeout, 120_000);
   }
+});
+
+test('each dry-run carries its upload\'s own tag, and an untagged record stops first', () => {
+  const calls = [];
+  verifyPublishingAuth([records[0], { ...records[1], tag: 'latest' }], { env, run: executor(success, calls), report: () => {} });
+  assert.deepEqual(calls.slice(1).map(({ args }) => args[args.indexOf('--tag') + 1]), ['next', 'latest']);
+  assert.throws(() => verifyPublishingAuth([{ ...records[0], tag: undefined }], { env, run: executor(success) }), /No publish tag/);
 });
 
 test('successful unauthenticated dry-run and failed or timed-out clients stop before publishing', () => {

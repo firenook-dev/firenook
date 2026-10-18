@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { probeRegistry, waitForRegistry, publishVerifiedRelease, TransientRegistryRead } from './registry-readiness.mjs';
 
-const native = {name:'@firenook/cli-linux-x64',version:'0.1.0-next.0',integrity:'sha512-tested'};
+const native = {name:'@firenook/cli-linux-x64',version:'0.1.0-next.0',integrity:'sha512-tested',tag:'next'};
 const cli = {...native,name:'firenook'};
 const version = record => ({name:record.name,version:record.version,dist:{integrity:record.integrity}});
 const index = record => ({versions:{[record.version]:version(record)},'dist-tags':{next:record.version}});
@@ -94,4 +94,33 @@ test('automatic prerelease latest requires owner review, not another upload', as
     probe:async record=>version(record),publish:async()=>assert.fail('already accepted'),
     wait:async records=>new Map(records.map(r=>[r.name,{...index(r),'dist-tags':{next:r.version,latest:r.version}}])),
   }),/Release owner must review/);
+});
+
+test('a CLI published to latest is verified on latest; its next is not expected to move', async () => {
+  const latest={...cli,tag:'latest'};
+  const body={versions:{[cli.version]:version(cli)},'dist-tags':{latest:cli.version,next:'0.0.9-next.9'}};
+  assert.deepEqual(await probeRegistry(latest,'index',response(200,body)),body);
+  await assert.rejects(probeRegistry(latest,'index',response(200,index(cli))),/Unexpected latest tag for firenook/);
+  await assert.rejects(probeRegistry(cli,'index',response(200,body)),/Unexpected next tag for firenook/);
+  await assert.rejects(probeRegistry({...native,tag:undefined},'index',response(200,index(native))),/No publish tag/);
+});
+
+test('a prerelease CLI on latest by request passes; an automatic latest elsewhere still stops', async () => {
+  const latest={...cli,tag:'latest'};
+  const tags=record=>({[record.tag]:record.version});
+  const indexes=await publishVerifiedRelease([native,latest],{
+    probe:async record=>version(record),publish:async()=>assert.fail('already accepted'),
+    wait:async records=>new Map(records.map(r=>[r.name,{...index(r),'dist-tags':tags(r)}])),
+  });
+  assert.equal(indexes.get('firenook')['dist-tags'].latest,cli.version);
+  await assert.rejects(publishVerifiedRelease([native,latest],{
+    probe:async record=>version(record),publish:async()=>assert.fail('already accepted'),
+    wait:async records=>new Map(records.map(r=>[r.name,{...index(r),'dist-tags':{...tags(r),latest:r.version}}])),
+  }),/automatic latest tags: @firenook\/cli-linux-x64\./);
+});
+
+test('a native package is never published to latest', async () => {
+  await assert.rejects(publishVerifiedRelease([{...native,tag:'latest'},cli],{
+    probe:async()=>assert.fail('must stop before any read'),publish:async()=>assert.fail('must stop before any upload'),
+  }),/next only/);
 });

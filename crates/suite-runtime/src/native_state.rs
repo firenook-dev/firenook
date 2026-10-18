@@ -552,6 +552,94 @@ fn write_receipt(root: &Path, receipt: &Receipt) -> Result<(), SuiteRuntimeError
 }
 
 /// A seed that changed: both ways on, as the developer would type them.
+/// Saved data's Firestore store, locked against a running emulator for as
+/// long as the returned lock lives.
+fn stopped_store(state_dir: &Path) -> Result<(File, PathBuf), SuiteRuntimeError> {
+    let root = fs::canonicalize(state_dir)
+        .map_err(|error| failure(format!("no saved data at {}: {error}", state_dir.display())))?;
+    let lock = lock(&root).map_err(|_| {
+        failure(format!(
+            "{} is in use: stop the emulator first",
+            root.display()
+        ))
+    })?;
+    let firestore = root.join("firestore");
+    if !firestore.join(STORE_FILE).is_file() {
+        return Err(failure(format!("no Firestore data in {}", root.display())));
+    }
+    Ok((lock, firestore))
+}
+
+/// The Firestore store's file in its directory.
+const STORE_FILE: &str = "firenook.redb";
+
+/// What saved data's Firestore file holds; see
+/// [`firenook_core_store::maintenance::inspect`].
+pub fn inspect_state(
+    state_dir: &Path,
+) -> Result<(PathBuf, firenook_core_store::maintenance::StoreSize), SuiteRuntimeError> {
+    let (_lock, firestore) = stopped_store(state_dir)?;
+    firenook_core_store::maintenance::inspect(&firestore)
+        .map(|size| (firestore.join(STORE_FILE), size))
+        .map_err(|error| failure(format!("could not read the Firestore store: {error}")))
+}
+
+/// What `firenook state:compact` did.
+#[derive(Debug)]
+pub struct CompactedState {
+    pub file: PathBuf,
+    pub compaction: firenook_core_store::maintenance::Compaction,
+}
+
+/// Compacts saved data's Firestore file. With `copy_first`, the file is
+/// copied beside itself first (a copy-on-write clone where the file system
+/// has one) and the copy removed once the compaction succeeds; an
+/// interrupted compaction otherwise leaves the next start a repair that
+/// reads the whole file.
+pub fn compact_state(
+    state_dir: &Path,
+    copy_first: bool,
+) -> Result<CompactedState, SuiteRuntimeError> {
+    let (_lock, firestore) = stopped_store(state_dir)?;
+    let file = firestore.join(STORE_FILE);
+    let copy = if copy_first {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        let copy = firestore.join(format!("{STORE_FILE}.before-compact-{stamp}"));
+        if let Err(error) = fs::copy(&file, &copy) {
+            let _ = fs::remove_file(&copy);
+            return Err(failure(format!(
+                "could not copy the store before compacting it ({error}); nothing was changed. Free some disk, or pass --no-copy to compact without a copy"
+            )));
+        }
+        Some(copy)
+    } else {
+        None
+    };
+    let options = firenook_core_store::DiskOptions {
+        field_indexes: firenook_core_store::field_indexes_from_env(),
+        ..firenook_core_store::DiskOptions::default()
+    };
+    match firenook_core_store::maintenance::compact(&firestore, options) {
+        Ok(compaction) => {
+            if let Some(copy) = &copy {
+                let _ = fs::remove_file(copy);
+            }
+            Ok(CompactedState { file, compaction })
+        }
+        Err(error) => Err(failure(match copy {
+            Some(copy) => format!(
+                "the compaction failed: {error}. The copy taken first is {}; the store itself is repaired at the next start",
+                copy.display()
+            ),
+            None => {
+                format!("the compaction failed: {error}. The store is repaired at the next start")
+            }
+        })),
+    }
+}
+
 fn refused_seed(reason: &str, state: &Path, seed: &Path) -> SuiteRuntimeError {
     failure(format!(
         "native state refused: {reason}; existing data preserved. Import the changed seed with a NEW --state-dir, or keep this data with the seed as it is now: firenook state:adopt-seed --state-dir {} --import {}",
