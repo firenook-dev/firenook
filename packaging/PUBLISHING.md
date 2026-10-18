@@ -81,10 +81,14 @@ macOS notarization and more platforms remain separate supported-platform work.
 3. Dispatch **Reviewed npm release** (`release-npm.yml`) on main with that tag.
    It must point exactly to that main commit. The workflow runs full quality
    gates and all five fresh native builds/packed npm and Bun install smokes.
+   Leave `latest` off to publish every package to `next`; turn it on only to
+   publish the CLI straight to `latest` (see below).
 4. Approve the `npm-release` environment only after reviewing the exact artifacts
-   and checks. GitHub-hosted Ubuntu publishes using `id-token: write`, with no
+   and checks, and the channel line in the authorize job's summary.
+   GitHub-hosted Ubuntu publishes using `id-token: write`, with no
    npm token. npm generates provenance for this public repo/public package.
-5. Platform packages publish before the CLI, all initially on `next`. Each
+5. Platform packages publish before the CLI, always on `next`; the CLI follows
+   on `next`, or on `latest` for a run dispatched with `latest`. Each
    missing package's connection must first pass an authentication-only dry-run using the pinned
    npm 12.0.2 client. A zero exit code is insufficient: its explicit OIDC token
    exchange success is required before any upload. Previously acknowledged or
@@ -104,17 +108,52 @@ macOS notarization and more platforms remain separate supported-platform work.
    not imply either metadata endpoint is already visible. There is no separate
    shorter per-upload readback deadline. Only reads are retried; mismatching integrity fails
    immediately. A timeout preserves the partial publication for investigation.
-   Unexpected automatic `latest` on a prerelease stops for owner review.
+   Each index must carry the tag its package was published with. Unexpected
+   automatic `latest` on a prerelease stops for owner review; a CLI published
+   to `latest` on request holds it on purpose.
 6. After successful npm publication, a **draft** GitHub release gets the exact
-   tarballs/manifests/test receipts. Review and publish those notes. The
-   workflow publishes to `next` only. Until the first stable release, `latest`
-   follows the newest verified prerelease so that `npx firenook` resolves to a
-   real engine rather than the `0.0.0` reservation: after registry
-   verification the release owner runs `npm dist-tag add <package>@VERSION
-   latest` interactively for the CLI and the five platform packages. From the
-   first stable release on, `latest` moves only for a separately reviewed
-   stable version. npm OIDC does not authenticate dist-tag management; never
-   add a long-lived token merely to automate that last step.
+   tarballs/manifests/test receipts. Review and publish those notes. Without
+   `latest`, the workflow publishes to `next` only. Until the first stable
+   release, `latest` follows the newest verified prerelease so that
+   `npx firenook` resolves to a real engine rather than the `0.0.0`
+   reservation: either dispatch with `latest`, which moves the CLI only, or
+   after registry verification the release owner runs `npm dist-tag add
+   <package>@VERSION latest` interactively for the CLI and the five platform
+   packages. From the first stable release on, `latest` moves only for a
+   separately reviewed stable version. npm OIDC does not authenticate dist-tag
+   management; never add a long-lived token merely to automate that step.
+
+## Publishing the CLI straight to `latest`
+
+The dispatch input `latest` (a checkbox, off by default) is the only way the
+workflow touches `latest`. It is chosen at dispatch and shown before approval:
+the authorize job's summary, on the run's page, reads either "This run
+publishes the CLI to `latest`" or "This run publishes the CLI to `next`
+(default)", and the publish step prints the same line after the plan, one line
+per package and its `--tag`. `node packaging/publish-packages.mjs ROOT --check`
+prints that plan for a downloaded artifact set; set `RELEASE_LATEST=true` to
+see the run with `latest`.
+
+With it on, the five native packages still go to `next` and are verified
+against the release assets as before. Only then is the CLI published, with
+`--tag latest` in its one OIDC upload, and its index must show `latest` on
+this version. `npm i firenook` and `npx firenook` get the release
+with no 2FA step and still no stored token. The native packages are never put
+on `latest`: the CLI pins their exact versions, so their own `latest` stays
+where it was. A prerelease takes `--tag latest` too: npm 12 refuses a
+prerelease publish only without an explicit tag, and the authentication
+dry-run uses each upload's own tag, so the client's tag rules are checked
+before anything is written.
+
+**What happens to `next`.** npm sets one tag per publish and OIDC cannot move
+tags, so a release published to `latest` leaves the CLI's `next` on the
+previous release. `npm i firenook@next` then installs an older version than
+`firenook@latest`, and the CLI's update notice, which follows `next` on a
+preview install, does not offer this release to installs of earlier
+previews. `next` stays there until the release owner moves it by hand
+(`npm dist-tag add firenook@VERSION next`, interactively with 2FA); the
+workflow never does, and has no token to do it with. Say so in the release
+notes of every release published this way.
 
 ## Recovering a partially published version without rebuilding
 
@@ -129,11 +168,15 @@ Recovery requires independently reviewed receipts for the actual failed run.
    investigation; do not blindly rerun a publishing job or dispatch again.
 2. Review/merge a version-specific `packaging/recoveries/npm-vVERSION.json`
    receipt: source run/attempt/commit, immutable artifact IDs/digests, all six
-   tarball SHA-256/SHA-512 identities and every previously accepted package.
+   tarball SHA-256/SHA-512 identities and every previously accepted package,
+   and the original run's channel: `"latest": true` when it was dispatched
+   with `latest` (its authorize summary says which), left out otherwise.
    If recovery itself fails, audit its logs and update the accepted-package
    receipt before any further attempt. Never regenerate the tarballs.
 3. Dispatch **the same** `release-npm.yml` on main with the **original unchanged
-   tag** and `resume: true`. The source must be a completed failed main release
+   tag**, `resume: true` and the `latest` choice the receipt records; a resume
+   dispatched with the other choice stops in the authorize job, before
+   approval, and again in the publish step. The source must be a completed failed main release
    with all seven quality checks, five platform cells and the verifier passing.
    An active/rerun source, changed/expired artifact, failed gate, changed tag,
    or changed CLI/engine source blocks recovery. There is no arbitrary run-ID

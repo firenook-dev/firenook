@@ -39,8 +39,11 @@ export function verifyPublishingAuth(records, { env = process.env, run = spawnSy
     'Authentication contract requires the reviewed npm 12.0.2 client');
   for (const record of records) {
     assert.match(record.name, /^(?:firenook|@firenook\/cli-(?:darwin-arm64|darwin-x64|linux-arm64|linux-x64|win32-x64))$/);
+    // The upload's own tag, so npm's tag rules (a prerelease needs an explicit
+    // one) are checked here too, before any package is written.
+    assert.ok(['next', 'latest'].includes(record.tag), `No publish tag for ${record.name}`);
     const result = run('npm', ['publish', record.path, '--dry-run', '--provenance',
-      '--access', 'public', '--tag', 'next', '--ignore-scripts', '--loglevel', 'verbose', '--logs-max', '0'],
+      '--access', 'public', '--tag', record.tag, '--ignore-scripts', '--loglevel', 'verbose', '--logs-max', '0'],
     { encoding: 'utf8', env, maxBuffer: 4 * 1024 * 1024, timeout: 120_000 });
     // A successful dry-run alone is insufficient: npm permits unauthenticated
     // dry-runs. Check the exact pinned-client OIDC success record as well.

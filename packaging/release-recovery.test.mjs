@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { recoveryReceipt, validateRecoverySource, validateRecoveryPackages } from './release-recovery.mjs';
+import { recoveryReceipt, validateRecoveryChannel, validateRecoverySource, validateRecoveryPackages } from './release-recovery.mjs';
 
 import { syntheticRecoveryFixture } from './synthetic-recovery-fixture.mjs';
 const {fixture, receipt} = syntheticRecoveryFixture();
@@ -39,6 +39,28 @@ test('recovery requires all six original tarball checksums and integrities', () 
     const altered=structuredClone(records); altered[0][key]='changed';
     assert.throws(()=>validateRecoveryPackages(receipt,altered));
   }
+});
+
+test('a resume keeps the channel its receipt records and refuses the other choice', () => {
+  // A receipt without the field, like every one written before the option, records next.
+  const reviewed=JSON.parse(readFileSync(new URL('./recoveries/npm-v0.1.0-next.2.json',import.meta.url)));
+  for (const old of [receipt, reviewed]) {
+    validateRecoveryChannel(old,false);
+    assert.throws(()=>validateRecoveryChannel(old,true),/records the CLI on next; dispatch the resume with latest: false/);
+  }
+  validateRecoveryChannel({...receipt,latest:false},false);
+  validateRecoveryChannel({...receipt,latest:true},true);
+  assert.throws(()=>validateRecoveryChannel({...receipt,latest:true},false),/records the CLI on latest; dispatch the resume with latest: true/);
+  for (const latest of ['true',1,null]) assert.throws(()=>validateRecoveryChannel({...receipt,latest},true),/must be a boolean/);
+});
+
+test('both the authorize job and the publisher apply the channel rule to a resume', () => {
+  const check=readFileSync(new URL('./check-release.mjs',import.meta.url),'utf8');
+  assert.ok(check.indexOf('validateRecoveryChannel(receipt, latest)')>check.indexOf('const receipt = recoveryReceipt()'));
+  assert.ok(check.indexOf('validateRecoveryChannel(receipt, latest)')<check.indexOf('authorizeRecovery(receipt, tagged)'));
+  const publisher=readFileSync(new URL('./publish-packages.mjs',import.meta.url),'utf8');
+  assert.ok(publisher.indexOf('validateRecoveryChannel(recovery, latest)')>0);
+  assert.ok(publisher.indexOf('validateRecoveryChannel(recovery, latest)')<publisher.indexOf('await verifyMissingPublishingAuth(ordered,'));
 });
 
 test('only an existing version-specific receipt enables recovery', () => {
