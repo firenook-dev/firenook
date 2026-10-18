@@ -13,6 +13,7 @@ use std::fmt::{self, Display, Formatter};
 use std::io::Read as _;
 use std::path::{Path as FilePath, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, RawQuery, State};
@@ -120,6 +121,8 @@ pub use write::TokenOp;
 pub use zip_stream::{EXPORT_BYTES, EXPORT_OBJECTS, ExportSource, ExportTicketInfo, TICKET_LIFE};
 #[cfg(test)]
 mod changes_tests;
+#[cfg(test)]
+mod close_tests;
 #[cfg(test)]
 mod console_read_tests;
 #[cfg(test)]
@@ -426,6 +429,18 @@ impl StorageRuntime {
         }
         self.flush().await
     }
+
+    /// [`StorageRuntime::shutdown`], then closes the metadata database, so
+    /// the next open needs no repair: redb clears its repair mark only when
+    /// the last handle is dropped. Other handles may still be ending their
+    /// own stop; this waits up to [`CLOSE_WAIT`] for them.
+    pub async fn close(self) -> Result<(), StorageError> {
+        let metadata = Arc::clone(&self.state.metadata);
+        self.shutdown().await?;
+        tokio::task::spawn_blocking(move || close_metadata(metadata))
+            .await
+            .map_err(|error| StorageError(format!("Storage close task failed: {error}")))?
+    }
 }
 
 impl Drop for StorageRuntime {
@@ -434,6 +449,35 @@ impl Drop for StorageRuntime {
     /// service's state, its metadata database included, alive).
     fn drop(&mut self) {
         self.state.tasks.signal_stop();
+    }
+}
+
+/// How long a shutdown waits for the metadata's other handles, held by
+/// work that is ending its own stop, to be dropped.
+const CLOSE_WAIT: Duration = Duration::from_secs(5);
+
+/// Drops the last handle to the metadata database, which is what closes
+/// redb's file and clears its repair mark. Still held after
+/// [`CLOSE_WAIT`], it stays open: durable, and repaired at the next open.
+fn close_metadata(mut metadata: Arc<metadata::MetadataStore>) -> Result<(), StorageError> {
+    let deadline = std::time::Instant::now() + CLOSE_WAIT;
+    loop {
+        match Arc::try_unwrap(metadata) {
+            Ok(store) => {
+                drop(store);
+                return Ok(());
+            }
+            Err(shared) if std::time::Instant::now() >= deadline => {
+                return Err(StorageError(format!(
+                    "Storage metadata is still held by {} other handle(s); its data is saved, and the next start repairs the file",
+                    Arc::strong_count(&shared) - 1
+                )));
+            }
+            Err(shared) => {
+                metadata = shared;
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
     }
 }
 
