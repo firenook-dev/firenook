@@ -1256,19 +1256,24 @@ the size; repack and packing better while running come after it.
 
 ## Releases (planned)
 
-- [ ] **Publish straight to `latest` when the release owner asks.** Every
-  package is published to `next`, and moving `latest` is a separate
-  `npm dist-tag add` per package with the owner's 2FA in an interactive
-  terminal; a passkey cannot answer from a non-interactive shell. The
-  workflow cannot do it for them: npm's trusted publishing (OIDC) covers
-  `npm publish` only, and the workflow keeps no stored token on purpose.
-  Plan: a dispatch input, off by default and shown in the protected
-  environment's approval, so promotion stays a reviewed decision, made at
-  dispatch. With it on, the five native packages go to `next` and are
-  verified against the release assets as now, then the CLI is published with
-  `--tag latest`: `npm i firenook` gets the release with no 2FA step and
-  still no stored token. The native packages need no `latest`, since the CLI
-  pins their exact versions. Decide first what `next` means afterwards: the
-  CLI's `next` would stay on the previous release until moved by hand, so
-  either the release notes say so or `next` is retired while every release
-  is a preview. Test with a dry run of the publish script for both settings.
+- [x] **Publish straight to `latest` when the release owner asks.** Moving
+  `latest` was a separate `npm dist-tag add` per package with the owner's 2FA
+  in an interactive terminal, since npm's trusted publishing (OIDC) covers
+  `npm publish` only and the workflow keeps no stored token. Built for
+  0.2.0-next.6: the dispatch input `latest` of `release-npm.yml`, off by
+  default. The authorize job's summary tells the `npm-release` approver which
+  channel the CLI goes to, and the publish step prints it with the plan, one
+  `--tag` per package. With it on, the five native packages go to `next` and
+  are verified against the release assets as before, then the CLI is
+  published with `--tag latest` (a prerelease too: the tag is explicit) and
+  its index must show `latest`. With it off, every npm command and registry
+  check is as before. One pure function picks the tag
+  (`packaging/release-channel.mjs`); the authentication dry-run uses it too.
+  A resume must repeat the choice its recovery receipt records
+  (`"latest": true`, left out for `next`), or the authorize job stops before
+  approval. Decided about `next`: npm sets one tag per publish and OIDC cannot
+  move tags, so a release published to `latest` leaves the CLI's `next` on the
+  previous release until it is moved by hand; `packaging/PUBLISHING.md` says
+  so, and the release notes of such a release must say so too. Tested with a
+  dry run of the publish script for both settings on a constructed artifact
+  set (`packaging/release-channel.test.mjs`).
