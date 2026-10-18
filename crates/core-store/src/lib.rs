@@ -993,6 +993,16 @@ impl Store {
         })
     }
 
+    /// The disk backend's file size; `None` in memory. See
+    /// [`DiskStore::file_bytes`].
+    #[must_use]
+    pub fn file_bytes(&self) -> Option<u64> {
+        match &self.backend {
+            StoreBackend::Memory(_) => None,
+            StoreBackend::Disk(store) => store.file_bytes(),
+        }
+    }
+
     /// Whether operations can perform blocking durable I/O. This inspects only
     /// the backend tag, without acquiring a snapshot or a store mutex.
     #[must_use]

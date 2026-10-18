@@ -67,11 +67,11 @@ async fn the_summary_counts_documents_and_databases_without_walking_on_the_calle
     store.commit(&[create("orders", "o/1")]).expect("committed");
     assert_eq!(figures(&console), (Some(4), Some(3)));
     assert_eq!(
-        firestore_summary(1, Some(1)).headline,
+        firestore_summary(1, Some(1), None).headline,
         "1 document · 1 database"
     );
     assert_eq!(
-        firestore_summary(211_260, None).headline,
+        firestore_summary(211_260, None, None).headline,
         "211,260 documents"
     );
 }
@@ -478,5 +478,33 @@ async fn the_console_never_keeps_the_store_open() {
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+/// Beside the documents' count, the store file's size: how much of it is
+/// theirs, and when it is worth a `state:compact`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_store_on_disk_shows_its_file_size() {
+    let on_disk = |summary: &SectionSummary| {
+        summary
+            .figures
+            .iter()
+            .find(|figure| figure.label == "On disk")
+            .and_then(|figure| figure.value)
+    };
+    let memory = Store::default();
+    assert_eq!(on_disk(&summary(&firestore_console(&memory))), None);
+    let directory =
+        std::env::temp_dir().join(format!("firenook-console-on-disk-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    let store =
+        Store::open_disk(&directory, firenook_core_store::DiskOptions::default()).expect("store");
+    let console = firestore_console(&store);
+    let bytes = std::fs::metadata(directory.join("firenook.redb"))
+        .expect("file")
+        .len();
+    assert_eq!(on_disk(&summary(&console)), Some(bytes));
+    drop(console);
+    drop(store);
     let _ = std::fs::remove_dir_all(&directory);
 }

@@ -162,6 +162,8 @@ pub fn field_indexes_from_env() -> bool {
 pub struct DiskStore {
     inner: Arc<Mutex<DiskState>>,
     write_buffers: Arc<WriteBufferAccounting>,
+    /// The redb file, for its size.
+    file: Arc<Path>,
 }
 
 /// A [`DiskStore`] handle that does not keep the database open.
@@ -169,6 +171,7 @@ pub struct DiskStore {
 pub struct WeakDiskStore {
     inner: Weak<Mutex<DiskState>>,
     write_buffers: Arc<WriteBufferAccounting>,
+    file: Arc<Path>,
 }
 
 impl WeakDiskStore {
@@ -178,6 +181,7 @@ impl WeakDiskStore {
         Some(DiskStore {
             inner: self.inner.upgrade()?,
             write_buffers: Arc::clone(&self.write_buffers),
+            file: Arc::clone(&self.file),
         })
     }
 }
@@ -312,7 +316,15 @@ impl DiskStore {
         Ok(Self {
             inner,
             write_buffers,
+            file: Arc::from(database_path.as_path()),
         })
+    }
+
+    /// The redb file's size on disk: the documents, their indexes, part-filled
+    /// pages and free ones.
+    #[must_use]
+    pub fn file_bytes(&self) -> Option<u64> {
+        fs::metadata(&self.file).ok().map(|metadata| metadata.len())
     }
 
     /// Makes every acknowledged commit durable now. A no-op under per-commit
@@ -328,6 +340,7 @@ impl DiskStore {
         WeakDiskStore {
             inner: Arc::downgrade(&self.inner),
             write_buffers: Arc::clone(&self.write_buffers),
+            file: Arc::clone(&self.file),
         }
     }
 

@@ -387,12 +387,17 @@ pub(crate) fn summary(firestore: &FirestoreConsole) -> SectionSummary {
         entries
     };
     let databases = seeded.then(|| counting.databases.load(Ordering::Acquire));
-    firestore_summary(documents, databases)
+    firestore_summary(documents, databases, firestore.changes.store().file_bytes())
 }
 
-/// The Firestore summary from its two figures; `databases` is `None` while
-/// the seed is not in.
-pub(crate) fn firestore_summary(documents: u64, databases: Option<u64>) -> SectionSummary {
+/// The Firestore summary from its figures; `databases` is `None` while the
+/// seed is not in, and `on_disk` (the store file's size, beside which the
+/// documents' count shows how much of it is theirs) for a store in memory.
+pub(crate) fn firestore_summary(
+    documents: u64,
+    databases: Option<u64>,
+    on_disk: Option<u64>,
+) -> SectionSummary {
     let count = |count: u64, one: &str, many: &str| {
         format!(
             "{} {}",
@@ -421,7 +426,14 @@ pub(crate) fn firestore_summary(documents: u64, databases: Option<u64>) -> Secti
                 value: databases,
                 unit: SummaryUnit::Count,
             },
-        ],
+        ]
+        .into_iter()
+        .chain(on_disk.map(|bytes| SummaryFigure {
+            label: "On disk".to_owned(),
+            value: Some(bytes),
+            unit: SummaryUnit::Bytes,
+        }))
+        .collect(),
     }
 }
 
