@@ -14,7 +14,7 @@ use std::fmt::{self, Debug, Display, Formatter};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bincode::{Decode, Encode};
 use im::{OrdMap, OrdSet};
@@ -26,7 +26,8 @@ mod lazy;
 
 pub use disk::{
     DEFAULT_REDB_CACHE_SIZE_BYTES, DEFAULT_WRITE_BEHIND_INTERVAL, DiskBulkCommit, DiskDurability,
-    DiskError, DiskOptions, DiskStore, OpenWatch, adopt_legacy_files, field_indexes_from_env,
+    DiskError, DiskOptions, DiskStore, OpenWatch, WeakDiskStore, adopt_legacy_files,
+    field_indexes_from_env,
 };
 pub use lazy::{EncodedDocument, LazyDocument};
 use lazy::{decode_stored_document, encode_stored_document, stored_scalar_fields};
@@ -912,12 +913,48 @@ pub struct Store {
     backend: StoreBackend,
     memory_accounting: RuntimeMemoryAccounting,
     commit_observers: Arc<Mutex<Vec<Arc<dyn CommitObserver>>>>,
+    /// Set by [`Store::close`]; long reads check it and end early.
+    closing: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Clone)]
 enum StoreBackend {
     Memory(Arc<Mutex<State>>),
     Disk(DiskStore),
+}
+
+/// A [`Store`] handle that does not keep the store open. Whatever the store
+/// itself holds, a commit observer above all, keeps this rather than a
+/// [`Store`]: the pair would otherwise keep each other, and the file, open.
+#[derive(Clone)]
+pub struct WeakStore {
+    backend: WeakBackend,
+    memory_accounting: RuntimeMemoryAccounting,
+    commit_observers: std::sync::Weak<Mutex<Vec<Arc<dyn CommitObserver>>>>,
+    closing: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[derive(Clone)]
+enum WeakBackend {
+    Memory(std::sync::Weak<Mutex<State>>),
+    Disk(WeakDiskStore),
+}
+
+impl WeakStore {
+    /// The store, while some [`Store`] handle still holds it open.
+    #[must_use]
+    pub fn upgrade(&self) -> Option<Store> {
+        let backend = match &self.backend {
+            WeakBackend::Memory(inner) => StoreBackend::Memory(inner.upgrade()?),
+            WeakBackend::Disk(store) => StoreBackend::Disk(store.upgrade()?),
+        };
+        Some(Store {
+            backend,
+            memory_accounting: self.memory_accounting.clone(),
+            commit_observers: self.commit_observers.upgrade()?,
+            closing: Arc::clone(&self.closing),
+        })
+    }
 }
 
 impl Store {
@@ -928,6 +965,7 @@ impl Store {
             backend: StoreBackend::Memory(Arc::new(Mutex::new(State::new(options)))),
             memory_accounting: RuntimeMemoryAccounting::default(),
             commit_observers: Arc::new(Mutex::new(Vec::new())),
+            closing: Arc::default(),
         }
     }
 
@@ -947,6 +985,7 @@ impl Store {
             backend: StoreBackend::Disk(store),
             memory_accounting: RuntimeMemoryAccounting::default(),
             commit_observers: Arc::new(Mutex::new(Vec::new())),
+            closing: Arc::default(),
         })
     }
 
@@ -963,6 +1002,41 @@ impl Store {
         match &self.backend {
             StoreBackend::Memory(_) => Ok(()),
             StoreBackend::Disk(store) => store.flush().map_err(commit_error),
+        }
+    }
+
+    /// A handle that does not keep this store open; see [`WeakStore`].
+    #[must_use]
+    pub fn downgrade(&self) -> WeakStore {
+        WeakStore {
+            backend: match &self.backend {
+                StoreBackend::Memory(inner) => WeakBackend::Memory(Arc::downgrade(inner)),
+                StoreBackend::Disk(store) => WeakBackend::Disk(store.downgrade()),
+            },
+            memory_accounting: self.memory_accounting.clone(),
+            commit_observers: Arc::downgrade(&self.commit_observers),
+            closing: Arc::clone(&self.closing),
+        }
+    }
+
+    /// Whether [`Store::close`] has begun. A read that walks a whole
+    /// database checks it now and then and ends early: the close waits for
+    /// every other handle, and such a walk can run for minutes.
+    #[must_use]
+    pub fn is_closing(&self) -> bool {
+        self.closing.load(AtomicOrdering::Relaxed)
+    }
+
+    /// Makes every acknowledged commit durable and closes the store's file;
+    /// see [`DiskStore::close`]. The commit observers are released first:
+    /// one holding a handle to this store would otherwise keep it open for
+    /// good. A no-op for the in-memory backend.
+    pub fn close(self, wait: Duration) -> Result<(), DiskError> {
+        self.closing.store(true, AtomicOrdering::Relaxed);
+        lock(&self.commit_observers).clear();
+        match self.backend {
+            StoreBackend::Memory(_) => Ok(()),
+            StoreBackend::Disk(store) => store.close(wait),
         }
     }
 

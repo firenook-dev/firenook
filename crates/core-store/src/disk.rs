@@ -156,6 +156,24 @@ pub struct DiskStore {
     write_buffers: Arc<WriteBufferAccounting>,
 }
 
+/// A [`DiskStore`] handle that does not keep the database open.
+#[derive(Clone)]
+pub struct WeakDiskStore {
+    inner: Weak<Mutex<DiskState>>,
+    write_buffers: Arc<WriteBufferAccounting>,
+}
+
+impl WeakDiskStore {
+    /// The store, while some [`DiskStore`] handle still holds it open.
+    #[must_use]
+    pub fn upgrade(&self) -> Option<DiskStore> {
+        Some(DiskStore {
+            inner: self.inner.upgrade()?,
+            write_buffers: Arc::clone(&self.write_buffers),
+        })
+    }
+}
+
 /// Renames a store written under the project's former name to the current
 /// file names, once, so that persisted state survives the rename. Nothing
 /// happens when the current files already exist or no legacy store is present.
@@ -291,6 +309,48 @@ impl DiskStore {
     pub fn flush(&self) -> Result<(), DiskError> {
         let mut state = self.state();
         flush_state(&mut state, &self.write_buffers)
+    }
+
+    /// A handle that does not keep the store open; see [`WeakDiskStore`].
+    #[must_use]
+    pub fn downgrade(&self) -> WeakDiskStore {
+        WeakDiskStore {
+            inner: Arc::downgrade(&self.inner),
+            write_buffers: Arc::clone(&self.write_buffers),
+        }
+    }
+
+    /// Makes every acknowledged commit durable and closes the file, so the
+    /// next open needs no repair: redb clears its repair mark only when the
+    /// database is dropped. Other handles may still be finishing their own
+    /// stop; this waits up to `wait` for them to be dropped. A store still
+    /// held then stays open, durable, and repaired at the next open.
+    pub fn close(self, wait: Duration) -> Result<(), DiskError> {
+        self.flush()?;
+        let deadline = std::time::Instant::now() + wait;
+        let mut inner = self.inner;
+        loop {
+            match Arc::try_unwrap(inner) {
+                Ok(state) => {
+                    let mut state = state
+                        .into_inner()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    // A handle dropped meanwhile may have committed again.
+                    flush_state(&mut state, &self.write_buffers)?;
+                    drop(state);
+                    return Ok(());
+                }
+                Err(shared) if std::time::Instant::now() >= deadline => {
+                    return Err(DiskError::StillOpen {
+                        handles: Arc::strong_count(&shared) - 1,
+                    });
+                }
+                Err(shared) => {
+                    inner = shared;
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
     }
 
     /// Whether acknowledged commits are still waiting for a durable flush.
@@ -2410,6 +2470,12 @@ pub enum DiskError {
     /// The open was asked to stop ([`OpenWatch::stopped`]) and did, leaving
     /// the store as it was.
     Stopped,
+    /// [`DiskStore::close`] found the store still held by other handles; its
+    /// data is durable and the next open repairs the file.
+    StillOpen {
+        /// Handles other than the one closing.
+        handles: usize,
+    },
 }
 
 impl DiskError {
@@ -2436,6 +2502,10 @@ impl Display for DiskError {
                 "persistence outcome is ambiguous; reopen the store to recover before writing",
             ),
             Self::Stopped => formatter.write_str("stopped while the store was opening"),
+            Self::StillOpen { handles } => write!(
+                formatter,
+                "the store is still held by {handles} other handle(s); its data is saved, and the next start repairs the file"
+            ),
         }
     }
 }
@@ -2450,7 +2520,8 @@ impl Error for DiskError {
             | Self::Corrupt(_)
             | Self::RecordTooLarge { .. }
             | Self::RequiresRestart
-            | Self::Stopped => None,
+            | Self::Stopped
+            | Self::StillOpen { .. } => None,
         }
     }
 }
@@ -2551,6 +2622,72 @@ mod tests {
         // A clean close saves what the next open needs.
         drop(open_watching(&directory, &watch).unwrap());
         assert_eq!(repairs(&watch), Vec::<f64>::new());
+    }
+
+    /// Whether redb opens the file read-only, which it refuses while the
+    /// file is still marked for repair.
+    fn opens_without_repair(directory: &TestDirectory) -> bool {
+        redb::Builder::new()
+            .open_read_only(directory.path().join(DATABASE_FILE))
+            .is_ok()
+    }
+
+    #[test]
+    fn a_close_leaves_no_repair_for_the_next_open() {
+        let directory = TestDirectory::new();
+        let store = written_and_flushed(&directory);
+        store
+            .commit(&[Write::Create {
+                key: key("items/unflushed"),
+                fields: fields(Value::Integer(9)),
+            }])
+            .unwrap();
+        assert!(!opens_without_repair(&directory));
+        store.close(Duration::ZERO).unwrap();
+        assert!(opens_without_repair(&directory));
+        let reopened = DiskStore::open(directory.path(), DiskOptions::default()).unwrap();
+        assert!(reopened.snapshot().get(&key("items/unflushed")).is_some());
+    }
+
+    #[test]
+    fn a_close_waits_for_handles_ending_their_own_stop() {
+        let directory = TestDirectory::new();
+        let store = written_and_flushed(&directory);
+        let other = store.clone();
+        let ending = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            drop(other);
+        });
+        store.close(Duration::from_secs(5)).unwrap();
+        ending.join().unwrap();
+        assert!(opens_without_repair(&directory));
+    }
+
+    #[test]
+    fn a_close_reports_a_handle_still_held() {
+        let directory = TestDirectory::new();
+        let store = written_and_flushed(&directory);
+        let held = store.clone();
+        assert!(matches!(
+            store.close(Duration::from_millis(20)),
+            Err(DiskError::StillOpen { handles: 1 })
+        ));
+        // Still durable: the held handle keeps the file open until it goes.
+        drop(held);
+        assert!(opens_without_repair(&directory));
+    }
+
+    #[test]
+    fn a_store_close_releases_observers_that_hold_the_store() {
+        struct Holding(#[allow(dead_code)] crate::Store);
+        impl crate::CommitObserver for Holding {
+            fn committed(&self, _observation: &crate::CommitObservation) {}
+        }
+        let directory = TestDirectory::new();
+        let store = crate::Store::open_disk(directory.path(), DiskOptions::default()).unwrap();
+        store.add_commit_observer(Arc::new(Holding(store.clone())));
+        store.close(Duration::from_millis(20)).unwrap();
+        assert!(opens_without_repair(&directory));
     }
 
     #[test]
