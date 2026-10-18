@@ -25,7 +25,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
-use firenook_core_store::{CommitObservation, DatabaseName, Precondition, Revision, Store, Write};
+use firenook_core_store::{
+    CommitObservation, DatabaseName, Precondition, Revision, Store, WeakStore, Write,
+};
 use futures_util::FutureExt as _;
 use futures_util::future::BoxFuture;
 use futures_util::stream::{self, BoxStream, StreamExt as _};
@@ -72,7 +74,9 @@ impl Default for FirestoreData {
 
 /// The databases of one project, counted as commits land.
 struct Counting {
-    store: Store,
+    /// Weak: the commit observer holds this, and a [`Store`] here would keep
+    /// the store open for good.
+    store: WeakStore,
     project: Arc<str>,
     /// Listed whether or not they hold a document: `(default)` and the
     /// databases firebase.json declares.
@@ -176,7 +180,10 @@ impl Counting {
         if candidates.is_empty() {
             return false;
         }
-        let snapshot = self.store.snapshot();
+        let Some(store) = self.store.upgrade() else {
+            return false;
+        };
+        let snapshot = store.snapshot();
         let empty: Vec<String> = candidates
             .into_iter()
             .filter(|database| {
@@ -263,7 +270,7 @@ impl FirestoreData {
                 console.databases.declared().iter().cloned().collect();
             fixed.insert(DEFAULT_DATABASE.to_owned());
             Counting {
-                store: console.changes.store().clone(),
+                store: console.changes.store().downgrade(),
                 project: Arc::from(console.schema.project()),
                 databases: AtomicU64::new(u64::try_from(fixed.len()).unwrap_or(u64::MAX)),
                 fixed,
@@ -290,6 +297,9 @@ impl FirestoreData {
         let project = counting.project.clone();
         let data = self.clone();
         let seed = move || {
+            let Some(store) = store.upgrade() else {
+                return;
+            };
             let snapshot = store.snapshot();
             let databases = snapshot.databases(&project);
             let mut own: u64 = 0;
@@ -297,6 +307,10 @@ impl FirestoreData {
                 let mut keys = snapshot.key_cursor(database, "");
                 while keys.next().is_some() {
                     own += 1;
+                    // A close waits for this walk; it ends here instead.
+                    if own.is_multiple_of(4096) && store.is_closing() {
+                        return;
+                    }
                 }
             }
             let foreign = snapshot.logical_memory_usage().entries.saturating_sub(own);
@@ -360,7 +374,12 @@ pub(crate) fn summary(firestore: &FirestoreConsole) -> SectionSummary {
     let data = firestore.changes.data();
     let counting = data.counting(firestore);
     data.schedule_check(counting);
-    let entries = counting.store.snapshot().logical_memory_usage().entries;
+    let entries = firestore
+        .changes
+        .store()
+        .snapshot()
+        .logical_memory_usage()
+        .entries;
     let seeded = counting.seeded.load(Ordering::Acquire);
     let documents = if seeded {
         entries.saturating_sub(counting.foreign_documents.load(Ordering::Acquire))

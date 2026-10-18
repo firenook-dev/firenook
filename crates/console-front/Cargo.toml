@@ -36,6 +36,7 @@ ts-rs.workspace = true
 zip.workspace = true
 
 [dev-dependencies]
+redb.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
 [lints]

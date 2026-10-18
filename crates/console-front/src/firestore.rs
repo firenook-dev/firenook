@@ -162,6 +162,15 @@ pub struct ChangeFeed {
     recording: Arc<AtomicBool>,
 }
 
+/// What the store calls on each commit: the feed without its handle to the
+/// store, which would keep the store, and its file, open for good.
+#[derive(Clone)]
+struct ChangeObserver {
+    data: FirestoreData,
+    recorded: ReplayRing<ChangeMeta>,
+    recording: Arc<AtomicBool>,
+}
+
 /// One recorded commit: the keys it touched, which the store already holds,
 /// so recording costs no copy of a path.
 #[derive(Clone, Debug)]
@@ -238,8 +247,16 @@ impl ChangeFeed {
             ),
             recording: Arc::new(AtomicBool::new(false)),
         };
-        store.add_commit_observer(Arc::new(feed.clone()));
+        store.add_commit_observer(Arc::new(feed.observer()));
         feed
+    }
+
+    fn observer(&self) -> ChangeObserver {
+        ChangeObserver {
+            data: self.data.clone(),
+            recorded: self.recorded.clone(),
+            recording: Arc::clone(&self.recording),
+        }
     }
 
     /// The `firestore.changes` topic over this feed.
@@ -277,7 +294,9 @@ impl ChangeFeed {
             );
         }
     }
+}
 
+impl ChangeObserver {
     /// Records one commit's keys, cheaply: one ring push under a short lock,
     /// never waiting on a subscriber.
     fn record(&self, observation: &CommitObservation) {
@@ -319,7 +338,7 @@ impl ChangeFeed {
     }
 }
 
-impl CommitObserver for ChangeFeed {
+impl CommitObserver for ChangeObserver {
     fn committed(&self, observation: &CommitObservation) {
         self.data.committed(observation);
         if observation.origin == CommitOrigin::Maintenance {
@@ -1159,7 +1178,7 @@ mod tests {
             std::mem::take(&mut *capture.0.lock().expect("capture"))
         };
         let observe = |recording: bool| {
-            let feed = ChangeFeed::attach(&Store::default());
+            let feed = ChangeFeed::attach(&Store::default()).observer();
             feed.recording.store(recording, Ordering::Relaxed);
             let began = std::time::Instant::now();
             for observation in &captured {

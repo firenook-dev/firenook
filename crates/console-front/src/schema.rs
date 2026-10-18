@@ -124,6 +124,13 @@ pub struct SchemaIndex {
     databases: Arc<Mutex<HashMap<String, Entry>>>,
 }
 
+/// What the store calls on each commit: the index without its handle to
+/// the store, which would keep the store, and its file, open for good.
+struct SchemaObserver {
+    project: Arc<str>,
+    databases: Arc<Mutex<HashMap<String, Entry>>>,
+}
+
 enum Entry {
     /// A walk is in progress; commits seen meanwhile wait here.
     Building {
@@ -178,6 +185,9 @@ enum Step<T> {
 /// a budget keeps a store that cannot be walked from looping for ever.
 const BUILD_ATTEMPTS: u8 = 2;
 
+/// Documents a walk counts between looks at whether the store is closing.
+const WALK_CHECK: u32 = 4096;
+
 /// Why a schema could not be answered.
 #[derive(Debug)]
 pub enum SchemaError {
@@ -197,7 +207,10 @@ impl SchemaIndex {
             project: Arc::from(project),
             databases: Arc::new(Mutex::new(HashMap::new())),
         };
-        store.add_commit_observer(Arc::new(index.clone()));
+        store.add_commit_observer(Arc::new(SchemaObserver {
+            project: Arc::clone(&index.project),
+            databases: Arc::clone(&index.databases),
+        }));
         index
     }
 
@@ -339,11 +352,11 @@ impl SchemaIndex {
         let database_id = database.database_id().to_owned();
         let walked = tokio::task::spawn_blocking(move || {
             let snapshot = store.snapshot();
-            DatabaseIndex::walk(&snapshot, &database)
+            DatabaseIndex::walk(&snapshot, &database, &|| store.is_closing())
         })
         .await;
         let mut databases = lock(&self.databases);
-        let outcome = if let Ok(mut index) = walked {
+        let outcome = if let Ok(Some(mut index)) = walked {
             // Commits that landed while walking and are newer than the
             // snapshot are not in it yet; older ones already are.
             if let Some(Entry::Building { pending, .. }) = databases.get_mut(&database_id) {
@@ -365,7 +378,7 @@ impl SchemaIndex {
     }
 }
 
-impl CommitObserver for SchemaIndex {
+impl CommitObserver for SchemaObserver {
     fn committed(&self, observation: &CommitObservation) {
         let mut databases = lock(&self.databases);
         if databases.is_empty() {
@@ -396,18 +409,28 @@ impl CommitObserver for SchemaIndex {
 }
 
 impl DatabaseIndex {
-    /// Counts every document of `database` in `snapshot`, keys only.
-    fn walk(snapshot: &Snapshot, database: &DatabaseName) -> Self {
+    /// Counts every document of `database` in `snapshot`, keys only;
+    /// `None` when the store began closing meanwhile.
+    fn walk(
+        snapshot: &Snapshot,
+        database: &DatabaseName,
+        closing: &dyn Fn() -> bool,
+    ) -> Option<Self> {
         let revision = snapshot.revision().get();
         let mut index = Self {
             revision,
             ..Self::default()
         };
         let mut cursor = snapshot.key_cursor(database, "");
+        let mut walked: u32 = 0;
         while let Some(key) = cursor.next() {
             index.apply(key.path(), true, revision);
+            walked = walked.wrapping_add(1);
+            if walked.is_multiple_of(WALK_CHECK) && closing() {
+                return None;
+            }
         }
-        index
+        Some(index)
     }
 
     /// Moves the counts for one document coming (`created`) or going.
