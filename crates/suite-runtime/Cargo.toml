@@ -42,6 +42,7 @@ tonic.workspace = true
 rustix.workspace = true
 
 [dev-dependencies]
+redb.workspace = true
 tower = { version = "0.5.3", features = ["util"] }
 tokio-tungstenite = "0.30.0"
 
