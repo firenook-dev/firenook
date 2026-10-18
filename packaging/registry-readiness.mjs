@@ -26,7 +26,9 @@ export async function probeRegistry(record, kind, fetchImpl = fetch) {
   assert.equal(version.version, record.version, 'Registry version identity mismatch');
   assert.equal(version.dist?.integrity, record.integrity, `Published artifact differs: ${record.name}. Stop; never overwrite a released version.`);
   if (kind === 'index') {
-    assert.equal(body['dist-tags']?.next, record.version, `Unexpected next tag for ${record.name}`);
+    // The tag this record was published with (release-channel.mjs).
+    assert.ok(['next', 'latest'].includes(record.tag), `No publish tag for ${record.name}`);
+    assert.equal(body['dist-tags']?.[record.tag], record.version, `Unexpected ${record.tag} tag for ${record.name}`);
   }
   return body;
 }
@@ -70,6 +72,7 @@ export async function publishVerifiedRelease(records, {
   const cli = records.find(record => record.name === 'firenook');
   assert.ok(cli, 'CLI record required');
   const natives = records.filter(record => record !== cli);
+  assert.ok(natives.every(record => record.tag !== 'latest'), 'Native packages are published to next only');
   for (const name of accepted) assert.ok(records.some(record => record.name === name), `Unknown accepted package: ${name}`);
   async function ensureAccepted(record) {
     // Exact-version metadata can exist while npm hides the package index for
@@ -90,7 +93,8 @@ export async function publishVerifiedRelease(records, {
   const indexes = await wait(natives, 'index', { probe });
   await ensureAccepted(cli);
   for (const [name, body] of await wait([cli], 'index', { probe })) indexes.set(name, body);
-  const automaticLatest = records.filter(record => record.version.includes('-') && indexes.get(record.name)?.['dist-tags']?.latest === record.version);
+  // A CLI published with --tag latest holds latest on purpose.
+  const automaticLatest = records.filter(record => record.tag !== 'latest' && record.version.includes('-') && indexes.get(record.name)?.['dist-tags']?.latest === record.version);
   if (automaticLatest.length) {
     throw new Error(`Verified prerelease artifacts also have automatic latest tags: ${automaticLatest.map(record => record.name).join(', ')}. Release owner must review this unexpected channel state; the registry may reject tag removal. Do not add an automation token, delete a version, or republish.`);
   }

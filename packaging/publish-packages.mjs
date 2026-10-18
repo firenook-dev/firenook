@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { manifest, release, sha256 } from '../packages/cli/src/binary.mjs';
 import { publishVerifiedRelease } from './registry-readiness.mjs';
-import { recoveryReceipt, validateRecoveryPackages } from './release-recovery.mjs';
+import { recoveryReceipt, validateRecoveryChannel, validateRecoveryPackages } from './release-recovery.mjs';
+import { channelNote, publishTag, releaseLatest } from './release-channel.mjs';
 import { auditPublicPackage } from './public-artifacts.mjs';
 import { publicationPolicy as loadPublicationPolicy } from './publication-policy.mjs';
 import { verifyMissingPublishingAuth } from './publishing-auth.mjs';
@@ -15,6 +16,7 @@ if (mode === '--publish') {
   const source = JSON.parse(readFileSync(new URL('./source-publication.json', import.meta.url)));
   if (source.reviewedCleanPublicHistory !== true) throw new Error('Public source/history cutover must be reviewed before publication');
 }
+const latest = releaseLatest();
 const records = new Map();
 const publicationPolicy = loadPublicationPolicy();
 for (const platform of Object.keys(release.platforms)) {
@@ -37,19 +39,26 @@ for (const platform of Object.keys(release.platforms)) {
   }
 }
 if (records.size !== Object.keys(release.platforms).length + 1) throw new Error('Incomplete release artifact set');
-const ordered = [...records.values()].sort((a, b) => Number(a.name === manifest.name) - Number(b.name === manifest.name));
+const ordered = [...records.values()].sort((a, b) => Number(a.name === manifest.name) - Number(b.name === manifest.name))
+  .map(record => ({...record, tag: publishTag(record, {latest})}));
 const recovery = process.env.RELEASE_RESUME === 'true' ? recoveryReceipt() : null;
-if (recovery) validateRecoveryPackages(recovery, ordered);
+if (recovery) { validateRecoveryPackages(recovery, ordered); validateRecoveryChannel(recovery, latest); }
 console.log(JSON.stringify({mode, version:manifest.version, packages:ordered}, null, 2));
+for (const record of ordered) console.log(`${mode === '--publish' ? 'Publish' : 'Plan'}: ${record.name}@${record.version} --tag ${record.tag}`);
+// A --check also runs inside the release's artifact job, which has no choice.
+console.log(mode === '--publish' ? channelNote(manifest.version, {latest})
+  : `Plan for RELEASE_LATEST=${latest}; a release run's own choice is in its authorize summary.`);
 if (mode === '--publish') {
   await verifyMissingPublishingAuth(ordered, { accepted: recovery?.accepted ?? [] });
-  // Native packages first, CLI last. Every package goes to next first, never
-  // latest until all exact registry artifacts have been verified.
+  // Native packages first, CLI last. Natives always go to next; the CLI goes
+  // to next, or to latest when asked, only after every native index verified.
   await publishVerifiedRelease(ordered, {
     accepted: recovery?.accepted ?? [],
-    publish: record => execFileSync('npm', ['publish', record.path, '--provenance', '--access', 'public', '--tag', 'next', '--ignore-scripts'], {stdio:'inherit'}),
+    publish: record => execFileSync('npm', ['publish', record.path, '--provenance', '--access', 'public', '--tag', record.tag, '--ignore-scripts'], {stdio:'inherit'}),
   });
-  if (!manifest.version.includes('-')) {
+  if (latest) {
+    console.log(`All artifacts verified: firenook@${manifest.version} on latest, the native packages on next. The CLI's next stays on the previous release; npm sets one tag per publish and OIDC cannot move tags.`);
+  } else if (!manifest.version.includes('-')) {
     // npm dist-tag is NOT supported by OIDC. Do not fall back to a stored token.
     console.log('All stable artifacts verified on next. Release owner must promote the CLI to latest interactively with 2FA.');
   }
