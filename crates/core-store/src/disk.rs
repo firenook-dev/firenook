@@ -28,7 +28,10 @@ use super::{
 };
 
 mod field_index;
+mod maintenance;
+
 use field_index::{EqualityJoin, PrefixIds, document_entries, entries};
+pub use maintenance::{Compaction, StoreSize, TableSize, compact, inspect};
 
 const LEGACY_DOCUMENTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("documents_v1");
 const DOCUMENTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("documents_v2");
@@ -2842,6 +2845,59 @@ mod tests {
         store.add_commit_observer(Arc::new(Holding(store.clone())));
         store.close(Duration::from_millis(20)).unwrap();
         assert!(opens_without_repair(&directory));
+    }
+
+    #[test]
+    fn an_inspection_reports_each_table_and_a_file_left_open() {
+        let directory = TestDirectory::new();
+        let store = written_and_flushed(&directory);
+        let copy = crashed_copy(&directory);
+        store.close(Duration::ZERO).unwrap();
+        let size = maintenance::inspect(directory.path()).unwrap();
+        assert!(!size.repaired);
+        let documents = size
+            .tables
+            .iter()
+            .find(|table| table.name == "documents_v2")
+            .unwrap();
+        assert_eq!(documents.entries, 1);
+        assert!(documents.stored_bytes > 0 && documents.page_bytes() <= size.file_bytes);
+        assert!(maintenance::inspect(copy.path()).unwrap().repaired);
+    }
+
+    #[test]
+    fn a_compaction_gives_back_freed_pages_and_keeps_every_document() {
+        let directory = TestDirectory::new();
+        let store = DiskStore::open(directory.path(), DiskOptions::default()).unwrap();
+        let filler = Value::String("x".repeat(2_000).into());
+        for batch in 0..20 {
+            let writes: Vec<Write> = (0..100)
+                .map(|index| Write::Create {
+                    key: key(&format!("items/{batch}-{index}")),
+                    fields: fields(filler.clone()),
+                })
+                .collect();
+            store.commit(&writes).unwrap();
+        }
+        for batch in 1..20 {
+            let deletes: Vec<Write> = (0..100)
+                .map(|index| Write::Delete {
+                    key: key(&format!("items/{batch}-{index}")),
+                    precondition: Precondition::None,
+                })
+                .collect();
+            store.commit(&deletes).unwrap();
+        }
+        store.close(Duration::ZERO).unwrap();
+        let compaction = maintenance::compact(directory.path(), DiskOptions::default()).unwrap();
+        assert!(
+            compaction.after_bytes < compaction.before_bytes,
+            "{compaction:?}"
+        );
+        assert!(opens_without_repair(&directory));
+        let reopened = open_without_counting(&directory).unwrap();
+        assert_eq!(reopened.document_total(), 100);
+        assert!(reopened.snapshot().get(&key("items/0-42")).is_some());
     }
 
     #[test]

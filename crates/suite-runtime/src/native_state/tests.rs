@@ -532,3 +532,41 @@ fn adopting_the_seed_keeps_the_data_and_the_previous_receipt() {
     let seed = incomplete.config.import.clone().unwrap();
     assert!(adopt_seed(&incomplete.config.state_dir, &seed).is_err());
 }
+
+#[test]
+fn compaction_and_inspection_wait_for_the_emulator_to_stop() {
+    let case = Case::new();
+    case.imported();
+    // A real store in place of the case's stand-in files.
+    let firestore = case.config.state_dir.join("firestore");
+    fs::remove_dir_all(&firestore).unwrap();
+    firenook_core_store::DiskStore::open(&firestore, firenook_core_store::DiskOptions::default())
+        .unwrap()
+        .close(std::time::Duration::from_secs(5))
+        .unwrap();
+    let running = NativeState::acquire(&case.config).unwrap();
+    for refused in [
+        compact_state(&case.config.state_dir, true).map(|_| ()),
+        inspect_state(&case.config.state_dir).map(|_| ()),
+    ] {
+        let error = refused.unwrap_err().to_string();
+        assert!(error.contains("stop the emulator first"), "{error}");
+    }
+    drop(running);
+    let (_, size) = inspect_state(&case.config.state_dir).unwrap();
+    assert!(size.tables.iter().any(|table| table.name == "documents_v2"));
+    let compacted = compact_state(&case.config.state_dir, true).unwrap();
+    assert!(compacted.compaction.after_bytes <= compacted.compaction.before_bytes);
+    // The copy taken first is gone once the compaction succeeded.
+    let left: Vec<_> = fs::read_dir(&firestore)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .contains("before-compact")
+        })
+        .collect();
+    assert!(left.is_empty());
+}

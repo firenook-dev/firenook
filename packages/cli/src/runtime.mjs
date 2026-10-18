@@ -49,6 +49,23 @@ export function adoptSeed(binary, stateDir, seed) {
   return result.status ?? 1;
 }
 
+// Returns a stopped store's free pages to the disk, copying the file first
+// unless asked not to; the engine prints what it did.
+export function compactState(binary, stateDir, {copy = true} = {}) {
+  const result = spawnSync(binary, ['state', 'compact', '--state-dir', stateDir, ...(copy ? [] : ['--no-copy'])],
+    {env:nativeEnvironment(), stdio:'inherit', windowsHide:true});
+  if (result.error) throw result.error;
+  return result.status ?? 1;
+}
+
+// Prints what a stopped store's file holds, table by table.
+export function inspectState(binary, stateDir) {
+  const result = spawnSync(binary, ['state', 'inspect', '--state-dir', stateDir],
+    {env:nativeEnvironment(), stdio:'inherit', windowsHide:true});
+  if (result.error) throw result.error;
+  return result.status ?? 1;
+}
+
 // Builds the native suite invocation. `mode` is 'start' or 'exec': like the
 // official CLI, exec keeps the console off unless --ui is given or
 // firebase.json enables it explicitly. `typed` is the command's arguments as

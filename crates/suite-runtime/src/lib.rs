@@ -76,7 +76,7 @@ mod shutdown_io;
 pub mod terminal;
 pub use control::{listen_for_shutdown, wait_for_shutdown};
 pub use launch::{LaunchContext, LaunchReason};
-pub use native_state::{AdoptedSeed, adopt_seed};
+pub use native_state::{AdoptedSeed, CompactedState, adopt_seed, compact_state, inspect_state};
 
 use console_wiring::{FunctionsConsoleOptions, HookContext};
 

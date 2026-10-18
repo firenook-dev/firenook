@@ -29,6 +29,10 @@ pub use disk::{
     DiskError, DiskOptions, DiskStore, OpenWatch, WeakDiskStore, adopt_legacy_files,
     field_indexes_from_env,
 };
+/// Work on a stopped store's file.
+pub mod maintenance {
+    pub use crate::disk::{Compaction, StoreSize, TableSize, compact, inspect};
+}
 pub use lazy::{EncodedDocument, LazyDocument};
 use lazy::{decode_stored_document, encode_stored_document, stored_scalar_fields};
 

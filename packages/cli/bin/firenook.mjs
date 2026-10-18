@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { binaryPath, manifest, release } from '../src/binary.mjs';
 import { parseOptions } from '../src/options.mjs';
-import { adoptSeed, diagnose, prepareLaunch, supervise, vendorExtensions } from '../src/runtime.mjs';
+import { adoptSeed, compactState, diagnose, inspectState, prepareLaunch, supervise, vendorExtensions } from '../src/runtime.mjs';
 import { runInteractive } from '../src/session.mjs';
 import { interactive } from '../src/terminal.mjs';
 import { nativeEnvironment, requestNativeStop } from '../src/processes.mjs';
@@ -41,6 +41,10 @@ Emulators
 Saved data (--state-dir with --resume-state)
   firenook state:adopt-seed --state-dir DIR --import DIR  Keep saved data whose seed changed: record the
                                                           seed as it is now (the old receipt is kept)
+  firenook state:inspect --state-dir DIR                  What the stopped Firestore file holds, table by
+                                                          table, and how much of it is free
+  firenook state:compact --state-dir DIR [--no-copy]      Return the stopped file's free pages to the disk
+                                                          (copied first; every document stays as it is)
 
 Advanced
   firenook binary-path                                    Verified packaged native binary location
@@ -76,6 +80,8 @@ const accepted = {
   'functions:invoke':[...common, 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'hub-port'],
   mcp:[...common, 'only', 'hub-port'],
   'state:adopt-seed':[...common, 'state-dir', 'import'],
+  'state:inspect':[...common, 'state-dir'],
+  'state:compact':[...common, 'state-dir', 'no-copy'],
 };
 function checkOptions(action, options) {
   for (const [name, value] of Object.entries(options)) {
@@ -146,6 +152,12 @@ async function main() {
     noPositionals(action, positionals);
     if (!options['state-dir'] || !options.import) throw new Error('state:adopt-seed needs --state-dir (the saved data) and --import (its seed), as given to emulators:start');
     return adoptSeed(binaryPath(), resolve(process.cwd(), options['state-dir']), resolve(process.cwd(), options.import));
+  }
+  if (action === 'state:inspect' || action === 'state:compact') {
+    noPositionals(action, positionals);
+    if (!options['state-dir']) throw new Error(`${action} needs --state-dir (the saved data), as given to emulators:start; stop the emulator first`);
+    const stateDir = resolve(process.cwd(), options['state-dir']);
+    return action === 'state:inspect' ? inspectState(binaryPath(), stateDir) : compactState(binaryPath(), stateDir, {copy:!options['no-copy']});
   }
   const testCommand = action === 'emulators:exec' ? execCommand(action, parsed) : noPositionals(action, positionals);
   // In a terminal, emulators:start draws its own UI; everything else, and
