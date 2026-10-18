@@ -1089,19 +1089,18 @@ stood, which left the store to a full repair at the next start, shown only as
 
 ## Next release: `0.2.0-next.6` (planned)
 
-In this order, each part finished and reviewed before the next starts:
+Built in this order, in one go, with the review on the finished candidate:
 
-1. **Closing the data on stop** (below). First: every start after a stop
-   pays for it now, the saved document count is written on a clean close,
-   and `state:compact` and `state:inspect` open the stopped file, so each
-   would begin with a repair.
-2. **Start-up speed** (below): keep Firestore's document count, and load
-   Functions while the data opens.
+1. **Closing the data on stop** (below): done.
+2. **Start-up speed** (below): the document count is kept, done. Loading
+   Functions while the data opens is left out: with the count kept it would
+   save tens of milliseconds on a resumed start, and on a first import it
+   would fire triggers for imported documents as it stands.
 3. **Store size** (below): `firenook state:compact`, clearing the old
-   documents table, and showing the size. Repack and packing better while
-   running follow in a later release.
-4. **Releases** (below): publish straight to `latest` when the release owner
-   asks, built before the release so next.6 itself can use it.
+   documents table, `state:inspect` and the Overview's size on disk, done.
+   Repack and packing better while running follow in a later release.
+4. **Releases** (below): publishing straight to `latest` when the release
+   owner asks, done, so next.6 itself can use it.
 
 Then one combined candidate, qualified as for earlier releases: CI on the
 exact head, the consumer gates and paired acceptance, and publication only
@@ -1138,18 +1137,35 @@ database. What keeps them alive is not found yet; the work added with the
 console (0.2.0-next.3) and the terminal UI (0.2.0-next.4) is the first place
 to look.
 
-- [ ] **Close both databases when stopping.** Find every owner of the store
-  and of Storage's metadata database that outlives the stop, end it, then
-  drop the databases before the stop summary is printed. A database that
-  cannot be closed is a failed stop, not "stopped cleanly".
-- [ ] **Test it on the file.** After a stop once ready and after a stop while
-  starting, the file opens read-only without a repair, for each service mix
-  the CLI starts. Guards the regression above.
-- [ ] **Say "stopped" only when the engine stopped.** The npm CLI shows
-  "✓ stopped … everything is kept" whenever a stop was requested and the
-  engine then ended, even by a signal (`packages/cli/src/session.mjs`). An
-  engine that was killed is reported as a failure, with what the next start
-  will do.
+- [x] **Close both databases when stopping.** Three things kept them open.
+  The console's change feed and schema index were registered as commit
+  observers while holding the store, and the Overview's counting held it
+  too: the store held its observers, they held the store, and the file
+  stayed open (0.2.0-next.3). Storage holds a Firestore handle for its rules,
+  so it closes first. And the console's whole-database walks (a schema, the
+  Overview's count) run on worker threads that did not watch the stop.
+  Built: `Store::close` makes every commit durable, releases the observers,
+  raises a flag the walks check every 4,096 documents, waits up to 5 s for
+  handles ending their own stop and drops the database;
+  `StorageRuntime::close` does the same for the metadata. The observers now
+  hold only what they record (the counting a `WeakStore`). A stop once ready
+  and a stop while starting drop the parts that hold data handles, close
+  Storage, then Firestore; a database still held is a failed stop. Measured
+  on a copy of the 4.3 GB store with 16 functions: the stop takes 1.4 s and
+  leaves both files closed (0.2.0-next.5: 0.1 s, Firestore left open); with
+  three console pages open, 3 s more is the existing grace for requests in
+  flight.
+- [x] **Test it on the file.** The engine itself, stopped once ready for
+  Firestore, Auth and Storage and for Firestore alone, then both files
+  opened read-only (`crates/cli/tests/stop_closes_data.rs`); a suite stopped
+  while starting, with the console's pieces built; the store and Storage
+  closes, a handle still held, and the console test that fails if any of its
+  pieces keeps the store open.
+- [x] **Say "stopped" only when the engine stopped.** Only an engine that
+  finished its stop (or a stop signal before it listened for one, when
+  nothing was open yet) is "stopped". A kill shows "Firenook did not finish
+  stopping" and that the next start checks the data first and repairs it if
+  it needs to; plain mode says the same in one line.
 
 ## Start-up speed (planned)
 
@@ -1160,7 +1176,20 @@ opening Firestore, Auth and Storage and 7.5 s loading about 20 functions; a
 32.6 GB store of 2.7 million documents spends about 2.5 minutes opening the
 data and 7 s on 21 functions.
 
-- [ ] **Keep Firestore's document count.** Every open decodes every document
+- [x] **Keep Firestore's document count.** Built for 0.2.0-next.6: every
+  commit saves the count and logical bytes beside the revision they
+  describe (`document_usage_v1` in the metadata table); an open reads them
+  when that revision is the store's, counts once otherwise and saves the
+  result, and a journal replay carries them forward write by write. Nothing
+  enforces a limit from them; they size the memory accounting and the
+  figures. Measured on copies, resumed with Firestore, Auth and Storage: the
+  32.6 GB store opened in 146 s with 0.2.0-next.5, 134 s on its first
+  0.2.0-next.6 start (the one count) and 67 ms from then on (ready in
+  0.35 s); the 4.3 GB store with its 16 functions, 1.4 s and 63 ms (ready
+  in 8.6 s and 7.1 s, the rest is Functions). 0.2.0-next.5 opens the data
+  as before, and the saved figures stay valid after it opened them.
+  The plan as written:
+  Every open decodes every document
   to size the memory accounting (entries and logical bytes); on the larger
   store that is the 2.5 minutes. Save the count and size in the store's
   metadata with each durable commit and on a clean close, adjust it during
@@ -1183,7 +1212,15 @@ data and 7 s on 21 functions.
     figure. It would compete with the first requests for the disk.
   - Tests as for the seed record: crash and replay, going back a release,
     repair, and a count that does not match its revision.
-- [ ] **Load Functions while the data opens.** Loading codebases needs Node
+- [ ] **Load Functions while the data opens.** Not in 0.2.0-next.6. With
+  the count kept, opening the data takes tens of milliseconds, so running it
+  beside Functions saves at most that much on a resumed start (measured:
+  0.2 s of 7.1 s). The gain is on a first import, and that is exactly
+  where it is unsafe as it stands: an import commits as client writes, so a
+  function registered while the import runs would fire for every imported
+  document. It needs delivery held until the data is ready, and ports bound
+  first; worth it only if first imports matter enough.
+  The plan as written: Loading codebases needs Node
   and the code, not the data, so it can run beside Firestore, Auth and
   Storage instead of after them. Conditions: bind every port first and hold
   data requests until the data is ready (code that queries Firestore while
@@ -1223,7 +1260,18 @@ statistics; the per-collection ones come from one pass over the documents.
 0.2.0-next.6 takes the compact command, clearing the old table and showing
 the size; repack and packing better while running come after it.
 
-- [ ] **`firenook state:compact`.** With the emulator stopped, redb's
+- [x] **`firenook state:compact`.** Built for 0.2.0-next.6, with
+  `state:inspect` beside it; both refuse while the emulator holds the data.
+  It copies the file first (a clone where the file system has one, removed
+  once the compaction succeeds; `--no-copy` skips it), opens it through the
+  store so a crash's journal replays and the file closes cleanly, then runs
+  redb's compaction until it finds nothing more to move. Measured on a copy
+  of the 32.6 GB store: 16 minutes, 32.60 GB → 27.79 GB, so 4.82 GB of its
+  8.60 GB of free pages back to the disk. The other 3.78 GB stay free inside
+  the file once redb finds nothing more to move (why it stops there is not
+  measured yet), and the tables are page for page as before. The store then opened in 150 ms with all
+  2,703,834 documents. The rest of the space is the repack's. The plan as
+  written: With the emulator stopped, redb's
   `Database::compact` moves pages into free space and truncates the file.
   Lossless: each step is an ordinary commit and every document stays as it
   is. An interrupted compaction leaves the next start a full repair (redb
@@ -1242,14 +1290,23 @@ the size; repack and packing better while running come after it.
   and whether large values belong out of line or compressed (measure the
   ratio on real documents first). Any change to the stored format keeps the
   rule of 0.2.0-next.5: the previous release still opens the data.
-- [ ] **Clear the old documents table after its migration.**
+- [x] **Clear the old documents table after its migration.** Built for
+  0.2.0-next.6: the migration clears `documents_v1` in the same commit as
+  the copy, and an open clears one an earlier engine left behind; tested
+  with a store holding both tables. The plan as written:
   `migrate_legacy_documents` copies `documents_v1` into `documents_v2` and
   the scope indexes but leaves `documents_v1` in place, so a store first
   written before that layout keeps a dead copy of every document. Every
   release since 0.1.0-next.3 reads only `documents_v2`, so clearing it costs
   no supported compatibility; compaction then returns the space. Test with a
   store holding both tables.
-- [ ] **Show the size.** A `state:inspect` that prints the table above for a
+- [x] **Show the size.** Built for 0.2.0-next.6: `firenook state:inspect
+  --state-dir DIR` lists every table (entries, keys and values, pages) and
+  the part of the file in no table, for a stopped store, reading it
+  read-only unless it is marked for repair. The console Overview's
+  Firestore card shows "On disk", the file's size, beside the documents;
+  free pages need a walk of the whole file, so they are in `state:inspect`
+  only. The plan as written: A `state:inspect` that prints the table above for a
   stopped store, and the file size and free pages on the console Overview
   beside the data size, so growth shows before a start slows down.
 

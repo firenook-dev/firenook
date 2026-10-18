@@ -759,17 +759,17 @@ const DATA = {
   backlog: [
   {
     "item": "Closing the data on stop",
-    "why": "Next.6, first: since next.3 a clean stop leaves Firestore's file marked open (and Storage's since next.4), so every start after a stop repairs it; close both, test the file after a stop, and report a killed engine as a failure",
+    "why": "Built for next.6: since next.3 a clean stop left Firestore's file marked open (and Storage's since next.4), so every start after a stop repaired it; both now close, the file is tested after each kind of stop, and a killed engine is reported as a failure",
     "size": "days"
   },
   {
     "item": "Start-up speed",
-    "why": "Next.6: keep Firestore's document count instead of decoding every document at each open (2.5 minutes on a 2.7-million-document store), and load Functions while the data opens (about 7 s); every saved-data start gets faster",
+    "why": "Built for next.6: Firestore's document count is kept instead of decoding every document at each open, so a 2.7-million-document store opens in 67 ms instead of 146 s; loading Functions beside the data is left out (it would now save tens of milliseconds)",
     "size": "days"
   },
   {
     "item": "Store size",
-    "why": "A 32.6 GB store held 7.5 GB of documents. Next.6: a compact command gives back the 8.6 GB of free pages, the old layout's leftover table is cleared, and the size shows before a start slows down; later, a repack gives back the part-filled pages too",
+    "why": "A 32.6 GB store held 7.5 GB of documents. Built for next.6: state:compact gives back the free pages, the old layout's leftover table is cleared, state:inspect and the Overview show the size; later, a repack gives back the part-filled pages too",
     "size": "days"
   },
   {
