@@ -1,3 +1,46 @@
+# 0.2.0-next.6 — data closed on stop, starts in milliseconds, the store's size
+
+- Pin the engine to `767605db4248fed403523a24f6901fcc1e693d13`, the merge of
+  [PR #93](https://github.com/firenook-dev/firenook/pull/93) on
+  0.2.0-next.5. Its tree is the PR head's, `7d14d9b`, which passed CI
+  ([run 39117077846](https://github.com/firenook-dev/firenook/actions/runs/39117077846))
+  and the five-platform packed-install matrix
+  ([run 39117077854](https://github.com/firenook-dev/firenook/actions/runs/39117077854)).
+- **A stop closes the data.** Since 0.2.0-next.3 a stop left Firestore's
+  store file marked open (and Storage's since 0.2.0-next.4), so every start
+  after a stop repaired it first. The console's change feed, schema index
+  and Overview count held the store they observed, Storage held a Firestore
+  handle, and the console's whole-database walks ignored the stop. A stop
+  once ready, or while starting, now closes Storage, then Firestore; one
+  that cannot close a database is reported as a failed stop.
+- **A killed engine is no stop.** The screen said "stopped … everything is
+  kept" whenever a stop was asked for and the engine then ended, even by a
+  kill. Now it says the stop did not finish and that the next start checks
+  the data first; plain mode says the same in one line.
+- **Saved data opens in milliseconds.** The documents' count is saved with
+  every commit instead of decoding every document at each open: a 32.6 GB
+  store of 2.7 million documents opened in 146 s and now in 67 ms, a 4.3 GB
+  one in 1.4 s and now in 63 ms. The first start of data an earlier release
+  wrote counts once and saves the result.
+- **`firenook state:inspect --state-dir DIR`** shows what a stopped store's
+  file holds, table by table, and how much of it is free.
+- **`firenook state:compact --state-dir DIR`** returns a stopped store's
+  free pages to the disk, copying the file first (a clone where the file
+  system has one; `--no-copy` skips it). Every document stays as it is. On
+  the 32.6 GB store: 32.60 GB to 27.79 GB in 16 minutes.
+- **The console Overview's Firestore card shows the store's size on disk.**
+- **The old documents table is cleared** once its documents are copied to
+  the current layout; stores first written before 0.1.0-next.3 carried a
+  dead copy of every document.
+- **Published straight to `latest`.** The release workflow can now publish
+  the CLI to `latest` in its one trusted publish, and this release used it.
+  npm sets one tag per publish, so the CLI's `next` stays on 0.2.0-next.5
+  until it is moved by hand, and a preview install, which follows `next`,
+  is not told about this release until then.
+- Data saved by 0.2.0-next.6 stays readable by 0.2.0-next.5: the count is a
+  new entry the earlier release ignores. No emulator protocol or port
+  changed.
+
 # 0.2.0-next.5 — saved data: a quick seed check, quick repairs, clean stops
 
 - Pin the engine to `18becb031bed1459133a5307790edb0afe19b0ca`, the merge of
