@@ -1085,9 +1085,9 @@ stood, which left the store to a full repair at the next start, shown only as
   second time after the Firebase JS SDK build was caught mid-write; registry
   integrity equal to the release assets for all six packages, provenance
   attestations verified on a fresh install).
-- [ ] Follow-up: see "Next release" below.
+- [x] Follow-up: built and published in 0.2.0-next.6; see "Data closed on stop, the kept count, the store's size" below.
 
-## Next release: `0.2.0-next.6` (planned)
+## Data closed on stop, the kept count, the store's size (`0.2.0-next.6`)
 
 Built in this order, in one go, with the review on the finished candidate:
 
@@ -1106,7 +1106,17 @@ Then one combined candidate, qualified as for earlier releases: CI on the
 exact head, the consumer gates and paired acceptance, and publication only
 with approval.
 
-## Closing the data on stop (planned)
+- [x] Published as `firenook@0.2.0-next.6` with `@firenook/cli-<platform>` ×5
+  on 2026-10-18 (PR #93, release PR #94, tag `npm-v0.2.0-next.6` on 9837199,
+  engine 767605d, release run 39121740242 dispatched with `latest`: the CLI
+  on `latest` with its `next` left on 0.2.0-next.5, the native packages on
+  `next`; registry integrity equal to the release assets for all six
+  packages, provenance attestations verified on a fresh install). A
+  consumer's integration, Extensions admission and installed-package gates
+  passed on the published package, and its two stores were measured on
+  copies; the acceptance-host lanes were not run.
+
+## Closing the data on stop (`0.2.0-next.6`)
 
 Found on 2026-10-18. A stop once the emulators are ready makes every commit
 durable, reports "stopped cleanly", and ends the process without closing
@@ -1167,7 +1177,7 @@ to look.
   stopping" and that the next start checks the data first and repairs it if
   it needs to; plain mode says the same in one line.
 
-## Start-up speed (planned)
+## Start-up speed (`0.2.0-next.6`; loading Functions beside the data left)
 
 After 0.2.0-next.5 a resumed start no longer reads its seed, and what is left
 is the data itself and the order the steps run in. Measured on resumed starts
@@ -1231,7 +1241,7 @@ data and 7 s on 21 functions.
   it (2 ms). Saves the Functions row (about 7 s with 20 functions).
 - [x] **Measure the store's size.** See "Store size" below.
 
-## Store size (planned)
+## Store size (`0.2.0-next.6`; repack and packing better left)
 
 Measured on 2026-10-18 on a copy of the 32.6 GB store above, kept in daily
 development for weeks after importing a seed that a fresh import stores in
@@ -1311,7 +1321,7 @@ the size; repack and packing better while running come after it.
   beside the data size, so growth shows before a start slows down.
 
 
-## Releases (planned)
+## Releases (`0.2.0-next.6`)
 
 - [x] **Publish straight to `latest` when the release owner asks.** Moving
   `latest` was a separate `npm dist-tag add` per package with the owner's 2FA
