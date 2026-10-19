@@ -120,24 +120,82 @@ it does not.
 
 ## Get started
 
+### Already using the Firebase emulator
+
+Firenook is a drop-in replacement: `firebase.json`, `.firebaserc`, your rules,
+your Functions code and your app stay exactly as they are.
+
+**1. Install it** in the project, next to firebase-tools (keep that for
+deploying):
+
 ```sh
-npm install --save-dev --save-exact firenook   # or: bun add --dev --exact firenook
-npx firenook init --adopt --dry-run            # see what Firenook accepts, skips and adds
+npm install --save-dev --save-exact firenook    # or: bun add --dev --exact firenook
+```
+
+**2. Check your project.** This reads `firebase.json` the way the Firebase CLI
+does and changes nothing:
+
+```console
+$ npx firenook init --adopt --dry-run
+  skip    Firenook: firebase.json configures the hosting emulator, which Firenook does not implement; skipping it.
+  ok      nothing to change; services: firestore, auth, storage, functions
+```
+
+It names any service Firenook skips (Realtime Database, Hosting, App Hosting,
+Data Connect) and any addition it would make, such as a missing `emulators`
+entry; `npx firenook init --adopt` applies those additions.
+
+**3. Swap the command.** Same flags, same ports, and the same export format, so
+your existing data imports as it is:
+
+```diff
+ "scripts": {
+-  "emulators": "firebase emulators:start --import ./data --export-on-exit",
+-  "test:integration": "firebase emulators:exec \"npm test\""
++  "emulators": "firenook emulators:start --import ./data --export-on-exit",
++  "test:integration": "firenook emulators:exec \"npm test\""
+ }
+```
+
+Your app connects to the same ports as before, so no code changes:
+`connectFirestoreEmulator(db, '127.0.0.1', 8080)`, `FIRESTORE_EMULATOR_HOST`
+and the rest work unchanged.
+
+**4. Optionally, stop exporting at every stop.** In place of
+`--export-on-exit`, give Firenook a state directory and it keeps your data
+between runs. Every start after the first picks the data up where you left
+it, and `./data` itself stays untouched:
+
+```sh
+npx firenook emulators:start --import ./data --state-dir ./.firenook/state --resume-state
+```
+
+Going back is just as short: stop Firenook (it saves first), export with
+`npx firenook emulators:export ./export`, and start the official CLI on that
+export.
+
+### Starting a new project
+
+```sh
+npm install --save-dev --save-exact firenook
+npx firenook init                       # firebase.json, rules, indexes and a Functions codebase
+cd functions && npm install && cd ..
 npx firenook emulators:start
 ```
 
-Connect your app as you would to the official emulator
-(`connectFirestoreEmulator(db, '127.0.0.1', 8080)`, `FIRESTORE_EMULATOR_HOST`
-and the rest), keep your data between runs with `--state-dir`, and run tests
-with `firenook emulators:exec "npm test"`. The
-[getting started guide](docs/getting-started.md) walks through each step.
+`init` sets up every emulator on its usual port with a `demo-<folder>` project,
+so nothing can reach a real Firebase project. Point your app at it:
 
-**Coming from the official emulator?** Swap `firebase emulators:start` for
-`firenook emulators:start` and keep everything else, including firebase-tools
-for deploying. Bring your data with `--import`. Going back is a stop and an
-export away.
+```js
+connectFirestoreEmulator(db, '127.0.0.1', 8080);
+connectAuthEmulator(auth, 'http://127.0.0.1:9099');
+connectStorageEmulator(storage, '127.0.0.1', 9199);
+connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+```
 
-Firenook needs Node 24 on macOS, Linux (glibc) or Windows x64.
+Firenook needs Node 24 on macOS, Linux (glibc) or Windows x64. The
+[getting started guide](docs/getting-started.md) covers each step in more
+depth, including tests and keeping data.
 
 ## Documentation
 

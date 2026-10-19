@@ -44,6 +44,29 @@ npx firenook emulators:start
 - **A console and a terminal made for it**, and `firenook mcp` for your coding
   agent.
 
+## Switching from the official emulator
+
+Your `firebase.json`, rules, Functions code and app stay as they are; keep
+firebase-tools for deploying.
+
+```console
+$ npx firenook init --adopt --dry-run
+  skip    Firenook: firebase.json configures the hosting emulator, which Firenook does not implement; skipping it.
+  ok      nothing to change; services: firestore, auth, storage, functions
+```
+
+```diff
+-  "emulators": "firebase emulators:start --import ./data --export-on-exit",
++  "emulators": "firenook emulators:start --import ./data --export-on-exit",
+```
+
+Same flags, same ports, the official export format both ways. To keep your
+data between runs without exporting, replace `--export-on-exit` with
+`--state-dir ./.firenook/state --resume-state`; `./data` is then never written.
+Starting fresh instead: `npx firenook init`.
+[Getting started](https://github.com/firenook-dev/firenook/blob/main/docs/getting-started.md)
+covers both.
+
 <p align="center">
   <img alt="The console's Overview: the health of all nine services with their counts and ports, and recent problems" src="https://raw.githubusercontent.com/firenook-dev/firenook/main/docs/assets/console-overview-light.png">
 </p>
