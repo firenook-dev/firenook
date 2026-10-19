@@ -30,11 +30,21 @@
   <img alt="firenook emulators:start: the start-up card, the ready summary and a live log of function calls, including a failed webhook with its stack trace" src="docs/assets/terminal.gif" width="760">
 </p>
 
+**Already using the Firebase emulators?** Install Firenook and change one word:
+
 ```sh
 npm install --save-dev firenook
-npx firenook init --adopt      # an existing Firebase project (or `init` for a new one)
-npx firenook emulators:start
 ```
+
+```diff
+- firebase emulators:start --import ./data
++ firenook emulators:start --import ./data
+```
+
+Same flags, same ports, and your `firebase.json`, rules, Functions code and app
+stay as they are. In a terminal, run it as `npx firenook emulators:start`.
+Starting a new project? `npx firenook init` sets one up.
+[Get started](#get-started) covers both.
 
 ## Why Firenook
 
@@ -69,20 +79,36 @@ invoke functions, publish to Pub/Sub. Nothing leaves your machine.
 
 ## The console
 
-Everything the suite runs, at <http://127.0.0.1:4000/console>: browse and edit
-Firestore and Storage, manage users and read the codes and links Auth would
-have sent, follow every function call with its trigger and logs, and inspect
-Pub/Sub, Cloud Tasks, Eventarc and Extensions. It follows the engine live and
-works offline.
+**The console the Firebase emulators should have had.** Google's Emulator UI
+has no page for your Functions, Pub/Sub, Cloud Tasks or Eventarc, only a log.
+Firenook's console covers every service it runs, live, on the same port, at
+<http://127.0.0.1:4000/console>:
+
+- **Functions:** every call with what triggered it, its outcome, its duration
+  and its logs, and every schedule. The official UI has only the log.
+- **Authentication:** users, their activity, and an inbox of the sign-in codes
+  and email links Auth would have sent, so you never dig through the terminal
+  for them.
+- **Firestore and Storage:** browse, edit and upload, and read their
+  security rules.
+- **Pub/Sub, Cloud Tasks and Eventarc,** which the official UI has no pages
+  for.
+- **An Overview** of every service's health and recent problems, with
+  snapshots and resets a click away.
+
+Light and dark, works offline, sends nothing anywhere. Bookmarks to the
+official UI's pages open the matching console page.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/console-overview-dark.png">
   <img alt="The console's Overview: the health of all nine services with their counts and ports, and recent problems" src="docs/assets/console-overview-light.png">
 </picture>
 
-| Firestore | Function invocations |
+| Function invocations | Authentication |
 | --- | --- |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/console-firestore-dark.png"><img alt="Firestore: collections, a page of orders and one open for editing" src="docs/assets/console-firestore-light.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/console-invocations-dark.png"><img alt="Every function call with its trigger, outcome and duration" src="docs/assets/console-invocations-light.png"></picture> |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/console-invocations-dark.png"><img alt="Every function call with its trigger, outcome and duration" src="docs/assets/console-invocations-light.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/console-auth-dark.png"><img alt="Authentication: users with filters, one open with its profile, security and providers" src="docs/assets/console-auth-light.png"></picture> |
+| **Firestore** | **Storage** |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/console-firestore-dark.png"><img alt="Firestore: collections, a page of orders and one open for editing" src="docs/assets/console-firestore-light.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/console-storage-dark.png"><img alt="Storage: a folder of product photos as a grid of thumbnails" src="docs/assets/console-storage-light.png"></picture> |
 
 More in [the console guide](docs/console.md).
 

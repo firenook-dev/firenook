@@ -17,11 +17,20 @@
   <a href="https://github.com/firenook-dev/firenook">GitHub</a>
 </p>
 
+**Already using the Firebase emulators?** Install Firenook and change one word:
+
 ```sh
-npm install --save-dev --save-exact firenook
-npx firenook init --adopt      # an existing Firebase project (or `init` for a new one)
-npx firenook emulators:start
+npm install --save-dev firenook
 ```
+
+```diff
+- firebase emulators:start --import ./data
++ firenook emulators:start --import ./data
+```
+
+Same flags, same ports, and your `firebase.json`, rules, Functions code and app
+stay as they are. In a terminal, run it as `npx firenook emulators:start`.
+Starting a new project? `npx firenook init` sets one up.
 
 <p align="center">
   <img alt="firenook emulators:start: the start-up card, the ready summary and a live log of function calls" src="https://raw.githubusercontent.com/firenook-dev/firenook/main/docs/assets/terminal.gif" width="760">
@@ -66,6 +75,16 @@ data between runs without exporting, replace `--export-on-exit` with
 Starting fresh instead: `npx firenook init`.
 [Getting started](https://github.com/firenook-dev/firenook/blob/main/docs/getting-started.md)
 covers both.
+
+## The console
+
+**The console the Firebase emulators should have had.** Google's Emulator UI
+has no page for your Functions, Pub/Sub, Cloud Tasks or Eventarc, only a log.
+Firenook's console covers every service it runs, live, on the same port, at
+`http://127.0.0.1:4000/console`. It shows every function call with its
+trigger, duration and logs, and an inbox of the codes and links Auth would
+have sent. It has Firestore and Storage with their rules, Pub/Sub, Cloud
+Tasks and Eventarc, and an Overview of every service's health.
 
 <p align="center">
   <img alt="The console's Overview: the health of all nine services with their counts and ports, and recent problems" src="https://raw.githubusercontent.com/firenook-dev/firenook/main/docs/assets/console-overview-light.png">
