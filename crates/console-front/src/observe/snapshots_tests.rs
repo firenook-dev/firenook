@@ -212,7 +212,10 @@ async fn a_snapshot_is_prepared_by_a_job_and_downloads_once_as_a_zip_of_the_expo
         "{disposition}"
     );
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(body)).expect("a zip");
-    let names: Vec<String> = archive.file_names().map(str::to_owned).collect();
+    let names: Vec<String> = archive
+        .file_names()
+        .map(|name| name.expect("name").into_owned())
+        .collect();
     let root = names[0]
         .split('/')
         .next()
