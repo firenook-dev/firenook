@@ -94,5 +94,6 @@ brew install librsvg imagemagick   # rsvg-convert renders the PNGs, magick packs
 
 `source-tailored.svg` is the approved Tailored Glass artwork the mark is polished
 from. `stage1.py` refits its outlines and `stage2.py` rebuilds the edge highlights.
-The tagline on the social images and the palette are constants at the top of
-`build_brand.py`.
+The social card's headline, figures and points, and the palette, are constants
+at the top of `build_brand.py`. The figures come from
+`benchmarks/next6-paired-acceptance.json`; change them only with a new receipt.

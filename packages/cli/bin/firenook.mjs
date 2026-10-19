@@ -13,7 +13,7 @@ import { serveMcp } from '../src/mcp.mjs';
 import { targetApply, targetClear, use } from '../src/rc.mjs';
 import { adopt, scaffold } from '../src/init.mjs';
 
-const help = `Firenook ${manifest.version} — Firebase-compatible local emulator suite
+const help = `Firenook ${manifest.version} — a drop-in replacement for the Firebase Local Emulator Suite
 
 Project
   firenook init [--force] [--dry-run] [--no-functions]   Scaffold firebase.json, rules, a Functions codebase
