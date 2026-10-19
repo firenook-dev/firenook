@@ -190,7 +190,7 @@ fn extract_zip(bytes: &[u8], target: &Path) -> Result<(), ExtensionsError> {
         let Some(relative) = entry.enclosed_name() else {
             return Err(ExtensionsError(format!(
                 "ZIP contained an entry for {}, a path outside of {}",
-                entry.name(),
+                String::from_utf8_lossy(entry.name_raw()),
                 target.display()
             )));
         };

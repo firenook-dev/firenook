@@ -998,7 +998,11 @@ async fn export_stream_round_trips_and_tickets_serve_a_retry() {
             let mut entry = archive.by_index(index).expect("entry");
             let mut body = Vec::new();
             entry.read_to_end(&mut body).expect("body");
-            entries.push((entry.name().to_owned(), entry.compression(), body));
+            entries.push((
+                entry.name().expect("name").into_owned(),
+                entry.compression(),
+                body,
+            ));
         }
         entries.sort_by(|left, right| left.0.cmp(&right.0));
         entries

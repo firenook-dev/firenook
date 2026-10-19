@@ -673,7 +673,7 @@ async fn large_entries_use_zip64() {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zipped)).expect("a zip");
     assert_eq!(archive.len(), 1);
     let mut large = archive.by_index(0).expect("entry");
-    assert_eq!(large.name(), "large.bin");
+    assert_eq!(large.name().expect("name"), "large.bin");
     assert_eq!(large.size(), SIZE);
     // Read to the end, so the zip crate checks the CRC, keeping the tail.
     let mut length = 0_u64;
