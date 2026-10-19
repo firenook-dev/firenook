@@ -5,11 +5,11 @@
   </picture>
 </p>
 
-<h3 align="center">The Firebase emulator suite, rebuilt in Rust</h3>
+<h3 align="center">A drop-in replacement for the Firebase Local Emulator Suite</h3>
 
 <p align="center">
-  Your <code>firebase.json</code>, your SDKs, your ports. A ninth of the memory,
-  writes 38× faster, and your data is there the moment you start.
+  Keep your <code>firebase.json</code>, SDKs and ports. Get 38× faster writes,
+  9× less memory, no Java, and data that survives restarts.
 </p>
 
 <p align="center">

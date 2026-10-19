@@ -45,7 +45,11 @@ WHITE = '#FFFFFF'
 NIGHT = '#141416'      # social-image background, a shade under charcoal
 MUTED_ON_DARK = '#A8A29E'
 
-TAGLINE = 'A Firebase-compatible local emulator suite, written in Rust'
+# The social card. Figures are from benchmarks/next6-paired-acceptance.json.
+HEADLINE = ('A drop-in replacement for the', 'Firebase Local Emulator Suite')
+STATS = (('38×', 'faster writes'), ('9×', 'less memory'))
+POINTS = ('No Java', 'Data survives restarts', 'Same firebase.json, SDKs and ports')
+LABEL_ON_DARK = '#D6D3D1'
 TRACKING = -0.025      # em, wordmark
 THEME = CHARCOAL       # browser theme colour and app-icon background
 SMALL_INSET = 9        # units each flame is inset by in the tab-size favicon
@@ -211,43 +215,77 @@ def icon(style, size, background, mark_height, ink=None):
     return document(size, size, f'0 0 {size} {size}', 'Firenook app icon.', children, style == 'glass')
 
 
+def text(font, words, x, baseline, cap, fill, tracking=0.0):
+    """Outlined text, its left ink edge at x and its capital H `cap` px tall; returns (group, width)."""
+    paths, box, _ = layout(font, words, 0, 0, 1000, ref_text='H', tracking_em=tracking)
+    k = cap / 1000
+    g = el('g', fill=fill, transform=f'translate({n(x)} {n(baseline)}) scale({k:.6f})')
+    for d in paths:
+        if d:
+            g.append(el('path', d=d))
+    return g, box[2] * k
+
+
 def social(width, height):
-    """Dark card: glass lockup with a soft ember glow, tagline underneath."""
-    lockup_w = width * 0.58
-    k = lockup_w / (WB[2] - MB[0])
-    tag_paths, tag_box, _ = layout(MEDIUM, TAGLINE, 0, 0, 1000, ref_text='Hxp', tracking_em=0)
-    tag_h = height * 0.052               # cap-to-descender band of the tagline
-    tk = tag_h / (tag_box[3] - tag_box[1])
-    tag_w = (tag_box[2] - tag_box[0]) * tk
-    gap = height * 0.085
-    block_h = MH * k + gap + tag_h
-    top = (height - block_h) / 2
-    lx = width / 2 - (MB[0] + (WB[2] - MB[0]) / 2) * k
-    ly = top - MB[1] * k
-    glow = el('radialGradient', id='glow', gradientUnits='userSpaceOnUse', cx=0, cy=0, r=1,
-              gradientTransform=f'translate({n(lx + (MB[0] + MW / 2) * k)} {n(ly + (MB[1] + MH / 2) * k)}) '
-                                f'scale({n(width * 0.42)} {n(height * 0.62)})')
-    for off, color, op in ((0, VERMILION, 0.22), (0.45, '#FF6A1A', 0.08), (1, VERMILION, 0)):
-        glow.append(el('stop', offset=off, stop_color=color, stop_opacity=op))
+    """Dark card: the lockup, the drop-in headline, the two measured figures and what stays the same."""
+    u = height / 640                     # sizes are drawn for 640 px tall
+    pad = 88 * u
+    mark_h = 64 * u
+    k = mark_h / MH
+    lx, ly = pad - MB[0] * k, 70 * u - MB[1] * k
+    flame = el('linearGradient', id='flame', x1=0, y1=0, x2=0, y2=1)
+    for off, color in ((0, AMBER), (1, VERMILION)):
+        flame.append(el('stop', offset=off, stop_color=color))
     defs = copy.deepcopy(DEFS)
-    defs.append(glow)
+    defs.append(flame)
+    glows = []
+    for i, (cx, cy, rx, ry, op) in enumerate(((lx + (MB[0] + MW / 2) * k, ly + (MB[1] + MH / 2) * k, 0.55, 0.75, 0.24),
+                                               (width * 0.92, height * 1.05, 0.45, 0.55, 0.10))):
+        glow = el('radialGradient', id=f'glow{i}', gradientUnits='userSpaceOnUse', cx=0, cy=0, r=1,
+                  gradientTransform=f'translate({n(cx)} {n(cy)}) scale({n(width * rx)} {n(height * ry)})')
+        for off, color, o in ((0, VERMILION, op), (0.45, '#FF6A1A', op / 3), (1, VERMILION, 0)):
+            glow.append(el('stop', offset=off, stop_color=color, stop_opacity=o))
+        defs.append(glow)
+        glows.append(el('rect', width=width, height=height, fill=f'url(#glow{i})'))
     lock = el('g', transform=f'translate({n(lx)} {n(ly)}) scale({k:.6f})')
     lock.append(mark_group('glass'))
     lock.append(word_group(WHITE))
-    tag = el('g', id='tagline', fill=MUTED_ON_DARK,
-             transform=f'translate({n(width / 2 - tag_w / 2 - tag_box[0] * tk)} {n(top + MH * k + gap - tag_box[1] * tk)}) scale({tk:.6f})')
-    for d in tag_paths:
-        if d:
-            tag.append(el('path', d=d))
+
+    parts, widths = [], []
+    for i, line in enumerate(HEADLINE):
+        g, w = text(BOLD, line, pad, (250 + 76 * i) * u, 50 * u, WHITE, tracking=-0.012)
+        parts.append(g)
+        widths.append(w)
+    x = pad
+    for number, label in STATS:
+        g, w = text(BOLD, number, x, 462 * u, 66 * u, 'url(#flame)', tracking=-0.01)
+        lg, lw = text(MEDIUM, label, x + w + 18 * u, 462 * u, 25 * u, LABEL_ON_DARK)
+        parts += [g, lg]
+        x += w + 18 * u + lw + 64 * u
+    widths.append(x - 64 * u - pad)
+    x = pad
+    for i, point in enumerate(POINTS):
+        if i:
+            dot = el('circle', cx=n(x + 16 * u), cy=n(547 * u), r=n(3.5 * u), fill=AMBER)
+            parts.append(dot)
+            x += 32 * u
+        g, w = text(MEDIUM, point, x, 556 * u, 21 * u, MUTED_ON_DARK)
+        parts.append(g)
+        x += w
+    widths.append(x - pad)
+    assert max(widths) <= width - 2 * pad, (width, [round(w) for w in widths])
+
     root = el('svg', width=width, height=height, viewBox=f'0 0 {width} {height}', role='img', aria_labelledby='title')
     title = el('title', id='title')
-    title.text = 'Firenook'
+    title.text = 'Firenook: ' + ' '.join(HEADLINE)
     root.append(title)
     root.append(defs)
     root.append(el('rect', width=width, height=height, fill=NIGHT))
-    root.append(el('rect', width=width, height=height, fill='url(#glow)'))
+    for g in glows:
+        root.append(g)
     root.append(lock)
-    root.append(tag)
+    for g in parts:
+        root.append(g)
     return root
 
 
