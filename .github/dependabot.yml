@@ -13,6 +13,10 @@ updates:
     directory: /conformance
     schedule:
       interval: daily
+    ignore:
+      # The bloom-filter fixture runs this exact SDK build as its oracle and pins
+      # its version and hash; moving it means re-pinning that fixture by hand.
+      - dependency-name: "firebase"
     groups:
       conformance-dependencies:
         patterns:
