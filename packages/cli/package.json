@@ -1,7 +1,9 @@
 {
   "name": "firenook",
   "version": "0.2.0-next.6",
-  "description": "Firenook: a Rust Firebase-compatible local emulator suite with persistent disk storage",
+  "description": "The Firebase emulator suite, rebuilt in Rust: Firestore, Auth, Storage, Functions, Pub/Sub and Cloud Tasks from your firebase.json, with your SDKs",
+  "keywords": ["firebase", "firebase-emulator", "emulator", "firestore", "firebase-auth", "cloud-functions", "cloud-storage", "pubsub", "cloud-tasks", "local-development", "testing", "rust"],
+  "homepage": "https://github.com/firenook-dev/firenook#readme",
   "type": "module",
   "bin": {"firenook": "bin/firenook.mjs"},
   "exports": {"./binary": "./src/binary.mjs"},
