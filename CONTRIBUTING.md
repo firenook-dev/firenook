@@ -19,6 +19,33 @@ Production cloud traffic requires explicit authorization and tiny synthetic
 fixtures. Package publication and source visibility are release-owner actions,
 not implied by a green test or a merged product change.
 
+## Building and testing
+
+Install the toolchain in `rust-toolchain.toml`, Node 24.20.0 and npm 12.0.2.
+Browser tests require Chrome/Chromium; recording the official oracles requires
+Java, firebase-tools 15.22.0 and their exact documented emulator artifacts.
+The product itself runs neither Java nor firebase-tools; CI verifies a suite
+start with `java` absent from `PATH` and replays the Functions/Extensions
+corpus against a project whose `node_modules` holds only the Functions SDK.
+
+```sh
+cargo test --locked --workspace --all-targets --all-features
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+npm ci --prefix conformance
+npm run check --prefix conformance
+npm test --prefix conformance
+npm run test:firenook:disk --prefix conformance
+node --test packaging/*.test.mjs
+```
+
+A source build can serve Firestore alone with bounded coverage:
+`cargo run -p firenook -- firestore --diagnostics --rules firestore.rules`.
+Recording is opt-in for that standalone command; `--websocket-port` also
+enables it and serves the Requests feed on that port. To try a reviewed
+candidate in your own application without publishing it, use
+[local packages](packaging/LOCAL-DEVELOPMENT.md).
+[DESIGN.md](DESIGN.md) describes the component boundaries.
+
 ## Independence
 
 This repository never names the consumers it is tested against, the hosts it
