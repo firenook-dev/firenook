@@ -65,12 +65,14 @@ const FORMER_PACKAGES = /@fireside-dev\/[a-z0-9-]*(?:@[0-9A-Za-z.-]+)?|fireside-
 const FORMER_PACKAGES_ALLOWED = [
   [/^README\.md$/, "the migration note from the former package"],
   [/^packages\/cli\/README\.md$/, "names the former package the migration note refers to"],
+  [/^docs\/former-name\.md$/, "the migration note from the former package"],
   [/^benchmarks\/phase-.*\.json$/, "publication receipts of the former releases"],
   [/^packaging\/fixtures\/npm-publication-readiness\.json$/, "recorded readiness contract of the first publication"],
 ];
 // Paragraphs that explain the rename (from their first line to the next blank line).
 const FORMER_NAME_PARAGRAPHS = [
   [/^README\.md$/, /^Firenook \(formerly Fireside\)/, "the rename and migration note"],
+  [/^docs\/former-name\.md$/, /^Firenook \(formerly Fireside\)/, "the rename and migration note"],
   [/^AGENTS\.md$/, /^The same script fails on the project's former name/, "the rule itself"],
 ];
 // Single lines that mention the former name on purpose.
