@@ -23,6 +23,7 @@ pub use smol_str::SmolStr as FirestoreString;
 
 mod disk;
 mod lazy;
+mod precision;
 
 pub use disk::{
     DEFAULT_REDB_CACHE_SIZE_BYTES, DEFAULT_WRITE_BEHIND_INTERVAL, DiskBulkCommit, DiskDurability,
@@ -893,6 +894,8 @@ impl BulkCommit<'_> {
     pub fn commit(&mut self, writes: &[Write]) -> Result<CommitResult, CommitError> {
         match &mut self.backend {
             BulkCommitBackend::Memory => self.store.commit(writes),
+            // An import's timestamps come from an export's microseconds, so
+            // none is finer; the memory backend's commit checks anyway.
             BulkCommitBackend::Disk(bulk) => {
                 let (result, changes) = bulk.commit(writes).map_err(commit_error)?;
                 self.store
@@ -1109,6 +1112,9 @@ impl Store {
         writes: &[Write],
         origin: CommitOrigin,
     ) -> Result<CommitResult, CommitError> {
+        // Every write path stores timestamps to the microsecond, as
+        // Firestore does, whatever its front decoded.
+        let writes = &*precision::stored_precision(writes);
         let (result, changes) = match &self.backend {
             StoreBackend::Memory(inner) => {
                 let mut state = lock(inner);

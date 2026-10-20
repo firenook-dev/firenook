@@ -509,7 +509,9 @@ async fn patch_document(
             transforms: Vec::new(),
             precondition,
         }
-    };
+    }
+    // As the store keeps it, before rules see it (see `decode_write`).
+    .at_stored_precision();
     let authorization = request_authorization(&headers, &project)?;
     let _guard = state.rules.write_lock();
     let snapshot = state.store.snapshot();
@@ -1625,7 +1627,14 @@ fn validate_parent(parent: &str) -> Result<(), RestError> {
     Ok(())
 }
 
+/// A commit's write as the store keeps it: timestamp values rounded down to
+/// the microsecond, before rules see it, as the official emulator does
+/// (`firenook_core_store::Write::at_stored_precision`).
 fn decode_write(value: &JsonValue, database: &DatabaseName) -> Result<Write, RestError> {
+    decode_write_as_sent(value, database).map(Write::at_stored_precision)
+}
+
+fn decode_write_as_sent(value: &JsonValue, database: &DatabaseName) -> Result<Write, RestError> {
     let object = value
         .as_object()
         .ok_or_else(|| RestError::invalid("commit write must be an object"))?;
@@ -3710,5 +3719,140 @@ mod tests {
                 assert_eq!(actual.to_bits(), expected.to_bits());
             }
         }
+    }
+
+    /// The request-values oracle, its project and an application with its
+    /// rules whose evaluations are kept.
+    fn precision_application() -> (
+        JsonValue,
+        Router,
+        Store,
+        firenook_rules_runtime::request_history::RequestHistory,
+    ) {
+        let fixture: JsonValue = serde_json::from_str(include_str!(
+            "../../../conformance/fixtures/developer-tools-request-values-v1/fixture.json"
+        ))
+        .expect("fixture");
+        let history = firenook_rules_runtime::request_history::RequestHistory::default();
+        let runtime = RulesRuntime::with_request_history(history.clone());
+        runtime
+            .install_project(
+                fixture["project"].as_str().expect("project"),
+                fixture["rules"].as_str().expect("rules"),
+            )
+            .expect("rules");
+        let store = Store::default();
+        let application = router_with_query_policy_memory_and_rules(
+            store.clone(),
+            QueryPolicy::default(),
+            None,
+            runtime,
+        );
+        (fixture, application, store, history)
+    }
+
+    /// The official emulator answers a write of a timestamp finer than a
+    /// microsecond, and shows rules, the value rounded down to the
+    /// microsecond.
+    #[tokio::test]
+    async fn a_timestamp_finer_than_a_microsecond_is_rounded_as_the_oracle_rounds_it() {
+        let (fixture, application, _, history) = precision_application();
+        let project = fixture["project"].as_str().expect("project");
+        let operation = &fixture["operations"][0];
+        let documents = format!("/v1/projects/{project}/databases/(default)/documents");
+        let response = application
+            .oneshot(
+                Request::patch(format!(
+                    "{documents}{}",
+                    operation["path"].as_str().expect("path")
+                ))
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(operation["body"].to_string()))
+                .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: JsonValue = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body"),
+        )
+        .expect("JSON");
+        let expected = &operation["response"]["fields"]["timestamp"];
+        assert_eq!(expected["timestampValue"], "2020-01-02T03:04:05.123456Z");
+        assert_eq!(&body["fields"]["timestamp"], expected);
+        // Rules saw the value the store keeps, as the oracle's did.
+        let frame = history
+            .subscribe()
+            .expect("history")
+            .recv()
+            .await
+            .expect("frame");
+        let events: JsonValue = serde_json::from_str(frame.text()).expect("events");
+        let seen =
+            events
+                .as_array()
+                .expect("events")
+                .iter()
+                .map(|event| {
+                    &event["rulesContext"]["request"]["mapValue"]["fields"]["resource"]["mapValue"]
+                        ["fields"]["data"]["mapValue"]["fields"]["timestamp"]
+                })
+                .filter(|value| !value.is_null())
+                .collect::<Vec<_>>();
+        let oracle = &fixture["messages"][1]["rulesContext"]["request"]["mapValue"]["fields"]["resource"]
+            ["mapValue"]["fields"]["data"]["mapValue"]["fields"]["timestamp"];
+        assert_ne!(seen.len(), 0);
+        assert!(seen.iter().all(|value| *value == oracle), "{seen:?}");
+    }
+
+    /// A commit's fields and transform operands are rounded too, nested in
+    /// maps and arrays.
+    #[tokio::test]
+    async fn a_commit_rounds_nested_timestamps_and_transform_operands() {
+        let (fixture, application, store, _) = precision_application();
+        let project = fixture["project"].as_str().expect("project");
+        let name = format!("projects/{project}/databases/(default)/documents/values/nested");
+        let commit = json!({"writes": [{
+            "update": {"name": name, "fields": {"map": {"mapValue": {"fields": {
+                "list": {"arrayValue": {"values": [
+                    {"timestampValue": "1969-12-31T23:59:59.999999999Z"}
+                ]}}
+            }}}}},
+            "updateTransforms": [{"fieldPath": "union", "appendMissingElements": {"values": [
+                {"timestampValue": "2020-01-02T03:04:05.000000001Z"}
+            ]}}]
+        }]});
+        let response = application
+            .oneshot(
+                Request::post(format!(
+                    "/v1/projects/{project}/databases/(default)/documents:commit"
+                ))
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(commit.to_string()))
+                .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let key = DocumentKey::new(
+            DatabaseName::new(project, "(default)").expect("database"),
+            "values/nested",
+        )
+        .expect("key");
+        let document = store.snapshot().get(&key).expect("document");
+        let at = |seconds, nanos| Value::Timestamp(Timestamp::new(seconds, nanos).expect("time"));
+        assert_eq!(
+            document.fields()["map"],
+            Value::Map(Fields::from([(
+                "list".to_owned(),
+                Value::Array(vec![at(-1, 999_999_000)])
+            )]))
+        );
+        assert_eq!(
+            document.fields()["union"],
+            Value::Array(vec![at(1_577_934_245, 0)])
+        );
     }
 }
