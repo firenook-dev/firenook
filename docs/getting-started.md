@@ -19,7 +19,9 @@ With Bun: `bun add --dev --exact firenook`. The package is a small launcher;
 npm or Bun picks the native engine for your machine from its optional
 dependencies, so keep optional dependencies enabled. Nothing else is
 downloaded, at install or at start: no Java, no firebase-tools, no emulator
-archives.
+archives. The one exception is an Extension from the registry, fetched once on
+first use; `firenook ext:vendor` copies it into the project so even that is
+offline.
 
 Firenook needs Node 24 (it runs your Functions) on macOS (Apple silicon or
 Intel), Linux (x64 or arm64, glibc) or Windows x64. Firenook is in preview

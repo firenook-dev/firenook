@@ -5,19 +5,46 @@
 Give a coding agent the running local suite: `firenook mcp` serves Firestore, Auth, Storage, Functions, Pub/Sub and Cloud Tasks as MCP tools.
 
 ```sh
-firenook mcp --project demo-my-app                       # stdio server for the running suite
-firenook mcp --project demo-my-app --only firestore,auth  # a subset of the tool groups
+firenook mcp                          # stdio server for the running suite
+firenook mcp --only firestore,auth    # a subset of the tool groups
 ```
+
+## Connect your agent
+
+Register `npx firenook mcp` with your agent, with Firenook installed in the
+project. The server reads `firebase.json` and `.firebaserc` from the folder the
+agent starts it in, so it needs no project id. Start the emulators as usual
+(`npx firenook emulators:start`); every tool finds them on each call.
+
+Claude Code, from the project folder. This writes `.mcp.json`, which you can
+commit so your team's agents have it too:
+
+```sh
+claude mcp add --scope project firenook -- npx firenook mcp
+```
+
+Agents that read an `mcpServers` file, such as Cursor's `.cursor/mcp.json`:
+
+```json
+{"mcpServers": {"firenook": {"command": "npx", "args": ["firenook", "mcp"]}}}
+```
+
+VS Code's `.vscode/mcp.json` names the same entry under `servers`:
+
+```json
+{"servers": {"firenook": {"type": "stdio", "command": "npx", "args": ["firenook", "mcp"]}}}
+```
+
+If your agent starts servers outside the project folder, add
+`--config /path/to/project/firebase.json`, and `--project <id>` when
+`.firebaserc` has no default.
+
+## What it serves
 
 `firenook mcp` is a dependency-free MCP server over stdio (newline-delimited
 JSON-RPC 2.0; protocol `2025-06-18`, and `2025-03-26`/`2024-11-05` clients are
 accepted) that gives a coding agent the running local suite: `initialize`,
-`ping`, `tools/list` and `tools/call`, capabilities `{"tools": {}}`. Register
-it with the agent's MCP configuration, for example:
-
-```json
-{"mcpServers": {"firenook": {"command": "npx", "args": ["firenook", "mcp", "--project", "demo-my-app"]}}}
-```
+`ping`, `tools/list` and `tools/call`, capabilities `{"tools": {}}`.
 
 Every tool resolves the suite through the hub locator on each call (falling
 back to the project's configured ports), so a suite restarted on other ports
