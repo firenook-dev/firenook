@@ -20,7 +20,7 @@
 **Already using the Firebase emulators?** Install Firenook and change one word:
 
 ```sh
-npm install --save-dev --save-exact firenook
+npm install --save-dev firenook
 ```
 
 ```diff
@@ -139,9 +139,8 @@ Every command and option: [CLI reference](https://github.com/firenook-dev/fireno
 
 Node 24 on macOS (Apple silicon or Intel), Linux (x64 or arm64, glibc) or
 Windows x64. Keep optional dependencies enabled: they carry the native engine
-for your platform. Firenook is in preview (`0.2.0-next` releases); pin an exact
-version. Releases up to `0.1.0-next.9` were published as `@fireside-dev/cli`;
-see [the former name](https://github.com/firenook-dev/firenook/blob/main/docs/former-name.md).
+for your platform. Firenook is in preview (`0.2.0-next` releases): pin an exact
+version (`--save-exact`) and upgrade on purpose.
 
 ## License
 
