@@ -663,6 +663,11 @@ emulator), replayed by `npm run replay:functions:runtime`:
   order), `secretEnvironmentVariables` and the shared-label rule for
   multi-region endpoints. dotenv files follow the official chain
   (`.env`, `.env.<projectId>`, `.env.local`, every `.secret.local` key).
+  The discovery client keeps no connection open: the SDK's
+  `/__/quitquitquit` calls `server.close()`, which waits for every
+  connection, so a kept one held the process (and the codebase's load) for
+  Node's 5 s keep-alive timeout before 0.2.0-next.7. The official ten-second
+  kill of a process that does not end stays.
 - **Workers**: one Node process per backend (`support/functions-worker.mjs`,
   loopback TCP, Express stack identical to the official runtime) serves every
   function of its codebase; the target, signature and service reach it as
