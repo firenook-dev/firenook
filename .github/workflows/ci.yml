@@ -14,8 +14,55 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: What the change touches
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Decide whether the slow jobs run
+        id: classify
+        # A pull request or push to main that changes only documentation skips
+        # the engine, console, harness and SDK jobs. Anything else runs them:
+        # any other file, a new branch, or a workflow call (a release has no
+        # base to compare, so it always runs everything). The public contract
+        # checks run every time; they check the text of every change and the
+        # npm package, README included. Markdown inside crates/, console/ and
+        # conformance/ counts as code, since fixtures and tests may read it.
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          documentation() {
+            case "$1" in
+              */*) ;;
+              *.md|LICENSE|NOTICE) return 0 ;;
+            esac
+            case "$1" in
+              docs/*|brand/*|support/*.md|support/*.html|support/*.gif|packages/cli/README.md|packaging/*.md|.github/*.md|.github/ISSUE_TEMPLATE/*) return 0 ;;
+            esac
+            return 1
+          }
+          code=true
+          if [ -n "$BASE" ] && [ "$BASE" != 0000000000000000000000000000000000000000 ]; then
+            files=$(git diff --name-only "$BASE" "$GITHUB_SHA")
+            if [ -n "$files" ]; then
+              code=false
+              while IFS= read -r file; do
+                documentation "$file" || { code=true; echo "code: $file"; break; }
+              done <<< "$files"
+            fi
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "Slow jobs run: $code"
+
   rust:
     name: Rust quality gate
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -46,6 +93,8 @@ jobs:
 
   console:
     name: Console checks and the engine the journeys run against
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -190,6 +239,8 @@ jobs:
 
   conformance:
     name: Differential harness
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     # The Auth and Pub/Sub oracle replays (Phases I and J) brought this job to
     # 16-18 minutes on a typical runner; 20 was cancelling it on slow ones.
@@ -379,6 +430,8 @@ jobs:
 
   firebase-js-sdk:
     name: Firebase JS SDK browser integration (${{ matrix.server_mode }}, client ${{ matrix.client_persistence }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
