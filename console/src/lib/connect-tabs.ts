@@ -1,6 +1,9 @@
 // Which "connect your app" snippets there are, and what each is called: the
-// one tab list every Connect surface draws from (the Overview's Connect
-// panel and its ⌘K items, an empty section's "From your app" block). Each
+// one tab list every Connect surface draws from (the top bar's Connect
+// dialog and its ⌘K items, an empty section's "From your app" block). The
+// last, `agent`, is a coding agent's setup rather than an app's snippet: its
+// tab draws the agents' files and install links (`connect/agent-setup.tsx`),
+// and its one snippet is the `mcpServers` entry any agent reads. Each
 // tab has the value a link names it by (`?connect=node`), the target
 // `lib/connect.ts` writes its code for (`admin-node`), its tab label and
 // the title over its code.
@@ -20,6 +23,7 @@ export type ConnectTarget =
   | 'java'
   | 'env'
   | 'firebase-json'
+  | 'agent'
 
 export interface ConnectTab {
   /** The value a link names the tab by (`?connect=`). */
@@ -51,6 +55,12 @@ export const CONNECT_TABS = [
     target: 'firebase-json',
     label: 'firebase.json',
     title: 'The emulators block of firebase.json',
+  },
+  {
+    param: 'agent',
+    target: 'agent',
+    label: 'Coding agent',
+    title: 'The MCP server for a coding agent',
   },
 ] as const satisfies readonly ConnectTab[]
 
