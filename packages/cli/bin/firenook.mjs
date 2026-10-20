@@ -36,7 +36,8 @@ Emulators
                                                           Inject a background event (Firestore, Storage,
                                                           Pub/Sub, Auth, schedule, Eventarc, task queue)
   firenook ext:vendor [--instance ID]...                  Copy registry Extensions into the project
-  firenook mcp [--project ID] [--only firestore,auth,...] Model Context Protocol server over stdio
+  firenook mcp [--project ID] [--only firestore,auth,...] Model Context Protocol server over stdio for coding
+                                                          agents; outside a project, the one running suite
 
 Saved data (--state-dir with --resume-state)
   firenook state:adopt-seed --state-dir DIR --import DIR  Keep saved data whose seed changed: record the

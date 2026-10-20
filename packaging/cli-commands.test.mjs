@@ -16,7 +16,8 @@ import { exportEmulators, firestoreDelete, locatorPath } from '../packages/cli/s
 import { applyTarget, clearTarget, targetApply, targetClear, use } from '../packages/cli/src/rc.mjs';
 import { INIT_PORTS, adopt, firestoreRules, scaffold } from '../packages/cli/src/init.mjs';
 import { EMULATED_SERVICE_ACCOUNT, invokeFunction, matchParams, runInvoke, substituteParams } from '../packages/cli/src/invoke.mjs';
-import { PROTOCOL_VERSIONS, TOOLS, createMcpServer, validateArguments } from '../packages/cli/src/mcp.mjs';
+import { PROTOCOL_VERSIONS, TOOLS, TOOL_GROUPS, createMcpServer, validateArguments } from '../packages/cli/src/mcp.mjs';
+import { manifest } from '../packages/cli/src/binary.mjs';
 import { decodeFields, decodeValue, encodeFields, encodeValue } from '../packages/cli/src/firestore-values.mjs';
 
 const cli = fileURLToPath(new URL('../packages/cli/bin/firenook.mjs', import.meta.url));
@@ -81,21 +82,161 @@ const DOCUMENT = {name:'projects/demo-fixture/databases/(default)/documents/user
   address:{mapValue:{fields:{city:{stringValue:'Springfield'}}}}, friend:{referenceValue:'projects/demo-fixture/databases/(default)/documents/users/bob'},
   where:{geoPointValue:{latitude:1.5, longitude:-2.5}}, blob:{bytesValue:'aGk='}}, createTime:'2026-01-01T00:00:00Z', updateTime:'2026-01-02T00:00:00Z'};
 
+// The engine's Console API (`/console/api/v1` on the UI port), as much of it
+// as the MCP tools call. Bulk actions answer a running job that the jobs route
+// then reports finished, as the engine's jobs do.
+const CONSOLE = {jobs:new Map(), objects:new Map([['demo-fixture.appspot.com/docs/a.txt', {type:'text/plain', bytes:Buffer.from('hello world')}],
+  ['demo-fixture.appspot.com/img/p.png', {type:'image/png', bytes:Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 3, 4, 5])}]])};
+const LOG_LINE = {cursor:'5a62a7b2.48', time:'2026-01-03T00:00:00.000Z', level:'error', service:'functions', source:'functions[us-central1-helloWorld]', function:'us-central1-helloWorld',
+  codebase:'default', execution:'eb524d-8', message:'Unhandled error Error: boom\n    at handler (index.js:3:9)', payload:{orderId:'o1'}};
+const CALL = {id:'eb524d-8', seq:8, functionId:'us-central1-helloWorld', codebase:'default', kind:'http', origin:'client', cause:{type:'http', method:'POST', path:'/'}, summary:'POST /',
+  startedAt:'2026-01-03T00:00:00.000Z', durationMs:204.258833, outcome:'failed', outcomeClass:'failed', status:500, callableStatus:null, cold:true, attempt:1, eventId:null, replayOf:null, logCount:1, error:null};
+const EVENT = {id:'ab12cd-1', seq:1, eventId:'e-1', receivedAt:'2026-01-03T00:00:00.000Z', channel:'projects/demo-fixture/locations/us-central1/channels/firebase', eventType:'com.example.order.placed',
+  source:'firenook-mcp', subject:null, publisher:null, origin:'console', matched:1, delivered:1, failed:0, pending:0, filtered:0, unheard:0, error:null};
+function consoleJob(kind, title, outcome = {}) {
+  const id = `job-${CONSOLE.jobs.size + 1}`;
+  const finished = {id, kind, section:kind.split('.')[0], title, total:outcome.done ?? 1, done:1, skipped:0, errors:[], errorCount:0, state:'done', startedAt:'2026-01-03T00:00:00Z', finishedAt:'2026-01-03T00:00:01Z', ...outcome};
+  CONSOLE.jobs.set(id, finished);
+  return {...finished, state:'running', done:0, finishedAt:null, result:undefined};
+}
+function fakeConsole(request, response, url, body, raw, reply) {
+  const path = url.pathname.slice('/console/api/v1'.length);
+  const query = Object.fromEntries(url.searchParams);
+  const route = `${request.method} ${path}`;
+  const fail = (status, code, message, fix) => reply(status, {error:{code, message, ...(fix ? {fix} : {})}});
+  if (request.method !== 'GET' && !/json/.test(request.headers['content-type'] ?? '') && !request.headers['x-firenook-console']) return fail(415, 'unsupported-media-type', 'Console API changes are sent as JSON.');
+  if (route === 'POST /agents/calls') {
+    if (fake.beaconStatus === 'hang') { fake.hanging.push(response); return undefined; }
+    response.writeHead(fake.beaconStatus ?? 204); return response.end();
+  }
+  RULES_ROUTES?.(route, query, body, reply, fail);
+  if (response.headersSent) return undefined;
+  if (request.method === 'GET' && path.startsWith('/jobs/')) {
+    const job = CONSOLE.jobs.get(decodeURIComponent(path.slice('/jobs/'.length)));
+    return job ? reply(200, job) : fail(404, 'not-found', 'There is no job.');
+  }
+  // Auth.
+  if (route === 'POST /auth/tokens') {
+    if (body.uid !== 'alice') return fail(404, 'not-found', `The Auth emulator has no user ${body.uid} in this project.`);
+    return reply(200, {idToken:'header.payload.', expiresAt:'2026-01-03T01:00:00Z', refreshToken:'refresh-1', customToken:'{}', payload:{user_id:'alice', ...(body.claims ?? {admin:true})}, provider:'password', providers:['password']});
+  }
+  const bulk = /^POST \/auth\/users:(setClaims|removeClaims|disable|enable|revoke)$/.exec(route);
+  if (bulk) {
+    const missing = body.target.keys.filter(key => key.endsWith('|nobody'));
+    const done = body.target.keys.length;
+    return reply(202, consoleJob(`auth.${bulk[1]}`, `${bulk[1]} ${done} user${done === 1 ? '' : 's'}`, {done, skipped:bulk[1] === 'enable' ? 1 : 0, errorCount:missing.length, errors:missing.map(key => ({key, message:'USER_NOT_FOUND'}))}));
+  }
+  if (route === 'GET /auth/tenants') return reply(200, {items:[{tenantId:'acme-1', displayName:'Acme', users:2, allowPasswordSignup:true, enableEmailLinkSignin:false, enableAnonymousUser:false, disableAuth:false, mfaState:'DISABLED', mfaProviders:[]}], total:1, projectUsers:3});
+  // Reset.
+  if (route === 'POST /suite/clear') {
+    if (body.sections.length > 1 && body.confirm !== 'demo-fixture') return fail(400, 'invalid-argument', 'Clearing more than one section needs confirm set to the project id, demo-fixture.', 'Type the project id to confirm, and send the request again.');
+    return reply(202, consoleJob('suite.clear', 'Clear', {done:body.sections.length, result:body.sections.map((section, index) => ({section, removed:index + 3}))}));
+  }
+  // Storage files.
+  if (route === 'GET /storage/buckets') return reply(200, {defaultBucket:'demo-fixture.appspot.com', rulesMode:'single', buckets:[{name:'demo-fixture.appspot.com', isDefault:true}], indexReady:true});
+  const key = `${query.bucket}/${query.name}`;
+  if (route === 'GET /storage/object' || route === 'PUT /storage/object') {
+    if (request.method === 'PUT') CONSOLE.objects.set(key, {type:request.headers['content-type'], bytes:raw, metadata:request.headers['x-firenook-metadata']});
+    const object = CONSOLE.objects.get(key);
+    if (!object) return fail(404, 'not-found', `No object ${query.name} in gs://${query.bucket}.`);
+    return reply(200, {bucket:query.bucket, name:query.name, size:object.bytes.length, contentType:object.type, customMetadata:{}, downloadTokens:['t-1'], md5Hash:'x', generation:'2', metageneration:'1', updated:'2026-01-03T00:00:00Z'});
+  }
+  if (route === 'GET /storage/object/media') {
+    const object = CONSOLE.objects.get(key);
+    if (!object) return fail(404, 'not-found', 'No object.');
+    const range = /^bytes=(\d+)-(\d+)$/.exec(request.headers.range ?? '');
+    const bytes = range ? object.bytes.subarray(Number(range[1]), Number(range[2]) + 1) : object.bytes;
+    response.writeHead(range ? 206 : 200, {'content-type':object.type});
+    return response.end(bytes);
+  }
+  if (route === 'DELETE /storage/object') {
+    if (!CONSOLE.objects.delete(`${body.bucket}/${body.name}`)) return fail(404, 'not-found', `No object ${body.name} in gs://${body.bucket}.`);
+    response.writeHead(204); return response.end();
+  }
+  const relocate = /^POST \/storage\/objects:(copy|move|delete)$/.exec(route);
+  if (relocate) {
+    const [source] = body.target.keys;
+    if (relocate[1] === 'delete') return reply(202, consoleJob('storage.delete', `Delete ${source}`, {done:2}));
+    const from = CONSOLE.objects.get(`${body.bucket}/${source}`);
+    const to = `${body.destination.bucket}/${body.renameTo}`;
+    if (!from) return reply(202, consoleJob(`storage.${relocate[1]}`, `Copy ${source}`, {done:1, skipped:1}));
+    if (CONSOLE.objects.has(to) && body.onConflict === 'fail') return reply(202, consoleJob(`storage.${relocate[1]}`, `Copy ${source}`, {errorCount:1, errors:[{key:body.renameTo, message:`${body.renameTo} already exists.`}]}));
+    CONSOLE.objects.set(to, from);
+    if (relocate[1] === 'move') CONSOLE.objects.delete(`${body.bucket}/${source}`);
+    return reply(202, consoleJob(`storage.${relocate[1]}`, `Copy ${source}`));
+  }
+  // Logs and function calls.
+  if (route === 'GET /logs/entries') {
+    if (/source:/.test(query.q ?? '')) return fail(400, 'invalid-argument', 'Unknown filter "source:".');
+    return reply(200, {items:[LOG_LINE], older:'5a62a7b2.40', newer:null, tail:'5a62a7b2.48', anchor:null});
+  }
+  if (route === 'GET /logs/facets') return reply(200, {kept:51, matched:4, levels:[{value:'debug', count:0}, {value:'info', count:2}, {value:'warn', count:1}, {value:'error', count:1}], services:[{value:'functions', count:4}],
+    functions:[{value:'us-central1-helloWorld', count:4}], instances:[], codebases:[{value:'default', count:4}], kinds:[{value:'function.failed', count:1}], internalHidden:3, logged:60, lastReload:null});
+  if (route === 'GET /functions') return reply(200, {phase:'running', projectId:'demo-fixture', functions:[{id:'us-central1-helloWorld', name:'helloWorld'}, {id:'europe-west1-helloWorld', name:'helloWorld'}, {id:'us-central1-addMessage', name:'addMessage'}]});
+  if (route === 'GET /functions/invocations') return reply(200, {page:{items:[CALL], nextCursor:null, prevCursor:null, total:{count:1, exact:true}, scanned:null}, liveCursor:'1.2'});
+  if (route === 'GET /functions/invocations/eb524d-8') return reply(200, {refs:[], detail:{summary:CALL,
+    request:{target:'url', method:'POST', path:'/', headers:[{name:'content-type', value:'application/json', sensitive:false}, {name:'authorization', value:null, sensitive:true}], contentType:'application/json', body:{size:13, truncated:false, encoding:'text', text:'{"data":{"a":1}}'}},
+    response:{status:500, headers:[], contentType:'text/html', body:{size:21, truncated:false, encoding:'text', text:'Internal Server Error'}, chunks:1, streaming:false, clientGone:false},
+    event:null, logs:[{index:0, at:'2026-01-03T00:00:00.100Z', offsetMs:100, level:'error', message:LOG_LINE.message, kind:null, fields:null, afterFinish:false}], logsDropped:0,
+    timings:{workerStartMs:null, firstByteMs:204.251, totalMs:204.258833}, replayable:true, notReplayable:null, liveCursor:'1.2'}});
+  if (route === 'GET /functions/invocations/gone-1') return fail(404, 'not-found', 'The engine no longer keeps invocation #1; it keeps the newest 2,000.');
+  if (route === 'POST /functions/invocations/eb524d-8/replay') {
+    const replayed = {...CALL, id:'eb524d-9', origin:'replay', replayOf:'eb524d-8', outcome:'succeeded', status:200, durationMs:1.5};
+    response.writeHead(200, {'content-type':'application/x-ndjson'});
+    return response.end([{frame:'started', invocation:{...replayed, outcome:null}}, {frame:'head', status:200, headers:[{name:'content-type', value:'application/json'}]},
+      {frame:'chunk', text:'{"ok":', encoding:'text'}, {frame:'chunk', text:Buffer.from('true}').toString('base64'), encoding:'base64'}, {frame:'finished', invocation:replayed}].map(line => JSON.stringify(line)).join('\n') + '\n');
+  }
+  // Eventarc, Extensions.
+  if (route === 'POST /eventarc/channel/publish') return reply(200, {event:EVENT});
+  if (route === 'GET /eventarc/events') return reply(200, {page:{items:[EVENT], nextCursor:null, prevCursor:null, total:{count:1, exact:true}, scanned:null}, liveCursor:'x'});
+  if (route === 'GET /eventarc/events/ab12cd-1' || route === 'GET /eventarc/events/ab12cd-2') return reply(200, {deliveries:[], detail:{summary:{...EVENT, id:path.split('/').pop()}, attributes:{type:EVENT.eventType}, datacontenttype:'application/json', time:null, data:{orderId:'o1'}, dataSize:16, dataTruncated:false, raw:'',
+    deliveries:[{triggerKey:'k', functionId:'us-central1-onOrderPlaced', matched:true, mismatches:[], invocationId:'eb524d-12', outcome:'succeeded', durationMs:0.762291}], replayOf:path.endsWith('-2') ? 'ab12cd-1' : null}});
+  if (route === 'POST /eventarc/events/ab12cd-1/replay') return reply(200, {event:{...EVENT, id:'ab12cd-2', origin:'replay'}});
+  if (route === 'GET /extensions/instances') return reply(200, {phase:'running', offline:false, dropped:[], emulatedApis:[], instances:[{instanceId:'resize', written:'resize', kind:'registry', reference:'firebase/storage-resize-images', version:'0.2.0', displayName:'Resize Images', state:'running', error:null, functionCount:2, warnings:[]}]});
+  if (route === 'POST /extensions/instances/resize/reload') return reply(200, {summary:{instanceId:'resize', kind:'registry', state:'running', functionCount:2, warnings:[]}, functions:[{functionId:'ext-resize-generateResizedImage', kind:'storage', status:'receiving'}]});
+  if (route === 'POST /extensions/instances/nope/reload') return fail(404, 'not-found', 'There is no extension instance nope.');
+  // Pub/Sub, Tasks, schedules.
+  const subscription = {name:'projects/demo-fixture/subscriptions/orders-sub', topic:'projects/demo-fixture/topics/orders', delivery:'pull', managed:'no', filter:null, deadLetterTopic:null, counters:{backlog:2, outstanding:0, oldestUnackedAt:'2026-01-03T00:00:00Z'}};
+  if (route === 'GET /pubsub/topics') return reply(200, {items:[{name:'projects/demo-fixture/topics/orders', kind:'user', counters:{published:5, lastPublishedAt:'2026-01-03T00:00:00Z'}, subscriptions:[subscription], functions:[{functionId:'us-central1-onOrder'}]}],
+    nextCursor:null, prevCursor:null, total:{count:1, exact:true}, scanned:null, project:'demo-fixture', otherProjects:[], detached:[{...subscription, name:'projects/demo-fixture/subscriptions/old', topic:null}], revision:1});
+  if (route === 'GET /pubsub/backlog') {
+    if (query.subscription !== subscription.name) return fail(404, 'not-found', 'Subscription does not exist');
+    return reply(200, {items:[{key:'k1', id:'41', state:'available', place:1, attempts:0, publishTime:'2026-01-03T00:00:00Z', size:300, data:{encoding:'text', text:'x'.repeat(256), truncated:true}, attributes:{k:'v'}, orderingKey:null},
+      {key:'k2', id:'42', state:'outstanding', place:null, attempts:1, publishTime:'2026-01-03T00:00:01Z', size:8, data:{encoding:'json', text:'{"id":2}', truncated:false}, attributes:{}, orderingKey:null}], nextCursor:null, prevCursor:null, total:{count:2, exact:true}, scanned:null});
+  }
+  if (route === 'GET /pubsub/subscription') return reply(200, {subscription:{summary:subscription}, deadLetteredInHistory:0});
+  if (route === 'GET /pubsub/message') return reply(200, {topic:query.topic, id:query.id, dataBase64:Buffer.from('y'.repeat(300)).toString('base64'), dataText:'y'.repeat(300), dataJson:false, attributes:{}});
+  const queue = {key:'queue:demo-fixture-us-central1-processTask', project:'demo-fixture', location:'us-central1', id:'processTask', function:{functionId:'us-central1-processTask', name:'processTask'}, paused:false, counters:{pending:1, running:0}};
+  if (route === 'GET /tasks/queues') return reply(200, {items:[queue], nextCursor:null, prevCursor:null, total:{count:1, exact:true}, scanned:null, project:'demo-fixture', projects:['demo-fixture'], rejectedRegistrations:[], refused:[], revision:1});
+  if (route === 'GET /tasks/tasks') return reply(200, {items:[{key:'t1', id:'1', name:'projects/demo-fixture/locations/us-central1/queues/processTask/tasks/123', shortName:'123', state:'pending', attempt:0, executionCount:0,
+    scheduleTime:null, dueAt:null, lastError:null, url:'http://x/processTask', body:{json:true, text:'{"data":{"id":1}}', truncated:false, size:17}}], nextCursor:null, prevCursor:null, total:{count:1, exact:true}, scanned:null});
+  if (route === 'POST /tasks/task/run') return body.id === '1' ? reply(200, {started:true, message:'The task is sent on the next tick.'}) : fail(404, 'not-found', 'No task of processTask has this id.');
+  const schedule = {functionId:'us-central1-nightly', functionName:'nightly', region:'us-central1', expression:'every 24 hours', timeZone:null, automatic:true, paused:false, nextRunAt:'2026-01-04T00:00:00Z', runs:1, lastRuns:[], problem:null};
+  if (route === 'GET /pubsub/schedules') return reply(200, {items:[schedule, {...schedule, functionId:'us-central1-nightlyV1', functionName:'nightlyV1'}], nextCursor:null, prevCursor:null, total:{count:2, exact:true}, scanned:null});
+  if (route === 'POST /pubsub/schedule/run') return reply(200, {at:'2026-01-03T00:00:00Z', trigger:'console', messageId:'7', skipped:null, delivery:{mark:'queued', invocation:null, status:null, durationMs:null, error:null, skippedReason:null}});
+  fail(404, 'not-found', `unknown console API route: /api/v1${path}`);
+}
+let RULES_ROUTES;
+
 // One HTTP server plays the hub and every emulator of the suite.
-const fake = {requests:[], running:{}, exportStatus:200, deleted:3, publishStatus:200};
+const fake = {requests:[], beacons:[], hanging:[], running:{}, exportStatus:200, deleted:3, publishStatus:200};
 let locatorDir;
 before(async () => {
   fake.deadPort = await unusedPort();
   fake.server = createServer((request, response) => {
-    let body = '';
-    request.on('data', chunk => { body += chunk; });
+    const chunks = [];
+    request.on('data', chunk => { chunks.push(chunk); });
     request.on('end', () => {
       const url = new URL(request.url, 'http://127.0.0.1');
       const path = url.pathname;
-      const parsed = body ? JSON.parse(body) : undefined;
-      fake.requests.push({method:request.method, url:request.url, path, query:Object.fromEntries(url.searchParams), headers:request.headers, body:parsed});
+      const raw = Buffer.concat(chunks);
+      const parsed = raw.length && /json/.test(request.headers['content-type'] ?? 'json') ? JSON.parse(raw.toString('utf8')) : undefined;
+      // The MCP call beacon lands after the tool answered; it is kept apart so
+      // order-based assertions on fake.requests stay deterministic.
+      (path === '/console/api/v1/agents/calls' ? fake.beacons : fake.requests).push({method:request.method, url:request.url, path, query:Object.fromEntries(url.searchParams), headers:request.headers, body:parsed, raw});
       const reply = (status, value) => { response.writeHead(status, {'content-type':'application/json'}); response.end(JSON.stringify(value)); };
       const text = (status, value) => { response.writeHead(status, {'content-type':'text/html; charset=utf-8'}); response.end(value); };
+      if (path.startsWith('/console/api/v1/')) return fakeConsole(request, response, url, parsed, raw, reply);
       if (request.method === 'GET' && path === '/') return reply(200, {version:'15.22.0', origins:[fake.origin], pid:process.pid, host:'127.0.0.1', port:fake.port});
       if (request.method === 'GET' && path === '/emulators') return reply(200, fake.running);
       if (request.method === 'POST' && path === '/_admin/export') return reply(fake.exportStatus, fake.exportStatus === 200 ? {message:'OK'} : {message:'synthetic export failure'});
@@ -118,6 +259,7 @@ before(async () => {
       if (request.method === 'PATCH' && path.startsWith('/v1/projects/demo-fixture/databases/')) return reply(200, {name:`projects/demo-fixture/databases/(default)/documents/${path.split('/documents/')[1]}`, fields:parsed.fields, createTime:'2026-01-01T00:00:00Z', updateTime:'2026-01-03T00:00:00Z'});
       if (request.method === 'POST' && path.endsWith(':runQuery')) return reply(200, [{document:DOCUMENT, readTime:'2026-01-03T00:00:00Z'}, {readTime:'2026-01-03T00:00:00Z', done:true}]);
       if (request.method === 'POST' && path.endsWith(':listCollectionIds')) return reply(200, {collectionIds:['posts', 'settings']});
+      if (request.method === 'POST' && path.endsWith(':runAggregationQuery')) return reply(200, [{readTime:'2026-01-03T00:00:00Z', result:{aggregateFields:{count:{integerValue:'7'}}}}]);
       // Auth.
       if (request.method === 'GET' && path === '/identitytoolkit.googleapis.com/v1/projects/demo-fixture/accounts:batchGet') return reply(200, {users:USERS});
       if (request.method === 'POST' && path === '/identitytoolkit.googleapis.com/v1/projects/demo-fixture/accounts:lookup') return reply(200, {users:USERS.filter(user => parsed.localId?.includes(user.localId) || parsed.email?.includes(user.email))});
@@ -138,7 +280,7 @@ before(async () => {
   fake.origin = `http://127.0.0.1:${fake.port}`;
   fake.running = {firestore:{name:'firestore', host:'127.0.0.1', port:fake.port}, auth:{name:'auth', host:'127.0.0.1', port:fake.port}};
   fake.base = fake.running;
-  fake.full = Object.fromEntries(['firestore', 'auth', 'storage', 'functions', 'pubsub', 'tasks', 'eventarc', 'hub'].map(name => [name, {name, host:'127.0.0.1', port:fake.port}]));
+  fake.full = Object.fromEntries(['firestore', 'auth', 'storage', 'functions', 'pubsub', 'tasks', 'eventarc', 'hub', 'ui'].map(name => [name, {name, host:'127.0.0.1', port:fake.port}]));
   locatorDir = mkdtempSync(join(tmpdir(), 'firenook-locator-'));
   process.env.FIRENOOK_LOCATOR_DIR = locatorDir;
   writeFileSync(locatorPath('demo-fixture'), JSON.stringify({version:'15.22.0', origins:[fake.origin], pid:process.pid}));
@@ -794,18 +936,40 @@ test('the MCP server negotiates the protocol, lists its tools and validates call
   assert.equal(await server.handle({jsonrpc:'2.0', method:'notifications/initialized'}), undefined, 'notifications get no response');
   assert.deepEqual(await server.handle(rpc(3, 'ping')), {jsonrpc:'2.0', id:3, result:{}});
   const list = await server.handle(rpc(4, 'tools/list'));
-  assert.deepEqual(list.result.tools.map(tool => tool.name), ['firenook_status', 'firestore_get', 'firestore_query', 'firestore_set', 'firestore_delete', 'firestore_list_collections',
-    'auth_list_users', 'auth_get_user', 'auth_create_user', 'auth_delete_user', 'auth_oob_codes', 'auth_verification_codes', 'storage_list', 'storage_get_metadata',
-    'functions_list', 'functions_invoke', 'pubsub_publish', 'tasks_stats', 'emulators_export']);
+  assert.deepEqual(list.result.tools.map(tool => tool.name), ['firenook_status', 'emulators_export',
+    'firestore_get', 'firestore_query', 'firestore_count', 'firestore_set', 'firestore_delete', 'firestore_list_collections',
+    'auth_list_users', 'auth_get_user', 'auth_create_user', 'auth_delete_user', 'auth_oob_codes', 'auth_verification_codes',
+    'auth_mint_token', 'auth_set_claims', 'auth_remove_claims', 'auth_disable_user', 'auth_enable_user', 'auth_revoke_tokens', 'auth_list_tenants',
+    'storage_list', 'storage_get_metadata', 'storage_read', 'storage_upload', 'storage_delete', 'storage_copy', 'storage_move',
+    'functions_list', 'functions_invoke', 'functions_list_calls', 'functions_get_call', 'functions_replay_call', 'logs_search', 'logs_facets',
+    'rules_get', 'rules_evaluate', 'rules_list_denials', 'pubsub_publish', 'pubsub_list_topics', 'pubsub_list_subscriptions', 'pubsub_peek',
+    'tasks_stats', 'tasks_list', 'tasks_run', 'schedules_list', 'schedules_run', 'eventarc_publish', 'eventarc_list_events', 'eventarc_get_event', 'eventarc_replay_event',
+    'extensions_list', 'extensions_reload', 'emulators_clear']);
+  const strict = (where, schemaObject) => {
+    assert.equal(schemaObject.type, 'object', where);
+    assert.equal(schemaObject.additionalProperties, false, `${where} is strict`);
+    assert.ok(Array.isArray(schemaObject.required), where);
+    for (const [name, property] of Object.entries(schemaObject.properties)) {
+      assert.ok(property.description || property.items, `${where}.${name} is described`);
+      if (property.properties) strict(`${where}.${name}`, property);
+      if (property.items?.properties) strict(`${where}.${name}[]`, property.items);
+    }
+  };
   for (const tool of list.result.tools) {
     assert.ok(tool.description.length > 20 && !tool.description.includes('\n'), `${tool.name} has a one-line description`);
-    assert.equal(tool.inputSchema.type, 'object');
-    assert.ok(Array.isArray(tool.inputSchema.required));
+    assert.match(tool.name, /^[a-z]+_[a-z_]+$/);
+    strict(tool.name, tool.inputSchema);
   }
+  for (const name of ['emulators_clear', 'storage_delete']) assert.match(TOOLS.find(tool => tool.name === name).description, /^DESTRUCTIVE: /);
   assert.equal(TOOLS.length, list.result.tools.length);
+  assert.ok(TOOLS.every(tool => tool.group === 'status' || TOOL_GROUPS.includes(tool.group)), 'every tool is in a selectable group');
   const only = createMcpServer({...options, project:'demo-fixture', only:'auth,tasks'}, dir, quiet);
-  assert.deepEqual((await only.handle(rpc(5, 'tools/list'))).result.tools.map(tool => tool.name), ['firenook_status', 'auth_list_users', 'auth_get_user', 'auth_create_user', 'auth_delete_user', 'auth_oob_codes', 'auth_verification_codes', 'tasks_stats', 'emulators_export']);
-  assert.throws(() => createMcpServer({...options, only:'wat'}, dir), /wat is not a tool group/);
+  assert.deepEqual((await only.handle(rpc(5, 'tools/list'))).result.tools.map(tool => tool.name), ['firenook_status', 'emulators_export', 'auth_list_users', 'auth_get_user', 'auth_create_user', 'auth_delete_user', 'auth_oob_codes', 'auth_verification_codes',
+    'auth_mint_token', 'auth_set_claims', 'auth_remove_claims', 'auth_disable_user', 'auth_enable_user', 'auth_revoke_tokens', 'auth_list_tenants', 'tasks_stats', 'tasks_list', 'tasks_run']);
+  const groups = createMcpServer({...options, project:'demo-fixture', only:'logs,rules,schedules,eventarc,extensions,reset'}, dir, quiet);
+  assert.deepEqual((await groups.handle(rpc(5, 'tools/list'))).result.tools.map(tool => tool.name), ['firenook_status', 'emulators_export', 'logs_search', 'logs_facets', 'rules_get', 'rules_evaluate', 'rules_list_denials',
+    'schedules_list', 'schedules_run', 'eventarc_publish', 'eventarc_list_events', 'eventarc_get_event', 'eventarc_replay_event', 'extensions_list', 'extensions_reload', 'emulators_clear']);
+  assert.throws(() => createMcpServer({...options, only:'wat'}, dir), /wat is not a tool group; --only takes firestore, auth, storage, functions, logs, rules, pubsub, tasks, schedules, eventarc, extensions, reset/);
   assert.equal((await server.handle(rpc(6, 'resources/list'))).error.code, -32601);
   assert.equal((await server.handle(rpc(7, 'tools/call', {name:'nope'}))).error.code, -32602);
   assert.equal((await server.handle(rpc(8, 'tools/call', {name:'firestore_get', arguments:{}}))).error.message, 'Invalid arguments for firestore_get: missing required argument path');
@@ -823,9 +987,14 @@ test('the MCP server negotiates the protocol, lists its tools and validates call
   const get = await absent.handle(rpc(14, 'tools/call', {name:'firestore_get', arguments:{path:'users/alice'}}));
   assert.equal(get.result.isError, true);
   assert.match(text(get).error, /Did not find a running emulator hub for project demo-absent/);
-  // No project at all.
-  const none = createMcpServer(options, dir, quiet);
-  assert.match(text(await none.handle(rpc(15, 'tools/call', {name:'firenook_status', arguments:{}}))).error, /No firebase\.json/);
+  assert.equal((await server.handle(rpc(15, 'tools/call', {name:'emulators_clear', arguments:{sections:['wat']}}))).error.message, 'Invalid arguments for emulators_clear: sections[0] must be one of firestore, auth, storage, pubsub, tasks');
+  assert.equal((await server.handle(rpc(16, 'tools/call', {name:'rules_evaluate', arguments:{method:'get', path:'a/b', object:{size:'x'}}}))).error.message, 'Invalid arguments for rules_evaluate: object: size must be an integer');
+  assert.equal((await server.handle(rpc(17, 'tools/call', {name:'rules_evaluate', arguments:{method:'get', path:'a/b', existing:3}}))).error.message, 'Invalid arguments for rules_evaluate: existing must be an object or null');
+  assert.equal((await server.handle(rpc(18, 'tools/call', {name:'storage_read', arguments:{path:'a', maxBytes:2 ** 30}}))).error.message, 'Invalid arguments for storage_read: maxBytes must be at most 1048576');
+  // A console tool against no suite is a tool error too.
+  const logs = await absent.handle(rpc(19, 'tools/call', {name:'logs_search', arguments:{level:['error']}}));
+  assert.equal(logs.result.isError, true);
+  assert.match(text(logs).error, /Did not find a running emulator hub for project demo-absent/);
 });
 test('MCP tools reach the emulators through the hub listing with the owner token', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-mcp-tools-'));
@@ -945,6 +1114,370 @@ test('MCP tools reach the emulators through the hub listing with the owner token
     assert.match(text(missing).error, /did not start Auth/);
   });
 });
+// One tool call against a server, failing the test on a tool error unless `expectError`.
+const toolCaller = server => async (name, args, expectError = false) => {
+  const response = await server.handle(rpc(1, 'tools/call', {name, arguments:args}));
+  assert.ok(response.result, `${name}: ${JSON.stringify(response.error)}`);
+  assert.equal(Boolean(response.result.isError), expectError, `${name}: ${response.result.content[0].text}`);
+  return text(response);
+};
+const consoleRequest = (mark, route) => since(mark).filter(request => `${request.method} ${request.path}` === `${route.split(' ')[0]} /console/api/v1${route.split(' ')[1]}`).pop();
+test('MCP Firestore count and collection-group queries', async () => {
+  const callTool = toolCaller(createMcpServer({...options, project:'demo-fixture'}, mkdtempSync(join(tmpdir(), 'firenook-mcp-count-')), quiet));
+  await withSuite(fake.full, async () => {
+    let mark = fake.requests.length;
+    assert.deepEqual(await callTool('firestore_count', {collection:'users', where:[{field:'age', op:'>', value:18}]}), {collection:'users', count:7});
+    let request = since(mark).find(item => item.path.endsWith(':runAggregationQuery'));
+    assert.equal(request.path, '/v1/projects/demo-fixture/databases/(default)/documents:runAggregationQuery');
+    assert.equal(request.headers.authorization, 'Bearer owner');
+    assert.deepEqual(request.body, {structuredAggregationQuery:{structuredQuery:{from:[{collectionId:'users'}], where:{fieldFilter:{field:{fieldPath:'age'}, op:'GREATER_THAN', value:{integerValue:18}}}}, aggregations:[{alias:'count', count:{}}]}});
+    mark = fake.requests.length;
+    assert.deepEqual(await callTool('firestore_count', {collection:'users/alice/posts', collectionGroup:true}), {collection:'users/alice/posts', collectionGroup:true, count:7});
+    request = since(mark).find(item => item.path.endsWith(':runAggregationQuery'));
+    assert.equal(request.path, '/v1/projects/demo-fixture/databases/(default)/documents/users/alice:runAggregationQuery');
+    assert.deepEqual(request.body.structuredAggregationQuery.structuredQuery.from, [{collectionId:'posts', allDescendants:true}]);
+    mark = fake.requests.length;
+    const group = await callTool('firestore_query', {collection:'posts', collectionGroup:true, limit:3});
+    assert.equal(group.collectionGroup, true);
+    assert.deepEqual(since(mark).find(item => item.path.endsWith(':runQuery')).body, {structuredQuery:{from:[{collectionId:'posts', allDescendants:true}], limit:3}});
+    assert.match((await callTool('firestore_count', {collection:'users/alice'}, true)).error, /users\/alice is a document path; pass a collection path$/);
+    assert.match((await callTool('firestore_query', {collection:'users/alice', collectionGroup:true}, true)).error, /users\/alice is a document path; pass a collection path or a collection id$/);
+  });
+});
+test('MCP console tools: logs, function calls, rules, Auth, Storage files, Eventarc, Extensions, Pub/Sub, Tasks and schedules', async () => {
+  const callTool = toolCaller(createMcpServer({...options, project:'demo-fixture'}, mkdtempSync(join(tmpdir(), 'firenook-mcp-console-')), quiet));
+  RULES_ROUTES = (route, query, body, reply, fail) => {
+    const source = "rules_version = '2';\nservice cloud.firestore {\n  match /orders/{id} {\n    allow read: if request.auth.uid == resource.data.owner;\n  }\n}\n";
+    if (route === 'GET /firestore/rules') return reply(200, {database:query.database ?? '(default)', source, enforced:true, path:'/p/firestore.rules', hash:'h1', fileSource:source, fileProblems:[]});
+    if (route === 'GET /storage/rules') return fail(503, 'unavailable', 'Storage runs without rules here.');
+    const allows = uid => [{line:4, from:source.indexOf('request.auth.uid'), to:source.indexOf(';\n  }'), outcome:uid === 'alice' ? 'allow' : 'deny'}];
+    if (route === 'POST /firestore/rules/evaluate') {
+      const [request] = body.requests;
+      if (request.path === 'nowhere/x') return reply(200, {results:[{outcome:'deny', error:null, allows:[], explanation:[], truncated:false, changedKeys:null, queryReason:null}]});
+      return reply(200, {results:[{outcome:request.auth?.uid === 'alice' ? 'allow' : 'deny', error:null, allows:allows(request.auth?.uid),
+        explanation:[{from:source.indexOf('request.auth.uid'), to:source.indexOf('request.auth.uid') + 16, line:4, value:JSON.stringify(request.auth?.uid ?? null), error:false}], truncated:false, changedKeys:null, queryReason:null}]});
+    }
+    if (route === 'POST /storage/rules/evaluate') return fail(503, 'unavailable', 'Storage runs without rules here.');
+    if (route === 'GET /firestore/rules/decisions/r-1') return reply(200, {requestId:'r-1', recordedOutcome:'deny', rules:source, rulesHash:'h1', result:{outcome:'deny', error:null, allows:allows('bob'), explanation:[], truncated:false}, request:{}});
+    if (route === 'GET /logs/entries' && /kind:rules\.denied/.test(query.q)) {
+      return reply(200, {items:[{cursor:'c.1', time:'2026-01-03T00:00:00.000Z', level:'warn', service:'firestore', kind:'rules.denied', message:'Rules denied get on orders/o1 for bob', payload:{database:'(default)', method:'get', origin:'app', path:'orders/o1', requestId:'r-1', uid:'bob'}},
+        {cursor:'c.2', time:'2026-01-03T00:00:01.000Z', level:'warn', service:'storage', kind:'storage.denied', message:'Rules denied get on secret/x', payload:{bucket:'demo-fixture.appspot.com', decision:'s1', method:'get', path:'secret/x', uid:null}}], older:null, newer:null, tail:'c.2', anchor:null});
+    }
+  };
+  try {
+    await withSuite(fake.full, async () => {
+      // Logs.
+      let mark = fake.requests.length;
+      const lines = await callTool('logs_search', {service:['functions'], level:['warn', 'error'], function:'helloWorld', text:'order failed', from:'-15m', limit:5});
+      const search = consoleRequest(mark, 'GET /logs/entries');
+      assert.deepEqual(search.query, {q:'service:functions level:warn level:error function:us-central1-helloWorld function:europe-west1-helloWorld "order failed"', from:'-15m', limit:'5'});
+      assert.equal(search.headers['x-firenook-client'], `firenook-mcp/${manifest.version}`);
+      assert.deepEqual(lines, {count:1, older:'5a62a7b2.40', lines:[{cursor:'5a62a7b2.48', time:LOG_LINE.time, level:'error', service:'functions', function:'us-central1-helloWorld', call:'eb524d-8', message:LOG_LINE.message, payload:{orderId:'o1'}}]});
+      assert.match((await callTool('logs_search', {q:'source:x'}, true)).error, /HTTP 400: Unknown filter "source:"/);
+      const facets = await callTool('logs_facets', {level:['error']});
+      assert.deepEqual(facets.levels, {debug:0, info:2, warn:1, error:1});
+      assert.deepEqual(facets.kinds, {'function.failed':1});
+      // Function calls.
+      mark = fake.requests.length;
+      const calls = await callTool('functions_list_calls', {function:'us-central1-helloWorld', outcome:'failed', q:'took:>200ms'});
+      assert.equal(consoleRequest(mark, 'GET /functions/invocations').query.q, 'function:us-central1-helloWorld outcome:failed took:>200ms');
+      assert.deepEqual(calls.calls[0], {id:'eb524d-8', function:'us-central1-helloWorld', kind:'http', origin:'client', summary:'POST /', startedAt:CALL.startedAt, durationMs:204.26, outcome:'failed', status:500, cold:true, logCount:1});
+      const detail = await callTool('functions_get_call', {id:'eb524d-8'});
+      assert.equal(detail.error, 'Unhandled error Error: boom');
+      assert.equal(detail.stack, LOG_LINE.message);
+      assert.deepEqual(detail.request, {method:'POST', path:'/', contentType:'application/json', headers:{'content-type':'application/json', authorization:'(hidden)'}, body:{data:{a:1}}, size:13});
+      assert.deepEqual(detail.response, {status:500, contentType:'text/html', body:'Internal Server Error', size:21});
+      assert.deepEqual(detail.timings, {workerStartMs:null, firstByteMs:204.25, totalMs:204.26});
+      assert.match((await callTool('functions_get_call', {id:'gone-1'}, true)).error, /HTTP 404: The engine no longer keeps invocation/);
+      mark = fake.requests.length;
+      const replay = await callTool('functions_replay_call', {id:'eb524d-8'});
+      assert.deepEqual(consoleRequest(mark, 'POST /functions/invocations/eb524d-8/replay').body, {});
+      assert.deepEqual({id:replay.id, replayOf:replay.replayOf, outcome:replay.outcome, status:replay.status, contentType:replay.contentType, body:replay.body}, {id:'eb524d-9', replayOf:'eb524d-8', outcome:'succeeded', status:200, contentType:'application/json', body:{ok:true}});
+      assert.match((await callTool('functions_replay_call', {id:'gone-1'}, true)).error, /HTTP 404/);
+      // Security Rules.
+      const rules = await callTool('rules_get', {});
+      assert.equal(rules.firestore.enforced, true);
+      assert.match(rules.storage.error, /Storage runs without rules here/);
+      assert.match((await callTool('rules_get', {service:'storage'}, true)).error, /HTTP 503: Storage runs without rules here/);
+      mark = fake.requests.length;
+      const denied = await callTool('rules_evaluate', {method:'get', path:'/orders/o1', uid:'bob', claims:{admin:false}});
+      assert.deepEqual(consoleRequest(mark, 'POST /firestore/rules/evaluate').body, {requests:[{method:'get', path:'orders/o1', auth:{uid:'bob', token:{admin:false}}}]});
+      assert.deepEqual({allowed:denied.allowed, outcome:denied.outcome, decidedBy:denied.decidedBy}, {allowed:false, outcome:'deny',
+        decidedBy:[{line:4, condition:'request.auth.uid == resource.data.owner', text:'allow read: if request.auth.uid == resource.data.owner;', outcome:'deny'}]});
+      assert.deepEqual(denied.steps, [{line:4, expression:'request.auth.uid', value:'"bob"'}]);
+      const allowed = await callTool('rules_evaluate', {method:'create', path:'orders/o2', uid:'alice', data:{owner:'alice', at:{$timestamp:'2026-01-01T00:00:00Z'}}, existing:null, time:'2026-01-02T00:00:00Z'});
+      assert.equal(allowed.allowed, true);
+      assert.deepEqual(consoleRequest(mark, 'POST /firestore/rules/evaluate') && fake.requests.filter(item => item.path === '/console/api/v1/firestore/rules/evaluate').pop().body.requests[0],
+        {method:'create', path:'orders/o2', auth:{uid:'alice', token:{}}, data:{owner:{stringValue:'alice'}, at:{timestampValue:'2026-01-01T00:00:00.000Z'}}, resource:null, time:'2026-01-02T00:00:00Z'});
+      mark = fake.requests.length;
+      await callTool('rules_evaluate', {method:'list', path:'orders', idToken:'h.p.', where:[{field:'owner', op:'==', value:'alice'}], limit:5, collectionGroup:true});
+      assert.deepEqual(consoleRequest(mark, 'POST /firestore/rules/evaluate').body.requests[0], {method:'list', path:'orders', authorization:'Bearer h.p.', group:true,
+        query:{where:{fieldFilter:{field:{fieldPath:'owner'}, op:'EQUAL', value:{stringValue:'alice'}}}, limit:5}});
+      assert.deepEqual(await callTool('rules_evaluate', {method:'get', path:'nowhere/x'}), {service:'firestore', method:'get', path:'nowhere/x', as:'unauthenticated', allowed:false, outcome:'deny', decidedBy:[],
+        reason:'No allow statement matches this request, so it is denied by default.'});
+      assert.match((await callTool('rules_evaluate', {method:'get', path:'a/b', claims:{x:1}}, true)).error, /claims need a uid/);
+      assert.match((await callTool('rules_evaluate', {service:'storage', method:'get', path:'a', data:{}}, true)).error, /for Storage pass object/);
+      assert.match((await callTool('rules_evaluate', {service:'storage', method:'create', path:'a.png', uid:'u', object:{size:3}}, true)).error, /HTTP 503/);
+      const denials = await callTool('rules_list_denials', {explain:true});
+      assert.equal(denials.count, 2);
+      assert.deepEqual(denials.denials[0].decidedBy, [{line:4, condition:'request.auth.uid == resource.data.owner', text:'allow read: if request.auth.uid == resource.data.owner;', outcome:'deny'}]);
+      assert.equal(denials.denials[1].service, 'storage');
+      assert.match(denials.denials[1].explainError, /HTTP 404/, 'a decision the engine lost is reported per denial');
+      mark = fake.requests.length;
+      assert.equal((await callTool('rules_list_denials', {service:'firestore', path:'orders', uid:'bob'})).count, 1);
+      assert.equal(consoleRequest(mark, 'GET /logs/entries').query.q, 'kind:rules.denied payload.uid:bob');
+      // More of Auth.
+      mark = fake.requests.length;
+      const token = await callTool('auth_mint_token', {uid:'alice', claims:{role:'editor'}});
+      assert.deepEqual(consoleRequest(mark, 'POST /auth/tokens').body, {uid:'alice', claims:{role:'editor'}});
+      assert.deepEqual({idToken:token.idToken, refreshToken:token.refreshToken, expiresAt:token.expiresAt, claims:token.claims}, {idToken:'header.payload.', refreshToken:'refresh-1', expiresAt:'2026-01-03T01:00:00Z', claims:{user_id:'alice', role:'editor'}});
+      assert.match((await callTool('auth_mint_token', {uid:'zed'}, true)).error, /no user zed/);
+      mark = fake.requests.length;
+      assert.deepEqual(await callTool('auth_set_claims', {uid:'alice', claims:{admin:true}}), {users:['alice'], changed:1, unchanged:0});
+      assert.deepEqual(consoleRequest(mark, 'POST /auth/users:setClaims').body, {target:{by:'keys', keys:['|alice']}, claims:{admin:true}, mode:'replace'});
+      assert.ok(consoleRequest(mark, `GET /jobs/job-${CONSOLE.jobs.size}`), 'the job is polled until it finished');
+      mark = fake.requests.length;
+      await callTool('auth_remove_claims', {uids:['alice', 'bob'], tenant:'acme-1', keys:['admin']});
+      assert.deepEqual(consoleRequest(mark, 'POST /auth/users:removeClaims').body, {target:{by:'keys', keys:['acme-1|alice', 'acme-1|bob']}, keys:['admin']});
+      for (const [tool, action] of [['auth_disable_user', 'disable'], ['auth_revoke_tokens', 'revoke']]) {
+        mark = fake.requests.length;
+        assert.equal((await callTool(tool, {uid:'bob'})).changed, 1);
+        assert.deepEqual(consoleRequest(mark, `POST /auth/users:${action}`).body, {target:{by:'keys', keys:['|bob']}});
+      }
+      assert.deepEqual(await callTool('auth_enable_user', {uid:'bob'}), {users:['bob'], changed:0, unchanged:1});
+      assert.match((await callTool('auth_disable_user', {uid:'nobody'}, true)).error, /nobody: USER_NOT_FOUND/);
+      assert.match((await callTool('auth_disable_user', {}, true)).error, /Name the user with uid/);
+      assert.deepEqual(await callTool('auth_list_tenants', {limit:10}), {total:1, projectUsers:3, tenants:[{tenantId:'acme-1', displayName:'Acme', users:2, allowPasswordSignup:true, enableEmailLinkSignin:false, enableAnonymousUser:false, disableAuth:false, mfaState:'DISABLED', mfaProviders:[]}]});
+      // Storage files.
+      const text = await callTool('storage_read', {path:'docs/a.txt'});
+      assert.deepEqual({encoding:text.encoding, content:text.content, truncated:text.truncated, size:text.size}, {encoding:'text', content:'hello world', truncated:false, size:11});
+      mark = fake.requests.length;
+      const binary = await callTool('storage_read', {path:'img/p.png', maxBytes:4});
+      assert.equal(consoleRequest(mark, 'GET /storage/object/media').headers.range, 'bytes=0-3');
+      assert.deepEqual({encoding:binary.encoding, content:binary.content, returnedBytes:binary.returnedBytes, truncated:binary.truncated}, {encoding:'base64', content:Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64'), returnedBytes:4, truncated:true});
+      assert.match((await callTool('storage_read', {path:'missing'}, true)).error, /HTTP 404: No object missing/);
+      mark = fake.requests.length;
+      const uploaded = await callTool('storage_upload', {path:'docs/b.bin', base64:Buffer.from([1, 2, 3]).toString('base64'), customMetadata:{k:'v'}, ifNotExists:true});
+      const put = consoleRequest(mark, 'PUT /storage/object');
+      assert.deepEqual(put.query, {bucket:'demo-fixture.appspot.com', name:'docs/b.bin'});
+      assert.deepEqual([...put.raw], [1, 2, 3]);
+      assert.equal(put.headers['content-type'], 'application/octet-stream');
+      assert.equal(put.headers['x-firenook-console'], '1');
+      assert.equal(put.headers.authorization, 'Bearer owner');
+      assert.equal(put.headers['if-none-match'], '*');
+      assert.deepEqual(JSON.parse(Buffer.from(put.headers['x-firenook-metadata'].slice(4), 'base64url')), {customMetadata:{k:'v'}});
+      assert.equal(uploaded.size, 3);
+      await callTool('storage_upload', {path:'docs/c.txt', text:'héllo'});
+      assert.equal(CONSOLE.objects.get('demo-fixture.appspot.com/docs/c.txt').bytes.toString('utf8'), 'héllo');
+      assert.match((await callTool('storage_upload', {path:'x', text:'a', base64:'YQ=='}, true)).error, /exactly one of text or base64/);
+      assert.deepEqual(await callTool('storage_copy', {path:'docs/a.txt', to:'archive/a.txt'}), {from:{bucket:'demo-fixture.appspot.com', path:'docs/a.txt'}, to:{bucket:'demo-fixture.appspot.com', path:'archive/a.txt'}, objects:1});
+      mark = fake.requests.length;
+      assert.match((await callTool('storage_copy', {path:'docs/a.txt', to:'archive/a.txt'}, true)).error, /archive\/a\.txt already exists/);
+      assert.deepEqual(consoleRequest(mark, 'POST /storage/objects:copy').body, {bucket:'demo-fixture.appspot.com', target:{by:'keys', keys:['docs/a.txt']}, destination:{bucket:'demo-fixture.appspot.com', prefix:''}, renameTo:'archive/a.txt', onConflict:'fail'});
+      await callTool('storage_move', {path:'archive/a.txt', to:'moved/a.txt', toBucket:'other', overwrite:true});
+      assert.ok(CONSOLE.objects.has('other/moved/a.txt') && !CONSOLE.objects.has('demo-fixture.appspot.com/archive/a.txt'));
+      assert.match((await callTool('storage_move', {path:'nothing.txt', to:'x.txt'}, true)).error, /nothing to move; nothing\.txt does not exist/);
+      mark = fake.requests.length;
+      assert.deepEqual(await callTool('storage_delete', {path:'docs/c.txt'}), {bucket:'demo-fixture.appspot.com', path:'docs/c.txt', deleted:1});
+      assert.deepEqual(consoleRequest(mark, 'DELETE /storage/object').body, {bucket:'demo-fixture.appspot.com', name:'docs/c.txt'});
+      assert.deepEqual(await callTool('storage_delete', {path:'docs/'}), {bucket:'demo-fixture.appspot.com', path:'docs/', deleted:2});
+      assert.match((await callTool('storage_delete', {path:'docs/c.txt'}, true)).error, /HTTP 404/);
+      // Eventarc.
+      mark = fake.requests.length;
+      const event = await callTool('eventarc_publish', {type:'com.example.order.placed', data:{orderId:'o1'}, attributes:{region:'eu'}});
+      assert.deepEqual(consoleRequest(mark, 'POST /eventarc/channel/publish').body, {channel:'projects/demo-fixture/locations/us-central1/channels/firebase', type:'com.example.order.placed', source:'firenook-mcp', attributes:{region:'eu'}, encoding:'json', data:'{"orderId":"o1"}'});
+      assert.deepEqual(event.deliveries, [{function:'us-central1-onOrderPlaced', matched:true, outcome:'succeeded', durationMs:0.76, call:'eb524d-12'}]);
+      assert.deepEqual(event.data, {orderId:'o1'});
+      mark = fake.requests.length;
+      await callTool('eventarc_publish', {type:'t', text:'plain', channel:'google'});
+      assert.deepEqual(consoleRequest(mark, 'POST /eventarc/channel/publish').body, {channel:'google', type:'t', source:'firenook-mcp', encoding:'text', data:'plain'});
+      assert.match((await callTool('eventarc_publish', {type:'t', text:'a', data:1}, true)).error, /not both/);
+      assert.equal((await callTool('eventarc_list_events', {q:'delivery:failed'})).events[0].id, 'ab12cd-1');
+      assert.equal((await callTool('eventarc_get_event', {id:'ab12cd-1'})).deliveries[0].call, 'eb524d-12');
+      const replayed = await callTool('eventarc_replay_event', {id:'ab12cd-1'});
+      assert.deepEqual({id:replayed.id, replayOf:replayed.replayOf}, {id:'ab12cd-2', replayOf:'ab12cd-1'});
+      assert.match((await callTool('eventarc_get_event', {id:'zz-9'}, true)).error, /HTTP 404/);
+      // Extensions.
+      assert.deepEqual((await callTool('extensions_list', {})).instances, [{instanceId:'resize', kind:'registry', reference:'firebase/storage-resize-images', version:'0.2.0', name:'Resize Images', state:'running', functionCount:2}]);
+      assert.deepEqual((await callTool('extensions_reload', {instance:'resize'})).functions, [{functionId:'ext-resize-generateResizedImage', kind:'storage', status:'receiving'}]);
+      assert.match((await callTool('extensions_reload', {instance:'nope'}, true)).error, /There is no extension instance nope/);
+      // Pub/Sub.
+      assert.deepEqual((await callTool('pubsub_list_topics', {})).topics, [{name:'projects/demo-fixture/topics/orders', kind:'user', published:5, lastPublishedAt:'2026-01-03T00:00:00Z', subscriptions:['projects/demo-fixture/subscriptions/orders-sub'], functions:['us-central1-onOrder']}]);
+      const subscriptions = await callTool('pubsub_list_subscriptions', {});
+      assert.deepEqual(subscriptions.subscriptions.map(item => item.name), ['projects/demo-fixture/subscriptions/orders-sub', 'projects/demo-fixture/subscriptions/old']);
+      assert.equal((await callTool('pubsub_list_subscriptions', {topic:'orders'})).count, 1);
+      mark = fake.requests.length;
+      const peek = await callTool('pubsub_peek', {subscription:'orders-sub', full:true});
+      assert.equal(consoleRequest(mark, 'GET /pubsub/backlog').query.subscription, 'projects/demo-fixture/subscriptions/orders-sub');
+      assert.deepEqual(peek.messages.map(message => [message.id, message.data, message.truncated ?? null]), [['41', 'y'.repeat(300), false], ['42', {id:2}, null]]);
+      assert.equal(peek.total, 2);
+      assert.match((await callTool('pubsub_peek', {subscription:'nope'}, true)).error, /Subscription does not exist/);
+      // Cloud Tasks.
+      const tasks = await callTool('tasks_list', {});
+      assert.deepEqual(tasks.queues[0].tasks, [{id:'1', name:'123', state:'pending', attempt:0, executionCount:0, scheduleTime:null, dueAt:null, url:'http://x/processTask', body:{data:{id:1}}}]);
+      mark = fake.requests.length;
+      assert.deepEqual(await callTool('tasks_run', {queue:'processTask', id:'1'}), {queue:'processTask', id:'1', started:true, message:'The task is sent on the next tick.'});
+      assert.deepEqual(consoleRequest(mark, 'POST /tasks/task/run').body, {queue:'queue:demo-fixture-us-central1-processTask', id:'1'});
+      assert.match((await callTool('tasks_run', {queue:'processTask', id:'9'}, true)).error, /No task of processTask has this id/);
+      assert.match((await callTool('tasks_list', {queue:'other'}, true)).error, /No Cloud Tasks queue other; the suite has processTask/);
+      // Schedules.
+      assert.deepEqual((await callTool('schedules_list', {})).schedules.map(item => item.functionId), ['us-central1-nightly', 'us-central1-nightlyV1']);
+      mark = fake.requests.length;
+      assert.deepEqual(await callTool('schedules_run', {function:'nightly'}), {functionId:'us-central1-nightly', at:'2026-01-03T00:00:00Z', trigger:'console', messageId:'7', skipped:null, delivery:{state:'queued', call:null, status:null, durationMs:null}});
+      assert.deepEqual(consoleRequest(mark, 'POST /pubsub/schedule/run').body, {functionId:'us-central1-nightly'});
+      assert.match((await callTool('schedules_run', {function:'weekly'}, true)).error, /No scheduled function weekly; the suite has us-central1-nightly, us-central1-nightlyV1/);
+    });
+  } finally { RULES_ROUTES = undefined; }
+});
+test('MCP emulators_clear keeps the console\'s safeguard: more than one service names the project id', async () => {
+  const callTool = toolCaller(createMcpServer({...options, project:'demo-fixture'}, mkdtempSync(join(tmpdir(), 'firenook-mcp-clear-')), quiet));
+  await withSuite(fake.full, async () => {
+    let mark = fake.requests.length;
+    const refused = await callTool('emulators_clear', {sections:['firestore', 'auth']}, true);
+    assert.equal(refused.error, 'Clearing 2 services (firestore, auth) deletes all their data; to confirm, pass confirmProject: "demo-fixture" (the project id)');
+    assert.equal(consoleRequest(mark, 'POST /suite/clear'), undefined, 'nothing is cleared');
+    assert.match((await callTool('emulators_clear', {sections:['firestore', 'storage'], confirmProject:'demo-other'}, true)).error, /pass confirmProject: "demo-fixture" \(the project id\), not "demo-other"/);
+    mark = fake.requests.length;
+    assert.deepEqual(await callTool('emulators_clear', {sections:['firestore', 'auth', 'firestore'], confirmProject:'demo-fixture'}), {project:'demo-fixture', cleared:[{section:'firestore', removed:3}, {section:'auth', removed:4}]});
+    assert.deepEqual(consoleRequest(mark, 'POST /suite/clear').body, {sections:['firestore', 'auth'], confirm:'demo-fixture'});
+    mark = fake.requests.length;
+    assert.deepEqual(await callTool('emulators_clear', {sections:['firestore'], runTriggers:true}), {project:'demo-fixture', cleared:[{section:'firestore', removed:3}]});
+    assert.deepEqual(consoleRequest(mark, 'POST /suite/clear').body, {sections:['firestore'], runTriggers:true}, 'one service needs no confirmation');
+    assert.match((await callTool('emulators_clear', {sections:[]}, true)).error, /Name at least one service/);
+  });
+});
+test('MCP console tools name the cause when the suite runs without the UI', async () => {
+  const callTool = toolCaller(createMcpServer({...options, project:'demo-fixture'}, mkdtempSync(join(tmpdir(), 'firenook-mcp-noui-')), quiet));
+  const {ui: _, ...withoutUi} = fake.full;
+  await withSuite(withoutUi, async () => {
+    for (const [name, args] of [['logs_search', {}], ['rules_get', {service:'firestore'}], ['auth_mint_token', {uid:'alice'}], ['emulators_clear', {sections:['auth']}], ['storage_read', {path:'a'}]]) {
+      assert.match((await callTool(name, args, true)).error, /uses the console API, which the suite serves on the Emulator UI port, and the running suite for demo-fixture was started without the UI .*emulators\.ui\.enabled in firebase\.json, or firenook emulators:start --ui/, name);
+    }
+    assert.equal((await callTool('firestore_get', {path:'users/alice'})).exists, true, 'the emulator tools need no UI');
+  });
+});
+test('MCP requests carry x-firenook-client and every tools/call posts the call beacon, fire-and-forget', async () => {
+  const server = createMcpServer({...options, project:'demo-fixture'}, mkdtempSync(join(tmpdir(), 'firenook-mcp-beacon-')), quiet);
+  const callTool = toolCaller(server);
+  const client = `firenook-mcp/${manifest.version}`;
+  await withSuite(fake.full, async () => {
+    const mark = fake.requests.length;
+    const beacons = fake.beacons.length;
+    await callTool('firestore_get', {path:'users/alice'});
+    await callTool('functions_invoke', {name:'onUserCreated', eventData:{name:'Eve'}, resource:'users/eve'});
+    await callTool('emulators_export', {path:join(tmpdir(), `firenook-export-${process.pid}-beacon`)});
+    await callTool('auth_get_user', {uid:'zed'});
+    await server.handle(rpc(9, 'tools/call', {name:'storage_read', arguments:{path:'missing'}}));
+    await server.settled();
+    rmSync(join(tmpdir(), `firenook-export-${process.pid}-beacon`), {recursive:true, force:true});
+    const sent = since(mark);
+    assert.ok(sent.length > 8);
+    for (const request of sent) assert.equal(request.headers['x-firenook-client'], client, `${request.method} ${request.path} is marked`);
+    const posted = fake.beacons.slice(beacons);
+    assert.deepEqual(posted.map(beacon => beacon.body), ['firestore_get', 'functions_invoke', 'emulators_export', 'auth_get_user', 'storage_read'].map(tool => ({client, tool})), 'one beacon per call, failed calls too');
+    for (const beacon of posted) {
+      assert.equal(beacon.method, 'POST');
+      assert.equal(beacon.headers['content-type'], 'application/json');
+      assert.equal(beacon.headers['x-firenook-client'], client);
+    }
+    // An engine without the route (404) changes nothing; one that never
+    // answers neither delays the call nor holds the beacon past about a second.
+    fake.beaconStatus = 404;
+    try { assert.equal((await callTool('firestore_get', {path:'users/alice'})).exists, true); await server.settled(); }
+    finally { delete fake.beaconStatus; }
+    fake.beaconStatus = 'hang';
+    try {
+      const started = Date.now();
+      assert.equal((await callTool('firestore_get', {path:'users/alice'})).exists, true);
+      assert.ok(Date.now() - started < 900, 'the response does not wait for the beacon');
+      await server.settled();
+      const waited = Date.now() - started;
+      assert.ok(waited >= 900 && waited < 3000, `the beacon gives up after about a second (${waited} ms)`);
+    } finally {
+      delete fake.beaconStatus;
+      for (const response of fake.hanging.splice(0)) response.destroy();
+    }
+  });
+  // No UI, no console, no beacon; no suite at all, no beacon either.
+  const {ui: _, ...withoutUi} = fake.full;
+  await withSuite(withoutUi, async () => {
+    const beacons = fake.beacons.length;
+    await callTool('firestore_get', {path:'users/alice'});
+    await server.settled();
+    assert.equal(fake.beacons.length, beacons);
+  });
+  // The CLI's own commands outside the server send no marker.
+  const mark = fake.requests.length;
+  await exportEmulators(join(tmpdir(), `firenook-export-${process.pid}-plain`), {...options, project:'demo-fixture', force:true}, mkdtempSync(join(tmpdir(), 'firenook-plain-')), log());
+  rmSync(join(tmpdir(), `firenook-export-${process.pid}-plain`), {recursive:true, force:true});
+  assert.ok(since(mark).length && since(mark).every(request => request.headers['x-firenook-client'] === undefined));
+});
+test('firenook mcp with no firebase.json and no --project finds the one running suite on every call', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-mcp-discover-'));
+  const locators = mkdtempSync(join(tmpdir(), 'firenook-locators-'));
+  const write = (project, origin = fake.origin, pid = process.pid) => writeFileSync(join(locators, `hub-${project}.json`), JSON.stringify({version:'15.22.0', origins:[origin], pid}));
+  const previous = process.env.FIRENOOK_LOCATOR_DIR;
+  process.env.FIRENOOK_LOCATOR_DIR = locators;
+  try {
+    const server = createMcpServer(options, dir, quiet);
+    const callTool = toolCaller(server);
+    await withSuite(fake.full, async () => {
+      // None running: tools say how to start one or name it.
+      let status = await callTool('firenook_status', {});
+      assert.equal(status.running, false);
+      assert.deepEqual(status.found, {by:'locator'});
+      assert.deepEqual(status.suites, {answering:[], stale:[]});
+      assert.match(status.error, /^No running suite found: no firebase\.json in .*, no --project, and no hub locator in .* answers\. Start the emulators with firenook emulators:start in the project folder, or start firenook mcp with --project <id> \(or --config <firebase\.json>\)\.$/);
+      assert.match((await callTool('firestore_get', {path:'users/alice'}, true)).error, /No running suite found.*firenook emulators:start.*--project <id>/);
+      // Stale locators (nothing answers, or another suite's hub answers) do not count.
+      write('demo-dead', `http://127.0.0.1:${fake.deadPort}`);
+      write('demo-reused', fake.origin, 1);
+      writeFileSync(join(locators, 'hub-Not_A_Project.json'), '{}');
+      writeFileSync(join(locators, 'unrelated.json'), '{}');
+      const stale = (await callTool('firestore_get', {path:'users/alice'}, true)).error;
+      assert.match(stale, /\(stale, not answering: [^,]*hub-demo-dead\.json, [^,]*hub-demo-reused\.json\)\. Start/, 'only the locator files of valid project ids are suites');
+      // A suite started after the server is found on the next call.
+      write('demo-fixture');
+      const alice = await callTool('firestore_get', {path:'users/alice'});
+      assert.equal(alice.data.name, 'Alice');
+      status = await callTool('firenook_status', {});
+      assert.equal(status.project, 'demo-fixture');
+      assert.deepEqual(status.found, {by:'locator', locator:join(locators, 'hub-demo-fixture.json')});
+      assert.equal(status.console, `${fake.origin}/console`);
+      assert.equal((await callTool('functions_invoke', {name:'addMessage', data:{text:'hi'}})).status, 200, 'functions:invoke gets the discovered project');
+      const destination = join(tmpdir(), `firenook-export-${process.pid}-discovered`);
+      assert.equal((await callTool('emulators_export', {path:destination})).ok, true, 'emulators:export gets the discovered project');
+      rmSync(destination, {recursive:true, force:true});
+      assert.equal((await callTool('auth_mint_token', {uid:'alice'})).idToken, 'header.payload.', 'console tools too');
+      // Two answering: ask for --project, naming both.
+      write('demo-second');
+      assert.equal((await callTool('firestore_get', {path:'users/alice'}, true)).error, `2 running suites answer (demo-fixture at ${fake.origin}, demo-second at ${fake.origin}); start firenook mcp with --project <id> to choose one`);
+      status = await callTool('firenook_status', {});
+      assert.deepEqual(status.suites.answering.map(suite => suite.project), ['demo-fixture', 'demo-second']);
+      // An explicit --project still wins, unchanged.
+      const named = toolCaller(createMcpServer({...options, project:'demo-fixture'}, dir, quiet));
+      assert.deepEqual((await named('firenook_status', {})).found, {by:'--project'});
+      assert.equal((await named('firestore_get', {path:'users/alice'})).exists, true);
+    });
+  } finally {
+    if (previous === undefined) delete process.env.FIRENOOK_LOCATOR_DIR; else process.env.FIRENOOK_LOCATOR_DIR = previous;
+    rmSync(locators, {recursive:true, force:true});
+  }
+});
+test('firenook mcp says on stderr how it finds the project', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-mcp-line-'));
+  const run = async (args, cwd) => {
+    const child = spawn(process.execPath, [cli, 'mcp', ...args], {cwd, env:{...process.env, FIRENOOK_LOCATOR_DIR:locatorDir}});
+    let stderr = '';
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.stdin.end();
+    await once(child, 'close');
+    return stderr;
+  };
+  assert.match(await run([], dir), /tools over stdio for the running suite \(no firebase\.json in .* and no --project: the one hub locator in .* that answers, found on every call\); local emulators only/);
+  const {dir: configured} = project();
+  assert.match(await run([], configured), /tools over stdio for project demo-fixture \(from .*firebase\.json\); local emulators only/);
+});
 test('firenook mcp over stdio writes only JSON-RPC lines to stdout', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-mcp-stdio-'));
   fake.running = fake.full;
@@ -962,12 +1495,12 @@ test('firenook mcp over stdio writes only JSON-RPC lines to stdout', async () =>
     assert.ok(responses.every(response => response.jsonrpc === '2.0' && ('result' in response || 'error' in response)), 'every stdout line is a JSON-RPC response');
     const byId = Object.fromEntries(responses.map(response => [response.id, response]));
     assert.equal(byId[1].result.protocolVersion, '2025-06-18');
-    assert.equal(byId[2].result.tools.length, 9, 'status, five Firestore tools, two Functions tools and export');
+    assert.equal(byId[2].result.tools.length, 13, 'status and export, six Firestore tools and five Functions tools');
     assert.equal(text(byId[3]).running, true);
     assert.equal(text(byId[4]).data.name, 'Alice');
     assert.deepEqual(byId[5].result, {});
     assert.deepEqual(byId.null, {jsonrpc:'2.0', id:null, error:{code:-32700, message:'Parse error'}});
     assert.equal(responses.length, 6);
-    assert.match(stderr, /firenook mcp .* tools over stdio for project demo-fixture; local emulators only/);
+    assert.match(stderr, /firenook mcp .*: 13 tools over stdio for project demo-fixture \(from --project\); local emulators only/);
   } finally { fake.running = fake.base; }
 });
