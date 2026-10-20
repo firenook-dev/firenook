@@ -33,7 +33,7 @@
 **Already using the Firebase emulators?** Install Firenook and change one word:
 
 ```sh
-npm install --save-dev firenook
+npm install --save-dev --save-exact firenook
 ```
 
 ```diff
@@ -42,9 +42,12 @@ npm install --save-dev firenook
 ```
 
 Same flags, same ports, and your `firebase.json`, rules, Functions code and app
-stay as they are. In a terminal, run it as `npx firenook emulators:start`.
-Starting a new project? `npx firenook init` sets one up.
-[Get started](#get-started) covers both.
+stay as they are. In a terminal, run it as `npx firenook emulators:start`. To
+keep your data between runs, with no export at every stop, add
+`--state-dir ./.firenook/state --resume-state`.
+
+Firenook needs Node 24, on macOS, Linux or Windows. Starting a new project?
+`npx firenook init` sets one up. [Get started](#get-started) covers both.
 
 ## Why Firenook
 
@@ -56,18 +59,22 @@ exports the official format, so your data moves both ways. Every change is
 checked against recorded behaviour of the official emulator.
 
 **Fast and light.** The services are native Rust and the data lives on disk,
-not in a Java heap. On a real application's two-hour workload, the emulator
-peaked at 2.16 GiB of memory against 19.56 GiB, answered writes in 5.3 ms
-against 203 ms at the median, and used 61% less CPU.
+not in a Java heap. On a real application's two-hour workload, Firenook
+peaked at 2.16 GiB of memory where the official emulator reached 19.56 GiB,
+answered writes in 5.3 ms against 203 ms at the median, and used 61% less CPU.
 
-**Your data stays.** Start again and Firestore, Auth and Storage are back with
-all your data in about half a second, even with millions of documents. No
-export at every stop, no import at every start. Acknowledged writes are durable within a
-second, and a stop always closes the data cleanly.
+**Your data stays.** Give Firenook a state directory and Firestore, Auth and
+Storage come back with all your data in about half a second, even with
+millions of documents: no export at every stop, no import at every start. A
+crash loses at most the last second of writes, where the official emulator
+loses everything since its last export, and a stop always closes the data
+cleanly.
 
 **One package, nothing else to install.** No Java, no firebase-tools, nothing
-downloaded at install or start: one npm package with a native engine for
-macOS, Linux and Windows. Node runs your Functions, as in production.
+else downloaded at install or start: one npm package with a native engine for
+macOS, Linux and Windows. Node runs your Functions, as in production. (An
+Extension from the registry is fetched once, on first use;
+`firenook ext:vendor` makes even that offline.)
 
 **A console and a terminal made for it.** A web console for every service,
 live as your app runs, and a terminal screen that shows each function call,
@@ -75,14 +82,38 @@ what triggered it, how long it took, and the stack trace when it fails.
 
 **Ready for your agent.** `firenook mcp` gives a coding agent the running
 suite: read and write Firestore, manage users and their codes, list Storage,
-invoke functions, publish to Pub/Sub. Nothing leaves your machine.
+invoke functions, publish to Pub/Sub. In Claude Code, from the project folder:
+`claude mcp add --scope project firenook -- npx firenook mcp`;
+[other agents](docs/mcp.md#connect-your-agent) run the same
+`npx firenook mcp`. Nothing leaves your machine.
+
+## What it emulates
+
+| Service | Port | Highlights |
+| --- | ---: | --- |
+| Firestore | 8080 | Native and web SDKs, realtime listeners, Security Rules, named databases, official import and export |
+| Authentication | 9099 | Every operation of the official Auth emulator: password, email link, phone, anonymous, custom tokens, test sign-in with Google, Apple and other providers, MFA, passkeys, tenants, blocking functions |
+| Cloud Storage | 9199 | Firebase and Cloud Storage APIs, Security Rules evaluated natively, including `firestore.get()` and `exists()` |
+| Cloud Functions | 5001 | HTTP, callable and streaming functions; Firestore, Storage, Auth, Pub/Sub, Eventarc, schedule and task-queue triggers; reload on save; `--inspect-functions`; `functions:invoke` for any trigger |
+| Extensions | 5001 | Local, vendored or registry sources, offline once vendored |
+| Pub/Sub | 8085 | Every RPC over gRPC and HTTP/JSON: push, ordering, filters, dead-letter topics, seek, snapshots, Avro schemas |
+| Cloud Tasks | 9499 | Queues for `onTaskDispatched` with the official retry and rate-limit behaviour |
+| Eventarc | 9299 | Custom events delivered to `onCustomEventPublished` |
+
+The console is on 4000, the hub on 4400 and logging on 4500. These are the
+official suite's ports, and `firebase.json` changes them the same way.
+
+Realtime Database, Hosting, App Hosting and Data Connect are not emulated; a
+`firebase.json` that configures them still starts, with a warning.
+[COMPATIBILITY.md](COMPATIBILITY.md) records what each service covers and what
+it does not.
 
 ## The console
 
 **The console the Firebase emulators should have had.** Google's Emulator UI
 has no page for your Functions, Pub/Sub, Cloud Tasks or Eventarc, only a log.
-Firenook's console covers every service it runs, live, on the same port, at
-<http://127.0.0.1:4000/console>:
+Firenook's console covers every service it runs, live, on the Emulator UI's
+port, at <http://127.0.0.1:4000/console>:
 
 - **Functions:** every call with what triggered it, its outcome, its duration
   and its logs, and every schedule. The official UI has only the log.
@@ -114,42 +145,23 @@ More in [the console guide](docs/console.md).
 
 ## Benchmarks
 
-The same application, data and two-hour workload on one server, one emulator
-at a time; then each emulator on its own with the same data.
+One server (a Ryzen 5 3600 with 64 GiB), one real application with 211,205
+Firestore documents and 6.7 GB in Storage, and two hours of its traffic against
+each emulator in turn. Then each emulator alone on the same data: starts,
+stops, 26 query shapes and a store grown to 2.5 million documents.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmark-dark.svg">
-  <img alt="Firenook against the official emulator: 89% less memory, writes 38 times faster, listener updates 18 times faster, restarts 39 times sooner, 80 times sooner on 2.5 million documents, 61% less CPU" src="docs/assets/benchmark-light.svg" width="880">
+  <img alt="Firenook against the official emulator: 9 times less memory, writes 38 times faster, listener updates 18 times faster, restarts 39 times sooner, 80 times sooner on 2.5 million documents, 61% less CPU" src="docs/assets/benchmark-light.svg" width="880">
 </picture>
 
 The official emulator answered 6 of 26 query shapes faster: ordering and range
 filters over a large collection, and batch gets of many documents. The method,
 every figure and those limits are in [the benchmarks](docs/benchmarks.md).
 
-## What it emulates
-
-| Service | Highlights |
-| --- | --- |
-| Firestore | Native and web SDKs, realtime listeners, Security Rules, named databases, official import and export |
-| Authentication | Every operation of the official Auth emulator: password, email link, phone, anonymous, custom tokens, test sign-in with Google, Apple and other providers, MFA, passkeys, tenants, blocking functions |
-| Cloud Storage | Firebase and Cloud Storage APIs, Security Rules evaluated natively, including `firestore.get()` and `exists()` |
-| Cloud Functions | HTTP, callable and streaming functions; Firestore, Storage, Auth, Pub/Sub, Eventarc, schedule and task-queue triggers; reload on save; `--inspect-functions`; `functions:invoke` for any trigger |
-| Extensions | Local, vendored or registry sources, offline once vendored |
-| Pub/Sub | Every RPC over gRPC and HTTP/JSON: push, ordering, filters, dead-letter topics, seek, snapshots, Avro schemas |
-| Cloud Tasks | Queues for `onTaskDispatched` with the official retry and rate-limit behaviour |
-| Eventarc | Custom events delivered to `onCustomEventPublished` |
-
-Realtime Database, Hosting, App Hosting and Data Connect are not emulated; a
-`firebase.json` that configures them still starts, with a warning.
-[COMPATIBILITY.md](COMPATIBILITY.md) records what each service covers and what
-it does not.
-
 ## Get started
 
 ### Already using the Firebase emulator
-
-Firenook is a drop-in replacement: `firebase.json`, `.firebaserc`, your rules,
-your Functions code and your app stay exactly as they are.
 
 **1. Install it** in the project, next to firebase-tools (keep that for
 deploying):
@@ -157,6 +169,9 @@ deploying):
 ```sh
 npm install --save-dev --save-exact firenook    # or: bun add --dev --exact firenook
 ```
+
+Every run keeps its working data under `.firenook/`, so add that folder to
+your `.gitignore`.
 
 **2. Check your project.** This reads `firebase.json` the way the Firebase CLI
 does and changes nothing:
@@ -210,7 +225,8 @@ npx firenook emulators:start
 ```
 
 `init` sets up every emulator on its usual port with a `demo-<folder>` project,
-so nothing can reach a real Firebase project. Point your app at it:
+so nothing can reach a real Firebase project, and adds `.firenook/` to your
+`.gitignore`. Point your app at it:
 
 ```js
 connectFirestoreEmulator(db, '127.0.0.1', 8080);
@@ -240,8 +256,9 @@ Firenook is in preview: releases are `0.2.0-next` versions on npm. Every
 release passes conformance replays against the official emulator and packed
 installs on all five platforms, and releases are measured against the official
 emulator with a real application (most recently 0.2.0-next.6, in the
-[benchmarks](docs/benchmarks.md)). Pin an exact version and upgrade on purpose; [the releases](https://github.com/firenook-dev/firenook/releases)
-list what each one carries.
+[benchmarks](docs/benchmarks.md)). Pin an exact version and upgrade on
+purpose; [the releases](https://github.com/firenook-dev/firenook/releases) list
+what each one carries.
 
 ## Contributing
 

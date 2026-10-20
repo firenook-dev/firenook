@@ -20,7 +20,7 @@
 **Already using the Firebase emulators?** Install Firenook and change one word:
 
 ```sh
-npm install --save-dev firenook
+npm install --save-dev --save-exact firenook
 ```
 
 ```diff
@@ -29,8 +29,10 @@ npm install --save-dev firenook
 ```
 
 Same flags, same ports, and your `firebase.json`, rules, Functions code and app
-stay as they are. In a terminal, run it as `npx firenook emulators:start`.
-Starting a new project? `npx firenook init` sets one up.
+stay as they are. In a terminal, run it as `npx firenook emulators:start`. To
+keep your data between runs, add `--state-dir ./.firenook/state --resume-state`.
+Firenook needs Node 24. Starting a new project? `npx firenook init` sets one
+up.
 
 <p align="center">
   <img alt="firenook emulators:start: the start-up card, the ready summary and a live log of function calls" src="https://raw.githubusercontent.com/firenook-dev/firenook/main/docs/assets/terminal.gif" width="760">
@@ -43,20 +45,25 @@ Starting a new project? `npx firenook init` sets one up.
   same ports, and your client and Admin SDKs connect unchanged. It imports and
   exports the official format.
 - **Fast and light.** Native Rust services with the data on disk. On a real
-  application's two-hour workload: 2.16 GiB of memory against 19.56 GiB, writes
-  in 5.3 ms against 203 ms at the median, 61% less CPU.
-- **Your data stays.** Start again and Firestore, Auth and Storage are back
-  with all your data in about half a second, even with millions of documents.
-- **Nothing else to install.** No Java, no firebase-tools, nothing downloaded
-  at install or start. npm or Bun picks the native engine for your machine;
+  application's two-hour workload, Firenook peaked at 2.16 GiB of memory where
+  the official emulator reached 19.56 GiB, answered writes in 5.3 ms against
+  203 ms at the median, and used 61% less CPU.
+- **Your data stays.** Give it a state directory and Firestore, Auth and
+  Storage come back with all your data in about half a second, even with
+  millions of documents. A crash loses at most the last second of writes.
+- **Nothing else to install.** No Java, no firebase-tools, nothing else
+  downloaded at install or start (an Extension from the registry is fetched
+  once, on first use). npm or Bun picks the native engine for your machine;
   Node runs your Functions.
 - **A console and a terminal made for it**, and `firenook mcp` for your coding
-  agent.
+  agent: `claude mcp add --scope project firenook -- npx firenook mcp` in
+  Claude Code, the same `npx firenook mcp` in
+  [other agents](https://github.com/firenook-dev/firenook/blob/main/docs/mcp.md#connect-your-agent).
 
 ## Switching from the official emulator
 
-Your `firebase.json`, rules, Functions code and app stay as they are; keep
-firebase-tools for deploying.
+Keep firebase-tools for deploying, and add `.firenook/` to your `.gitignore`:
+every run keeps its working data there.
 
 ```console
 $ npx firenook init --adopt --dry-run
@@ -80,7 +87,8 @@ covers both.
 
 **The console the Firebase emulators should have had.** Google's Emulator UI
 has no page for your Functions, Pub/Sub, Cloud Tasks or Eventarc, only a log.
-Firenook's console covers every service it runs, live, on the same port, at
+Firenook's console covers every service it runs, live, on the Emulator UI's
+port, at
 `http://127.0.0.1:4000/console`. It shows every function call with its
 trigger, duration and logs, and an inbox of the codes and links Auth would
 have sent. It has Firestore and Storage with their rules, Pub/Sub, Cloud
@@ -101,11 +109,12 @@ with a warning. See [compatibility](https://github.com/firenook-dev/firenook/blo
 ## Benchmarks
 
 <p align="center">
-  <img alt="Firenook against the official emulator: 89% less memory, writes 38 times faster, listener updates 18 times faster, restarts 39 times sooner, 80 times sooner on 2.5 million documents, 61% less CPU" src="https://raw.githubusercontent.com/firenook-dev/firenook/main/docs/assets/benchmark-light.svg" width="880">
+  <img alt="Firenook against the official emulator: 9 times less memory, writes 38 times faster, listener updates 18 times faster, restarts 39 times sooner, 80 times sooner on 2.5 million documents, 61% less CPU" src="https://raw.githubusercontent.com/firenook-dev/firenook/main/docs/assets/benchmark-light.svg" width="880">
 </p>
 
-The same application, data and workload on one server, one emulator at a time.
-The official emulator answered 6 of 26 query shapes faster (ordering and range
+One real application with 211,205 documents and 6.7 GB in Storage, and two
+hours of its traffic against each emulator in turn on one server. The official
+emulator answered 6 of 26 query shapes faster (ordering and range
 filters over a large collection, batch gets).
 [The method and every figure.](https://github.com/firenook-dev/firenook/blob/main/docs/benchmarks.md)
 

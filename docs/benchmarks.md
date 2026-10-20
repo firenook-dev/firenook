@@ -9,7 +9,7 @@ Every figure on this page comes from one recorded run whose numbers are kept in
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/benchmark-dark.svg">
-  <img alt="Firenook against the official emulator: 89% less memory, writes 38 times faster, listener updates 18 times faster, restarts 39 times sooner, 80 times sooner on 2.5 million documents, 61% less CPU" src="assets/benchmark-light.svg" width="880">
+  <img alt="Firenook against the official emulator: 9 times less memory, writes 38 times faster, listener updates 18 times faster, restarts 39 times sooner, 80 times sooner on 2.5 million documents, 61% less CPU" src="assets/benchmark-light.svg" width="880">
 </picture>
 
 ## What ran
