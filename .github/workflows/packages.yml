@@ -2,7 +2,7 @@ name: Installable packages
 
 on:
   pull_request:
-    paths: ['crates/**', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'support/functions-worker.mjs', 'conformance/fixtures/**', 'packages/**', 'packaging/**', '.github/workflows/packages.yml', '.github/workflows/release-npm.yml']
+    paths: ['crates/**', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'support/functions-worker.mjs', 'conformance/fixtures/**', 'packages/**', 'packaging/**', '.github/workflows/packages.yml', '.github/workflows/release-npm.yml', '!**/*.md']
   workflow_dispatch:
     inputs:
       candidate:
