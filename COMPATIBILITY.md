@@ -54,6 +54,14 @@ the project's rules for every database as it does on the official emulator. The 
 database (`Cloud Firestore Emulator does not support multiple databases yet.`)
 and then loads no rules at all.
 
+Firestore timestamp values are stored to the microsecond, as production
+stores them ("any additional precision is rounded down") and as the official
+emulator answers a write (`conformance/fixtures/developer-tools-request-values-v1`):
+a finer value in a document, a map or array in it, or a transform's operand
+is rounded down before rules see the write, on REST, gRPC and WebChannel
+alike. Since `0.2.0-next.7`; an export of data saved earlier with a finer
+value rounds it down too, where it used to refuse the whole export.
+
 Each configured Firestore rules file is watched while the suite runs and
 reloaded on change, as the official CLI watches the configured rules file
 (chokidar) and re-uploads it. One second after the last change in a burst the

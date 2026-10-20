@@ -179,11 +179,7 @@ async fn http_calls_are_recorded_with_their_own_lines() {
     assert!(!events.iter().any(console_only));
     let ends = harness.end_lines(&id);
     assert_eq!(ends.len(), 1, "{ends:?}");
-    assert!(
-        ends[0]
-            .message
-            .starts_with("Finished \"us-central1-hello\" in ")
-    );
+    assert_rounded_end_line(&ends[0], "us-central1-hello");
     // Without the console header the answer carries no id.
     let (plain, _) = harness
         .call_text(
@@ -616,4 +612,31 @@ async fn an_end_line_follows_every_line_its_call_printed() {
         "{late} of the call's 3000 lines came after its end line"
     );
     harness.stop().await;
+}
+
+/// An end line in the official shape, its duration rounded as the console
+/// writes milliseconds: a tenth at most, never a floating-point tail; its
+/// detail's `durationMs` to the microsecond.
+fn assert_rounded_end_line(line: &LogEvent, function: &str) {
+    let figure = line
+        .message
+        .strip_prefix(&format!("Finished \"{function}\" in "))
+        .and_then(|rest| rest.strip_suffix("ms"))
+        .unwrap_or_else(|| panic!("{:?}", line.message));
+    let (whole, tenth) = figure.split_once('.').unwrap_or((figure, "0"));
+    assert!(
+        !whole.is_empty()
+            && whole.bytes().all(|digit| digit.is_ascii_digit())
+            && tenth.len() == 1
+            && tenth.bytes().all(|digit| digit.is_ascii_digit()),
+        "{figure}"
+    );
+    let detail = line.detail.as_ref().expect("an end line's detail");
+    let duration = detail["durationMs"].to_string();
+    assert!(
+        duration
+            .split_once('.')
+            .is_none_or(|(_, fraction)| fraction.len() <= 3),
+        "{duration}"
+    );
 }

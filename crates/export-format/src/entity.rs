@@ -556,12 +556,11 @@ fn decode_timestamp(microseconds: i64) -> Result<Timestamp, EntityError> {
     Timestamp::new(seconds, nanos).map_err(|error| EntityError::invalid(error.to_string()))
 }
 
+/// The export keeps microseconds, as Firestore stores timestamps. A finer
+/// value saved before writes were rounded at commit is rounded down here,
+/// as a write of it now would be; the nanosecond fraction is never negative,
+/// so down is towards the past before the epoch too.
 fn encode_timestamp(timestamp: Timestamp) -> Result<i64, EntityError> {
-    if !timestamp.nanos().is_multiple_of(1_000) {
-        return Err(EntityError::invalid(
-            "export timestamps must have microsecond precision",
-        ));
-    }
     timestamp
         .seconds()
         .checked_mul(1_000_000)
@@ -870,20 +869,41 @@ mod tests {
     }
 
     #[test]
-    fn submicrosecond_timestamps_are_not_silently_truncated() {
+    fn a_saved_timestamp_finer_than_a_microsecond_exports_rounded_down() {
         let database = DatabaseName::new("project", DEFAULT_DATABASE).unwrap();
         let key = DocumentKey::new(database, "collection/document").unwrap();
+        let finer = |seconds, nanos| Value::Timestamp(Timestamp::new(seconds, nanos).unwrap());
         let document = ExportedDocument::new(
             key,
-            Fields::from([(
-                "timestamp".to_owned(),
-                Value::Timestamp(Timestamp::new(1, 1).unwrap()),
-            )]),
+            Fields::from([
+                ("timestamp".to_owned(), finer(1, 1)),
+                ("late".to_owned(), finer(1_577_934_245, 123_456_789)),
+                ("before".to_owned(), finer(-1, 999_999_500)),
+                (
+                    "nested".to_owned(),
+                    Value::Map(BTreeMap::from([(
+                        "list".to_owned(),
+                        Value::Array(vec![finer(2, 999)]),
+                    )])),
+                ),
+            ]),
         );
-        assert!(matches!(
-            encode_entity(&document),
-            Err(EntityError::Invalid(_))
-        ));
+        let decoded = decode_entity(&encode_entity(&document).unwrap()).unwrap();
+        let fields = decoded.fields();
+        assert_eq!(fields["timestamp"], finer(1, 0));
+        assert_eq!(fields["late"], finer(1_577_934_245, 123_456_000));
+        assert_eq!(fields["before"], finer(-1, 999_999_000));
+        assert_eq!(
+            fields["nested"],
+            Value::Map(BTreeMap::from([(
+                "list".to_owned(),
+                Value::Array(vec![finer(2, 0)]),
+            )]))
+        );
+        assert_eq!(
+            encode_timestamp(Timestamp::new(-1, 999_999_500).unwrap()).unwrap(),
+            -1
+        );
     }
 
     fn assert_fields_equivalent(actual: &Fields, expected: &Fields) {
