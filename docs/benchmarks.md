@@ -5,7 +5,9 @@
 Firenook 0.2.0-next.6 against the official Firebase emulator (firebase-tools
 15.22.0 on Java 26 with its default settings), measured on 18–19 October 2026.
 Every figure on this page comes from one recorded run whose numbers are kept in
-[`benchmarks/next6-paired-acceptance.json`](../benchmarks/next6-paired-acceptance.json).
+[`benchmarks/next6-paired-acceptance.json`](../benchmarks/next6-paired-acceptance.json),
+except the [check of 0.2.0-next.7](#020-next7-against-020-next6) against it,
+which has its own record.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/benchmark-dark.svg">
@@ -155,6 +157,47 @@ On its own a write commits in under a millisecond; inside the application, with
 its functions, listeners and web server on the same machine, the median was
 5.3 ms. That is up from about 3.3 ms in the September run of 0.1.0-next.7,
 while the application around it also grew; this run does not separate the two.
+
+## 0.2.0-next.7 against 0.2.0-next.6
+
+0.2.0-next.7 changes no write, query or storage path these figures measure, so
+the paired run was not repeated. Instead it was checked against 0.2.0-next.6 on
+the same server and data on 20 October 2026, one release at a time, taking
+turns, with Firestore, Auth and Storage only. The numbers are kept in
+[`benchmarks/next7-regression.json`](../benchmarks/next7-regression.json).
+
+| | 0.2.0-next.6 | 0.2.0-next.7 |
+| --- | ---: | ---: |
+| First start, importing the data (4 each) | 21.4 s | 21.8 s |
+| Start again with the data (3 each) | 0.56 s | 0.58 s |
+| Memory once ready | 0.15 GiB | 0.16 GiB |
+| Memory after the 26 query shapes | 0.24 GiB | 0.27 GiB |
+| Write, median / p99 (5 rounds each) | 0.72 / 1.13 ms | 0.76 / 1.12 ms |
+| Listener, median | 0.80 ms | 0.83 ms |
+| Eight writers | 3,213 writes/s | 3,257 writes/s |
+| A project with seven functions, ready (5 each) | **6.82 s** | **0.78 s** |
+
+Of the 26 query shapes above, run four times on each release, 20 answered
+within 5% of 0.2.0-next.6, two faster and four slower by 5 to 20%, at most 1.8 ms
+(a write and delete, a collection-group query, a filtered count and a
+transaction). On those four, 0.2.0-next.6 itself varied by 16 to 61% from one
+round to the next, and the 2,000 writes above, the stronger measure of a write,
+are unchanged. Memory is 11 MB higher once ready and 21 MB higher after the
+queries.
+
+The functions row is the one 0.2.0-next.7 set out to change: discovering a
+codebase waited about 6 s for the SDK's discovery server to exit, kept open by
+an idle connection, and now takes about 0.2 s. Every emulator, Functions
+included, is ready in under a second.
+
+A project with no seed, started four times with `--keep-data`, was ready in
+0.35 s the first time and 0.17 s after, and found every document the earlier
+runs wrote.
+
+One finding from the copies: a start on a freshly copied data folder took 0.65
+to 16 s on both releases, most often several seconds, until the copy was
+flushed to the disk with `sync`, and 0.56 to 0.66 s on both after it. The slow start the 0.2.0-next.6 run saw on
+copied data is the copy's pending writes reaching the disk, not Firenook.
 
 ## How it was kept fair
 

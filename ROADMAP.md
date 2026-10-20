@@ -1475,9 +1475,10 @@ Each tool has a test against the fake suite in
   `/__/quitquitquit` closes the server, which waits for open connections, and
   the engine's client kept its connection open for reuse, so Node waited out
   its 5 s keep-alive. Built: the discovery client keeps no idle connection;
-  the timeout, the kill after 10 s and every message are unchanged. On the
-  development machine, discovery of a seven-function codebase went from
-  6.2 s to 0.2 s and launch to ready from 6.9 s to 0.5 s. A test holds idle
+  the timeout, the kill after 10 s and every message are unchanged.
+  Discovery of a seven-function codebase went from 6.2 s to 0.2 s, and on
+  the acceptance host the whole suite with that codebase is ready in 0.78 s
+  against 6.82 s (`benchmarks/next7-regression.json`). A test holds idle
   connections for 30 s and fails at 10 s without the fix.
 - [x] **The Functions log line's duration** printed floating-point noise
   (`1.6076249999999999ms`). Built: the line keeps the official `in Nms`
@@ -1489,3 +1490,14 @@ Each tool has a test against the fake suite in
   `orders/x`). Built: a bare id is read against the open collection, and a
   path that names no document opens the panel on "Document not found"
   without asking the engine.
+
+**Checked against 0.2.0-next.6** on the acceptance host with the private
+consumer seed instead of a new paired run, since no measured path changed
+(`docs/benchmarks.md`, `benchmarks/next7-regression.json`): imports, resumed
+starts, writes, listener delivery and 20 of 26 query shapes within run-to-run
+noise; memory 11 MB higher once ready. It also explained the last open
+follow-up of the next.6 benchmark: a start on a freshly copied state
+directory is slow only until the copy's pending writes reach the disk
+(`sync` before the start: 0.56–0.66 s on both releases), so nothing in
+Firenook needs fixing. Ordered and range field indexes, the six slower query
+shapes, remain for a later release.
