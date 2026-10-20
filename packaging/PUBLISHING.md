@@ -223,6 +223,18 @@ new-repository recovery using their old run IDs. Existing npm attestations and
 archive hashes remain tied to the original publication; a new version requires
 new public-repository verification and reconnected trusted publishers.
 
+### `0.2.0-next.7` publication interruption
+
+Release run `39464616341`, dispatched with `latest`, passed all seven quality
+checks, five platform builds and the artifact verifier. After approval, npm
+acknowledged all five native uploads with provenance; four became visible
+within 12 minutes, while `@firenook/cli-win32-x64` was still not visible when
+the 20-minute index barrier ran out, so the publisher stopped before the CLI,
+as designed. Nothing was published to `latest`. The version-specific receipt
+records all five natives as accepted, pins the original artifacts and the six
+tarball identities, and records `"latest": true`; the recovery publishes only
+the CLI after the win32 index appears.
+
 ## Version and rollback policy
 
 - Use `0.1.0-next.N`/`0.1.0-rc.N` while the public contract is preview-only.
