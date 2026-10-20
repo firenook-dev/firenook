@@ -224,6 +224,35 @@ impl std::fmt::Debug for LogSink {
     }
 }
 
+/// A call's duration in a log line, rounded as the console writes a
+/// millisecond figure (`formatDuration` in `console/src/lib/format.ts`): a
+/// tenth below 10 ms when there is a fraction, whole milliseconds above, and
+/// never negative. It keeps the official `Finished "x" in Nms` shape, which
+/// log readers parse, so a long call stays in milliseconds: `1.6ms`,
+/// `840ms`, `1234ms` (a sum of clock readings would print
+/// `1.6076249999999999ms`).
+pub(crate) fn line_millis(ms: f64) -> String {
+    let value = if ms.is_finite() { ms.max(0.0) } else { 0.0 };
+    // The console's half-up rounding: `toFixed` and `Math.round`, not the
+    // half-even of Rust's formatting.
+    if value < 10.0 && value.fract() != 0.0 {
+        format!("{:.1}", (value * 10.0).round() / 10.0)
+    } else {
+        format!("{:.0}", value.round())
+    }
+}
+
+/// A call's duration in a line's detail (`durationMs`), which the console
+/// shows in the line's payload: to the microsecond, without the
+/// floating-point tail.
+pub(crate) fn detail_millis(ms: f64) -> f64 {
+    if ms.is_finite() {
+        (ms.max(0.0) * 1000.0).round() / 1000.0
+    } else {
+        0.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -269,5 +298,39 @@ mod tests {
         let plain =
             LogEvent::new("INFO", "functions", "x".to_owned()).with_detail(json!({"status": 200}));
         assert!(!plain.is_console_only());
+    }
+
+    /// The console's millisecond figures (`format.test.ts`), in the
+    /// official line's `Nms` shape.
+    #[test]
+    fn a_line_writes_its_duration_as_the_console_does() {
+        for (ms, written) in [
+            (1.607_624_999_999_999_9, "1.6"),
+            (0.42, "0.4"),
+            (0.25, "0.3"),
+            (2.0, "2"),
+            (9.96, "10.0"),
+            (12.5, "13"),
+            (850.0, "850"),
+            (999.6, "1000"),
+            (1_234.4, "1234"),
+            (61_000.0, "61000"),
+            (0.0, "0"),
+            (-5.0, "0"),
+            (f64::NAN, "0"),
+        ] {
+            assert_eq!(line_millis(ms), written, "{ms}");
+        }
+    }
+
+    #[test]
+    fn a_detail_keeps_microseconds_without_the_floating_point_tail() {
+        assert_eq!(
+            json!(detail_millis(1.607_624_999_999_999_9)).to_string(),
+            "1.608"
+        );
+        assert_eq!(json!(detail_millis(840.0)).to_string(), "840.0");
+        assert_eq!(json!(detail_millis(-1.0)).to_string(), "0.0");
+        assert_eq!(json!(detail_millis(f64::INFINITY)).to_string(), "0.0");
     }
 }
