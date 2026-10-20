@@ -235,6 +235,15 @@ records all five natives as accepted, pins the original artifacts and the six
 tarball identities, and records `"latest": true`; the recovery publishes only
 the CLI after the win32 index appears.
 
+The win32 version became visible about 58 minutes after its upload (the same
+package of 0.2.0-next.6 took 3), with integrity equal to the release asset.
+Resume run `39478322080` published the CLI to `latest` from the original
+bytes. Its `release-notes` job was skipped, because a job is skipped whenever
+a job upstream was skipped and the resume skips the build jobs; the draft
+release was made by hand from the original artifacts, with the same 27 files
+and a `release-source.json` naming both runs, and the job now runs after any
+successful publish.
+
 ## Version and rollback policy
 
 - Use `0.1.0-next.N`/`0.1.0-rc.N` while the public contract is preview-only.

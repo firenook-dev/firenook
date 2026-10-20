@@ -77,6 +77,8 @@ test('recovery preserves protected OIDC workflow and cannot fall through failed 
   assert.match(workflow,/needs: \[authorize, quality, artifacts\]/);
   assert.match(workflow,/always\(\) && needs.authorize.result == 'success' && \(inputs.resume \|\| \(needs.quality.result == 'success' && needs.artifacts.result == 'success'\)\)/);
   assert.match(workflow,/run-id: \$\{\{ needs.authorize.outputs.source_run \|\| github.run_id \}\}/);
+  // The draft release follows a resumed publish too, whose build jobs were skipped.
+  assert.match(workflow,/release-notes:\r?\n    needs: \[authorize, publish\]\r?\n(?:    #[^\r\n]*\r?\n)*    if: \$\{\{ always\(\) && needs.authorize.result == 'success' && needs.publish.result == 'success' \}\}/);
   assert.match(workflow,/artifact-ids: \$\{\{ needs.authorize.outputs.artifact_ids \}\}/);
   assert.doesNotMatch(workflow,/NPM_TOKEN|NODE_AUTH_TOKEN|secrets\./);
 });
