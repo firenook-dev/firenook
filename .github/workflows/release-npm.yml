@@ -98,6 +98,9 @@ jobs:
 
   release-notes:
     needs: [authorize, publish]
+    # A resume skips the build jobs, and a job skips whenever a job upstream
+    # was skipped unless it says otherwise: the notes follow the publish.
+    if: ${{ always() && needs.authorize.result == 'success' && needs.publish.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write

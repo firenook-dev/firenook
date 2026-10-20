@@ -1352,6 +1352,20 @@ README already makes work without reading the docs first. Built on
 2026-10-20 in one go: the engine, the CLI, the MCP server and the console in
 parallel branches, merged into one candidate (PR #107).
 
+- [x] Published as `firenook@0.2.0-next.7` with `@firenook/cli-<platform>` ×5
+  on 2026-10-21 (PR #107, release PR #108, tag `npm-v0.2.0-next.7` on
+  7d4cefe, engine 37fdd03). Release run 39464616341, dispatched with
+  `latest`, passed every gate; npm acknowledged all five native uploads, but
+  `@firenook/cli-win32-x64` took about 58 minutes to become visible (its
+  next.6 upload took 3), past the 20-minute barrier, so the publisher stopped
+  before the CLI. Recovery receipt PR #109 and resume run 39478322080 then
+  published the CLI to `latest` from the original bytes, with no rebuild:
+  the CLI's `next` stays on 0.2.0-next.6, the native packages are on `next`,
+  registry integrity equals the release assets for all six packages, and
+  provenance attestations verify on a fresh install. A consumer's Extensions,
+  installed-package and integration gates passed on the candidate built from
+  the PR head.
+
 - [x] **Keep data in a project that has no seed.** Keeping data between runs
   needed `--state-dir` and `--resume-state`, and `--resume-state` refused to
   start without `--import`, while a nonempty state directory refuses to start
