@@ -322,12 +322,14 @@ test('target:apply and target:clear mirror the official .firebaserc target seman
   writeFileSync(join(dir, '.firebaserc'), '{}');
   assert.throws(() => targetApply(['storage', 'main', 'x'], options, dir, log()), /Must have an active project/);
 });
+// No coding agent is detected from the machine running the tests.
+const hermetic = {env:{}};
 test('init scaffolds a runnable demo project with the official defaults and never overwrites without --force', () => {
   const root = mkdtempSync(join(tmpdir(), 'firenook-init-'));
   const dir = join(root, 'My App'); mkdirSync(dir);
   writeFileSync(join(dir, '.gitignore'), 'node_modules/\n');
   const output = log();
-  assert.equal(scaffold(options, dir, output), 0);
+  assert.equal(scaffold(options, dir, output, hermetic), 0);
   const config = readJson(join(dir, 'firebase.json'));
   assert.deepEqual(Object.keys(config), ['firestore', 'storage', 'functions', 'emulators']);
   assert.deepEqual(config.storage, {rules:'storage.rules'});
@@ -348,9 +350,9 @@ test('init scaffolds a runnable demo project with the official defaults and neve
   assert.ok(!existsSync(join(dir, 'functions/node_modules')), 'nothing is installed');
   assert.match(output.err.join('\n'), /Next steps:[\s\S]*cd functions && npm install[\s\S]*firenook emulators:start --project demo-my-app/);
   assert.equal(firestoreRules(new Date(Date.UTC(2026, 0, 15, 12))).includes('timestamp.date(2026, 2, 14)'), true);
-  assert.throws(() => scaffold(options, dir, log()), /exists; use firenook init --adopt/);
+  assert.throws(() => scaffold(options, dir, log(), hermetic), /exists; use firenook init --adopt/);
   writeFileSync(join(dir, 'storage.rules'), 'custom');
-  scaffold({...options, force:true, project:'demo-forced'}, dir, log());
+  scaffold({...options, force:true, project:'demo-forced'}, dir, log(), hermetic);
   assert.equal(readFileSync(join(dir, 'storage.rules'), 'utf8').startsWith("rules_version = '2';"), true, '--force rewrites every scaffold file');
   assert.equal(readJson(join(dir, '.firebaserc')).projects.default, 'demo-forced');
   assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), 'node_modules/\n.firenook/\n*-debug.log\n', 'gitignore lines are never duplicated');
@@ -362,18 +364,18 @@ test('init scaffolds a runnable demo project with the official defaults and neve
   // Without Functions, dry runs and JSON plans.
   const lean = mkdtempSync(join(tmpdir(), 'firenook-init-lean-'));
   const plan = log();
-  scaffold({...options, 'no-functions':true, 'dry-run':true, json:true}, lean, plan);
+  scaffold({...options, 'no-functions':true, 'dry-run':true, json:true}, lean, plan, hermetic);
   assert.ok(!existsSync(join(lean, 'firebase.json')));
   const parsed = JSON.parse(plan.out[0]);
   assert.equal(parsed.functions, false);
   assert.equal(parsed.applied, false);
   assert.ok(parsed.files.every(file => file.action === 'write' && !file.path.includes('functions')));
-  scaffold({...options, 'no-functions':true, project:'demo-lean'}, lean, log());
+  scaffold({...options, 'no-functions':true, project:'demo-lean'}, lean, log(), hermetic);
   const leanConfig = readJson(join(lean, 'firebase.json'));
   assert.equal(leanConfig.functions, undefined);
   assert.deepEqual(Object.keys(leanConfig.emulators), ['auth', 'firestore', 'pubsub', 'storage', 'hub', 'logging', 'ui', 'singleProjectMode']);
   assert.equal(loadProject(options, lean).minimumFunctions, '0');
-  assert.throws(() => scaffold({...options, project:'Nope'}, mkdtempSync(join(tmpdir(), 'firenook-init-bad-')), log()), /Invalid project id/);
+  assert.throws(() => scaffold({...options, project:'Nope'}, mkdtempSync(join(tmpdir(), 'firenook-init-bad-')), log(), hermetic), /Invalid project id/);
 });
 test('init --adopt lists skips, errors and additions, then applies only the additions', () => {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-adopt-'));
@@ -381,7 +383,7 @@ test('init --adopt lists skips, errors and additions, then applies only the addi
     emulators:{hosting:{port:5000}, firestore:{port:8080}}};
   writeFileSync(join(dir, 'firebase.json'), JSON.stringify(original, null, 2));
   let output = log();
-  assert.equal(adopt({...options, 'dry-run':true}, dir, output), 0);
+  assert.equal(adopt({...options, 'dry-run':true}, dir, output, hermetic), 0);
   const text = output.err.join('\n');
   assert.match(text, /skip\s+Firenook: firebase\.json configures the hosting emulator, which Firenook does not implement; skipping it/);
   assert.match(text, /add\s+add emulators\.functions \{port: 5001\}/);
@@ -393,7 +395,7 @@ test('init --adopt lists skips, errors and additions, then applies only the addi
   assert.ok(!existsSync(join(dir, '.firebaserc')) && !existsSync(join(dir, 'firestore.rules')));
   assert.equal(readFileSync(join(dir, 'firebase.json'), 'utf8'), JSON.stringify(original, null, 2));
   output = log();
-  assert.equal(adopt({...options, json:true, project:'demo-chosen'}, dir, output), 0);
+  assert.equal(adopt({...options, json:true, project:'demo-chosen'}, dir, output, hermetic), 0);
   const report = JSON.parse(output.out[0]);
   assert.equal(report.project, 'demo-chosen');
   assert.deepEqual(report.services, ['firestore', 'functions']);
@@ -404,7 +406,7 @@ test('init --adopt lists skips, errors and additions, then applies only the addi
   assert.ok(!existsSync(join(dir, '.firebaserc')), '--json prints only');
   // Apply.
   output = log();
-  assert.equal(adopt({...options, project:'demo-chosen'}, dir, output), 0);
+  assert.equal(adopt({...options, project:'demo-chosen'}, dir, output, hermetic), 0);
   const updated = readJson(join(dir, 'firebase.json'));
   assert.deepEqual(Object.keys(updated), ['hosting', 'firestore', 'functions', 'emulators'], 'key order is preserved');
   assert.deepEqual(updated.emulators, {hosting:{port:5000}, firestore:{port:8080}, functions:{port:5001}});
@@ -412,18 +414,18 @@ test('init --adopt lists skips, errors and additions, then applies only the addi
   assert.match(readFileSync(join(dir, 'firestore.rules'), 'utf8'), /service cloud\.firestore/);
   assert.deepEqual(readJson(join(dir, 'firestore.indexes.json')), {indexes:[], fieldOverrides:[]});
   output = log();
-  assert.equal(adopt(options, dir, output), 0);
+  assert.equal(adopt(options, dir, output, hermetic), 0);
   assert.match(output.err.join('\n'), /ok\s+nothing to change; services: firestore, functions/);
   // Hard errors block the run and leave every file alone.
   const broken = {...updated, emulators:{...updated.emulators, firestore:{host:'198.51.100.8', port:8080}, wat:{}, auth:{host:'198.51.100.9'}}};
   writeFileSync(join(dir, 'firebase.json'), JSON.stringify(broken));
   output = log();
-  assert.equal(adopt(options, dir, output), 1);
+  assert.equal(adopt(options, dir, output, hermetic), 1);
   assert.match(output.err.join('\n'), /error\s+Unsupported configured emulator: wat[\s\S]*error\s+Unsupported host for auth[\s\S]*Fix the errors above/);
   assert.equal(readFileSync(join(dir, 'firebase.json'), 'utf8'), JSON.stringify(broken));
   writeFileSync(join(dir, 'firebase.json'), '{not json');
-  assert.throws(() => adopt(options, dir, log()), /not valid JSON/);
-  assert.throws(() => adopt(options, mkdtempSync(join(tmpdir(), 'firenook-adopt-none-')), log()), /does not exist; run firenook init without --adopt/);
+  assert.throws(() => adopt(options, dir, log(), hermetic), /not valid JSON/);
+  assert.throws(() => adopt(options, mkdtempSync(join(tmpdir(), 'firenook-adopt-none-')), log(), hermetic), /does not exist; run firenook init without --adopt/);
 });
 // The fake hub lives in this process, so subprocesses that talk to it must
 // not block the event loop: spawn asynchronously.

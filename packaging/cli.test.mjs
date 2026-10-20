@@ -282,6 +282,28 @@ test('export default, parent/symlink safety and resume isolation', () => {
   assert.throws(()=>loadProject({...options,'state-dir':'existing'},dir),/nonempty state/);
   assert.equal(readFileSync(join(dir,'existing','data'),'utf8'),'preserve');
 });
+test('--keep-data keeps the data in .firenook/state, with or without a seed', () => {
+  const {dir,options} = project();
+  const kept = loadProject({...options,'keep-data':true},dir);
+  assert.equal(kept.state,canonical(join(dir,'.firenook','state')));
+  assert.equal(kept.resume,true);
+  assert.equal(kept.imported,undefined);
+  // No seed is needed to resume any more.
+  assert.equal(loadProject({...options,'state-dir':'work','resume-state':true},dir).resume,true);
+  assert.equal(loadProject({...options,'keep-data':true,'state-dir':'elsewhere'},dir).state,canonical(join(dir,'elsewhere')));
+  assert.equal(loadProject({...options,'keep-data':true,import:'seed'},dir).imported,canonical(join(dir,'seed')));
+  assert.throws(()=>loadProject({...options,'keep-data':true,import:'seed','export-on-exit':true},dir),/immutable seed/);
+  assert.throws(()=>loadProject({...options,'resume-state':true},dir),/--resume-state requires --state-dir; --keep-data alone keeps the data in \.firenook\/state/);
+  const launch = launchFor(dir,{...options,'keep-data':true});
+  assert.equal(flagValue(launch.args,'--state-dir'),canonical(join(dir,'.firenook','state')));
+  assert.ok(launch.args.includes('--resume-state'));
+  assert.ok(!launch.args.includes('--import'));
+  // A second start without --keep-data never silently reimports or resets it.
+  mkdirSync(join(dir,'.firenook','state'),{recursive:true});
+  writeFileSync(join(dir,'.firenook','state','native-state.json'),'{}');
+  assert.throws(()=>loadProject({...options,'state-dir':'.firenook/state'},dir),/requires explicit --resume-state \(or --keep-data\)/);
+  assert.throws(()=>parseOptions(['--keep-data=yes']),/does not take a value/);
+});
 test('state and credential isolation stay outside original config and seed', () => {
   const {dir,options} = project();
   const before = readFileSync(join(dir,'firebase.json'),'utf8');

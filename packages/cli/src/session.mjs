@@ -367,7 +367,9 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   };
   const dataLine = () => (model.opening.kind === 'resume' ? `nothing was changed: ${shortPath(stateDir, cwd)} is as you left it`
     : model.opening.kind === 'import' && launch.args.includes('--resume-state') ? `the seed was imported into ${shortPath(stateDir, cwd)}; the next start picks it up`
-      : ephemeral ? 'nothing of yours was changed' : `the data in ${shortPath(stateDir, cwd)} is kept`);
+      : ephemeral ? 'nothing of yours was changed'
+        : model.opening.kind === 'fresh' && launch.args.includes('--resume-state') ? `the data is saved in ${shortPath(stateDir, cwd)}; the next start picks it up`
+          : `the data in ${shortPath(stateDir, cwd)} is kept`);
   async function problemLines(failure) {
     if (failure.kind === 'port') {
       const listener = LISTENERS[failure.service] ?? {label: failure.service, key: `"${failure.service}": { "port": PORT }`};
@@ -625,7 +627,8 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   ];
   function showKeys() {
     const at = clock();
-    screen.emit(() => [stream(at, blue(G.help), 'keys', null, ''), ...KEYS.map(([key, text]) => under('', `${bold(key)}   ${dim(text)}`))]);
+    screen.emit(() => [stream(at, blue(G.help), 'keys', null, ''), ...KEYS.map(([key, text]) => under('', `${bold(key)}   ${dim(text)}`)),
+      under('', dim(`coding agent: run ${bold('npx firenook mcp add')} in the project to give it the MCP server`))]);
   }
   function showWarnings() {
     const at = clock();
