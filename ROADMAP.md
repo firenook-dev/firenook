@@ -1401,3 +1401,37 @@ README already makes work without reading the docs first.
   repository stays a CLI action with a plan and a dry run. Once the server
   marks its requests, the tab shows when an agent last called.
 - [ ] **The terminal's `?` help names `firenook mcp add`.**
+
+**The MCP server's coverage.** `firenook mcp` has 19 tools: status, export,
+Firestore get/query/set/delete/list collections, Auth users and pending codes,
+Storage listing and metadata, Functions list and invoke, a Pub/Sub publish and
+Cloud Tasks queue stats. What a coding agent most needs while building or
+fixing a feature is missing. The console's API (`/console/api/v1`) already
+serves every item below, so most of this is new tools over existing routes;
+the server ships in the same package as the engine, so the two stay in step.
+In priority order:
+
+- [ ] **Logs and function calls.** Search the log by service, level, text and
+  time (`/logs/entries`, `/logs/facets`); list recent function calls with
+  their trigger, outcome and duration, and read one call's logs, error and
+  stack trace, request and response (`/functions/invocations`); replay a
+  call. Today an agent cannot see why a function failed.
+- [ ] **Security Rules.** Read the Firestore and Storage rules in force
+  (`/rules`); ask whether a request as a given user would be allowed, with
+  the line that decided it (`/rules/evaluate`); list recent denials
+  (`/rules/decisions`).
+- [ ] **More of Auth.** Mint an ID token for a user, so an agent can call a
+  function or the REST API as that user (`/auth/tokens`); set and remove
+  custom claims; disable, enable and revoke a user; list tenants.
+- [ ] **Reset.** Clear chosen services' data through `/suite/clear`, with
+  the same safeguard as the console: clearing more than one section names
+  the project id.
+- [ ] **Storage files.** Read an object's content, upload one, delete,
+  copy and move.
+- [ ] **The rest.** Eventarc: publish a custom event, list and replay events.
+  Extensions: list instances, reload one. Pub/Sub: topics, subscriptions and a
+  backlog peek. Cloud Tasks: list tasks, run one now. Schedules: list them and
+  run one now. Firestore: count and collection-group queries.
+
+Each tool gets a test against a running suite beside the existing ones in
+`packaging/cli-commands.test.mjs`, and `docs/mcp.md` lists every tool.
