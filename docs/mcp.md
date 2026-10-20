@@ -11,13 +11,33 @@ firenook mcp --only firestore,auth    # a subset of the tool groups
 
 ## Connect your agent
 
-Register `npx firenook mcp` with your agent, with Firenook installed in the
-project. The server reads `firebase.json` and `.firebaserc` from the folder the
-agent starts it in, so it needs no project id. Start the emulators as usual
+From the project folder, with Firenook installed in the project:
+
+```sh
+npx firenook mcp add             # writes the files below for the agents it finds
+npx firenook mcp add --dry-run   # shows what it would write
+npx firenook mcp add --agent cursor,vscode
+```
+
+It looks for Claude Code (a `.claude/` folder, `CLAUDE.md`, an existing
+`.mcp.json` or `claude` on the PATH), Cursor (`.cursor/`) and VS Code
+(`.vscode/`), and writes each one's project file with the entry
+`npx firenook mcp`. Other servers in those files are kept, a second run
+changes nothing, and another `firenook` entry is replaced only with `--force`.
+Commit the files so your team's agents have the server too, and restart the
+agent to load it. `firenook init` offers the same for a new project, and
+`init --adopt` lists it with its other additions. An agent configured only in
+the home folder gets the line to add (Codex: `codex mcp add firenook -- npx
+firenook mcp`); no file outside the project is edited. The console's Connect
+dialog has the same snippets, with install links for Cursor and VS Code, on
+its Coding agent tab.
+
+The server reads `firebase.json` and `.firebaserc` from the folder the agent
+starts it in, so it needs no project id. Start the emulators as usual
 (`npx firenook emulators:start`); every tool finds them on each call.
 
-Claude Code, from the project folder. This writes `.mcp.json`, which you can
-commit so your team's agents have it too:
+By hand instead, Claude Code, from the project folder (this writes
+`.mcp.json`):
 
 ```sh
 claude mcp add --scope project firenook -- npx firenook mcp

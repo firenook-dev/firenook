@@ -25,7 +25,7 @@ firenook ext:vendor [--instance ID]...
 firenook state:inspect --state-dir DIR              # what the saved Firestore file holds and how much is free
 firenook state:compact --state-dir DIR [--no-copy]  # return the free pages to the disk (emulator stopped)
 firenook state:adopt-seed --state-dir DIR --import SEED   # keep saved data after its seed changed
-firenook mcp [--project ID] [--only firestore,auth,storage,functions,pubsub,tasks]
+firenook mcp [--project ID] [--only firestore,auth,storage,functions,logs,rules,pubsub,tasks,schedules,eventarc,extensions,reset]
 firenook mcp add [--agent claude,cursor,vscode] [--dry-run] [--force] [--json]   # give coding agents the server
 firenook binary-path | native ARGS...
 ```
