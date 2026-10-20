@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "version": "0.2.0-next.7",
+  "tag": "npm-v0.2.0-next.7",
+  "engineRevision": "37fdd0387ea81f3131c20b594159113c86084a3a",
+  "sourceRun": 39464616341,
+  "sourceAttempt": 1,
+  "sourceCommit": "7d4cefe2828aefd68f4b77abb50338094453c715",
+  "artifacts": [
+    {
+      "id": 12285201697,
+      "name": "darwin-arm64",
+      "digest": "sha256:e46f1f1ab74f77184bfc2860896a2c03b34961a5274f917fcc0bc90b73f95abf"
+    },
+    {
+      "id": 12287030353,
+      "name": "darwin-x64",
+      "digest": "sha256:8e5d6562b7f2714d7e7b9f241430e625d9f96147171bc4e21e41629d902de447"
+    },
+    {
+      "id": 12285675207,
+      "name": "linux-arm64",
+      "digest": "sha256:f17bad0c6a1038b4cdb0fc952fcb433a28aa4e62cea2c6a72719213f6334993d"
+    },
+    {
+      "id": 12285081546,
+      "name": "linux-x64",
+      "digest": "sha256:6b296d9e7832803fd7f088109a4d0e3a1f830246775085af2bca9904e78fa12c"
+    },
+    {
+      "id": 12284734321,
+      "name": "win32-x64",
+      "digest": "sha256:d194c366238f92248a081bdc4ec32563ca83c3df845320d1623c04303a6651f8"
+    }
+  ],
+  "packages": [
+    {
+      "name": "@firenook/cli-darwin-arm64",
+      "sha256": "4792792f98cec6dba311ea7b22418d47273303d380457ce342c3999abd203608",
+      "integrity": "sha512-2GSDub2FeT6iLOmehv27YDHBasw2n8yecsLor66nVBXEhBlg93VUynzrTutqD/wAd+V6xfcvp1eEjxBeiIAbSg=="
+    },
+    {
+      "name": "@firenook/cli-darwin-x64",
+      "sha256": "f58f3118d2aee54e39c3b41cbf873915cb26538edc2bf80b5a1bf434321e774e",
+      "integrity": "sha512-ky2yAPPanfJln7mB3ADsjj3Ovbg4JD7/uhBRIK0dwPGmPC2P7OkH7QPvIsloutAceHiT4o71r5tsCwketLKKCQ=="
+    },
+    {
+      "name": "@firenook/cli-linux-arm64",
+      "sha256": "18e77522d8a0e0d7a97a19f52ecc2dbeceb9a344683a3e7cdb338515d768c8c9",
+      "integrity": "sha512-iF+s16h8ZEWRvXA/gjDn2cn3BQsPB6JXgMrEB2nuNcm+4LLjJz7AuBpmoFnY/9w94900qoQw9zqHTJzeg0d1mg=="
+    },
+    {
+      "name": "@firenook/cli-linux-x64",
+      "sha256": "4774d33396592f394ead74a229accbee34234c78da4ff30f9023ec30dc0e261d",
+      "integrity": "sha512-2fVZRX9vdLO1633QDZHG/cFbQP+Kr9MprQbrbZV90QkU2UywscgculnQrAa7FzegBoFaMAElx/Sd685O+jhL/g=="
+    },
+    {
+      "name": "@firenook/cli-win32-x64",
+      "sha256": "f95d5fba8239f644042b4ebe6ecc5019ecafd234f68449c3af39bdc5a79b301f",
+      "integrity": "sha512-s//ZSntUyDJgdhMeqDiYbECpAon5M8bjSJd07GtVnx7EMstH5D7mUY5A3/7qNzO7czouk9lKe6kKBEAcBMeMDg=="
+    },
+    {
+      "name": "firenook",
+      "sha256": "ad7c13b31d61efd59aba668a59de54169c9159196d7f501999279b68d8166b13",
+      "integrity": "sha512-mTh4t295yAD5/HNUMFG3+dWBW+HaK6lEeyl4Rhdzcbh9dAPUTWTpD2jejNHXT5GzwwTJe3rGs9XXcCuUkuZsug=="
+    }
+  ],
+  "accepted": [
+    "@firenook/cli-darwin-arm64",
+    "@firenook/cli-darwin-x64",
+    "@firenook/cli-linux-arm64",
+    "@firenook/cli-linux-x64",
+    "@firenook/cli-win32-x64"
+  ],
+  "latest": true
+}
