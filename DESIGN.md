@@ -202,6 +202,16 @@ the developer's: import into a new `--state-dir`, or `firenook
 state:adopt-seed`, which records the seed as it is now and keeps the previous
 receipt beside the new one.
 
+Data kept without a seed (`--resume-state` with no `--import`, as a new
+project starts) records an empty seed path and fingerprint in the same
+receipt format, so 0.2.0-next.6 and earlier read the receipt and refuse it
+as a changed seed path. Its first start reads no seed and writes no
+`native-seed.json`; the receipt is written incomplete before any store opens
+and complete once they exist, as an import's is. A resume checks no seed.
+Seedless data never takes a seed and seeded data never drops its own: a
+seedless state started with `--import`, a seeded one started without it,
+and `state:adopt-seed` on a seedless state are each refused, the data kept.
+
 ### Repairs and stops while opening
 
 redb marks its file while it is open and clears the mark on a clean close; a

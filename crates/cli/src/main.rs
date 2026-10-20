@@ -453,8 +453,9 @@ struct SuiteArgs {
     offline: bool,
     #[arg(long = "state-dir")]
     state_dir: PathBuf,
-    /// Reuse a validated native disk state, importing the seed only on first boot.
-    /// Requires --import; keep exports separate from the seed and state directory.
+    /// Reuse a validated native disk state, importing the --import seed only on
+    /// first boot; without --import the data starts empty and is kept. Keep
+    /// exports separate from the seed and state directory.
     #[arg(long = "resume-state", conflicts_with = "firestore_memory")]
     resume_state: bool,
     #[arg(long)]

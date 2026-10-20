@@ -570,3 +570,213 @@ fn compaction_and_inspection_wait_for_the_emulator_to_stop() {
         .collect();
     assert!(left.is_empty());
 }
+
+/// A start that keeps its data without a seed, as a new project does.
+fn seedless(case: &Case) -> SuiteConfig {
+    let mut config = case.config.clone();
+    config.import = None;
+    config
+}
+
+fn receipt_json(config: &SuiteConfig) -> serde_json::Value {
+    serde_json::from_slice(&fs::read(config.state_dir.join(RECEIPT)).unwrap()).unwrap()
+}
+
+#[test]
+fn data_kept_without_a_seed_starts_empty_and_completes_its_receipt() {
+    let case = Case::new();
+    let config = seedless(&case);
+    let mut guard = NativeState::acquire(&config).unwrap();
+    assert!(!guard.reusing());
+    // Written incomplete before any store opens, as an import's is.
+    let pending = receipt_json(&config);
+    assert_eq!(pending["complete"], false);
+    assert_eq!(pending["identity"]["seedPath"], "");
+    assert_eq!(pending["identity"]["seedSha256"], "");
+    case.files();
+    guard.complete().unwrap();
+    let done = receipt_json(&config);
+    assert_eq!(done["complete"], true);
+    assert_eq!(done["identity"]["seedPath"], "");
+    assert_eq!(done["identity"]["seedSha256"], "");
+    // No seed was read, so none is recorded.
+    assert!(!config.state_dir.join("native-seed.json").exists());
+    // Completing again (a second checkpoint) changes nothing.
+    let before = fs::read(config.state_dir.join(RECEIPT)).unwrap();
+    guard.complete().unwrap();
+    assert_eq!(fs::read(config.state_dir.join(RECEIPT)).unwrap(), before);
+}
+
+#[test]
+fn data_kept_without_a_seed_is_picked_up_with_its_changes() {
+    let case = Case::new();
+    let config = seedless(&case);
+    let mut guard = NativeState::acquire(&config).unwrap();
+    case.files();
+    guard.complete().unwrap();
+    drop(guard);
+    let data = config.state_dir.join("auth-state.json");
+    fs::write(&data, b"written after the first start").unwrap();
+    let receipt = fs::read(config.state_dir.join(RECEIPT)).unwrap();
+    let mut guard = NativeState::acquire(&config).unwrap();
+    assert!(guard.reusing());
+    guard.complete().unwrap();
+    assert_eq!(fs::read(&data).unwrap(), b"written after the first start");
+    // A resume rewrites nothing and still reads no seed.
+    assert_eq!(fs::read(config.state_dir.join(RECEIPT)).unwrap(), receipt);
+    assert!(!config.state_dir.join("native-seed.json").exists());
+}
+
+#[test]
+fn a_seedless_receipt_keeps_the_format_earlier_engines_read() {
+    let case = Case::new();
+    let config = seedless(&case);
+    let mut guard = NativeState::acquire(&config).unwrap();
+    case.files();
+    guard.complete().unwrap();
+    let saved = receipt_json(&config);
+    let mut keys = saved["identity"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "buckets",
+            "defaultBucket",
+            "format",
+            "project",
+            "seedPath",
+            "seedSha256"
+        ]
+    );
+    assert_eq!(saved["identity"]["format"], 2);
+    // The unchanged struct, unknown fields refused, reads it back exactly.
+    let bytes = fs::read(config.state_dir.join(RECEIPT)).unwrap();
+    let receipt: Receipt = serde_json::from_slice(&bytes).unwrap();
+    assert!(receipt.complete);
+    assert_eq!(receipt.identity.seed_path, PathBuf::new());
+    assert!(receipt.identity.seed().is_none());
+    assert_eq!(
+        serde_json::to_value(&receipt).unwrap(),
+        serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+    );
+}
+
+#[test]
+fn data_kept_without_a_seed_refuses_a_seed() {
+    let case = Case::new();
+    let config = seedless(&case);
+    let mut guard = NativeState::acquire(&config).unwrap();
+    case.files();
+    guard.complete().unwrap();
+    drop(guard);
+    let receipt = fs::read(config.state_dir.join(RECEIPT)).unwrap();
+    let refused = refusal(&case.config);
+    let seed = fs::canonicalize(case.config.import.as_ref().unwrap()).unwrap();
+    assert!(
+        refused.contains(&format!(
+            "this data was started without a seed, so it cannot take the seed {}: start without --import to keep using it",
+            seed.display()
+        )),
+        "{refused}"
+    );
+    assert!(refused.contains("existing data preserved"), "{refused}");
+    assert_eq!(fs::read(config.state_dir.join(RECEIPT)).unwrap(), receipt);
+    assert!(!config.state_dir.join("native-seed.json").exists());
+    assert!(NativeState::acquire(&config).unwrap().reusing());
+}
+
+#[test]
+fn seeded_data_refuses_a_start_without_its_seed() {
+    let case = Case::new();
+    case.imported();
+    let seed = fs::canonicalize(case.config.import.as_ref().unwrap()).unwrap();
+    let refused = refusal(&seedless(&case));
+    assert!(
+        refused.contains(&format!(
+            "it was imported from {}: pass --import {} to keep using it",
+            seed.display(),
+            seed.display()
+        )),
+        "{refused}"
+    );
+    assert!(refused.contains("existing data preserved"), "{refused}");
+    assert!(NativeState::acquire(&case.config).unwrap().reusing());
+}
+
+#[test]
+fn an_unfinished_first_start_without_a_seed_is_never_picked_up() {
+    let case = Case::new();
+    let config = seedless(&case);
+    drop(NativeState::acquire(&config).unwrap());
+    case.files();
+    let refused = refusal(&config);
+    assert!(
+        refused.contains("the first start that made it did not finish"),
+        "{refused}"
+    );
+    assert!(config.state_dir.join("auth-state.json").exists());
+}
+
+#[test]
+fn data_kept_without_a_seed_still_needs_resume_state() {
+    let case = Case::new();
+    let config = seedless(&case);
+    let mut guard = NativeState::acquire(&config).unwrap();
+    case.files();
+    guard.complete().unwrap();
+    drop(guard);
+    let mut unmanaged = config.clone();
+    unmanaged.resume_state = false;
+    let refused = refusal(&unmanaged);
+    assert!(
+        refused.contains("pass --resume-state to keep using it"),
+        "{refused}"
+    );
+}
+
+#[test]
+fn adopting_a_seed_for_data_kept_without_one_is_refused() {
+    let case = Case::new();
+    let config = seedless(&case);
+    let mut guard = NativeState::acquire(&config).unwrap();
+    case.files();
+    guard.complete().unwrap();
+    drop(guard);
+    let receipt = fs::read(config.state_dir.join(RECEIPT)).unwrap();
+    let seed = case.config.import.clone().unwrap();
+    let error = adopt_seed(&config.state_dir, &seed)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("it was started without a seed, so it has none to replace"),
+        "{error}"
+    );
+    assert_eq!(fs::read(config.state_dir.join(RECEIPT)).unwrap(), receipt);
+    assert!(!config.state_dir.join("native-seed.json").exists());
+    assert!(NativeState::acquire(&config).unwrap().reusing());
+}
+
+#[test]
+fn exports_of_data_kept_without_a_seed_only_avoid_the_state() {
+    let case = Case::new();
+    let config = seedless(&case);
+    for destination in [
+        case.root.clone(),
+        config.state_dir.clone(),
+        config.state_dir.join("export"),
+    ] {
+        assert!(validate_export_destination(&config, &destination).is_err());
+    }
+    // The folder a seed would be is just another folder now.
+    for destination in [
+        config.export_on_exit.clone().unwrap(),
+        case.config.import.clone().unwrap(),
+    ] {
+        assert!(validate_export_destination(&config, &destination).is_ok());
+    }
+}

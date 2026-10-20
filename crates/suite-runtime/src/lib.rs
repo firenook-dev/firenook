@@ -1071,14 +1071,18 @@ async fn prepare_native_suite(
     if guard.reusing() {
         startup.import = None;
         if !terminal::enabled() {
-            eprintln!("firenook resuming validated native state (seed import skipped)");
+            if config.import.is_some() {
+                eprintln!("firenook resuming validated native state (seed import skipped)");
+            } else {
+                eprintln!("firenook resuming validated native state (kept without a seed)");
+            }
         }
     }
     terminal::emit(&terminal::opening(config, guard.reusing()));
     if let Some(step) = checking {
         step.done(&[], None);
     }
-    let prepared = prepare_suite(&startup).await?;
+    let prepared = prepare_suite(&startup, guard.reusing()).await?;
     if config.resume_state {
         if let Some(auth) = &prepared.auth {
             auth.checkpoint_native_state()
@@ -1159,13 +1163,19 @@ fn console_slash_redirect(uri: &axum::http::Uri) -> Redirect {
     }
 }
 
-async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRuntimeError> {
+/// The suite's services, before any listens. `reusing` says whether the
+/// data is saved state being picked up.
+async fn prepare_suite(
+    config: &SuiteConfig,
+    reusing: bool,
+) -> Result<PreparedSuite, SuiteRuntimeError> {
     tokio::fs::create_dir_all(&config.state_dir)
         .await
         .map_err(|error| failure(format!("failed to create suite state: {error}")))?;
     let logging = prepare_logging(config)?;
-    let [firestore_step, auth_step, storage_step] = begin_data_steps(config);
-    let store = open_store(config, data_verb(config))?;
+    let verb = data_verb(config, reusing);
+    let [firestore_step, auth_step, storage_step] = begin_data_steps(config, verb);
+    let store = open_store(config, verb)?;
     let triggers = TriggerRegistry::default();
     let functions_endpoint = format!("{}/", config.origin(config.ports.functions));
     let delivery = DeliveryRuntime::start(
@@ -2629,19 +2639,21 @@ fn spawn_exporter(
     })
 }
 
-/// Opens the terminal's start-up rows for the selected data services.
-fn data_verb(config: &SuiteConfig) -> &'static str {
+/// What the data services do as they open: import a seed, pick up saved
+/// state, or start empty (the first start of data kept without a seed
+/// among them).
+fn data_verb(config: &SuiteConfig, reusing: bool) -> &'static str {
     if config.import.is_some() {
         "importing"
-    } else if config.resume_state {
+    } else if reusing {
         "resuming"
     } else {
         "starting"
     }
 }
 
-fn begin_data_steps(config: &SuiteConfig) -> [Option<terminal::Step>; 3] {
-    let verb = data_verb(config);
+/// Opens the terminal's start-up rows for the selected data services.
+fn begin_data_steps(config: &SuiteConfig, verb: &'static str) -> [Option<terminal::Step>; 3] {
     let services = config.services;
     [
         ("firestore", services.firestore),

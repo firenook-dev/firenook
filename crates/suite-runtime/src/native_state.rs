@@ -28,6 +28,8 @@ struct Identity {
     project: String,
     default_bucket: String,
     buckets: Vec<String>,
+    /// The `--import` seed the data was first imported from; empty for data
+    /// started without one, which then never takes a seed.
     seed_path: PathBuf,
     /// The whole-seed fingerprint, in the format every engine computes, so
     /// that saved data stays readable by earlier ones. This engine compares
@@ -42,6 +44,13 @@ struct Receipt {
     identity: Identity,
 }
 
+impl Identity {
+    /// The seed the data came from; `None` when it was started without one.
+    fn seed(&self) -> Option<&Path> {
+        (!self.seed_path.as_os_str().is_empty()).then_some(self.seed_path.as_path())
+    }
+}
+
 /// A first import under way: the seed's files as they were when it began,
 /// and the read that hashes them meanwhile.
 struct Import {
@@ -51,11 +60,37 @@ struct Import {
     cancel: Arc<AtomicBool>,
 }
 
+impl Import {
+    /// Takes the seed's files' details and starts hashing them.
+    fn begin(seed: &Path) -> Result<Self, SuiteRuntimeError> {
+        let before = seed::scan(seed).map_err(refused)?;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let hashing = {
+            let seed = seed.to_owned();
+            let found = before.clone();
+            let cancel = Arc::clone(&cancel);
+            std::thread::Builder::new()
+                .name("firenook-seed".to_owned())
+                .spawn(move || seed::hash_all(&seed, &found, &cancel, false))
+                .map_err(io_error)?
+        };
+        Ok(Self {
+            seed: seed.to_owned(),
+            before,
+            hashing: Some(hashing),
+            cancel,
+        })
+    }
+}
+
 pub(super) struct NativeState {
     _lock: File,
     root: PathBuf,
     identity: Option<Identity>,
     reusing: bool,
+    /// The receipt was written incomplete by this start, which completes it
+    /// once the stores exist.
+    first_start: bool,
     import: Option<Import>,
 }
 
@@ -66,8 +101,9 @@ impl NativeState {
             if config.firestore_in_memory {
                 return Err(refused("native resume requires disk/WAL mode"));
             }
-            let seed = seed_path(config)?;
-            reject_overlap(&root, &seed)?;
+            if let Some(seed) = seed_path(config)? {
+                reject_overlap(&root, &seed)?;
+            }
             if let Some(destination) = &config.export_on_exit {
                 validate_export_destination(config, destination)?;
             }
@@ -78,14 +114,19 @@ impl NativeState {
             root,
             identity: None,
             reusing: false,
+            first_start: false,
             import: None,
         };
         let receipt_path = guard.root.join(RECEIPT);
         if !config.resume_state {
             if receipt_path.exists() {
-                return Err(refused(
-                    "managed state requires --resume-state and its original --import seed",
-                ));
+                let seedless = read_receipt(&guard.root)
+                    .is_ok_and(|receipt| receipt.identity.seed().is_none());
+                return Err(refused(if seedless {
+                    "this is saved data, started without a seed: pass --resume-state to keep using it"
+                } else {
+                    "managed state requires --resume-state and its original --import seed"
+                }));
             }
             return Ok(guard);
         }
@@ -107,7 +148,9 @@ impl NativeState {
             project: config.project_id.clone(),
             default_bucket: config.default_bucket.clone(),
             buckets,
-            seed_path: seed,
+            // Data started without a seed records an empty one, which an
+            // earlier engine reads as a seed path that changed and refuses.
+            seed_path: seed.unwrap_or_default(),
             seed_sha256: String::new(),
         };
         if receipt_path.exists() {
@@ -115,7 +158,9 @@ impl NativeState {
             if let Some(reason) = mismatch(&receipt, &identity) {
                 return Err(refused(reason));
             }
-            check_seed(&guard.root, &receipt.identity)?;
+            if receipt.identity.seed().is_some() {
+                check_seed(&guard.root, &receipt.identity)?;
+            }
             validate_files(&guard.root)?;
             identity.seed_sha256 = receipt.identity.seed_sha256;
             guard.reusing = true;
@@ -127,18 +172,9 @@ impl NativeState {
             }
             // The seed is read once, beside the import: its files' details
             // now, their hashes meanwhile, and a second look at the end
-            // catches a seed edited while it was being imported.
-            let before = seed::scan(&identity.seed_path).map_err(refused)?;
-            let cancel = Arc::new(AtomicBool::new(false));
-            let hashing = {
-                let seed = identity.seed_path.clone();
-                let found = before.clone();
-                let cancel = Arc::clone(&cancel);
-                std::thread::Builder::new()
-                    .name("firenook-seed".to_owned())
-                    .spawn(move || seed::hash_all(&seed, &found, &cancel, false))
-                    .map_err(io_error)?
-            };
+            // catches a seed edited while it was being imported. Without a
+            // seed there is nothing to read.
+            guard.import = identity.seed().map(Import::begin).transpose()?;
             write_receipt(
                 &guard.root,
                 &Receipt {
@@ -146,12 +182,7 @@ impl NativeState {
                     identity: identity.clone(),
                 },
             )?;
-            guard.import = Some(Import {
-                seed: identity.seed_path.clone(),
-                before,
-                hashing: Some(hashing),
-                cancel,
-            });
+            guard.first_start = true;
         }
         guard.identity = Some(identity);
         Ok(guard)
@@ -166,7 +197,19 @@ impl NativeState {
             return Ok(());
         };
         validate_files(&self.root)?;
+        if !self.first_start {
+            return Ok(());
+        }
+        // Data started without a seed is complete once its stores exist.
         let Some(mut import) = self.import.take() else {
+            write_receipt(
+                &self.root,
+                &Receipt {
+                    complete: true,
+                    identity: identity.clone(),
+                },
+            )?;
+            self.first_start = false;
             return Ok(());
         };
         let hashing = import
@@ -196,6 +239,7 @@ impl NativeState {
                 identity: identity.clone(),
             },
         )?;
+        self.first_start = false;
         if let Some(step) = waiting {
             step.done(&[(record.files() as u64, "seed files")], None);
         }
@@ -361,6 +405,12 @@ pub fn adopt_seed(state_dir: &Path, seed: &Path) -> Result<AdoptedSeed, SuiteRun
             "the import that made it did not finish, and adopting a seed cannot finish it",
         ));
     }
+    if receipt.identity.seed().is_none() {
+        return Err(refused(format!(
+            "it was started without a seed, so it has none to replace, and data started without a seed never takes one; to start from {}, import it",
+            seed.display()
+        )));
+    }
     let seed = validate_seed(seed)?;
     reject_overlap(&root, &seed)?;
     let found = seed::scan(&seed).map_err(refused)?;
@@ -383,12 +433,9 @@ pub fn adopt_seed(state_dir: &Path, seed: &Path) -> Result<AdoptedSeed, SuiteRun
     })
 }
 
-fn seed_path(config: &SuiteConfig) -> Result<PathBuf, SuiteRuntimeError> {
-    let seed = config
-        .import
-        .as_ref()
-        .ok_or_else(|| refused("--resume-state requires --import as seed identity"))?;
-    validate_seed(seed)
+/// The `--import` seed, validated; `None` for a start without one.
+fn seed_path(config: &SuiteConfig) -> Result<Option<PathBuf>, SuiteRuntimeError> {
+    config.import.as_deref().map(validate_seed).transpose()
 }
 
 /// The seed's canonical path, once its manifest is known to point inside it.
@@ -420,7 +467,9 @@ pub(super) fn validate_export_destination(
     destination: &Path,
 ) -> Result<(), SuiteRuntimeError> {
     let destination = resolve_path(destination)?;
-    reject_overlap(&destination, &seed_path(config)?)?;
+    if let Some(seed) = seed_path(config)? {
+        reject_overlap(&destination, &seed)?;
+    }
     reject_overlap(&destination, &resolve_path(&config.state_dir)?)
 }
 
@@ -489,7 +538,11 @@ fn validate_files(root: &Path) -> Result<(), SuiteRuntimeError> {
 fn mismatch(receipt: &Receipt, identity: &Identity) -> Option<String> {
     let saved = &receipt.identity;
     if !receipt.complete {
-        return Some("the import that made it did not finish".to_owned());
+        return Some(if saved.seed().is_some() {
+            "the import that made it did not finish".to_owned()
+        } else {
+            "the first start that made it did not finish".to_owned()
+        });
     }
     if saved.format != identity.format {
         return Some(format!(
@@ -509,6 +562,22 @@ fn mismatch(receipt: &Receipt, identity: &Identity) -> Option<String> {
             saved.buckets.join(", "),
             identity.buckets.join(", ")
         ));
+    }
+    match (saved.seed(), identity.seed()) {
+        (None, Some(seed)) => {
+            return Some(format!(
+                "this data was started without a seed, so it cannot take the seed {}: start without --import to keep using it",
+                seed.display()
+            ));
+        }
+        (Some(saved), None) => {
+            return Some(format!(
+                "it was imported from {}: pass --import {} to keep using it",
+                saved.display(),
+                quoted(saved)
+            ));
+        }
+        _ => {}
     }
     if saved.seed_path != identity.seed_path {
         return Some(format!(
