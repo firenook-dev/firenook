@@ -297,6 +297,25 @@ test('a seed that changed names its files, and both ways on as commands', async 
     'nothing was deleted']) shows(shown, expected);
 });
 
+test('data kept without a seed, and data kept from one, say which way on', async () => {
+  const card = async (args, reason) => {
+    const {out, text} = screen(120, 50);
+    const {spawner} = engine(async ({send}) => {
+      send({type: 'failed', kind: 'state', message: `native state refused: ${reason}; existing data preserved.`, reason});
+      return 1;
+    });
+    assert.equal(await runInteractive(launch(args), {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input: keyboard(), env, platform: 'darwin', spawner}), 1);
+    return text();
+  };
+  let shown = await card(['--resume-state', '--import', '/tmp/firenook-terminal-seed'], 'this data was started without a seed, so it cannot take the seed /tmp/firenook-terminal-seed: start without --import to keep using it');
+  for (const expected of ['cannot take the seed', 'to keep using it, start without --import; to start from the seed, give it a new --state-dir', 'nothing was deleted']) shows(shown, expected);
+  assert.ok(!shown.includes('to import the seed again'));
+  shown = await card(['--resume-state'], 'it was imported from /tmp/firenook-terminal-seed: pass --import /tmp/firenook-terminal-seed to keep using it');
+  for (const expected of ['to keep using it, start with its seed again:', '--import /tmp/firenook-terminal-seed']) shows(shown, expected);
+  shown = await card([], 'this is saved data, started without a seed: pass --resume-state to keep using it');
+  shows(shown, 'to keep using it, add --keep-data (or --resume-state); a fresh start needs a new --state-dir');
+});
+
 test('data an earlier engine saved, whose seed cannot be proven, points to adopting it', async () => {
   const {out, text} = screen(120, 50);
   const {spawner} = engine(async ({send}) => {
