@@ -680,7 +680,7 @@ const DATA = {
     "name": "mcp (local MCP server)",
     "status": "done",
     "note": "Dependency-free stdio server: status, Firestore, Auth, Storage, Functions, Pub/Sub, Tasks, export (next.9)",
-    "remaining": "—",
+    "remaining": "Planned for next.7: firenook mcp add, the init offer, a no-argument start and the console's Coding agent tab",
     "size": "—"
   },
   {
@@ -757,6 +757,16 @@ const DATA = {
   }
 ],
   backlog: [
+  {
+    "item": "Keeping data without a seed",
+    "why": "Planned for next.7: --resume-state needs --import, so a project made with init cannot keep its data between runs; resume from an empty seed",
+    "size": "days"
+  },
+  {
+    "item": "Coding agent setup",
+    "why": "Planned for next.7: firenook mcp add writes each agent's project file, init offers it, the server finds the running suite with no arguments, and the console's Connect dialog gets a Coding agent tab",
+    "size": "days"
+  },
   {
     "item": "Closing the data on stop",
     "why": "Built for next.6: since next.3 a clean stop left Firestore's file marked open (and Storage's since next.4), so every start after a stop repaired it; both now close, the file is tested after each kind of stop, and a killed engine is reported as a failure",

@@ -1344,3 +1344,45 @@ the size; repack and packing better while running come after it.
   so, and the release notes of such a release must say so too. Tested with a
   dry run of the publish script for both settings on a constructed artifact
   set (`packaging/release-channel.test.mjs`).
+
+## Coding agents and keeping data without a seed (`0.2.0-next.7`, planned)
+
+Found on 2026-10-20 while reviewing the README. Both items make a promise the
+README already makes work without reading the docs first.
+
+- [ ] **Keep data in a project that has no seed.** Keeping data between runs
+  needs `--state-dir` and `--resume-state`, and `--resume-state` refuses to
+  start without `--import` (`--resume-state requires explicit --state-dir and
+  --import`), while a nonempty state directory refuses to start without
+  `--resume-state`. A project made with `firenook init` has no seed, so it
+  cannot keep its data at all: the second start with the same `--state-dir`
+  is refused. Allow `--resume-state` without `--import`, with an empty seed
+  as the data's identity, so `--state-dir ./.firenook/state --resume-state`
+  works from the first start of a new project.
+- [ ] **Set up a coding agent in one command: `firenook mcp add`.** Today
+  the agent's MCP configuration is written by hand from one generic line in
+  `docs/mcp.md`, and each agent keeps it somewhere else. `mcp add` finds the
+  agents a project uses (`.claude/` or `claude` on the path, `.cursor/`,
+  `.vscode/`) and writes each one's project file: `.mcp.json`,
+  `.cursor/mcp.json`, `.vscode/mcp.json` (under `servers`). The entry is
+  `npx firenook mcp` with no project id, so the file can be committed and
+  every teammate's agent has it. It prints what it wrote, takes `--dry-run`
+  and `--agent`, and a second run changes nothing. An agent whose only
+  configuration is in the home folder gets the line printed, never a file
+  edited outside the project.
+- [ ] **`init` offers it.** A new project's `init` asks once, naming the
+  agents found; `init --adopt` lists it in its plan as one more addition.
+  Both run the same code as `mcp add`.
+- [ ] **`firenook mcp` with no arguments finds the running suite.** With no
+  `firebase.json` in its folder and no `--project`, the server uses the one
+  suite whose `hub-<project>.json` locator answers, and asks for `--project`
+  when two do. Editor install links add the server to the user's settings,
+  where there is no project folder to read, so without this they would have
+  to carry a project id.
+- [ ] **A "Coding agent" tab in the console's Connect dialog.** Each agent's
+  snippet with the project's values filled in, "Add to Cursor" and "Add to VS
+  Code" install links (the editor asks the user to confirm), and the `mcp add`
+  command for the rest. The console writes no project files: changing the
+  repository stays a CLI action with a plan and a dry run. Once the server
+  marks its requests, the tab shows when an agent last called.
+- [ ] **The terminal's `?` help names `firenook mcp add`.**
