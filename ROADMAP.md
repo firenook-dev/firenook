@@ -1345,111 +1345,147 @@ the size; repack and packing better while running come after it.
   dry run of the publish script for both settings on a constructed artifact
   set (`packaging/release-channel.test.mjs`).
 
-## Coding agents and keeping data without a seed (`0.2.0-next.7`, planned)
+## Coding agents and keeping data without a seed (`0.2.0-next.7`)
 
 Found on 2026-10-20 while reviewing the README. Both items make a promise the
-README already makes work without reading the docs first.
+README already makes work without reading the docs first. Built on
+2026-10-20 in one go: the engine, the CLI, the MCP server and the console in
+parallel branches, merged into one candidate (PR #107).
 
-- [ ] **Keep data in a project that has no seed.** Keeping data between runs
-  needs `--state-dir` and `--resume-state`, and `--resume-state` refuses to
-  start without `--import` (`--resume-state requires explicit --state-dir and
-  --import`), while a nonempty state directory refuses to start without
-  `--resume-state`. A project made with `firenook init` has no seed, so it
-  cannot keep its data at all: the second start with the same `--state-dir`
-  is refused. Allow `--resume-state` without `--import`, with an empty seed
-  as the data's identity, so `--state-dir ./.firenook/state --resume-state`
-  works from the first start of a new project. The launcher drops its
-  `--import` requirement; the engine writes the receipt with an empty seed
-  path and skips the seed read. The receipt keeps its format (it rejects
-  unknown fields), so 0.2.0-next.6 still reads a seedless receipt and refuses
-  it cleanly as a changed seed path. Both refusals stay: a seedless state
-  started with `--import`, and a seeded state started without it. Tests: the
-  first start, a resume, both refusals, and 0.2.0-next.6 on a seedless
-  receipt.
-- [ ] **`--keep-data`**, short for `--state-dir ./.firenook/state
-  --resume-state` (with the seed when `--import` is given). Keeping data stays
-  opt-in for `emulators:start`: someone switching from the official emulator
-  expects `--import ./data` to start from that data every time, and
-  `emulators:exec` stays fresh for tests.
-- [ ] **`init` uses it.** The start command `init` prints for a new project
-  carries `--keep-data`; a new project never had the official behaviour to
-  keep. The README's "Your data stays" then shows `--keep-data`.
-- [ ] **Set up a coding agent in one command: `firenook mcp add`.** Today
-  the agent's MCP configuration is written by hand from one generic line in
-  `docs/mcp.md`, and each agent keeps it somewhere else. `mcp add` finds the
-  agents a project uses (`.claude/` or `claude` on the path, `.cursor/`,
-  `.vscode/`) and writes each one's project file: `.mcp.json`,
-  `.cursor/mcp.json`, `.vscode/mcp.json` (under `servers`). The entry is
-  `npx firenook mcp` with no project id, so the file can be committed and
-  every teammate's agent has it. It prints what it wrote, takes `--dry-run`
-  and `--agent`, and a second run changes nothing. An agent whose only
-  configuration is in the home folder gets the line printed, never a file
+- [x] **Keep data in a project that has no seed.** Keeping data between runs
+  needed `--state-dir` and `--resume-state`, and `--resume-state` refused to
+  start without `--import`, while a nonempty state directory refuses to start
+  without `--resume-state`. A project made with `firenook init` has no seed,
+  so it could not keep its data at all. Built: the launcher and the engine
+  accept `--resume-state` without `--import`. The receipt keeps its format
+  (format 2, the same fields, unknown fields still rejected): a seedless state
+  records an empty seed path and fingerprint, writes no seed record, and is
+  complete once its stores exist. Three refusals name the way on: a seedless
+  state started with `--import` ("start without --import to keep using it"),
+  a seeded state started without it ("pass --import <seed>"), and saved data
+  started without `--resume-state`; `state:adopt-seed` refuses a seedless
+  state. 0.2.0-next.6 reads a seedless receipt and refuses it with
+  "--resume-state requires --import as seed identity" (no `--import`) or "it
+  was imported from , not <seed>" (with one), every state file byte for byte
+  unchanged. The terminal's refusal card gives each case its own fix line.
+  Tests: the first start, a resume, every refusal, an unfinished first start,
+  the receipt read back through the unchanged struct, export destinations,
+  and 0.2.0-next.6 on a seedless state.
+- [x] **`--keep-data`**, short for `--state-dir ./.firenook/state
+  --resume-state` (with the seed when `--import` is given); `--state-dir`
+  names another directory. Keeping data stays opt-in for `emulators:start`:
+  someone switching from the official emulator expects `--import ./data` to
+  start from that data every time, and `emulators:exec` stays fresh for
+  tests.
+- [x] **`init` uses it.** The start command `init` prints for a new project
+  carries `--keep-data`, and the README's "Your data stays", its switching
+  steps, getting started, the data guide and the CLI reference show
+  `--keep-data`.
+- [x] **Set up a coding agent in one command: `firenook mcp add`.** It finds
+  the agents a project uses (Claude Code: `.claude/`, `CLAUDE.md`, an existing
+  `.mcp.json` or `claude` on the PATH; Cursor: `.cursor/` or `.cursorrules`;
+  VS Code: `.vscode/`) and writes each one's project file: `.mcp.json`,
+  `.cursor/mcp.json`, `.vscode/mcp.json` (under `servers`, with
+  `type: stdio`). The entry is `npx firenook mcp` with no project id (plus
+  `--config` when `firebase.json` is in another folder), so the file can be
+  committed. Other servers in the files are kept, a second run changes
+  nothing, another `firenook` entry is replaced only with `--force`, and a
+  file that is not plain JSON (comments) is left alone with the snippet
+  printed. It takes `--dry-run`, `--agent` and `--json`. Codex and Windsurf,
+  configured only in the home folder, get the line printed, never a file
   edited outside the project.
-- [ ] **`init` offers it.** A new project's `init` asks once, naming the
-  agents found; `init --adopt` lists it in its plan as one more addition.
-  Both run the same code as `mcp add`.
-- [ ] **`firenook mcp` with no arguments finds the running suite.** With no
+- [x] **`init` offers it.** In a terminal, a new project's `init` asks once,
+  naming the agents found; Enter or `y` writes the files, `n`, Ctrl-C or
+  Ctrl-D prints the command instead. Without a terminal, with `--json` or
+  `--non-interactive`, it prints `firenook mcp add` as a next step. `init
+  --adopt` lists it in its plan as one more addition and applies it with the
+  rest. Both run the same code as `mcp add`.
+- [x] **`firenook mcp` with no arguments finds the running suite.** With no
   `firebase.json` in its folder and no `--project`, the server uses the one
-  suite whose `hub-<project>.json` locator answers, and asks for `--project`
-  when two do. Editor install links add the server to the user's settings,
-  where there is no project folder to read, so without this they would have
-  to carry a project id.
-- [ ] **A "Coding agent" tab in the console's Connect dialog.** Each agent's
-  snippet with the project's values filled in, "Add to Cursor" and "Add to VS
-  Code" install links (the editor asks the user to confirm), and the `mcp add`
-  command for the rest. The console writes no project files: changing the
-  repository stays a CLI action with a plan and a dry run. Once the server
-  marks its requests, the tab shows when an agent last called.
-- [ ] **The terminal's `?` help names `firenook mcp add`.**
+  suite whose `hub-<project>.json` locator answers with the process id the
+  locator records, and asks for `--project` when two do. It looks again on
+  every call (the locator folder's scan is cached until the folder changes),
+  so a suite started after the agent is found without a restart.
+- [x] **A "Coding agent" tab in the console's Connect dialog.** Built: an
+  Agents group with one tab: the `npx firenook mcp add` command, then Claude
+  Code (the project and user commands, `.mcp.json`), Cursor ("Add to
+  Cursor", `.cursor/mcp.json`), VS Code ("Add to VS Code", "Add to VS Code
+  Insiders", `.vscode/mcp.json`) and any other agent's `mcpServers` entry. A
+  checkbox adds `--project <id>` to the user-level items when more than one
+  emulator runs on the machine; project files never carry it. The console
+  writes no project files. The server now marks its requests
+  (`x-firenook-client: firenook-mcp/<version>`) and posts each call to
+  `POST /console/api/v1/agents/calls`, held in memory; the tab reads `GET
+  /console/api/v1/agents` when it opens and shows "Last call 2 min ago:
+  firestore_query (firenook-mcp/0.2.0-next.7)".
+- [x] **The terminal's `?` help names `firenook mcp add`.**
 
-**The MCP server's coverage.** `firenook mcp` has 19 tools: status, export,
+**The MCP server's coverage.** `firenook mcp` had 19 tools: status, export,
 Firestore get/query/set/delete/list collections, Auth users and pending codes,
 Storage listing and metadata, Functions list and invoke, a Pub/Sub publish and
-Cloud Tasks queue stats. What a coding agent most needs while building or
-fixing a feature is missing. The console's API (`/console/api/v1`) already
-serves every item below, so most of this is new tools over existing routes;
-the server ships in the same package as the engine, so the two stay in step.
-In priority order:
+Cloud Tasks queue stats. Built: 54 tools, the new ones over the console's API
+(`/console/api/v1`, which the suite serves on the UI port; a suite started
+without the UI answers them with an error that says so), in twelve `--only`
+groups: firestore, auth, storage, functions, logs, rules, pubsub, tasks,
+schedules, eventarc, extensions, reset. Every tool ran against a running
+0.2.0-next.6 suite, and `docs/mcp.md` lists them.
 
-- [ ] **Logs and function calls.** Search the log by service, level, text and
-  time (`/logs/entries`, `/logs/facets`); list recent function calls with
-  their trigger, outcome and duration, and read one call's logs, error and
-  stack trace, request and response (`/functions/invocations`); replay a
-  call. Today an agent cannot see why a function failed.
-- [ ] **Security Rules.** Read the Firestore and Storage rules in force
-  (`/rules`); ask whether a request as a given user would be allowed, with
-  the line that decided it (`/rules/evaluate`); list recent denials
-  (`/rules/decisions`).
-- [ ] **More of Auth.** Mint an ID token for a user, so an agent can call a
-  function or the REST API as that user (`/auth/tokens`); set and remove
-  custom claims; disable, enable and revoke a user; list tenants.
-- [ ] **Reset.** Clear chosen services' data through `/suite/clear`, with
-  the same safeguard as the console: clearing more than one section names
-  the project id.
-- [ ] **Storage files.** Read an object's content, upload one, delete,
-  copy and move.
-- [ ] **The rest.** Eventarc: publish a custom event, list and replay events.
-  Extensions: list instances, reload one. Pub/Sub: topics, subscriptions and a
-  backlog peek. Cloud Tasks: list tasks, run one now. Schedules: list them and
-  run one now. Firestore: count and collection-group queries.
+- [x] **Logs and function calls.** `logs_search` (service, level, function,
+  call, text, time), `logs_facets`, `functions_list_calls` (trigger, outcome,
+  status, duration, error), `functions_get_call` (cause, request and
+  response, event, the error with its stack, the call's log, timings) and
+  `functions_replay_call`.
+- [x] **Security Rules.** `rules_get` (Firestore and Storage rules in force,
+  with problems), `rules_evaluate` (a request as a uid with claims, an ID
+  token or no one, against the rules in force or a draft: the verdict, the
+  deciding line and each expression's value) and `rules_list_denials`
+  (recent denials from the log, with the denying lines on request). No route
+  lists rule decisions yet, so denials come from the `rules.denied` log
+  lines, which diagnostics write.
+- [x] **More of Auth.** `auth_mint_token` (an ID token and refresh token for a
+  user), `auth_set_claims`, `auth_remove_claims`, `auth_disable_user`,
+  `auth_enable_user`, `auth_revoke_tokens` and `auth_list_tenants`.
+- [x] **Reset.** `emulators_clear` over `/suite/clear`; clearing two or more
+  services needs `confirmProject` set to the project id, as the console asks,
+  and the refusal names the value.
+- [x] **Storage files.** `storage_read` (text inline, binary as base64, with
+  a size cap and a `truncated` flag), `storage_upload`, `storage_delete` (an
+  object or a folder), `storage_copy` and `storage_move`.
+- [x] **The rest.** Eventarc publish, list, get and replay; Extensions list
+  and reload; Pub/Sub topics, subscriptions and a backlog peek that leases
+  nothing; Cloud Tasks list and run; schedules list and run; Firestore
+  `firestore_count` and collection-group queries.
 
-Each tool gets a test against a running suite beside the existing ones in
+Each tool has a test against the fake suite in
 `packaging/cli-commands.test.mjs`, and `docs/mcp.md` lists every tool.
 
 **Fixes the README demo and the next.6 benchmark found** (recorded in
 `benchmarks/next6-paired-acceptance.json` `followUps`):
 
-- [ ] **Timestamps finer than a microsecond.** Firestore accepts them, then
-  the export refuses them ("export timestamps must have microsecond
-  precision"). Production rounds them down at write; do the same, and let
-  the export round down any finer value already saved.
-- [ ] **Functions discovery takes about 6 s** inside the runtime for a
-  codebase the SDK's discovery server answers in 0.2 s by hand (the attempt-13
-  receipt saw the inventory answer 7 s after the bind). Find where the time
-  goes, fix it, and record start-to-ready before and after.
-- [ ] **The Functions log line's duration** prints floating-point noise
-  (`1.6076249999999999ms`); round it as the console does.
-- [ ] **The console's document panel crashes** with a TypeError when `doc=`
-  in the URL holds a bare id rather than a full path (`x` instead of
-  `orders/x`). Read a bare id against the open collection, and show "not
-  found" for anything else instead of crashing.
+- [x] **Timestamps finer than a microsecond.** Firestore accepted them, then
+  the export refused them ("export timestamps must have microsecond
+  precision"). Built: every commit stores timestamps rounded down to the
+  microsecond (fields, values in maps and arrays, transform operands), the
+  REST and gRPC decoders round before rules run, and the export rounds down a
+  finer value an earlier engine saved. The official emulator's answer was
+  already in the frozen `developer-tools-request-values-v1` fixture (a PATCH
+  of `…05.123456789Z` answered `…05.123456Z`); a REST test now replays it.
+- [x] **Functions discovery took about 6 s.** Found: the SDK's discovery
+  server answered in about 0.2 s, then the engine waited for it to exit. Its
+  `/__/quitquitquit` closes the server, which waits for open connections, and
+  the engine's client kept its connection open for reuse, so Node waited out
+  its 5 s keep-alive. Built: the discovery client keeps no idle connection;
+  the timeout, the kill after 10 s and every message are unchanged. On the
+  development machine, discovery of a seven-function codebase went from
+  6.2 s to 0.2 s and launch to ready from 6.9 s to 0.5 s. A test holds idle
+  connections for 30 s and fails at 10 s without the fix.
+- [x] **The Functions log line's duration** printed floating-point noise
+  (`1.6076249999999999ms`). Built: the line keeps the official `in Nms`
+  shape, with one decimal under 10 ms and whole milliseconds above, as the
+  console does, and its `durationMs` detail carries the same duration to
+  the microsecond.
+- [x] **The console's document panel crashed** with a TypeError when `doc=`
+  in the URL held a bare id rather than a full path (`x` instead of
+  `orders/x`). Built: a bare id is read against the open collection, and a
+  path that names no document opens the panel on "Document not found"
+  without asking the engine.
