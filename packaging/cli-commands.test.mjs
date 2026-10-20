@@ -908,8 +908,12 @@ test('path helpers and the Firestore value codec follow the shell encoder and ro
   assert.match(substituteParams('users/{uid}', {}), /^users\/uid[1-9]$/);
   assert.deepEqual(encodeFields({s:'x', b:false, i:3, d:2.5, n:null, a:[1, 'two'], m:{k:1}, t:{$timestamp:'2026-01-01T00:00:00Z'}, r:{$ref:'users/bob'}, g:{$geo:{latitude:1, longitude:2}}, y:{$bytes:'aGk='}, u:undefined}, {project:'demo-fixture'}),
     {s:{stringValue:'x'}, b:{booleanValue:false}, i:{integerValue:3}, d:{doubleValue:2.5}, n:{nullValue:'NULL_VALUE'}, a:{arrayValue:{values:[{integerValue:1}, {stringValue:'two'}]}}, m:{mapValue:{fields:{k:{integerValue:1}}}},
-      t:{timestampValue:'2026-01-01T00:00:00.000Z'}, r:{referenceValue:'projects/demo-fixture/databases/(default)/documents/users/bob'}, g:{geoPointValue:{latitude:1, longitude:2}}, y:{bytesValue:'aGk='}});
+      t:{timestampValue:'2026-01-01T00:00:00Z'}, r:{referenceValue:'projects/demo-fixture/databases/(default)/documents/users/bob'}, g:{geoPointValue:{latitude:1, longitude:2}}, y:{bytesValue:'aGk='}});
   assert.deepEqual(encodeValue(new Date('2026-02-03T04:05:06Z')), {timestampValue:'2026-02-03T04:05:06.000Z'});
+  // An RFC 3339 string keeps its precision; anything else Date reads is normalised.
+  assert.deepEqual(encodeValue({$timestamp:'2026-02-03T04:05:06.123456789Z'}), {timestampValue:'2026-02-03T04:05:06.123456789Z'});
+  assert.deepEqual(encodeValue({$timestamp:'2026-02-03T12:05:06.5+08:00'}), {timestampValue:'2026-02-03T12:05:06.5+08:00'});
+  assert.deepEqual(encodeValue({$timestamp:'2026-02-03'}), {timestampValue:'2026-02-03T00:00:00.000Z'});
   assert.throws(() => encodeFields('nope'), /key-value pairs/);
   assert.throws(() => encodeValue({$ref:'users/bob'}), /needs a project/);
   assert.throws(() => encodeValue({$timestamp:'yesterday'}), /RFC 3339/);
@@ -1210,7 +1214,7 @@ test('MCP console tools: logs, function calls, rules, Auth, Storage files, Event
       const allowed = await callTool('rules_evaluate', {method:'create', path:'orders/o2', uid:'alice', data:{owner:'alice', at:{$timestamp:'2026-01-01T00:00:00Z'}}, existing:null, time:'2026-01-02T00:00:00Z'});
       assert.equal(allowed.allowed, true);
       assert.deepEqual(consoleRequest(mark, 'POST /firestore/rules/evaluate') && fake.requests.filter(item => item.path === '/console/api/v1/firestore/rules/evaluate').pop().body.requests[0],
-        {method:'create', path:'orders/o2', auth:{uid:'alice', token:{}}, data:{owner:{stringValue:'alice'}, at:{timestampValue:'2026-01-01T00:00:00.000Z'}}, resource:null, time:'2026-01-02T00:00:00Z'});
+        {method:'create', path:'orders/o2', auth:{uid:'alice', token:{}}, data:{owner:{stringValue:'alice'}, at:{timestampValue:'2026-01-01T00:00:00Z'}}, resource:null, time:'2026-01-02T00:00:00Z'});
       mark = fake.requests.length;
       await callTool('rules_evaluate', {method:'list', path:'orders', idToken:'h.p.', where:[{field:'owner', op:'==', value:'alice'}], limit:5, collectionGroup:true});
       assert.deepEqual(consoleRequest(mark, 'POST /firestore/rules/evaluate').body.requests[0], {method:'list', path:'orders', authorization:'Bearer h.p.', group:true,

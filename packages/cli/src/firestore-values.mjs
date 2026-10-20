@@ -34,6 +34,8 @@ function sentinel(value) {
 }
 
 // One value. `context` = {project, database} completes {"$ref"} names.
+const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
+
 export function encodeValue(value, context = {}) {
   if (typeof value === 'string') return {stringValue:value};
   if (typeof value === 'boolean') return {booleanValue:value};
@@ -55,7 +57,9 @@ export function encodeValue(value, context = {}) {
     if (key === '$timestamp') {
       const date = new Date(value.$timestamp);
       if (typeof value.$timestamp !== 'string' || Number.isNaN(date.getTime())) throw new Error('$timestamp must be an RFC 3339 date string');
-      return {timestampValue:date.toISOString()};
+      // An RFC 3339 string keeps its precision (a Date has milliseconds only);
+      // Firestore stores it to the microsecond.
+      return {timestampValue:RFC3339.test(value.$timestamp) ? value.$timestamp : date.toISOString()};
     }
     if (key === '$ref') {
       if (typeof value.$ref !== 'string' || !value.$ref) throw new Error('$ref must be a document path');
