@@ -115,10 +115,11 @@ function execCommand(action, {command, positionals, flags}) {
   throw new Error('emulators:exec requires a script (one quoted string) or an argv command after --');
 }
 
-// A yes/no question on the terminal; Enter means yes.
+// A yes/no question on the terminal; Enter means yes, Ctrl-C or Ctrl-D no.
 async function confirm(question) {
   const lines = createInterface({input:process.stdin, output:process.stderr});
   try { return !/^\s*n/i.test(await lines.question(question)); }
+  catch { process.stderr.write('\n'); return false; }
   finally { lines.close(); }
 }
 
