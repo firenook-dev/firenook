@@ -38,10 +38,10 @@ Emulators
                                                           Inject a background event (Firestore, Storage,
                                                           Pub/Sub, Auth, schedule, Eventarc, task queue)
   firenook ext:vendor [--instance ID]...                  Copy registry Extensions into the project
-  firenook mcp [--project ID] [--only firestore,auth,...] Model Context Protocol server over stdio
-  firenook mcp add [--agent claude,cursor,vscode] [--dry-run] [--force]
-                                                          Give the project's coding agents the server:
-                                                          writes .mcp.json, .cursor/mcp.json, .vscode/mcp.json
+  firenook mcp [--project ID] [--only firestore,auth,...] Model Context Protocol server over stdio for coding
+                                                          agents; outside a project, the one running suite
+  firenook mcp add [--agent claude,cursor,vscode] [--dry-run] [--force]   Give the project's coding agents
+                                                          the server (.mcp.json, .cursor/, .vscode/mcp.json)
 
 Saved data (--keep-data, or --state-dir with --resume-state)
   firenook state:adopt-seed --state-dir DIR --import DIR  Keep saved data whose seed changed: record the

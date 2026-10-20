@@ -1,76 +1,66 @@
 // firenook mcp: a Model Context Protocol server over stdio (newline-delimited
-// JSON-RPC 2.0, as the MCP stdio transport specifies) that exposes the running
-// local suite to an agent: Firestore documents, Auth accounts and codes,
-// Storage objects, Functions inventory and invocation, Pub/Sub publishing,
-// Cloud Tasks statistics and exports. Every tool talks to the local emulators
-// only, found through the hub locator; nothing is sent anywhere else. No
-// dependency beyond Node: stdout carries JSON-RPC lines and nothing else,
-// diagnostics go to stderr.
+// JSON-RPC 2.0, as the MCP stdio transport specifies) that gives a coding agent
+// the running local suite: Firestore documents and queries, Auth accounts,
+// tokens and claims, Storage objects and files, Functions and their calls,
+// the log, Security Rules, Pub/Sub, Cloud Tasks, schedules, Eventarc,
+// Extensions, export and reset. The emulator tools are here; the Console API
+// tools are in mcp-console.mjs and what both share in mcp-suite.mjs. Every
+// tool talks to the local suite only, found on each call through the hub
+// locator; nothing is sent anywhere else. No dependency beyond Node: stdout
+// carries JSON-RPC lines and nothing else, diagnostics go to stderr.
 import { createInterface } from 'node:readline';
 import { manifest, release } from './binary.mjs';
-import { exportEmulators, findHub, locatorPath, readLocator, resolveProject, runningServices, serviceOrigin } from './hub.mjs';
+import { withClient } from './client.mjs';
+import { exportEmulators, findHub, locatorDirectory, locatorPath, readLocator, resolveProject, runningServices, runningSuites, serviceOrigin } from './hub.mjs';
 import { listFunctions, pubsubMessage, runInvoke, summarizeTrigger } from './invoke.mjs';
-import { decodeDocument, encodeFields, encodeValue } from './firestore-values.mjs';
+import { decodeDocument, encodeFields } from './firestore-values.mjs';
+import { BUCKET, CLIENT, DATABASE, ORDER_BY, OWNER, ToolError, WHERE, boolean, call, encodePath, isObject, optionsFor, postBeacon, projectSource, schema, sortOrder, string, suite, target, trimPath, whereFilter } from './mcp-suite.mjs';
+import { CONSOLE_TOOLS } from './mcp-console.mjs';
 
 export const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
-export const TOOL_GROUPS = ['firestore', 'auth', 'storage', 'functions', 'pubsub', 'tasks'];
-const OWNER = {authorization:'Bearer owner'};
-const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-
-class ToolError extends Error {}
-const describe = error => error?.cause?.code || error?.cause?.message || error?.message || String(error);
-
-// One HTTP exchange with an emulator; non-2xx answers become tool errors that
-// carry the emulator's own message.
-async function call(url, {method = 'GET', headers = {}, body, allow = []} = {}) {
-  let response;
-  try {
-    response = await fetch(url, {method, headers:{...(body !== undefined ? {'content-type':'application/json'} : {}), ...headers},
-      body:body === undefined ? undefined : JSON.stringify(body), signal:AbortSignal.timeout(60000)});
-  } catch (error) { throw new ToolError(`${method} ${url} failed: ${describe(error)}; is the suite running?`); }
-  const text = await response.text();
-  let parsed = text;
-  try { parsed = text ? JSON.parse(text) : {}; } catch { /* keep the text */ }
-  if (!response.ok && !allow.includes(response.status)) {
-    const message = parsed?.error?.message || parsed?.message || (typeof parsed === 'string' ? parsed : JSON.stringify(parsed));
-    throw new ToolError(`${method} ${url} answered HTTP ${response.status}: ${message || 'no details'}`);
-  }
-  return {status:response.status, body:parsed};
-}
+export const TOOL_GROUPS = ['firestore', 'auth', 'storage', 'functions', 'logs', 'rules', 'pubsub', 'tasks', 'schedules', 'eventarc', 'extensions', 'reset'];
 
 // A Firestore field path in update masks: simple names bare, others quoted.
 const fieldPath = name => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : `\`${name.replace(/[\\`]/g, char => `\\${char}`)}\``);
-const OPERATORS = {'==':'EQUAL', '!=':'NOT_EQUAL', '<':'LESS_THAN', '<=':'LESS_THAN_OR_EQUAL', '>':'GREATER_THAN', '>=':'GREATER_THAN_OR_EQUAL',
-  'array-contains':'ARRAY_CONTAINS', 'array-contains-any':'ARRAY_CONTAINS_ANY', in:'IN', 'not-in':'NOT_IN'};
-const trimPath = path => String(path).replace(/(^\/+|\/+$)/g, '');
-const encodePath = path => trimPath(path).split('/').map(encodeURIComponent).join('/');
+const GROUP = boolean('Collection-group query: every collection with the last segment\'s id at any depth under the parent (the database root for a bare id, e.g. posts; users/alice/posts for one document\'s descendants)');
 
-// Where the suite answers, resolved for every call so a restarted suite on
-// other ports is found without restarting the server.
-async function suite(context, name) {
-  const project = resolveProject(context.options, context.cwd);
-  const hub = await findHub(project, context.options);
-  const listing = await runningServices(hub.origin);
-  return {project, hub, listing, origin:name ? serviceOrigin(project, name, listing, context.options) : undefined,
-    originOf:service => serviceOrigin(project, service, listing, context.options)};
+// The runQuery parent and structured query for a collection path (or a
+// collection-group query) with filters, ordering and a limit.
+function structuredQuery(project, {collection, database = '(default)', where = [], orderBy = [], limit, collectionGroup = false}) {
+  const segments = trimPath(collection).split('/');
+  if (!trimPath(collection) || segments.some(segment => !segment)) throw new ToolError(`${collection} is not a collection path`);
+  if (segments.length % 2 === 0) throw new ToolError(`${collection} is a document path; pass a collection path${collectionGroup ? ' or a collection id' : ''}`);
+  const root = `projects/${project.project}/databases/${database}/documents`;
+  const parent = segments.length > 1 ? `${root}/${segments.slice(0, -1).join('/')}` : root;
+  const query = {from:[{collectionId:segments[segments.length - 1], ...(collectionGroup ? {allDescendants:true} : {})}]};
+  if (limit !== undefined) query.limit = limit;
+  const filter = whereFilter(where, {project:project.project, database});
+  if (filter) query.where = filter;
+  if (orderBy.length) query.orderBy = sortOrder(orderBy);
+  return {url:parent.split('/').map(encodeURIComponent).join('/'), structuredQuery:query};
 }
 
-const string = description => ({type:'string', description});
-const schema = (properties, required = []) => ({type:'object', properties, required, additionalProperties:false});
-const DATABASE = string('Firestore database id; default (default)');
-const BUCKET = string('Storage bucket; default <project>.appspot.com');
-
 export const TOOLS = [
-  {name:'firenook_status', group:'status', description:'The running Firenook suite: hub locator, hub status, the emulators listing (host and port per service) and the CLI version.',
+  {name:'firenook_status', group:'status', description:'The running Firenook suite: how the project was found, hub locator, hub status, the emulators listing (host and port per service) and the CLI version; with no project, the suites whose locators answer.',
     inputSchema:schema({}),
     async run(_args, context) {
-      const project = resolveProject(context.options, context.cwd);
+      const source = projectSource(context.options, context.cwd);
+      const versions = {version:manifest.version, engineRevision:release.engineRevision, client:CLIENT};
+      let project;
+      try { project = await target(context); }
+      catch (error) {
+        const suites = source.by === 'locator' ? await runningSuites() : undefined;
+        return {project:null, running:false, found:source, error:error.message, ...(suites ? {locatorDirectory:locatorDirectory(), suites} : {}), ...versions};
+      }
+      const found = project.discovered ? {...source, locator:project.discovered.locator} : source;
       const locator = readLocator(project.project);
       let hub;
       try { hub = await findHub(project, context.options); }
-      catch (error) { return {project:project.project, running:false, locator:locatorPath(project.project), error:error.message, version:manifest.version, engineRevision:release.engineRevision}; }
-      return {project:project.project, running:true, locator:{path:locatorPath(project.project), contents:locator ?? null}, hub:{origin:hub.origin, status:hub.status},
-        emulators:await runningServices(hub.origin) ?? null, version:manifest.version, engineRevision:release.engineRevision};
+      catch (error) { return {project:project.project, running:false, found, locator:locatorPath(project.project), error:error.message, ...versions}; }
+      const emulators = await runningServices(hub.origin) ?? null;
+      context.seen = {project, listing:emulators ?? undefined};
+      return {project:project.project, running:true, found, locator:{path:locatorPath(project.project), contents:locator ?? null}, hub:{origin:hub.origin, status:hub.status},
+        emulators, console:emulators?.ui ? `${serviceOrigin(project, 'ui', emulators)}/console` : null, ...versions};
     }},
   {name:'firestore_get', group:'firestore', description:'Read one Firestore document by path (collection/document[/subcollection/document]); returns its fields as plain JSON or exists:false.',
     inputSchema:schema({path:string('Document path, e.g. users/alice'), database:DATABASE}, ['path']),
@@ -80,29 +70,27 @@ export const TOOLS = [
       if (status === 404) return {path:trimPath(path), exists:false};
       return {exists:true, ...decodeDocument(body)};
     }},
-  {name:'firestore_query', group:'firestore', description:'Run a structured query over one collection (Firestore runQuery): optional where filters, ordering and limit; returns matching documents as plain JSON.',
-    inputSchema:schema({collection:string('Collection path, e.g. users or users/alice/posts'), database:DATABASE,
-      where:{type:'array', description:'Filters combined with AND', items:schema({field:string('Field path'), op:{type:'string', enum:Object.keys(OPERATORS), description:'Comparison operator'}, value:{description:'Plain JSON value ({"$timestamp":...}, {"$ref":...} sentinels allowed)'}}, ['field', 'op', 'value'])},
-      orderBy:{type:'array', description:'Sort keys', items:schema({field:string('Field path'), direction:{type:'string', enum:['asc', 'desc'], description:'Default asc'}}, ['field'])},
-      limit:{type:'integer', description:'Maximum documents; default 50', minimum:1}}, ['collection']),
-    async run({collection, database = '(default)', where = [], orderBy = [], limit = 50}, context) {
+  {name:'firestore_query', group:'firestore', description:'Run a structured query over one collection, or with collectionGroup over every collection with that id (Firestore runQuery): optional where filters, ordering and limit; returns matching documents as plain JSON.',
+    inputSchema:schema({collection:string('Collection path, e.g. users or users/alice/posts; with collectionGroup a collection id (posts) or a path whose parent bounds it'), database:DATABASE,
+      where:WHERE, orderBy:ORDER_BY,
+      limit:{type:'integer', description:'Maximum documents; default 50', minimum:1}, collectionGroup:GROUP}, ['collection']),
+    async run({collection, database = '(default)', where = [], orderBy = [], limit = 50, collectionGroup = false}, context) {
       const {project, origin} = await suite(context, 'firestore');
-      const segments = trimPath(collection).split('/');
-      if (segments.length % 2 === 0) throw new ToolError(`${collection} is a document path; firestore_query takes a collection path`);
-      const root = `projects/${project.project}/databases/${database}/documents`;
-      const parent = segments.length > 1 ? `${root}/${segments.slice(0, -1).join('/')}` : root;
-      const encode = value => encodeValue(value, {project:project.project, database});
-      const filters = where.map(({field, op, value}) => {
-        if (!OPERATORS[op]) throw new ToolError(`Unsupported operator ${op}; use one of ${Object.keys(OPERATORS).join(', ')}`);
-        return {fieldFilter:{field:{fieldPath:field}, op:OPERATORS[op], value:encode(value)}};
-      });
-      const structuredQuery = {from:[{collectionId:segments[segments.length - 1]}], limit};
-      if (filters.length === 1) structuredQuery.where = filters[0];
-      else if (filters.length > 1) structuredQuery.where = {compositeFilter:{op:'AND', filters}};
-      if (orderBy.length) structuredQuery.orderBy = orderBy.map(({field, direction = 'asc'}) => ({field:{fieldPath:field}, direction:direction === 'desc' ? 'DESCENDING' : 'ASCENDING'}));
-      const {body} = await call(`${origin}/v1/${parent.split('/').map(encodeURIComponent).join('/')}:runQuery`, {method:'POST', headers:OWNER, body:{structuredQuery}});
+      const query = structuredQuery(project, {collection, database, where, orderBy, limit, collectionGroup});
+      const {body} = await call(`${origin}/v1/${query.url}:runQuery`, {method:'POST', headers:OWNER, body:{structuredQuery:query.structuredQuery}});
       const documents = (Array.isArray(body) ? body : []).filter(entry => entry.document).map(entry => decodeDocument(entry.document));
-      return {collection:trimPath(collection), count:documents.length, documents};
+      return {collection:trimPath(collection), ...(collectionGroup ? {collectionGroup:true} : {}), count:documents.length, documents};
+    }},
+  {name:'firestore_count', group:'firestore', description:'Count the documents of a collection, or with collectionGroup of every collection with that id, that match optional where filters (a COUNT aggregation; no documents are read back).',
+    inputSchema:schema({collection:string('Collection path, or a collection id with collectionGroup'), database:DATABASE, where:WHERE, collectionGroup:GROUP}, ['collection']),
+    async run({collection, database = '(default)', where = [], collectionGroup = false}, context) {
+      const {project, origin} = await suite(context, 'firestore');
+      const query = structuredQuery(project, {collection, database, where, collectionGroup});
+      const {body} = await call(`${origin}/v1/${query.url}:runAggregationQuery`, {method:'POST', headers:OWNER,
+        body:{structuredAggregationQuery:{structuredQuery:query.structuredQuery, aggregations:[{alias:'count', count:{}}]}}});
+      const value = (Array.isArray(body) ? body : [body]).find(entry => entry?.result)?.result?.aggregateFields?.count?.integerValue;
+      if (value === undefined) throw new ToolError(`runAggregationQuery answered without a count: ${JSON.stringify(body).slice(0, 300)}`);
+      return {collection:trimPath(collection), ...(collectionGroup ? {collectionGroup:true} : {}), count:Number(value)};
     }},
   {name:'firestore_set', group:'firestore', description:'Write a Firestore document from plain JSON: replaces it, or with merge:true updates only the given top-level fields.',
     inputSchema:schema({path:string('Document path'), data:{type:'object', description:'Fields as plain JSON'}, merge:{type:'boolean', description:'Merge into the existing document'}, database:DATABASE}, ['path', 'data']),
@@ -216,7 +204,8 @@ export const TOOLS = [
       const options = {...context.options, region, data:data === undefined ? undefined : JSON.stringify(data), 'event-data':eventData === undefined ? undefined : JSON.stringify(eventData),
         resource, params:params === undefined ? undefined : JSON.stringify(params), auth:auth === undefined ? undefined : JSON.stringify(auth), 'event-type':eventType, method};
       for (const key of Object.keys(options)) if (options[key] === undefined) delete options[key];
-      return runInvoke(name, options, context.cwd);
+      const {project} = await suite(context);
+      return runInvoke(name, optionsFor({options}, project), context.cwd);
     }},
   {name:'pubsub_publish', group:'pubsub', description:'Publish a message to a Pub/Sub emulator topic: string data as given, other JSON as its text (base64-encoded on the wire), plus attributes.',
     inputSchema:schema({topic:string('Topic name (or projects/<p>/topics/<name>)'), data:{description:'Message data'}, attributes:{type:'object', description:'String attributes'}, orderingKey:string('Ordering key')}, ['topic']),
@@ -238,10 +227,13 @@ export const TOOLS = [
     async run({path, force = false}, context) {
       const lines = [];
       const log = {log:line => lines.push(line), error:line => lines.push(line)};
-      await exportEmulators(path, {...context.options, force, json:true}, context.cwd, log);
+      const {project} = await suite(context);
+      await exportEmulators(path, {...optionsFor(context, project), force, json:true}, context.cwd, log);
       return {...JSON.parse(lines[lines.length - 1]), log:lines.slice(0, -1)};
     }},
-];
+  ...CONSOLE_TOOLS,
+// tools/list order: the status tools, then each group in TOOL_GROUPS order.
+].sort((a, b) => TOOL_GROUPS.indexOf(a.group) - TOOL_GROUPS.indexOf(b.group));
 
 // The Admin SDK's UserRecord view of an Auth emulator account.
 function account(user) {
@@ -254,8 +246,9 @@ function account(user) {
     mfa:user.mfaInfo ?? [], createdAt:time(user.createdAt), lastLoginAt:time(user.lastLoginAt)};
 }
 
-// Minimal JSON Schema checks (types, required, enum, minimum) so a wrong call
-// is an -32602 error instead of a confusing emulator answer.
+// Minimal JSON Schema checks (types, required, enum, minimum, maximum, nested
+// objects) so a wrong call is an -32602 error instead of a confusing emulator
+// answer.
 export function validateArguments(schemaObject, args) {
   if (args === undefined) args = {};
   if (!isObject(args)) return 'arguments must be an object';
@@ -268,20 +261,32 @@ export function validateArguments(schemaObject, args) {
   }
   return undefined;
 }
+const isType = (type, value) => (type === 'string' ? typeof value === 'string' : type === 'boolean' ? typeof value === 'boolean'
+  : type === 'integer' ? Number.isInteger(value) : type === 'number' ? typeof value === 'number'
+    : type === 'array' ? Array.isArray(value) : type === 'object' ? isObject(value) : type === 'null' ? value === null : true);
+const article = type => (type === 'integer' ? 'an integer' : type === 'null' ? 'null' : `${/^[aeiou]/.test(type) ? 'an' : 'a'} ${type}`);
 function checkValue(property, value, name) {
   if (property.type) {
-    const type = property.type;
-    const ok = type === 'string' ? typeof value === 'string' : type === 'boolean' ? typeof value === 'boolean'
-      : type === 'integer' ? Number.isInteger(value) : type === 'number' ? typeof value === 'number'
-        : type === 'array' ? Array.isArray(value) : type === 'object' ? isObject(value) : true;
-    if (!ok) return `${name} must be ${type === 'integer' ? 'an integer' : `${/^[aeiou]/.test(type) ? 'an' : 'a'} ${type}`}`;
+    const types = [property.type].flat();
+    if (!types.some(type => isType(type, value))) return `${name} must be ${types.map(article).join(' or ')}`;
+    if (value === null) return undefined;
   }
   if (property.enum && !property.enum.includes(value)) return `${name} must be one of ${property.enum.join(', ')}`;
   if (property.minimum !== undefined && value < property.minimum) return `${name} must be at least ${property.minimum}`;
+  if (property.maximum !== undefined && value > property.maximum) return `${name} must be at most ${property.maximum}`;
+  if (property.type === 'object' && property.properties && property.additionalProperties === false) {
+    const problem = validateArguments(property, value);
+    if (problem) return `${name}: ${problem}`;
+  }
   if (property.type === 'array' && property.items) {
     for (const [index, item] of value.entries()) {
-      const problem = property.items.type === 'object' ? validateArguments(property.items, item) : checkValue(property.items, item, `${name}[${index}]`);
-      if (problem) return `${name}[${index}]: ${problem}`;
+      if (property.items.type === 'object' && property.items.properties) {
+        const problem = validateArguments(property.items, item);
+        if (problem) return `${name}[${index}]: ${problem}`;
+      } else {
+        const problem = checkValue(property.items, item, `${name}[${index}]`);
+        if (problem) return problem;
+      }
     }
   }
   return undefined;
@@ -297,13 +302,29 @@ export function selectTools(only) {
 
 // The protocol handler, independent of the transport. `handle` takes one
 // parsed message and returns the response to send, or undefined for a
-// notification.
+// notification. Every request a tool makes carries x-firenook-client; after
+// each tools/call the call beacon goes to the console, never awaited by the
+// response (`settled()` waits for the beacons in flight).
 export function createMcpServer(options, cwd = process.cwd(), log = console) {
   const {only, ...rest} = options;
   const tools = selectTools(only);
-  const context = {options:rest, cwd};
+  const beacons = new Set();
   const error = (id, code, message, data) => ({jsonrpc:'2.0', id:id ?? null, error:{code, message, ...(data === undefined ? {} : {data})}});
   const result = (id, value) => ({jsonrpc:'2.0', id, result:value});
+  async function runTool(tool, args) {
+    const context = {options:rest, cwd};
+    try {
+      const value = await withClient(CLIENT, () => tool.run(args, context));
+      return {content:[{type:'text', text:JSON.stringify(value, null, 2)}]};
+    } catch (failure) {
+      log.error(`firenook mcp: ${tool.name}: ${failure.message}`);
+      return {content:[{type:'text', text:JSON.stringify({error:failure.message}, null, 2)}], isError:true};
+    } finally {
+      const beacon = withClient(CLIENT, () => postBeacon(context.seen, tool.name));
+      beacons.add(beacon);
+      beacon.finally(() => beacons.delete(beacon));
+    }
+  }
   async function handle(message) {
     if (!isObject(message) || message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
       return error(isObject(message) ? message.id : null, -32600, 'Invalid Request: expected a JSON-RPC 2.0 request or notification');
@@ -317,7 +338,7 @@ export function createMcpServer(options, cwd = process.cwd(), log = console) {
         const requested = params?.protocolVersion;
         const protocolVersion = PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0];
         return result(id, {protocolVersion, capabilities:{tools:{}}, serverInfo:{name:'firenook', version:manifest.version},
-          instructions:'Tools act on the local Firenook emulator suite only (found through the hub locator of the configured project). Firestore values use plain JSON with {"$timestamp"}, {"$ref"}, {"$geo"} and {"$bytes"} sentinels. Nothing is sent to any cloud service.'});
+          instructions:'Tools act on the local Firenook emulator suite only: the project of the folder the server runs in, or, with no firebase.json there and no --project, the one running suite. Firestore values use plain JSON with {"$timestamp"}, {"$ref"}, {"$geo"} and {"$bytes"} sentinels. Tools marked destructive change or delete emulator data. Nothing is sent to any cloud service.'});
       }
       case 'ping': return result(id, {});
       case 'tools/list': return result(id, {tools:tools.map(({name, description, inputSchema}) => ({name, description, inputSchema}))});
@@ -328,18 +349,12 @@ export function createMcpServer(options, cwd = process.cwd(), log = console) {
         if (params.arguments !== undefined && !isObject(params.arguments)) return error(id, -32602, 'params.arguments must be an object');
         const problem = validateArguments(tool.inputSchema, params.arguments);
         if (problem) return error(id, -32602, `Invalid arguments for ${tool.name}: ${problem}`);
-        try {
-          const value = await tool.run(params.arguments ?? {}, context);
-          return result(id, {content:[{type:'text', text:JSON.stringify(value, null, 2)}]});
-        } catch (failure) {
-          log.error(`firenook mcp: ${tool.name}: ${failure.message}`);
-          return result(id, {content:[{type:'text', text:JSON.stringify({error:failure.message}, null, 2)}], isError:true});
-        }
+        return result(id, await runTool(tool, params.arguments ?? {}));
       }
       default: return error(id, -32601, `Method not found: ${method}`);
     }
   }
-  return {tools, handle};
+  return {tools, handle, settled:() => Promise.all([...beacons])};
 }
 
 // The stdio transport: one JSON-RPC message per line in, one per line out.
@@ -351,7 +366,7 @@ export async function serveMcp(options, cwd = process.cwd(), streams = {input:pr
   output.on?.('error', () => { closed = true; input.destroy?.(); });
   const send = message => { if (!closed) output.write(`${JSON.stringify(message)}\n`); };
   const pending = new Set();
-  log.error(`firenook mcp ${manifest.version}: ${server.tools.length} tools over stdio for project ${describeProject(options, cwd)}; local emulators only`);
+  log.error(`firenook mcp ${manifest.version}: ${server.tools.length} tools over stdio for ${describeProject(options, cwd)}; local emulators only`);
   const lines = createInterface({input, crlfDelay:Infinity});
   for await (const line of lines) {
     if (!line.trim()) continue;
@@ -366,8 +381,16 @@ export async function serveMcp(options, cwd = process.cwd(), streams = {input:pr
     work.finally(() => pending.delete(work));
   }
   await Promise.all(pending);
+  await server.settled();
   return 0;
 }
+// The startup line's account of the project: named by the folder or the
+// options, or found per call among the running suites.
 function describeProject(options, cwd) {
-  try { return resolveProject(options, cwd).project; } catch (error) { return `(unresolved: ${error.message})`; }
+  const source = projectSource(options, cwd);
+  if (source.by === 'locator') return `the running suite (no firebase.json in ${cwd} and no --project: the one hub locator in ${locatorDirectory()} that answers, found on every call)`;
+  try {
+    const {project} = resolveProject(options, cwd);
+    return `project ${project} (${source.by === '--project' ? 'from --project' : `from ${source.config}`})`;
+  } catch (error) { return `an unresolved project (${error.message})`; }
 }
