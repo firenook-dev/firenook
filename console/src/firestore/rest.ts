@@ -7,6 +7,7 @@
 
 import { API_BASE, ApiError } from '@/api/client'
 import { type ViewAs, forgetToken, resolveAuthorization } from '@/lib/identity'
+import { isDocumentPath } from './document-path'
 import type { StructuredQuery } from './query'
 import { type FsDocument, type RestDocument, type RestValue, decodeDocument } from './value'
 
@@ -225,10 +226,17 @@ export async function listCollectionIds(scope: FirestoreScope, parent: string): 
   return ids
 }
 
-/** One document; `null` when it does not exist. */
+/**
+ * One document; `null` when it does not exist, or when `path` names no
+ * document. That is not asked for: a collection's path reads as its
+ * listing, which is no document (a bare id in the address did this, and
+ * the panel crashed reading the listing as one).
+ */
 export async function getDocument(scope: FirestoreScope, path: string): Promise<FsDocument | null> {
+  if (!isDocumentPath(path)) return null
   try {
-    return decodeDocument(await call<RestDocument>(scope, `/${path}`))
+    const answer = await call<Partial<RestDocument>>(scope, `/${path}`)
+    return typeof answer.name === 'string' ? decodeDocument({ ...answer, name: answer.name }) : null
   } catch (error) {
     if (error instanceof FirestoreError && error.status === 404) return null
     throw error

@@ -9,6 +9,7 @@ import { statusQuery } from '@/api/queries'
 import type { FirestoreSearch } from '@/routes/firestore'
 import { EMPTY_QUERY, QueryParseError, type WorkbenchQuery, parseQuery, printQuery } from '../query'
 import { type FirestoreScope, firestoreScope } from '../rest'
+import { resolveDocument } from '../document-path'
 import { isPattern } from '../schema'
 import { type ViewAs, parseViewAs, serializeViewAs } from '@/lib/identity'
 
@@ -42,6 +43,11 @@ export interface Workbench {
   queryText: string
   query: WorkbenchQuery
   queryError: string | undefined
+  /**
+   * The open document from `doc=`: its whole path, a bare id read against
+   * the open collection, or what was written when it names no document
+   * (`isDocumentPath` tells; the panel says so).
+   */
   selectedDocument: string | undefined
   tab: 'fields' | 'json'
   origin: string
@@ -108,6 +114,7 @@ export function useWorkbenchState(): Workbench | null {
     const isCollection = segments.length % 2 === 1
     const collectionPath = isCollection ? path : ''
     const pattern = isPattern(path)
+    const grouped = Boolean(search.group) || pattern
     const queryText = search.q ?? ''
     let query = EMPTY_QUERY
     let queryError: string | undefined
@@ -141,11 +148,11 @@ export function useWorkbenchState(): Workbench | null {
       collectionPath,
       isPattern: pattern,
       // A pattern is only ever the group of collections it names.
-      group: Boolean(search.group) || pattern,
+      group: grouped,
       queryText,
       query,
       queryError,
-      selectedDocument: search.doc,
+      selectedDocument: resolveDocument(search.doc, { collectionPath, group: grouped }),
       tab: search.tab ?? 'fields',
       origin: window.location.origin,
       navigate,
