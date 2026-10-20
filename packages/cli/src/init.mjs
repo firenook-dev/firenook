@@ -1,9 +1,9 @@
 // init: scaffold a new project, or (--adopt) adapt an existing firebase.json
 // with the same checks the launcher applies. Nothing is installed or fetched.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { DEFAULT_PORTS, inspectProject, readJson, validProjectId } from './options.mjs';
-import { applyAgents, planAgents } from './agents.mjs';
+import { applyAgents, planAgents, shown } from './agents.mjs';
 
 // The official `firebase init` port defaults, written explicitly.
 export const INIT_PORTS = Object.fromEntries(['auth', 'functions', 'firestore', 'pubsub', 'storage', 'eventarc', 'tasks', 'hub', 'logging', 'ui'].map(name => [name, DEFAULT_PORTS[name]]));
@@ -150,7 +150,7 @@ export function scaffold(options, cwd = process.cwd(), log = console, {ask, env 
   writePlan(plan, log, Boolean(options.json));
   const finish = () => { if (!options.json) { log.error('Next steps:'); for (const step of next) log.error(`  ${step}`); } return 0; };
   if (!offer) return finish();
-  const files = agents.map(step => relative(directory, step.path)).join(', ');
+  const files = agents.map(step => shown(directory, step.path)).join(', ');
   return Promise.resolve(ask(`Give ${agentNames(agents)} the Firenook MCP server? This writes ${files}. [Y/n] `)).then(yes => {
     if (yes) { applyAgents(agents); for (const step of agents) log.error(`  wrote   ${step.path}`); }
     else next.push(`firenook mcp add   (gives ${agentNames(agents)} the Firenook MCP server)`);

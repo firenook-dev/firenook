@@ -39,7 +39,7 @@ const HOME_AGENTS = [
 // files go somewhere other than beside firebase.json.
 export function serverCommand(directory, config) {
   const args = ['npx', 'firenook', 'mcp'];
-  if (config && dirname(config) !== directory) args.push('--config', relative(directory, config).split('\\').join('/'));
+  if (config && dirname(config) !== directory) args.push('--config', shown(directory, config));
   return args;
 }
 const entryFor = (agent, command) => ({...(agent.stdio ? {type:'stdio'} : {}), command:command[0], args:command.slice(1)});
@@ -85,9 +85,12 @@ export function homeAgentLines(directory, config, {env = process.env, home = env
   return HOME_AGENTS.filter(agent => agent.detect(env, home)).map(agent => ({name:agent.name, line:agent.line(command)}));
 }
 
+// A path inside the project as people type it: forward slashes everywhere.
+export const shown = (directory, path) => (relative(directory, path) || path).split('\\').join('/');
+
 const VERB = {add:'add    ', replace:'replace', keep:'keep   ', differs:'keep   ', unreadable:'skip   '};
 export function describeStep(step, directory) {
-  const path = relative(directory, step.path) || step.path;
+  const path = shown(directory, step.path);
   if (step.action === 'keep') return `${VERB.keep} ${path} (${step.name}: already set)`;
   if (step.action === 'differs') return `${VERB.differs} ${path} (${step.name}: it has another firenook entry; --force replaces it)`;
   if (step.action === 'unreadable') return `${VERB.unreadable} ${path} (${step.name}: not plain JSON; add this by hand: ${step.snippet})`;
