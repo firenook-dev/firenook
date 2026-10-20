@@ -1,3 +1,76 @@
+# 0.2.0-next.7 — data kept without a seed, coding agents set up in one command, 54 MCP tools
+
+- Pin the engine to `37fdd0387ea81f3131c20b594159113c86084a3a`, the merge of
+  [PR #107](https://github.com/firenook-dev/firenook/pull/107) on
+  0.2.0-next.6. Its tree is the PR head's, `e8ecd33`, which passed CI
+  ([run 39450933562](https://github.com/firenook-dev/firenook/actions/runs/39450933562))
+  and the five-platform packed-install matrix
+  ([run 39450933535](https://github.com/firenook-dev/firenook/actions/runs/39450933535)).
+- **A project with no seed keeps its data.** `--resume-state` needed
+  `--import`, so a project made with `firenook init` could not keep its data
+  between runs. Now it needs only a state directory; data started without a
+  seed records an empty one, and a start that mixes the two up (a seedless
+  state given `--import`, or a seeded one started without it) is refused
+  with the way on, nothing changed.
+- **`--keep-data`** is short for `--state-dir ./.firenook/state
+  --resume-state`, with or without `--import`. Keeping data stays opt-in, so
+  `--import ./data` alone still starts from that data every time. `init`
+  prints its start command with `--keep-data`.
+- **`firenook mcp add`** gives the project's coding agents the MCP server:
+  it writes `.mcp.json` (Claude Code), `.cursor/mcp.json` and
+  `.vscode/mcp.json` for the agents it finds, keeping every other server,
+  with `--dry-run`, `--agent` and `--force`. A second run changes nothing.
+  `init` offers it once in a terminal; `init --adopt` lists it in its plan.
+  The terminal's `?` help names it.
+- **54 MCP tools, up from 19.** The function calls and the log (with each
+  call's error and stack trace, and a replay), Security Rules (the rules in
+  force, whether a request as a given user is allowed and which line
+  decided, recent denials), Auth tokens and claims, Storage files (read,
+  upload, delete, copy, move), Eventarc, Extensions, Pub/Sub topics and a
+  backlog peek, Cloud Tasks, schedules, Firestore counts and collection-group
+  queries, and a reset that asks for the project id before it clears more
+  than one service. The new tools use the console's API, so they need the
+  console on (the default). A `{"$timestamp"}` finer than a millisecond now
+  keeps its precision when a tool writes it.
+- **`firenook mcp` with no arguments** uses the one running suite, so an
+  editor's install link needs no project id; with two running, it asks for
+  `--project`.
+- **The console's Connect dialog has a Coding agent tab**: the setup for
+  Claude Code, Cursor, VS Code and any other agent, "Add to Cursor" and
+  "Add to VS Code" install links, and when an agent last called.
+- **Functions start in under a second, not seven.** Discovery waited about
+  6 s for the SDK's discovery server to exit, kept open by an idle
+  keep-alive connection; it now takes about 0.2 s. On the acceptance host, a
+  project with seven functions and every emulator is ready in 0.78 s against
+  6.82 s.
+- **Timestamps are stored to the microsecond**, as in production: a finer
+  value is rounded down at write, so the export no longer refuses it, and
+  the export rounds down any finer value an earlier release saved.
+- **The Functions log line's duration** prints `1.6ms`, not
+  `1.6076249999999999ms`.
+- **The console's document panel** reads a bare id in `doc=` against the
+  open collection instead of crashing.
+- **Checked against 0.2.0-next.6** on the acceptance host with the same data,
+  instead of a new paired run against the official emulator, since no
+  measured path changed: imports, resumed starts, writes, listener delivery
+  and the query shapes match within run-to-run noise, and memory is 11 MB
+  higher once ready (`docs/benchmarks.md`, `benchmarks/next7-regression.json`).
+  The slow start the 0.2.0-next.6 run saw on a freshly copied state directory
+  is the copy's pending writes reaching the disk, not Firenook.
+- A consumer's gates passed on the candidate built from the PR head
+  (`0.2.0-local.ge8ecd3325537`): Extensions admission (24 handlers admitted,
+  2 ignored upstream, as the official emulator records), the installed
+  package smoke and its 26 integration tests. Its stack with three Extensions
+  was ready in 2.6 s, against 7.4 s on 0.2.0-next.6.
+- Data kept without a seed needs 0.2.0-next.7; 0.2.0-next.6 refuses it and
+  changes nothing. Data saved by 0.2.0-next.6 opens unchanged, and data
+  0.2.0-next.7 saved from a seed opens in 0.2.0-next.6 (checked on the
+  private consumer seed: 211,202 documents and 33,353 objects). No emulator
+  protocol or port changed.
+- Published straight to `latest`: the CLI's `next` stays on 0.2.0-next.6
+  until it is moved by hand, and a preview install, which follows `next`, is
+  not told about this release until then.
+
 # 0.2.0-next.6 — data closed on stop, starts in milliseconds, the store's size
 
 - Pin the engine to `767605db4248fed403523a24f6901fcc1e693d13`, the merge of
