@@ -752,6 +752,33 @@ stream, loaded by glob). A few behaviours worth knowing:
   `connectDialects(status, { services, params? })` in `lib/connect.ts`
   gives a `CodeBlock` its tabs from that list (an empty section shows
   `EMPTY_CONNECT`: web, node, python, go).
+- The dialog's last tab, **Coding agent** (`?connect=agent`, group
+  "Agents"), sets up `firenook mcp` instead of an app
+  (`connect/agent-setup.tsx`; the texts and links come from
+  `lib/agent-config.ts`, and its one `connectSnippet` is the `mcpServers`
+  entry). It has no host picker: the server finds the running suite. Order:
+  when an agent last called, `npx firenook mcp add` (the console writes no
+  project files; that stays a command with a plan and `--dry-run`), then one
+  agent at a time (Claude Code's commands and `.mcp.json`, Cursor's and VS
+  Code's install links and project files, the generic entry). **A project
+  file never names the project** (it is committed and shared); what goes in
+  a person's own settings (Claude Code's user scope, the install links, the
+  generic entry) takes `--project <id>` only when "More than one emulator
+  runs on this machine" is ticked. Install links follow the vendors'
+  formats: Cursor `cursor://anysphere.cursor-deeplink/mcp/install?name=…&config=<base64
+  of the entry's JSON, URL-encoded>`, VS Code `vscode:mcp/install?<URL-encoded
+  JSON of the entry with its name>` and `vscode-insiders:` the same.
+- **The agent call beacon** (`crates/console-front/src/agents.rs`): `POST
+  /agents/calls` `{ client, tool }` (each 1 to 64 characters of
+  `A-Z a-z 0-9 . _ / @ : + -` and space; other fields ignored) answers 204
+  and is what the MCP server sends fire-and-forget after every tool call,
+  from Node: JSON, no `Origin`, so the guard passes it as any JSON change.
+  `GET /agents` is `AgentActivity { lastCall: { at, client, tool } | null,
+  calls }`, `at` RFC 3339 UTC to the millisecond. In memory, one value and
+  a counter: a restart forgets it. The tab reads it with `agentsQuery`
+  (`staleTime: 0`, `refetchOnWindowFocus`): as it opens and when the window
+  is shown again, never on a timer. The journey dispatches the browser's own
+  bubbling `visibilitychange` (TanStack Query listens on `window`).
 
 ### End-to-end
 
@@ -2351,6 +2378,14 @@ indenting: paste instead (`pasteRules`).
   `alg: none` token made in the browser. `FirestoreScope` carries `identity`
   and `authorize(signal)`; query keys hold `identityKey(identity)`, never a
   token, so rules run exactly as for the app.
+- `doc=` is the open document's whole path; a bare id (`doc=x` beside
+  `path=orders`) is read against the open collection
+  (`firestore/document-path.ts`, `resolveDocument`), and anything that
+  still names no document (an id at the root or in a collection group, a
+  collection's path) opens the panel on "Document not found" without asking
+  the engine. `getDocument` answers `null` for such a path and for an answer
+  without a `name`: a GET on a collection's path is its listing, and reading
+  that as a document crashed the panel.
 - View state is the URL (`path`, `q`, `group`, `as`, `doc`, `tab`);
   selection and focus are Zustand; queries are keyed
   `['fs', db, kind, scope, ...]` so the channel can target them.
