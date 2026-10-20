@@ -18,7 +18,7 @@ use futures_util::{Stream, StreamExt as _, TryStreamExt as _};
 use serde_json::{Map, Value, json};
 use tokio::sync::oneshot;
 
-use crate::log::{LogEvent, LogSink};
+use crate::log::{LogEvent, LogSink, detail_millis, line_millis};
 use crate::manifest::Signature;
 use crate::monitor::cause::{self, CauseInput};
 use crate::monitor::{
@@ -697,16 +697,13 @@ impl EndLine {
         let elapsed = self.started.elapsed().as_secs_f64() * 1000.0;
         let summary = self.monitor.summary(self.token.seq);
         let status = summary.as_ref().and_then(|summary| summary.status);
+        // The line and its detail say the same duration: the invocation's.
+        let duration = summary
+            .as_ref()
+            .and_then(|summary| summary.duration_ms)
+            .unwrap_or(elapsed);
         let mut detail = Map::new();
-        detail.insert(
-            "durationMs".to_owned(),
-            json!(
-                summary
-                    .as_ref()
-                    .and_then(|summary| summary.duration_ms)
-                    .unwrap_or(elapsed)
-            ),
-        );
+        detail.insert("durationMs".to_owned(), json!(detail_millis(duration)));
         detail.insert("status".to_owned(), json!(status));
         detail.insert(
             "outcome".to_owned(),
@@ -729,7 +726,11 @@ impl EndLine {
         let line = self.attributed(LogEvent::new(
             "INFO",
             "functions",
-            format!("Finished \"{}\" in {elapsed}ms", self.function_id),
+            format!(
+                "Finished \"{}\" in {}ms",
+                self.function_id,
+                line_millis(duration)
+            ),
         ));
         self.record(line.with_kind(kind).with_detail(Value::Object(detail)));
     }
@@ -745,7 +746,11 @@ impl EndLine {
             .monitor
             .summary(self.token.seq)
             .and_then(|summary| summary.error);
-        let mut detail = json!({ "outcome": "failed", "durationMs": elapsed, "consoleOnly": true });
+        let mut detail = json!({
+            "outcome": "failed",
+            "durationMs": detail_millis(elapsed),
+            "consoleOnly": true,
+        });
         if let Some(error) = error {
             detail["error"] = Value::String(error);
         }
@@ -753,8 +758,9 @@ impl EndLine {
             "ERROR",
             "functions",
             format!(
-                "Finished \"{}\" in {elapsed}ms with an error",
-                self.function_id
+                "Finished \"{}\" in {}ms with an error",
+                self.function_id,
+                line_millis(elapsed)
             ),
         ));
         self.record(line.with_kind("function.failed").with_detail(detail));

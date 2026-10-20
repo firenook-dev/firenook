@@ -1,0 +1,241 @@
+{
+  "name": "0.2.0-next.7 regression check against 0.2.0-next.6",
+  "measuredAt": "2026-10-20",
+  "host": "the private acceptance host: AMD Ryzen 5 3600 (6 cores, 12 threads), 64 GiB, NVMe, Ubuntu 24.04 (Linux 6.8), Node 24.20.0",
+  "data": "the private consumer seed: 211,205 Firestore documents, 33,352 Storage objects (6.7 GB), one Auth user",
+  "candidate": {
+    "package": "0.2.0-local.g00a753e4b6cc",
+    "engineRevision": "00a753e4b6cca01cfd4ddbe7bcce5a73d179b0d2",
+    "note": "the PR #107 head the run used; later commits on the PR change the npm CLI only (MCP timestamp encoding, Windows path display), not the engine"
+  },
+  "baseline": {
+    "package": "0.2.0-next.6",
+    "engineRevision": "767605db4248fed403523a24f6901fcc1e693d13"
+  },
+  "method": [
+    "One emulator at a time on the otherwise idle host, Firestore, Auth and Storage only unless stated, UI off, plain output.",
+    "First start importing the seed: a first start into a new state directory, four per release, alternating.",
+    "Resumed start: three restarts on the state each release imported; ready is launch to \"All emulators ready\".",
+    "Writes: ten alternating rounds, each on its own copy of the state next.6 saved, flushed with sync before the start; 2,000 sequential writes each confirmed by a listener, then 4,000 from eight writers at once.",
+    "Query shapes: the 26 shapes of docs/benchmarks.md (named as there), 40 iterations each, on resumed data, eight alternating rounds (four per release, in two runs); the figure per shape is the median of the four round medians. Memory: the proportional set size of the whole process tree, in the second run's rounds (two per release), once ready and after the query shapes.",
+    "Functions: a project with seven functions (HTTP, Firestore, Storage, schedule and Pub/Sub triggers) and every emulator, five alternating starts per release with no state kept.",
+    "Keep data: next.7 only, a project with no seed started four times with --keep-data, 100 documents written per run."
+  ],
+  "lanes": {
+    "next.6": {
+      "firstStartImportingTheSeedMs": {
+        "samples": [
+          20251,
+          22485,
+          24962,
+          19656
+        ],
+        "median": 21368.0
+      },
+      "resumedStartMs": {
+        "samples": [
+          559,
+          551,
+          562
+        ],
+        "median": 559
+      },
+      "stopMs": {
+        "samples": [
+          308,
+          55,
+          54,
+          49
+        ],
+        "median": 54.5
+      },
+      "memoryAtReadyGiB": {
+        "samples": [
+          0.149,
+          0.146
+        ],
+        "median": 0.1475
+      },
+      "memoryAfterQueryShapesGiB": {
+        "samples": [
+          0.245,
+          0.244
+        ],
+        "median": 0.2445
+      },
+      "writeMedianMs": 0.72,
+      "writeP99Ms": 1.13,
+      "listenerDeliveryMedianMs": 0.8,
+      "eightWritersMedianMs": 2.27,
+      "eightWritersPerSecond": {
+        "samples": [
+          2786,
+          3204,
+          3305,
+          3351,
+          3421
+        ],
+        "mean": 3213
+      },
+      "functionsProjectReadyMs": {
+        "samples": [
+          6842,
+          6820,
+          6823,
+          6820,
+          6818
+        ],
+        "median": 6820
+      },
+      "queryShapeMedianMs": {
+        "Get one document by id": 3.705,
+        "Batch get of 50 documents": 118.69,
+        "Collection, limit 1": 3.375,
+        "Collection, limit 100": 100.72999999999999,
+        "Ids only, limit 500": 101.025,
+        "== on a string field": 32.4,
+        "== on a boolean, limit 20": 18.58,
+        "Document id in 10 ids": 24.509999999999998,
+        "array-contains": 66.005,
+        "array-contains-any of 5 values": 58.935,
+        "orderBy an integer field, limit 20": 166.675,
+        "orderBy a timestamp, descending, limit 20": 188.2,
+        "== plus orderBy on another field": 101.505,
+        "Range on an integer field, limit 20": 164.925,
+        "Five cursor pages of 20": 838.55,
+        "offset 1000, limit 20": 32.55,
+        "count() of a collection": 7.425,
+        "count() with == on a boolean": 22.619999999999997,
+        "Collection group, limit 20": 18.53,
+        "Second collection: == on a boolean, limit 50": 50.685,
+        "Second collection: array-contains plus orderBy a timestamp": 15.455,
+        "Second collection: == plus !=": 35.349999999999994,
+        "Small collection: == on a string": 1.8050000000000002,
+        "Write one document, then delete it": 1.69,
+        "Transaction: read, modify, write": 3.64,
+        "Listener: first snapshot of 20 documents": 51.95
+      }
+    },
+    "next.7": {
+      "firstStartImportingTheSeedMs": {
+        "samples": [
+          22622,
+          20886,
+          20532,
+          24203
+        ],
+        "median": 21754.0
+      },
+      "resumedStartMs": {
+        "samples": [
+          593,
+          576,
+          574
+        ],
+        "median": 576
+      },
+      "stopMs": {
+        "samples": [
+          347,
+          60,
+          49,
+          47
+        ],
+        "median": 54.5
+      },
+      "memoryAtReadyGiB": {
+        "samples": [
+          0.161,
+          0.156
+        ],
+        "median": 0.1585
+      },
+      "memoryAfterQueryShapesGiB": {
+        "samples": [
+          0.266,
+          0.266
+        ],
+        "median": 0.266
+      },
+      "writeMedianMs": 0.76,
+      "writeP99Ms": 1.12,
+      "listenerDeliveryMedianMs": 0.83,
+      "eightWritersMedianMs": 2.2,
+      "eightWritersPerSecond": {
+        "samples": [
+          3030,
+          3291,
+          3192,
+          3379,
+          3394
+        ],
+        "mean": 3257
+      },
+      "functionsProjectReadyMs": {
+        "samples": [
+          777,
+          790,
+          784,
+          790,
+          784
+        ],
+        "median": 784
+      },
+      "queryShapeMedianMs": {
+        "Get one document by id": 3.4050000000000002,
+        "Batch get of 50 documents": 112.75999999999999,
+        "Collection, limit 1": 3.24,
+        "Collection, limit 100": 101.235,
+        "Ids only, limit 500": 101.555,
+        "== on a string field": 30.985,
+        "== on a boolean, limit 20": 17.255,
+        "Document id in 10 ids": 24.38,
+        "array-contains": 64.105,
+        "array-contains-any of 5 values": 57.62,
+        "orderBy an integer field, limit 20": 167.61,
+        "orderBy a timestamp, descending, limit 20": 191.37,
+        "== plus orderBy on another field": 102.06,
+        "Range on an integer field, limit 20": 167.01999999999998,
+        "Five cursor pages of 20": 854.965,
+        "offset 1000, limit 20": 31.945,
+        "count() of a collection": 7.455,
+        "count() with == on a boolean": 24.415,
+        "Collection group, limit 20": 20.345,
+        "Second collection: == on a boolean, limit 50": 51.105000000000004,
+        "Second collection: array-contains plus orderBy a timestamp": 14.795,
+        "Second collection: == plus !=": 37.11,
+        "Small collection: == on a string": 1.885,
+        "Write one document, then delete it": 2.0199999999999996,
+        "Transaction: read, modify, write": 3.835,
+        "Listener: first snapshot of 20 documents": 52.155
+      }
+    }
+  },
+  "keepDataWithoutSeed": [
+    {
+      "readyMs": 346,
+      "documentsAtStart": 0,
+      "documentsAtStop": 100
+    },
+    {
+      "readyMs": 174,
+      "documentsAtStart": 100,
+      "documentsAtStop": 200
+    },
+    {
+      "readyMs": 169,
+      "documentsAtStart": 200,
+      "documentsAtStop": 300
+    },
+    {
+      "readyMs": 174,
+      "documentsAtStart": 300,
+      "documentsAtStop": 400
+    }
+  ],
+  "findings": [
+    "Query shapes, median of four rounds per release: 20 of 26 within 5% of 0.2.0-next.6, two faster (Get one document by id 3.71 to 3.41 ms; == on a boolean, limit 20 18.58 to 17.25 ms) and four slower by 5-20%: Write one document, then delete it 1.69 to 2.02 ms; Collection group, limit 20 18.53 to 20.34 ms; count() with == on a boolean 22.62 to 24.41 ms; Transaction: read, modify, write 3.64 to 3.83 ms. On those four shapes 0.2.0-next.6 spread by 16-61% between its own rounds and 0.2.0-next.7 by 3-5%, and every 0.2.0-next.7 round lies inside the range of 0.2.0-next.6 but one (Collection group, 20.71 ms against its highest 20.61 ms). Only the write touches code next.7 changed (a check for timestamps finer than a microsecond); the 2,000-write lane, the stronger measure of a write, is unchanged.",
+    "Memory is 11 MB higher once ready (0.159 against 0.148 GiB) and 21 MB higher after the query shapes (0.266 against 0.245 GiB), in both rounds.",
+    "A start on a freshly copied state directory took 0.65-16 s on both releases (most often several seconds) until the copy was flushed with sync, then 0.56-0.66 s on both: the slow start the next.6 benchmark noted on copied state is the copy's pending writes reaching the disk, not the engine."
+  ]
+}

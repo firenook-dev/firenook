@@ -140,8 +140,14 @@ pub async fn discover_from_sdk(
     });
     let timeout = discovery_timeout();
     let deadline = Instant::now() + timeout;
+    // No connection outlives its request. The SDK's `/__/quitquitquit`
+    // answers and calls `server.close()`, which waits for every open
+    // connection: one kept alive for reuse held the discovery process for
+    // Node's keep-alive timeout (5 s) before it could exit, and the codebase
+    // loaded that much later.
     let client = reqwest::Client::builder()
         .timeout(timeout)
+        .pool_max_idle_per_host(0)
         .build()
         .map_err(|error| RuntimeError(format!("failed to build discovery client: {error}")))?;
     let url = format!("http://127.0.0.1:{port}/__/functions.yaml");
@@ -157,7 +163,12 @@ pub async fn discover_from_sdk(
                 timeout.as_millis()
             )));
         }
-        match client.get(&url).send().await {
+        match client
+            .get(&url)
+            .header(reqwest::header::CONNECTION, "close")
+            .send()
+            .await
+        {
             Ok(response) => {
                 let status = response.status();
                 let text = response.text().await.unwrap_or_default();
@@ -175,15 +186,22 @@ pub async fn discover_from_sdk(
                 });
             }
             Err(error) if error.is_connect() || error.is_request() => {
-                tokio::time::sleep(Duration::from_millis(50)).await;
+                // Not listening yet: a refused connection on loopback costs
+                // nothing, so look again soon (the official CLI retries at
+                // once).
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
             Err(error) => break Err(RuntimeError(format!("discovery request failed: {error}"))),
         }
     };
     let _ = client
         .get(format!("http://127.0.0.1:{port}/__/quitquitquit"))
+        .header(reqwest::header::CONNECTION, "close")
         .send()
         .await;
+    drop(client);
+    // As the official CLI: the process ends by itself, or is killed after
+    // ten seconds (user code that keeps Node's event loop busy).
     if tokio::time::timeout(Duration::from_secs(10), child.wait())
         .await
         .is_err()
@@ -223,4 +241,60 @@ async fn reserve_port() -> Result<u16, RuntimeError> {
         .port();
     drop(listener);
     Ok(port)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The SDK's discovery server as far as its end goes: `/__/quitquitquit`
+    /// answers and calls `server.close()`, which waits for every open
+    /// connection. Idle connections are kept for 30 s here, so a client
+    /// that kept one would hold the process past the ten-second kill.
+    const FAKE_SDK: &str = r"
+const http = require('http');
+const server = http.createServer((request, response) => {
+  if (request.url === '/__/functions.yaml') {
+    response.setHeader('content-type', 'text/yaml');
+    response.end(JSON.stringify({specVersion: 'v1alpha1', endpoints: {}}));
+  } else if (request.url === '/__/quitquitquit') {
+    response.end('ok');
+    server.close();
+  } else {
+    response.statusCode = 404;
+    response.end();
+  }
+});
+server.keepAliveTimeout = 30000;
+server.listen(Number(process.env.PORT), '127.0.0.1');
+";
+
+    fn node() -> Option<PathBuf> {
+        let path = std::env::var_os("PATH")?;
+        std::env::split_paths(&path)
+            .map(|directory| directory.join(if cfg!(windows) { "node.exe" } else { "node" }))
+            .find(|candidate| candidate.is_file())
+    }
+
+    #[tokio::test]
+    async fn discovery_ends_as_soon_as_the_sdk_quits() {
+        let Some(node) = node() else {
+            eprintln!("skipped: node is not on PATH");
+            return;
+        };
+        let root = tempfile::tempdir().expect("a directory");
+        let sdk = root.path().join("node_modules/firebase-functions");
+        std::fs::create_dir_all(sdk.join("lib/bin")).expect("the SDK's folders");
+        std::fs::write(sdk.join("package.json"), r#"{"version":"7.4.0"}"#).expect("package");
+        std::fs::write(sdk.join("lib/bin/firebase-functions.js"), FAKE_SDK).expect("binary");
+        let started = Instant::now();
+        let manifest = discover_from_sdk(&node, &sdk, root.path(), &BTreeMap::new())
+            .await
+            .expect("the manifest");
+        let took = started.elapsed();
+        assert_eq!(manifest["specVersion"].as_str(), Some("v1alpha1"));
+        // A kept connection made this five seconds (Node's keep-alive), or
+        // ten here (the kill).
+        assert!(took < Duration::from_secs(3), "discovery took {took:?}");
+    }
 }

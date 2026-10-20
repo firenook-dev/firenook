@@ -44,7 +44,7 @@ async fn a_stop_before_ready_closes_firestore_and_storage() {
     };
     // Everything a start opens before readiness, the console's Firestore
     // pieces (which observe the store) included.
-    let prepared = prepare_suite(&config).await.expect("prepared");
+    let prepared = prepare_suite(&config, false).await.expect("prepared");
     prepared
         .store
         .commit(&[Write::Create {

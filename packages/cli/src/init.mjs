@@ -3,6 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { DEFAULT_PORTS, inspectProject, readJson, validProjectId } from './options.mjs';
+import { applyAgents, planAgents, shown } from './agents.mjs';
 
 // The official `firebase init` port defaults, written explicitly.
 export const INIT_PORTS = Object.fromEntries(['auth', 'functions', 'firestore', 'pubsub', 'storage', 'eventarc', 'tasks', 'hub', 'logging', 'ui'].map(name => [name, DEFAULT_PORTS[name]]));
@@ -91,8 +92,15 @@ function writePlan(plan, log, quiet) {
   }
 }
 
+// The coding agents a new project uses, as one sentence: "Claude Code and Cursor".
+const agentNames = steps => steps.map(step => step.name).join(steps.length > 2 ? ', ' : ' and ').replace(/, ([^,]+)$/, ' and $1');
+
 // init [--force] [--dry-run] [--project ID] [--no-functions]
-export function scaffold(options, cwd = process.cwd(), log = console) {
+// `ask(question)` resolves to true or false; it is given only in a terminal,
+// where init offers once to give the coding agents it finds the MCP server
+// (the same files `firenook mcp add` writes). Without it, init prints the
+// command instead and stays synchronous.
+export function scaffold(options, cwd = process.cwd(), log = console, {ask, env = process.env} = {}) {
   const config = resolve(cwd, options.config || 'firebase.json');
   const directory = dirname(config);
   if (existsSync(config) && !options.force) throw new Error(`${config} exists; use firenook init --adopt to adapt it, or --force to overwrite the scaffold files`);
@@ -124,17 +132,30 @@ export function scaffold(options, cwd = process.cwd(), log = console) {
   if (functions) plan.push(file('functions/package.json', functionsPackage()), file('functions/index.js', FUNCTIONS_INDEX), file('functions/.gitignore', 'node_modules/\n*.local\n'));
   const gitignore = gitignoreAddition(directory);
   if (gitignore) plan.push({path:gitignore.path, content:gitignore.content, skip:false});
-  const next = [...(functions ? ['cd functions && npm install'] : []), `firenook emulators:start --project ${project}`];
+  // A new project never had the official behaviour to keep: its data stays
+  // between runs from the first start.
+  const next = [...(functions ? ['cd functions && npm install'] : []), `firenook emulators:start --project ${project} --keep-data`];
+  const agents = planAgents(directory, {config, env}).filter(step => step.action === 'add');
   const dry = Boolean(options['dry-run']);
-  if (options.json) log.log(JSON.stringify({directory, project, functions, files:plan.map(item => ({path:item.path, action:item.skip ? 'keep' : 'write'})), applied:!dry, next}));
+  const offer = agents.length && !dry && !options.json && ask;
+  if (agents.length && !offer) next.push(`firenook mcp add   (gives ${agentNames(agents)} the Firenook MCP server)`);
+  if (options.json) log.log(JSON.stringify({directory, project, functions, files:plan.map(item => ({path:item.path, action:item.skip ? 'keep' : 'write'})),
+    agents:agents.map(({agent, path}) => ({agent, path})), applied:!dry, next}));
   else {
     log.error(`Firenook init: project ${project} in ${directory}${dry ? ' (dry run, nothing written)' : ''}`);
     if (dry) for (const item of plan) log.error(`  ${item.skip ? 'keep ' : 'write'}   ${item.path}`);
+    if (dry) for (const step of agents) log.error(`  offer   ${step.path} (${step.name}: the Firenook MCP server)`);
   }
   if (dry) return 0;
   writePlan(plan, log, Boolean(options.json));
-  if (!options.json) { log.error('Next steps:'); for (const step of next) log.error(`  ${step}`); }
-  return 0;
+  const finish = () => { if (!options.json) { log.error('Next steps:'); for (const step of next) log.error(`  ${step}`); } return 0; };
+  if (!offer) return finish();
+  const files = agents.map(step => shown(directory, step.path)).join(', ');
+  return Promise.resolve(ask(`Give ${agentNames(agents)} the Firenook MCP server? This writes ${files}. [Y/n] `)).then(yes => {
+    if (yes) { applyAgents(agents); for (const step of agents) log.error(`  wrote   ${step.path}`); }
+    else next.push(`firenook mcp add   (gives ${agentNames(agents)} the Firenook MCP server)`);
+    return finish();
+  });
 }
 
 // Adds a rules/indexes file referenced by firebase.json when it is missing.
@@ -162,7 +183,7 @@ function referencedFiles(data, directory) {
 
 // init --adopt [--dry-run] [--project ID]: collect every launcher finding, then
 // apply only additions (never rewriting existing keys) when nothing blocks.
-export function adopt(options, cwd = process.cwd(), log = console) {
+export function adopt(options, cwd = process.cwd(), log = console, {env = process.env} = {}) {
   const config = resolve(cwd, options.config || 'firebase.json');
   const directory = dirname(config);
   if (!existsSync(config)) throw new Error(`${config} does not exist; run firenook init without --adopt to scaffold a project`);
@@ -186,6 +207,11 @@ export function adopt(options, cwd = process.cwd(), log = console) {
   if (projectMissing) additions.push({kind:'.firebaserc', target:'projects.default', value:project, description:`set .firebaserc projects.default = ${project}${rcExists ? '' : ' (create the file)'}`});
   const files = referencedFiles(data, directory);
   for (const file of files) additions.push({kind:'file', target:file.path, description:`${file.description}: ${file.path}`});
+  // The coding agents the project uses get the MCP server, as firenook mcp add does.
+  const agents = planAgents(directory, {config, env});
+  for (const step of agents.filter(step => step.content)) additions.push({kind:'agent', target:step.path, agent:step.agent, description:`give ${step.name} the Firenook MCP server: ${step.path}`});
+  for (const step of agents.filter(step => step.action === 'differs')) warnings.push(`${step.path} already has another firenook entry for ${step.name}; firenook mcp add --force replaces it`);
+  for (const step of agents.filter(step => step.action === 'unreadable')) warnings.push(`${step.path} is not plain JSON, so ${step.name} gets no MCP server from init; add this by hand: ${step.snippet}`);
   const apply = !options['dry-run'] && !options.json && !errors.length;
   if (options.json) {
     log.log(JSON.stringify({config, project, services:inspection.services, errors, warnings, additions:additions.map(({description, ...rest}) => rest), applied:false}));
@@ -210,6 +236,9 @@ export function adopt(options, cwd = process.cwd(), log = console) {
       log.error(`  wrote   ${inspection.rc}`);
     }
     for (const file of files) { mkdirSync(dirname(file.path), {recursive:true}); writeFileSync(file.path, file.content); log.error(`  wrote   ${file.path}`); }
+    const written = agents.filter(step => step.content);
+    applyAgents(written);
+    for (const step of written) log.error(`  wrote   ${step.path}`);
   } else if (!options.json && errors.length) log.error('Fix the errors above, then re-run firenook init --adopt; nothing was written.');
   else if (!options.json && options['dry-run'] && additions.length) log.error('Dry run: nothing was written.');
   return errors.length ? 1 : 0;

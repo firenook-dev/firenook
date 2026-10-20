@@ -10,6 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import { findHub, resolveProject, runningServices, serviceOrigin } from './hub.mjs';
 import { encodeFields, relativePath } from './firestore-values.mjs';
+import { suiteFetch } from './client.mjs';
 
 // The Admin SDK's placeholder for tasks enqueued against the emulator.
 export const EMULATED_SERVICE_ACCOUNT = 'emulated-service-acct@email.com';
@@ -47,7 +48,7 @@ async function readResponse(response) {
 // GET /backends: the loaded function definitions in the official shape.
 export async function listFunctions(functions) {
   let response;
-  try { response = await fetch(`${functions}/backends`, {signal:AbortSignal.timeout(10000)}); }
+  try { response = await suiteFetch(`${functions}/backends`, {signal:AbortSignal.timeout(10000)}); }
   catch (error) { throw new Error(`no Functions emulator answered at ${functions}/backends (${describe(error)}); start it with firenook emulators:start`); }
   if (!response.ok) throw new Error(`${functions}/backends answered HTTP ${response.status}`);
   const body = await response.json();
@@ -268,7 +269,7 @@ export function buildEnvelope(trigger, project, eventData, opts, services = {}) 
 export async function resolveTriggerKey(functions, project, trigger) {
   const route = key => `${functions}/functions/projects/${encodeURIComponent(project)}/triggers/${key}`;
   let probe;
-  try { probe = await fetch(route(`firenook-probe-${randomUUID()}`), {method:'POST', headers:{'content-type':'application/json'}, body:'{}', signal:AbortSignal.timeout(10000)}); }
+  try { probe = await suiteFetch(route(`firenook-probe-${randomUUID()}`), {method:'POST', headers:{'content-type':'application/json'}, body:'{}', signal:AbortSignal.timeout(10000)}); }
   catch (error) { throw new Error(`no Functions emulator answered at ${functions} (${describe(error)}); start it with firenook emulators:start`); }
   const text = await probe.text();
   const listed = /valid functions are:\s*(.*)$/s.exec(text);
@@ -308,7 +309,7 @@ export async function runInvoke(name, options, cwd = process.cwd()) {
       body = JSON.stringify({data:jsonOption(options.data, '--data')});
     }
     let response;
-    try { response = await fetch(url, {method, headers, body}); }
+    try { response = await suiteFetch(url, {method, headers, body}); }
     catch (error) { throw new Error(`no Functions emulator answered at ${url} (${describe(error)}); start it with firenook emulators:start`); }
     return {function:name, region, transport:'https', method, url, ...await readResponse(response)};
   }
@@ -341,7 +342,7 @@ export async function runInvoke(name, options, cwd = process.cwd()) {
 
 async function post(url, body, headers = {}) {
   let response;
-  try { response = await fetch(url, {method:'POST', headers:{'content-type':'application/json', ...headers}, body:JSON.stringify(body), signal:AbortSignal.timeout(60000)}); }
+  try { response = await suiteFetch(url, {method:'POST', headers:{'content-type':'application/json', ...headers}, body:JSON.stringify(body), signal:AbortSignal.timeout(60000)}); }
   catch (error) { throw new Error(`${url} did not answer (${describe(error)}); is the suite running?`); }
   return readResponse(response);
 }

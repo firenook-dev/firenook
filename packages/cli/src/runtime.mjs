@@ -102,7 +102,7 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {
   for (const bucket of options['storage-bucket']) args.push('--storage-bucket', bucket);
   if (p.imported) args.push('--import', p.imported);
   if (p.exported) args.push('--export-on-exit', p.exported);
-  if (options['resume-state']) args.push('--resume-state');
+  if (p.resume) args.push('--resume-state');
   if (options['no-diagnostics']) args.push('--no-diagnostics');
   // The console answers only the names it is reached by (loopback and
   // --host by default); a proxy or cloud name is added here.

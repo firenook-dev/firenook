@@ -9,7 +9,9 @@
 // engine's connect host, the address this page was opened at, the Android
 // emulator's 10.0.2.2, or one typed, and the choice is kept per browser.
 // The address names the platform (`?connect=python`), so a link or ⌘K
-// opens it on that one; closing it drops the parameter.
+// opens it on that one; closing it drops the parameter. The last entry,
+// Coding agent (`?connect=agent`), sets up an agent's MCP server instead
+// (`agent-setup.tsx`), and has no host to pick.
 
 import { Button, Dialog, Input, Select, cn } from '@cloudflare/kumo'
 import { CheckIcon, XIcon } from '@phosphor-icons/react'
@@ -19,6 +21,7 @@ import type { OverviewEngineDetails } from '@/api/generated/observe/OverviewEngi
 import { CodeBlock } from '@/components/console/code-block'
 import { connectSnippet, hostLiteral } from '@/lib/connect'
 import { CONNECT_TABS, type ConnectParam, type ConnectTab, connectTab } from '@/lib/connect-tabs'
+import { AgentSetup } from './agent-setup'
 import { useConnectHost } from './host'
 
 /** The platforms down the dialog's side, by who runs the code. */
@@ -26,6 +29,7 @@ const GROUPS: readonly { label: string; params: readonly ConnectParam[] }[] = [
   { label: 'Apps', params: ['web', 'flutter', 'apple', 'android'] },
   { label: 'Servers', params: ['node', 'python', 'go', 'java'] },
   { label: 'Configuration', params: ['env', 'firebase-json'] },
+  { label: 'Agents', params: ['agent'] },
 ]
 
 /** The picker's entry for "type a host". */
@@ -51,6 +55,8 @@ function snippetNote(tab: ConnectTab, demo: boolean): string {
       return 'firenook emulators:exec sets the variables it marks for the command it starts; Functions get the last ones too.'
     case 'firebase-json':
       return 'The ports and host this engine runs on, for a project that should start the same way next time.'
+    case 'agent':
+      return 'The MCP server finds this engine by itself.'
   }
 }
 
@@ -71,6 +77,9 @@ export function ConnectDialog({
   onParam: (param: ConnectParam) => void
 }) {
   const host = useConnectHost(status)
+  // A coding agent reaches the engine through `firenook mcp`, which finds it
+  // without a host, so its tab has no host to pick.
+  const hosted = connectTab(param).target !== 'agent'
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog className="flex max-h-[min(88vh,760px)] flex-col p-0 sm:w-[min(1000px,calc(100vw-4rem))]">
@@ -84,7 +93,7 @@ export function ConnectDialog({
               </Dialog.Description>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <HostPicker host={host} />
+              {hosted && <HostPicker host={host} />}
               <Dialog.Close
                 aria-label="Close"
                 render={
@@ -132,27 +141,33 @@ export function ConnectBody({
   return (
     <div className="grid min-h-0 flex-1 grid-cols-[12.5rem_minmax(0,1fr)] border-t border-kumo-line">
       <Platforms current={tab.param as ConnectParam} onPick={onParam} />
-      <div className="grid min-h-0 min-w-0 content-start gap-3 overflow-auto px-6 py-5">
-        <CodeBlock
-          label={tab.title}
-          code={code}
-          language={
-            tab.target === 'firebase-json'
-              ? 'json'
-              : tab.target === 'env'
-                ? 'shell'
-                : tab.target === 'python'
-                  ? 'python'
-                  : tab.target === 'go'
-                    ? 'go'
-                    : 'js'
-          }
-          testId="connect-snippet"
-        />
-        <p className="max-w-[72ch] text-[13px] text-kumo-subtle" data-testid="connect-note">
-          {snippetNote(tab, demo)}
-        </p>
-      </div>
+      {tab.target === 'agent' ? (
+        <div className="min-h-0 min-w-0 overflow-auto px-6 py-5">
+          <AgentSetup project={status.projectId} />
+        </div>
+      ) : (
+        <div className="grid min-h-0 min-w-0 content-start gap-3 overflow-auto px-6 py-5">
+          <CodeBlock
+            label={tab.title}
+            code={code}
+            language={
+              tab.target === 'firebase-json'
+                ? 'json'
+                : tab.target === 'env'
+                  ? 'shell'
+                  : tab.target === 'python'
+                    ? 'python'
+                    : tab.target === 'go'
+                      ? 'go'
+                      : 'js'
+            }
+            testId="connect-snippet"
+          />
+          <p className="max-w-[72ch] text-[13px] text-kumo-subtle" data-testid="connect-note">
+            {snippetNote(tab, demo)}
+          </p>
+        </div>
+      )}
     </div>
   )
 }

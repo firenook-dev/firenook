@@ -22,7 +22,7 @@ In a terminal, `firenook emulators:start` draws its own screen:
 | `r` | reloads your functions |
 | `e` | exports a snapshot of the data to `.firenook/exports/<time>` |
 | `w` | lists the start-up warnings |
-| `?` | shows the keys |
+| `?` | shows the keys, and how to connect a coding agent (`npx firenook mcp add`) |
 | `q` or Ctrl-C | stops Firenook, saving the data first |
 
 When Firenook cannot start, the card says what went wrong, how to fix it and

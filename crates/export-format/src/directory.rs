@@ -730,6 +730,50 @@ mod tests {
         fs::remove_dir_all(&test_root).expect("test directory should be removed");
     }
 
+    /// Data an earlier engine saved can hold a timestamp finer than a
+    /// microsecond, which writes now round at commit: the export rounds it
+    /// down the same way instead of refusing the whole export.
+    #[test]
+    fn an_export_rounds_down_a_saved_timestamp_finer_than_a_microsecond() {
+        use firenook_core_store::{DatabaseName, DocumentKey, Fields, Timestamp};
+        let at = |nanos| Value::Timestamp(Timestamp::new(1_577_934_245, nanos).unwrap());
+        let document = ExportedDocument::new(
+            DocumentKey::new(
+                DatabaseName::new("demo-precision", "(default)").unwrap(),
+                "saved/finer",
+            )
+            .unwrap(),
+            Fields::from([
+                ("at".to_owned(), at(123_456_789)),
+                (
+                    "nested".to_owned(),
+                    Value::Map(Fields::from([(
+                        "list".to_owned(),
+                        Value::Array(vec![at(1)]),
+                    )])),
+                ),
+            ]),
+        );
+        let test_root = unique_test_directory();
+        fs::create_dir(&test_root).expect("test parent should be created");
+        let summary =
+            write_export(test_root.join("finer"), [&document]).expect("export should write");
+        let exported = ExportReader::open(summary.overall_metadata_path())
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let fields = exported[0].fields();
+        assert_eq!(fields["at"], at(123_456_000));
+        assert_eq!(
+            fields["nested"],
+            Value::Map(Fields::from([(
+                "list".to_owned(),
+                Value::Array(vec![at(0)])
+            )]))
+        );
+        fs::remove_dir_all(&test_root).expect("test directory should be removed");
+    }
+
     #[test]
     fn background_reader_yields_the_same_documents_in_order() {
         let direct = ExportReader::open(FIXTURE)

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 // The five data services Firenook emulates.
 export const SERVICES = ['firestore', 'auth', 'storage', 'functions', 'pubsub'];
@@ -15,10 +15,12 @@ const LISTENERS = ['firestore', 'auth', 'storage', 'functions', 'pubsub', 'hub',
 export const DEFAULT_PORTS = {firestore:8080, auth:9099, storage:9199, functions:5001, pubsub:8085, hub:4400, ui:4000, logging:4500, eventarc:9299, tasks:9499, 'firestore-websocket':9150};
 export const LOOPBACK = ['localhost', '127.0.0.1', '::1', '[::1]'];
 export const VERBOSITIES = ['DEBUG', 'INFO', 'QUIET', 'SILENT', 'WARN', 'ERROR'];
+// Where --keep-data keeps the data, inside the project directory.
+export const KEEP_DATA_DIR = join('.firenook', 'state');
 
-const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'instance', 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'log-verbosity', 'alias', 'add', 'unalias', 'database']);
+const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'instance', 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'log-verbosity', 'alias', 'add', 'unalias', 'database', 'agent']);
 const durabilities = new Set(['write-behind', 'per-commit']);
-const switches = new Set(['resume-state', 'no-diagnostics', 'help', 'offline', 'non-interactive', 'json', 'force', 'debug', 'ui', 'plain', 'adopt', 'dry-run', 'recursive', 'shallow', 'all-collections', 'clear', 'functions', 'no-functions', 'no-copy']);
+const switches = new Set(['resume-state', 'keep-data', 'no-diagnostics', 'help', 'offline', 'non-interactive', 'json', 'force', 'debug', 'ui', 'plain', 'adopt', 'dry-run', 'recursive', 'shallow', 'all-collections', 'clear', 'functions', 'no-functions', 'no-copy']);
 // Optional-value options: a bare flag or --name=value.
 const optionalValues = new Set(['inspect-functions']);
 // Official single-letter aliases.
@@ -215,18 +217,23 @@ export function inspectProject(options, cwd = process.cwd()) {
     exported = canonical(resolve(cwd, exported));
     if (contains(exported, canonical(cwd)) || contains(exported, canonical(directory))) fail('export', 'Export destination must not be the project directory or an ancestor');
   }
-  const state = options['state-dir'] ? canonical(resolve(cwd, options['state-dir'])) : undefined;
-  if (state && existsSync(state) && !options['resume-state'] && readdirSync(state).length) fail('state', 'Existing nonempty state requires explicit --resume-state; never silently reimport or reset it');
+  // --keep-data is --resume-state with the project's own state directory
+  // (unless --state-dir names another): data kept between runs, with or
+  // without a seed.
+  const resume = Boolean(options['resume-state'] || options['keep-data']);
+  const stateOption = options['state-dir'] ?? (options['keep-data'] ? join(directory, KEEP_DATA_DIR) : undefined);
+  const state = stateOption ? canonical(resolve(cwd, stateOption)) : undefined;
+  if (state && existsSync(state) && !resume && readdirSync(state).length) fail('state', 'Existing nonempty state requires explicit --resume-state (or --keep-data); never silently reimport or reset it');
   if (options['minimum-functions'] !== undefined && !/^\d+$/.test(String(options['minimum-functions']))) fail('minimum-functions', '--minimum-functions must be a nonnegative integer');
   if (state && [imported, exported, canonical(directory)].filter(Boolean).some(path => contains(state, path) || (path !== canonical(directory) && contains(path, state)))) {
     fail('state', 'State must be separate from seed/export directories and must not contain the project');
   }
-  if (options['resume-state'] && (!imported || !state)) fail('state', '--resume-state requires explicit --state-dir and --import');
-  if (options['resume-state'] && imported && exported && (contains(imported, exported) || contains(exported, imported))) fail('state', 'Resume exports must be separate from the immutable seed');
+  if (resume && !state) fail('state', '--resume-state requires --state-dir; --keep-data alone keeps the data in .firenook/state');
+  if (resume && imported && exported && (contains(imported, exported) || contains(exported, imported))) fail('state', 'Resume exports must be separate from the immutable seed');
   // The engine needs a positive minimum only when a Functions codebase exists.
   const functionsConfigured = has('functions') || has('extensions');
   const minimumFunctions = options['minimum-functions'] !== undefined ? String(options['minimum-functions']) : (services.includes('functions') && functionsConfigured ? '1' : '0');
-  return {config, directory, rc, data, project, demo, configured, services, skipped, ui, uiExplicit, singleProjectMode, host, ports, imported, exported, state, minimumFunctions, errors, warnings};
+  return {config, directory, rc, data, project, demo, configured, services, skipped, ui, uiExplicit, singleProjectMode, host, ports, imported, exported, state, resume, minimumFunctions, errors, warnings};
 }
 
 // What the engine is told about this launch (--launch-context), so the

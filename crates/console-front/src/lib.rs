@@ -8,6 +8,7 @@
 //! `/console` on the Emulator UI port; every asset and API call is
 //! same-origin, so the console works whatever scheme the UI was opened with.
 
+mod agents;
 mod api_error;
 mod auth;
 mod blocking;
@@ -537,6 +538,7 @@ pub fn console_router(mut services: ConsoleServices) -> Router {
             services.observe.logging.clone(),
         ))
         .merge(context.jobs.router())
+        .merge(agents::AgentBeacon::default().router())
         .merge(hub.router());
     for section in &sections {
         api = api.merge(section.router(&context));
@@ -830,6 +832,7 @@ mod tests {
         BatchGetResponse::<()>::export_all(config).expect("TypeScript bindings written");
         ListMeta::export_all(config).expect("TypeScript bindings written");
         SearchResults::export_all(config).expect("TypeScript bindings written");
+        agents::export_bindings(config);
         live::export_bindings(config);
         auth::export_bindings(config);
         storage::export_bindings(config);

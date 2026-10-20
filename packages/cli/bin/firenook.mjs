@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline/promises';
 import { resolve } from 'node:path';
 import { binaryPath, manifest, release } from '../src/binary.mjs';
 import { parseOptions } from '../src/options.mjs';
@@ -10,6 +11,7 @@ import { nativeEnvironment, requestNativeStop } from '../src/processes.mjs';
 import { exportEmulators, firestoreDelete } from '../src/hub.mjs';
 import { invokeFunction } from '../src/invoke.mjs';
 import { serveMcp } from '../src/mcp.mjs';
+import { mcpAdd } from '../src/agents.mjs';
 import { targetApply, targetClear, use } from '../src/rc.mjs';
 import { adopt, scaffold } from '../src/init.mjs';
 
@@ -36,9 +38,12 @@ Emulators
                                                           Inject a background event (Firestore, Storage,
                                                           Pub/Sub, Auth, schedule, Eventarc, task queue)
   firenook ext:vendor [--instance ID]...                  Copy registry Extensions into the project
-  firenook mcp [--project ID] [--only firestore,auth,...] Model Context Protocol server over stdio
+  firenook mcp [--project ID] [--only firestore,auth,...] Model Context Protocol server over stdio for coding
+                                                          agents; outside a project, the one running suite
+  firenook mcp add [--agent claude,cursor,vscode] [--dry-run] [--force]   Give the project's coding agents
+                                                          the server (.mcp.json, .cursor/, .vscode/mcp.json)
 
-Saved data (--state-dir with --resume-state)
+Saved data (--keep-data, or --state-dir with --resume-state)
   firenook state:adopt-seed --state-dir DIR --import DIR  Keep saved data whose seed changed: record the
                                                           seed as it is now (the old receipt is kept)
   firenook state:inspect --state-dir DIR                  What the stopped Firestore file holds, table by
@@ -52,9 +57,10 @@ Advanced
 
 Common options: -P/--project ID, -c/--config firebase.json, --json (doctor, export, delete, init),
   --debug (engine log in .firenook/runs/session-*/firenook-debug.log), --log-verbosity LEVEL,
-  --non-interactive (accepted; Firenook never prompts, destructive commands need --force).
+  --non-interactive (accepted; only init asks a question, in a terminal; destructive commands need --force).
 Start/exec: --only auth,functions,firestore,storage,pubsub (extensions=functions; eventarc/tasks/hub/ui/
-  logging follow their parent), --import DIR, --export-on-exit[=DIR], --state-dir DIR, --resume-state,
+  logging follow their parent), --import DIR, --export-on-exit[=DIR], --keep-data (keep the data between
+  runs in .firenook/state, with or without --import), --state-dir DIR, --resume-state,
   --storage-bucket target=bucket (repeatable), --host HOST, --allowed-hosts NAME,..., --ui,
   --minimum-functions N, --inspect-functions[=PORT], --offline, --durability write-behind|per-commit,
   --no-diagnostics, --firestore-websocket-port N, --hub-port N, --logging-port N, --eventarc-port N,
@@ -69,7 +75,7 @@ deploy/login command (never intercepted). Disk/WAL state by default; runs are ke
 `;
 
 const common = ['project', 'config', 'help', 'non-interactive', 'json', 'debug', 'log-verbosity'];
-const launch = [...common, 'import', 'export-on-exit', 'only', 'state-dir', 'resume-state', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'inspect-functions', 'offline', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'no-diagnostics', 'ui', 'plain'];
+const launch = [...common, 'import', 'export-on-exit', 'only', 'state-dir', 'resume-state', 'keep-data', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'inspect-functions', 'offline', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'no-diagnostics', 'ui', 'plain'];
 const accepted = {
   doctor:[...launch, 'instance'], 'emulators:start':launch, 'emulators:exec':launch, 'ext:vendor':[...common, 'instance', 'offline'],
   'emulators:export':[...common, 'force', 'only', 'hub-port'],
@@ -79,6 +85,7 @@ const accepted = {
   init:[...common, 'adopt', 'dry-run', 'force', 'functions', 'no-functions'],
   'functions:invoke':[...common, 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'hub-port'],
   mcp:[...common, 'only', 'hub-port'],
+  'mcp add':[...common, 'agent', 'dry-run', 'force'],
   'state:adopt-seed':[...common, 'state-dir', 'import'],
   'state:inspect':[...common, 'state-dir'],
   'state:compact':[...common, 'state-dir', 'no-copy'],
@@ -108,6 +115,14 @@ function execCommand(action, {command, positionals, flags}) {
   throw new Error('emulators:exec requires a script (one quoted string) or an argv command after --');
 }
 
+// A yes/no question on the terminal; Enter means yes, Ctrl-C or Ctrl-D no.
+async function confirm(question) {
+  const lines = createInterface({input:process.stdin, output:process.stderr});
+  try { return !/^\s*n/i.test(await lines.question(question)); }
+  catch { process.stderr.write('\n'); return false; }
+  finally { lines.close(); }
+}
+
 async function main() {
   const [action, ...args] = process.argv.slice(2);
   if (!action || ['--help', '-h', 'help'].includes(action)) { console.log(help); return 0; }
@@ -135,6 +150,11 @@ async function main() {
     checkOptions(action, options);
     return invokeFunction(name, options);
   }
+  if (action === 'mcp' && args[0] === 'add') return run('mcp add', args.slice(1));
+  return run(action, args);
+}
+
+async function run(action, args) {
   if (!Object.hasOwn(accepted, action)) throw new Error(`Unsupported command ${action}; use --help. Firebase deploy/login commands are never intercepted.`);
   const parsed = parseOptions(args);
   const {options, command, positionals} = parsed;
@@ -146,8 +166,16 @@ async function main() {
   if (action === 'use') { if (positionals.length > 1) throw new Error('use takes at most one alias or project id'); return use(positionals[0], options); }
   if (action === 'target:apply') return targetApply(positionals, options);
   if (action === 'target:clear') return targetClear(positionals, options);
-  if (action === 'init') { noPositionals(action, positionals); return options.adopt ? adopt(options) : scaffold(options); }
+  if (action === 'init') {
+    noPositionals(action, positionals);
+    if (options.adopt) return adopt(options);
+    // init asks one question, only in a terminal: whether to give the coding
+    // agents it found the MCP server.
+    const terminal = process.stdin.isTTY && process.stderr.isTTY && !options['non-interactive'] && !options.json;
+    return scaffold(options, process.cwd(), console, {ask:terminal ? confirm : undefined});
+  }
   if (action === 'mcp') { noPositionals(action, positionals); return serveMcp(options); }
+  if (action === 'mcp add') { noPositionals(action, positionals); return mcpAdd(options); }
   if (action === 'state:adopt-seed') {
     noPositionals(action, positionals);
     if (!options['state-dir'] || !options.import) throw new Error('state:adopt-seed needs --state-dir (the saved data) and --import (its seed), as given to emulators:start');

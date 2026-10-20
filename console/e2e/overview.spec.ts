@@ -238,6 +238,147 @@ test('connect: a snippet per platform, with the host the app sees', async ({ pag
   await expect.poll(() => new URL(page.url()).searchParams.get('connect')).toBeNull()
 })
 
+test('connect: a coding agent’s setup, and when an agent last called', async ({ page, engine }) => {
+  const asked: string[] = []
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/console/api/v1/agents') asked.push(request.method())
+  })
+  const before = (await (await fetch(`${engine.origin}/console/api/v1/agents`)).json()) as {
+    lastCall: unknown
+    calls: number
+  }
+  await page.goto(`${engine.origin}/console`)
+  await page.getByTestId('top-bar-connect').click()
+  await page.getByTestId('connect-tabs').getByRole('tab', { name: 'Coding agent' }).click()
+  await expect.poll(() => new URL(page.url()).searchParams.get('connect')).toBe('agent')
+  const connect = page.getByTestId('connect-agent')
+  // An agent reaches the engine through the MCP server, which finds it: no host to pick.
+  await expect(page.getByTestId('connect-host')).toHaveCount(0)
+  const last = page.getByTestId('agent-last-call-text')
+  if (before.lastCall === null) await expect(last).toHaveText('No agent has called yet.')
+
+  // The one command for every agent the project uses, copied as printed.
+  await expect(page.getByTestId('agent-mcp-add')).toContainText('npx firenook mcp add')
+  await page.getByTestId('agent-mcp-add-copy').click()
+  expect(await readClipboard(page)).toBe('npx firenook mcp add')
+  await expect(connect).toContainText('--dry-run')
+
+  // Claude Code: the project's command and file name no project.
+  await expect(page.getByTestId('agent-claude-project')).toContainText(
+    'claude mcp add --scope project firenook -- npx firenook mcp',
+  )
+  const file = (testId: string) =>
+    page
+      .getByTestId(testId)
+      .locator('pre')
+      .innerText()
+      .then((text) => JSON.parse(text) as unknown)
+  expect(await file('agent-claude-file')).toEqual({
+    mcpServers: { firenook: { command: 'npx', args: ['firenook', 'mcp'] } },
+  })
+  await expect(page.getByTestId('agent-claude-user')).toContainText(
+    'claude mcp add --scope user firenook -- npx firenook mcp',
+  )
+  await expect(page.getByTestId('agent-claude-user')).not.toContainText('--project')
+
+  // Cursor: an install link carrying the entry as base64 JSON, and the project file.
+  const tabs = page.getByTestId('agent-tabs')
+  await tabs.getByRole('tab', { name: 'Cursor' }).click()
+  const cursorLink = async () => {
+    const href = (await page.getByTestId('agent-cursor-install').getAttribute('href')) ?? ''
+    const url = new URL(href)
+    expect(`${url.protocol}//${url.host}${url.pathname}`).toBe(
+      'cursor://anysphere.cursor-deeplink/mcp/install',
+    )
+    expect(url.searchParams.get('name')).toBe('firenook')
+    return JSON.parse(atob(url.searchParams.get('config') ?? '')) as unknown
+  }
+  expect(await cursorLink()).toEqual({ command: 'npx', args: ['firenook', 'mcp'] })
+  await expect(connect).toContainText('Cursor asks you to confirm')
+  expect(await file('agent-cursor-file')).toEqual({
+    mcpServers: { firenook: { command: 'npx', args: ['firenook', 'mcp'] } },
+  })
+
+  // VS Code and Insiders: the entry with its name, URL-encoded JSON; the file keeps `servers`.
+  await tabs.getByRole('tab', { name: 'VS Code' }).click()
+  const vscodeLink = async (testId: string, scheme: string) => {
+    const href = (await page.getByTestId(testId).getAttribute('href')) ?? ''
+    expect(href.startsWith(`${scheme}:mcp/install?`)).toBe(true)
+    return JSON.parse(decodeURIComponent(href.slice(`${scheme}:mcp/install?`.length))) as unknown
+  }
+  expect(await vscodeLink('agent-vscode-install', 'vscode')).toEqual({
+    name: 'firenook',
+    command: 'npx',
+    args: ['firenook', 'mcp'],
+  })
+  expect(await vscodeLink('agent-vscode-insiders-install', 'vscode-insiders')).toEqual({
+    name: 'firenook',
+    command: 'npx',
+    args: ['firenook', 'mcp'],
+  })
+  expect(await file('agent-vscode-file')).toEqual({
+    servers: { firenook: { type: 'stdio', command: 'npx', args: ['firenook', 'mcp'] } },
+  })
+
+  // More than one emulator on the machine: what goes in one's own settings
+  // names this project; the project files never do.
+  await page.getByRole('checkbox', { name: /More than one emulator/ }).click()
+  const named = ['firenook', 'mcp', '--project', engine.project]
+  expect(await vscodeLink('agent-vscode-install', 'vscode')).toEqual({
+    name: 'firenook',
+    command: 'npx',
+    args: named,
+  })
+  expect(await file('agent-vscode-file')).toEqual({
+    servers: { firenook: { type: 'stdio', command: 'npx', args: ['firenook', 'mcp'] } },
+  })
+  await tabs.getByRole('tab', { name: 'Cursor' }).click()
+  expect(await cursorLink()).toEqual({ command: 'npx', args: named })
+  await tabs.getByRole('tab', { name: 'Claude Code' }).click()
+  await expect(page.getByTestId('agent-claude-user')).toContainText(
+    `npx firenook mcp --project ${engine.project}`,
+  )
+  await tabs.getByRole('tab', { name: 'Other agents' }).click()
+  expect(await file('agent-other-entry')).toEqual({
+    mcpServers: { firenook: { command: 'npx', args: named } },
+  })
+
+  // The MCP server's beacon, as it sends it from Node: JSON, no Origin.
+  const beacon = await fetch(`${engine.origin}/console/api/v1/agents/calls`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ client: 'firenook-mcp/0.2.0-next.7', tool: 'firestore_query' }),
+  })
+  expect(beacon.status).toBe(204)
+  // Nothing polls: the line moves when the tab opens again, or the window is focused.
+  await page.waitForTimeout(1_500)
+  if (before.lastCall === null) await expect(last).toHaveText('No agent has called yet.')
+  const reads = asked.length
+  expect(reads).toBeGreaterThanOrEqual(1)
+  await page.getByTestId('connect-tabs').getByRole('tab', { name: 'Web' }).click()
+  await page.getByTestId('connect-tabs').getByRole('tab', { name: 'Coding agent' }).click()
+  await expect(last).toHaveText('Last call just now: firestore_query (firenook-mcp/0.2.0-next.7)')
+  expect(asked.length).toBe(reads + 1)
+  await fetch(`${engine.origin}/console/api/v1/agents/calls`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ client: 'firenook-mcp/0.2.0-next.7', tool: 'logs_search' }),
+  })
+  // Back from the agent's window: the browser says the page is visible
+  // again, with the event it sends then (it bubbles to the window).
+  await page.evaluate(() =>
+    (
+      globalThis as unknown as { document: { dispatchEvent: (event: Event) => boolean } }
+    ).document.dispatchEvent(new Event('visibilitychange', { bubbles: true })),
+  )
+  await expect(last).toHaveText('Last call just now: logs_search (firenook-mcp/0.2.0-next.7)')
+  const after = (await (await fetch(`${engine.origin}/console/api/v1/agents`)).json()) as {
+    calls: number
+  }
+  expect(after.calls).toBe(before.calls + 2)
+  expect(asked.every((method) => method === 'GET')).toBe(true)
+})
+
 test('links from other pages: a reset for one section, and a connect tab', async ({
   page,
   engine,

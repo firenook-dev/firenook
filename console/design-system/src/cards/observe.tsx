@@ -12,7 +12,12 @@
 
 import { Button, Radio, TooltipProvider } from '@cloudflare/kumo'
 import { FloppyDiskIcon, XIcon } from '@phosphor-icons/react'
-import { QueryClient, QueryClientProvider, type UseQueryResult } from '@tanstack/react-query'
+import {
+  QueryClient,
+  QueryClientProvider,
+  type UseQueryResult,
+  useQueryClient,
+} from '@tanstack/react-query'
 import {
   RouterProvider,
   createMemoryHistory,
@@ -52,6 +57,7 @@ import { LOGS_PLACEHOLDER, logFields } from '@/logs/fields'
 import { type LogItem, edgeItem, groupLines, itemKey } from '@/logs/rows'
 import { bucketSentence, bucketSpan, levelBuckets } from '@/observe/level-bars'
 import { LevelStrip } from '@/observe/level-strip'
+import { agentsQuery } from '@/connect/agents-query'
 import { ConnectBody } from '@/connect/connect-dialog'
 import { DataCard } from '@/overview/components/data-section'
 import { EngineDetails } from '@/overview/components/engine-details'
@@ -896,6 +902,40 @@ function ConnectSample() {
   )
 }
 
+/** The Coding agent tab, an agent having called two minutes before the card was drawn. */
+function ConnectAgentSample() {
+  const client = useQueryClient()
+  // The tab reads `GET /agents`; the card answers it from the cache.
+  useState(() =>
+    client.setQueryData(agentsQuery.queryKey, {
+      lastCall: {
+        at: new Date(Date.now() - 2 * 60_000).toISOString(),
+        client: 'firenook-mcp/0.2.0-next.7',
+        tool: 'firestore_query',
+      },
+      calls: 12,
+    }),
+  )
+  const [param, setParam] = useState<ConnectParam>('agent')
+  return (
+    <div className="flex h-[640px] w-[1000px] flex-col overflow-hidden rounded-xl bg-kumo-base shadow-lg ring ring-kumo-line">
+      <div className="grid gap-1 px-6 pt-5 pb-4">
+        <h3 className="text-lg font-semibold text-kumo-default">Connect your app</h3>
+        <p className="text-[14px] text-kumo-subtle">
+          The code that points an app at this engine, with its ports, host and project id filled in.
+        </p>
+      </div>
+      <ConnectBody
+        status={STATUS}
+        engine={ENGINE}
+        host="127.0.0.1"
+        param={param}
+        onParam={setParam}
+      />
+    </div>
+  )
+}
+
 function OverviewCard() {
   return (
     <Kit>
@@ -911,6 +951,12 @@ function OverviewCard() {
           note="The header's one action, a dialog: the platforms down the side by who runs the code, the snippet with this engine's ports, host and project id, and what to change."
         >
           <ConnectSample />
+        </Section>
+        <Section
+          title="Connect a coding agent"
+          note="The dialog's Coding agent tab: when an agent last called through the MCP server, the one command that writes every agent's project file, then each agent's command, install links and project file. What goes in a person's own settings names the project only when more than one emulator runs."
+        >
+          <ConnectAgentSample />
         </Section>
       </Stack>
     </Kit>

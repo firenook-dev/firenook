@@ -10,6 +10,7 @@
 // app's own configuration and only adds the emulator lines.
 
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
+import { mcpServersJson } from './agent-config'
 import { CONNECT_TABS, type ConnectParam, type ConnectTarget } from './connect-tabs'
 
 /** The Android emulator's name for the machine it runs on. */
@@ -349,6 +350,10 @@ const WRITERS: Record<ConnectTarget, (context: SnippetContext) => string[]> = {
     ]
     return ['{', '  "emulators": {', rows.join(',\n'), '  }', '}']
   },
+
+  // A coding agent reaches the engine through `firenook mcp`, which finds
+  // the running suite itself: the entry names no host, port or project.
+  agent: () => mcpServersJson().split('\n'),
 }
 
 /** One line of firebase.json's `emulators` block. */

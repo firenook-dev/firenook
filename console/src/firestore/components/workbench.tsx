@@ -16,6 +16,7 @@ import { PanelToggle } from '@/components/shell/section-panel'
 import { type SubscriptionStatus, liveChannel } from '@/lib/live/channel'
 import { isTyping, useShortcuts } from '@/lib/shortcuts'
 import { useCreateDialog } from '../create'
+import { isDocumentPath } from '../document-path'
 import { EXPORT_NOTES, exportFilename, renderExport, useExportDialog } from '../export'
 import { printQuery } from '../query'
 import { useLiveChanges } from '../live'
@@ -97,7 +98,7 @@ function WorkbenchBody() {
       recordRecent({ path: workbench.collectionPath, kind: 'collection' })
   }, [recordRecent, workbench.collectionPath])
   useEffect(() => {
-    if (workbench.selectedDocument)
+    if (workbench.selectedDocument && isDocumentPath(workbench.selectedDocument))
       recordRecent({ path: workbench.selectedDocument, kind: 'document' })
   }, [recordRecent, workbench.selectedDocument])
 

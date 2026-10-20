@@ -367,7 +367,9 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   };
   const dataLine = () => (model.opening.kind === 'resume' ? `nothing was changed: ${shortPath(stateDir, cwd)} is as you left it`
     : model.opening.kind === 'import' && launch.args.includes('--resume-state') ? `the seed was imported into ${shortPath(stateDir, cwd)}; the next start picks it up`
-      : ephemeral ? 'nothing of yours was changed' : `the data in ${shortPath(stateDir, cwd)} is kept`);
+      : ephemeral ? 'nothing of yours was changed'
+        : model.opening.kind === 'fresh' && launch.args.includes('--resume-state') ? `the data is saved in ${shortPath(stateDir, cwd)}; the next start picks it up`
+          : `the data in ${shortPath(stateDir, cwd)} is kept`);
   async function problemLines(failure) {
     if (failure.kind === 'port') {
       const listener = LISTENERS[failure.service] ?? {label: failure.service, key: `"${failure.service}": { "port": PORT }`};
@@ -394,8 +396,17 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
       const lines = [...field(dim('Problem'), `${reason}, so Firenook will not pick up ${shortPath(stateDir, cwd)}`), ...space()];
       const changed = finder && seed ? shortPath(join(dirname(resolve(cwd, seed)), finder[1]), cwd) : undefined;
       if (changed) lines.push(cells(dim('Changed'), '', `${changed}  ${dim('(Finder writes this file)')}`), ...space());
+      // Data kept without a seed, and data kept from one, say which way on.
+      const seeded = reason.match(/it was imported from (.+?): pass --import/);
       if (/suite state is locked/.test(reason)) {
         lines.push(...field(dim('Fix'), `another Firenook is using ${shortPath(stateDir, cwd)}: stop it first, or start this one with another --state-dir`, dim));
+      } else if (/started without a seed, so it cannot take the seed/.test(reason)) {
+        lines.push(...field(dim('Fix'), 'to keep using it, start without --import; to start from the seed, give it a new --state-dir', dim));
+      } else if (seeded) {
+        lines.push(...field(dim('Fix'), 'to keep using it, start with its seed again:', dim));
+        lines.push(cells('', '', bold(`--import ${/[\s"'$]/.test(shortPath(seeded[1], cwd)) ? JSON.stringify(shortPath(seeded[1], cwd)) : shortPath(seeded[1], cwd)}`)));
+      } else if (/started without a seed: pass --resume-state/.test(reason)) {
+        lines.push(...field(dim('Fix'), 'to keep using it, add --keep-data (or --resume-state); a fresh start needs a new --state-dir', dim));
       } else if (changed) {
         lines.push(...field(dim('Fix'), 'if nothing else changed, delete it and start again:', dim));
         lines.push(cells('', '', bold(`rm ${/[\s"'$]/.test(changed) ? JSON.stringify(changed) : changed}`)));
@@ -625,7 +636,8 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   ];
   function showKeys() {
     const at = clock();
-    screen.emit(() => [stream(at, blue(G.help), 'keys', null, ''), ...KEYS.map(([key, text]) => under('', `${bold(key)}   ${dim(text)}`))]);
+    screen.emit(() => [stream(at, blue(G.help), 'keys', null, ''), ...KEYS.map(([key, text]) => under('', `${bold(key)}   ${dim(text)}`)),
+      under('', dim(`coding agent: run ${bold('npx firenook mcp add')} in the project to give it the MCP server`))]);
   }
   function showWarnings() {
     const at = clock();

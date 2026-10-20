@@ -13,6 +13,7 @@ firenook target:clear storage NAME
 firenook setup                                    # nothing to download; kept for old scripts
 firenook doctor [options]                         # read-only checks, JSON
 firenook emulators:start [options]
+firenook emulators:start --keep-data [--import SEED]   # keep the data between runs in .firenook/state
 firenook emulators:exec [options] "npm test"      # script through the shell
 firenook emulators:exec [options] -- CMD ARGS...  # argv command, no shell
 firenook emulators:export DIR [--force] [--only firestore,auth,storage]
@@ -24,7 +25,8 @@ firenook ext:vendor [--instance ID]...
 firenook state:inspect --state-dir DIR              # what the saved Firestore file holds and how much is free
 firenook state:compact --state-dir DIR [--no-copy]  # return the free pages to the disk (emulator stopped)
 firenook state:adopt-seed --state-dir DIR --import SEED   # keep saved data after its seed changed
-firenook mcp [--project ID] [--only firestore,auth,storage,functions,pubsub,tasks]
+firenook mcp [--project ID] [--only firestore,auth,storage,functions,logs,rules,pubsub,tasks,schedules,eventarc,extensions,reset]
+firenook mcp add [--agent claude,cursor,vscode] [--dry-run] [--force] [--json]   # give coding agents the server
 firenook binary-path | native ARGS...
 ```
 
@@ -39,9 +41,25 @@ without `--force`. `init --adopt` runs the launcher's own checks over an
 existing project and prints a plan: errors Firenook cannot accept, official
 services it skips, and additions it can make (missing `emulators` entries for
 configured services, a missing `.firebaserc` default, referenced rules files
-that do not exist). Without `--dry-run`/`--json` the additions are applied by
-editing the parsed JSON, never rewriting other keys; errors leave every file
-untouched and exit 1.
+that do not exist, and the MCP server for the coding agents the folder shows,
+as `mcp add` writes it). Without `--dry-run`/`--json` the additions are applied
+by editing the parsed JSON, never rewriting other keys; errors leave every file
+untouched and exit 1. A new project's `init` prints its start command with
+`--keep-data` and, in a terminal, asks once whether to give the coding agents it
+finds the MCP server.
+
+`mcp add` writes the `firenook mcp` server into the project file of each
+coding agent the folder shows: `.mcp.json` for Claude Code (a `.claude/`
+folder, `CLAUDE.md`, an existing `.mcp.json` or `claude` on the PATH),
+`.cursor/mcp.json` for Cursor and `.vscode/mcp.json` for VS Code (under
+`servers`). `--agent` names them instead. The entry is `npx firenook mcp`
+with no project id (plus `--config` when `firebase.json` is in another
+folder), so the files can be committed. Other servers in the files are kept,
+a second run changes nothing, another `firenook` entry is replaced only with
+`--force`, and a file that is not plain JSON (VS Code's comments) is left
+alone with the snippet printed. Agents configured only in the home folder
+(Codex, Windsurf) get the line to add, never a file edited outside the
+project.
 
 `use`, `target:apply` and `target:clear` are pure `.firebaserc` edits: no
 network, no login. `use <alias|id>` records `projects.default`, `--add`

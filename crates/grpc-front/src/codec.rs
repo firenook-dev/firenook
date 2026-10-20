@@ -383,7 +383,22 @@ pub(crate) fn encode_system_read_time(value: Timestamp) -> ProtoTimestamp {
     }
 }
 
+/// A write as the store keeps it: timestamp values rounded down to the
+/// microsecond (see `firenook_core_store::Write::at_stored_precision`), before
+/// rules see it, as the official emulator does.
 pub(crate) fn decode_write(write: proto::Write) -> Result<DecodedWrite, Status> {
+    decode_write_as_sent(write).map(|decoded| DecodedWrite {
+        write: decoded.write.at_stored_precision(),
+        key: decoded.key,
+        transforms: decoded
+            .transforms
+            .into_iter()
+            .map(FieldTransform::at_stored_precision)
+            .collect(),
+    })
+}
+
+fn decode_write_as_sent(write: proto::Write) -> Result<DecodedWrite, Status> {
     let proto::Write {
         update_mask,
         update_transforms,
@@ -709,6 +724,56 @@ mod tests {
                 ..
             } if value == Timestamp::new(123, 456_000).expect("timestamp is valid")
         ));
+    }
+
+    #[test]
+    fn a_decoded_write_holds_timestamps_to_the_microsecond() {
+        let finer = |nanos| proto::Value {
+            value_type: Some(ValueType::TimestampValue(ProtoTimestamp {
+                seconds: 1_577_934_245,
+                nanos,
+            })),
+        };
+        let write = proto::Write {
+            operation: Some(Operation::Update(proto::Document {
+                name: "projects/demo/databases/(default)/documents/cities/kl".to_owned(),
+                fields: BTreeMap::from([
+                    ("at".to_owned(), finer(123_456_789)),
+                    (
+                        "list".to_owned(),
+                        proto::Value {
+                            value_type: Some(ValueType::ArrayValue(proto::ArrayValue {
+                                values: vec![finer(1)],
+                            })),
+                        },
+                    ),
+                ]),
+                ..proto::Document::default()
+            })),
+            update_transforms: vec![proto::document_transform::FieldTransform {
+                field_path: "union".to_owned(),
+                transform_type: Some(TransformType::AppendMissingElements(proto::ArrayValue {
+                    values: vec![finer(999)],
+                })),
+            }],
+            ..proto::Write::default()
+        };
+        let decoded = decode_write(write).expect("write should decode");
+        let at = |nanos| Value::Timestamp(Timestamp::new(1_577_934_245, nanos).expect("time"));
+        let Write::Set {
+            fields, transforms, ..
+        } = &decoded.write
+        else {
+            panic!("expected a set: {:?}", decoded.write);
+        };
+        assert_eq!(fields["at"], at(123_456_000));
+        assert_eq!(fields["list"], Value::Array(vec![at(0)]));
+        for transforms in [transforms, &decoded.transforms] {
+            assert_eq!(
+                transforms[0].operation,
+                TransformOperation::ArrayUnion(vec![at(0)])
+            );
+        }
     }
 
     #[test]

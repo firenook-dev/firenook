@@ -30,7 +30,7 @@ npm install --save-dev firenook
 
 Same flags, same ports, and your `firebase.json`, rules, Functions code and app
 stay as they are. In a terminal, run it as `npx firenook emulators:start`. To
-keep your data between runs, add `--state-dir ./.firenook/state --resume-state`.
+keep your data between runs, add `--keep-data`.
 Firenook needs Node 24. Starting a new project? `npx firenook init` sets one
 up.
 
@@ -48,17 +48,19 @@ up.
   application's two-hour workload, Firenook peaked at 2.16 GiB of memory where
   the official emulator reached 19.56 GiB, answered writes in 5.3 ms against
   203 ms at the median, and used 61% less CPU.
-- **Your data stays.** Give it a state directory and Firestore, Auth and
-  Storage come back with all your data in about half a second, even with
-  millions of documents. A crash loses at most the last second of writes.
+- **Your data stays.** Add `--keep-data` and Firestore, Auth and Storage come
+  back with all your data in about half a second, even with millions of
+  documents. A crash loses at most the last second of writes.
 - **Nothing else to install.** No Java, no firebase-tools, nothing else
   downloaded at install or start (an Extension from the registry is fetched
   once, on first use). npm or Bun picks the native engine for your machine;
   Node runs your Functions.
 - **A console and a terminal made for it**, and `firenook mcp` for your coding
-  agent: `claude mcp add --scope project firenook -- npx firenook mcp` in
-  Claude Code, the same `npx firenook mcp` in
-  [other agents](https://github.com/firenook-dev/firenook/blob/main/docs/mcp.md#connect-your-agent).
+  agent: Firestore, users and their tokens, logs and function calls, Security
+  Rules decisions, Storage, Pub/Sub, Cloud Tasks and Eventarc as tools.
+  `npx firenook mcp add` sets it up for Claude Code, Cursor and VS Code;
+  [other agents](https://github.com/firenook-dev/firenook/blob/main/docs/mcp.md#connect-your-agent)
+  run the same `npx firenook mcp`.
 
 ## Switching from the official emulator
 
@@ -78,7 +80,7 @@ $ npx firenook init --adopt --dry-run
 
 Same flags, same ports, the official export format both ways. To keep your
 data between runs without exporting, replace `--export-on-exit` with
-`--state-dir ./.firenook/state --resume-state`; `./data` is then never written.
+`--keep-data`; `./data` is then never written.
 Starting fresh instead: `npx firenook init`.
 [Getting started](https://github.com/firenook-dev/firenook/blob/main/docs/getting-started.md)
 covers both.
@@ -124,12 +126,13 @@ filters over a large collection, batch gets).
 firenook init [--adopt] [--dry-run]           # scaffold a project, or adapt an existing one
 firenook doctor                               # read-only checks, JSON
 firenook emulators:start [options]            # --only, --project, --import, --export-on-exit, --inspect-functions
-firenook emulators:start --import ./seed --state-dir ./.firenook/state --resume-state   # keep data between runs
+firenook emulators:start --keep-data [--import ./seed]   # keep data between runs, in .firenook/state
 firenook emulators:exec "npm test"            # start, run your tests, stop
 firenook emulators:export ./export            # snapshot a running suite
 firenook functions:invoke NAME [--data JSON | --event-data JSON]   # call any function, any trigger
 firenook ext:vendor                           # copy registry Extensions into the project
 firenook mcp                                  # the running suite as tools for a coding agent
+firenook mcp add                              # give Claude Code, Cursor and VS Code that server
 firenook state:inspect | state:compact --state-dir DIR
 ```
 

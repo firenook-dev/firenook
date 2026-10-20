@@ -89,6 +89,107 @@ describe('connect your app', () => {
   })
 })
 
+/** The engine's answer to a read, as JSON. */
+const answer = (body: unknown) =>
+  Promise.resolve(
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }),
+  )
+
+describe('the coding agent tab', () => {
+  it('says when an agent last called, and gives each agent its setup', async () => {
+    const user = userEvent.setup()
+    const at = new Date(Date.now() - 2 * 60_000).toISOString()
+    const fetch = vi.fn((url: string) =>
+      url.endsWith('/console/api/v1/agents')
+        ? answer({
+            lastCall: { at, client: 'firenook-mcp/0.2.0-next.7', tool: 'firestore_query' },
+            calls: 4,
+          })
+        : new Promise<Response>(() => {}),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const status = withDocuments(1)
+    await renderInConsole(
+      () => (
+        <ConnectBody
+          status={status}
+          engine={undefined}
+          host="127.0.0.1"
+          param="agent"
+          onParam={() => {}}
+        />
+      ),
+      { status },
+    )
+    expect(screen.getByRole('tab', { name: 'Coding agent' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-last-call')).toHaveTextContent(
+        'Last call 2 min ago: firestore_query (firenook-mcp/0.2.0-next.7)',
+      ),
+    )
+    expect(screen.getByTestId('agent-mcp-add')).toHaveTextContent('npx firenook mcp add')
+    // Claude Code: the project's command and file, which name no project.
+    expect(screen.getByTestId('agent-claude-project')).toHaveTextContent(
+      'claude mcp add --scope project firenook -- npx firenook mcp',
+    )
+    expect(screen.getByTestId('agent-claude-file')).toHaveTextContent('"mcpServers"')
+    expect(screen.getByTestId('agent-claude-user')).not.toHaveTextContent('--project')
+    // With more than one emulator, what goes in one's own settings names it.
+    await user.click(screen.getByRole('checkbox', { name: /More than one emulator/ }))
+    expect(screen.getByTestId('agent-claude-user')).toHaveTextContent(
+      'npx firenook mcp --project demo-overview',
+    )
+    expect(screen.getByTestId('agent-claude-file')).not.toHaveTextContent('--project')
+    await user.click(screen.getByRole('tab', { name: 'Cursor' }))
+    const cursor = screen.getByTestId('agent-cursor-install')
+    expect(cursor.getAttribute('href')).toMatch(
+      /^cursor:\/\/anysphere\.cursor-deeplink\/mcp\/install\?name=firenook&config=/,
+    )
+    const config = new URL(cursor.getAttribute('href') ?? '').searchParams.get('config') ?? ''
+    expect(JSON.parse(atob(config))).toEqual({
+      command: 'npx',
+      args: ['firenook', 'mcp', '--project', 'demo-overview'],
+    })
+    expect(screen.getByTestId('agent-cursor-file')).not.toHaveTextContent('--project')
+    await user.click(screen.getByRole('tab', { name: 'VS Code' }))
+    expect(screen.getByTestId('agent-vscode-install').getAttribute('href')).toMatch(
+      /^vscode:mcp\/install\?/,
+    )
+    expect(screen.getByTestId('agent-vscode-insiders-install').getAttribute('href')).toMatch(
+      /^vscode-insiders:mcp\/install\?/,
+    )
+    expect(screen.getByTestId('agent-vscode-file')).toHaveTextContent('"servers"')
+    // The agents are read once as the tab opens; nothing polls.
+    expect(fetch.mock.calls.filter(([url]) => url.endsWith('/agents'))).toHaveLength(1)
+  })
+
+  it('says so when no agent has called', async () => {
+    vi.stubGlobal('fetch', () => answer({ lastCall: null, calls: 0 }))
+    const status = withDocuments(1)
+    await renderInConsole(
+      () => (
+        <ConnectBody
+          status={status}
+          engine={undefined}
+          host="127.0.0.1"
+          param="agent"
+          onParam={() => {}}
+        />
+      ),
+      { status },
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-last-call')).toHaveTextContent('No agent has called yet.'),
+    )
+  })
+})
+
 describe('the top bar’s Connect', () => {
   it('opens the dialog over the page on screen, keeps the platform in the address, and closes', async () => {
     const user = userEvent.setup()

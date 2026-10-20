@@ -24,6 +24,7 @@ import { codeTab } from '@/components/console/request/as-code'
 import { PanelTitle } from '@/components/kit'
 import { useCreateDialog } from '../create'
 import { type CodeTarget, documentAsCode } from '../query'
+import { documentExample, isDocumentPath } from '../document-path'
 import { documentQuery } from '../queries'
 import { commit, documentRoot, quoteFieldSegment } from '../rest'
 import { type Subcollection, workbenchSubcollectionsQuery } from '../subcollections'
@@ -79,7 +80,10 @@ function readSize(path: string, nodes: readonly DraftNode[]): SizeReading {
 export function Inspector({ path, onDelete }: { path: string; onDelete: (path: string) => void }) {
   const workbench = useWorkbench()
   const steps = useGridSteps()
-  const document = useQuery(documentQuery(workbench.scope, path))
+  // `doc=` can name something that is no document (a collection, an id
+  // with no collection to read it in); nothing is asked of the engine then.
+  const valid = isDocumentPath(path)
+  const document = useQuery({ ...documentQuery(workbench.scope, path), enabled: valid })
   // The editor below holds the draft; the header up here says how big it
   // is. What the editor last reported is kept against the editor it came
   // from, so a document switched to — or rewritten by another client,
@@ -95,7 +99,10 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
   const size = drafted?.key === editorKey ? drafted.reading : stored
   // Names and counts in one request, shared with the grid's column: the
   // row the inspector was opened from has usually asked already.
-  const subcollections = useQuery(workbenchSubcollectionsQuery(workbench, path))
+  const subcollections = useQuery({
+    ...workbenchSubcollectionsQuery(workbench, path),
+    enabled: valid,
+  })
 
   // The kit's inspector frame, which was measured on this one: the path
   // (copyable) as the title, size and age beside it, the trigger chip and
@@ -160,7 +167,7 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
           {document.data && !workbench.foreign && (
             <TriggerChip database={workbench.database} path={path} />
           )}
-          {parentCollection(path) !== workbench.collectionPath && (
+          {valid && parentCollection(path) !== workbench.collectionPath && (
             <Tooltip
               content={`Open ${parentCollection(path)} in the grid`}
               render={
@@ -185,7 +192,9 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
       closeLabel="Close the document"
       testId="inspector"
     >
-      {document.isPending ? (
+      {!valid ? (
+        <NotADocument path={path} />
+      ) : document.isPending ? (
         <div className="p-4">
           <Text variant="secondary" size="sm">
             Loading…
@@ -211,6 +220,24 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
         />
       )}
     </InspectorFrame>
+  )
+}
+
+/** `doc=` names no document: said in the panel's own words, nothing to create. */
+function NotADocument({ path }: { path: string }) {
+  const workbench = useWorkbench()
+  return (
+    <div className="grid gap-3 p-4" data-testid="inspector-not-a-document">
+      <PanelTitle>Document not found</PanelTitle>
+      <Text variant="secondary" size="sm">
+        <span className="font-mono text-[0.9em]">{path}</span> is not a document’s path. A document
+        is named by its collection and its id, as in{' '}
+        <span className="font-mono text-[0.9em]">
+          {documentExample(path, workbench.collectionPath)}
+        </span>
+        .
+      </Text>
+    </div>
   )
 }
 

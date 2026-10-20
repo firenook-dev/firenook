@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DEFAULT_PORTS, SERVICES, canonical, connectHost, contains, loadProject, validProjectId } from './options.mjs';
+import { suiteFetch } from './client.mjs';
 
 export const EXPORTABLE = ['firestore', 'auth', 'storage'];
 export const METADATA_FILE = 'firebase-export-metadata.json';
@@ -22,6 +23,9 @@ export function readLocator(project) {
 // The project as the launcher sees it, or (without a firebase.json) just the
 // explicit --project id with default ports: export and delete only need the
 // id to find the locator file.
+// Discovery (discoverProject below) applies only when neither --project,
+// --config nor a firebase.json in cwd names a project.
+export const needsDiscovery = (options, cwd = process.cwd()) => !options.project && !options.config && !existsSync(resolve(cwd, 'firebase.json'));
 export function resolveProject(options, cwd = process.cwd()) {
   try { return loadProject(options, cwd); }
   catch (error) {
@@ -32,17 +36,77 @@ export function resolveProject(options, cwd = process.cwd()) {
 
 const describe = error => error?.cause?.code || error?.cause?.message || error?.message || String(error);
 
+// The suites running on this machine: every hub-<project>.json in the locator
+// directory, probed in parallel. A locator answers when one of its origins
+// does with the pid the file records (a stale file whose port another suite
+// took does not count). Returns {answering, stale}, each [{project, path,
+// origin?}] sorted by project id.
+// The locator file names, rescanned only when the directory changed: the
+// system temporary directory can hold tens of thousands of entries, and a
+// directory's mtime moves whenever a file is added or removed (a change in
+// the last two seconds is always rescanned, for coarse timestamps).
+let scanned;
+function locatorNames() {
+  const directory = locatorDirectory();
+  const {mtimeMs} = statSync(directory);
+  if (scanned?.directory === directory && scanned.mtimeMs === mtimeMs && Date.now() - mtimeMs > 2000) return scanned.names;
+  const names = readdirSync(directory).filter(name => /^hub-.+\.json$/.test(name) && validProjectId(name.slice('hub-'.length, -'.json'.length)));
+  scanned = {directory, mtimeMs, names};
+  return names;
+}
+export async function runningSuites(timeout = 2000) {
+  let names;
+  try { names = locatorNames(); }
+  catch { return {answering:[], stale:[]}; }
+  const probes = await Promise.all(names.map(async name => {
+    const project = name.slice('hub-'.length, -'.json'.length);
+    const path = join(locatorDirectory(), name);
+    let locator;
+    try { locator = JSON.parse(readFileSync(path, 'utf8')); } catch { return {project, path, answering:false}; }
+    for (const origin of Array.isArray(locator?.origins) ? locator.origins : []) {
+      try {
+        const response = await suiteFetch(`${origin}/`, {signal:AbortSignal.timeout(timeout)});
+        if (!response.ok) continue;
+        const status = await response.json();
+        if (locator.pid !== undefined && status?.pid !== undefined && status.pid !== locator.pid) continue;
+        return {project, path, origin, answering:true};
+      } catch { /* the next origin */ }
+    }
+    return {project, path, answering:false};
+  }));
+  const pick = answering => probes.filter(probe => probe.answering === answering).map(({answering: _, ...probe}) => probe).sort((a, b) => a.project.localeCompare(b.project));
+  return {answering:pick(true), stale:pick(false)};
+}
+
+// The project of the one running suite, for a command started outside any
+// project folder (no firebase.json, no --project): the configless project
+// resolveProject builds for --project, plus how it was found. Two answering
+// suites ask for --project; none is an error naming emulators:start.
+export async function discoverProject(cwd = process.cwd(), command = 'this command') {
+  const {answering, stale} = await runningSuites();
+  if (answering.length === 1) {
+    const [suite] = answering;
+    return {project:suite.project, directory:cwd, host:'127.0.0.1', ports:{...DEFAULT_PORTS}, services:SERVICES, configless:true, discovered:{locator:suite.path, origin:suite.origin}};
+  }
+  if (answering.length > 1) {
+    throw new Error(`${answering.length} running suites answer (${answering.map(suite => `${suite.project} at ${suite.origin}`).join(', ')}); start ${command} with --project <id> to choose one`);
+  }
+  const ignored = stale.length ? ` (stale, not answering: ${stale.map(suite => suite.path).join(', ')})` : '';
+  throw new Error(`No running suite found: no firebase.json in ${cwd}, no --project, and no hub locator in ${locatorDirectory()} answers${ignored}. Start the emulators with firenook emulators:start in the project folder, or start ${command} with --project <id> (or --config <firebase.json>).`);
+}
+
 // Finds the running hub: the locator file's origins first, then the port the
 // configuration names. Returns {origin, status, locator}.
 export async function findHub(project, options = {}) {
   const locator = readLocator(project.project);
   const origins = [...(Array.isArray(locator?.origins) ? locator.origins : [])];
+  // A discovered project has no configuration of its own: its locator is all.
   const configured = `http://${connectHost(project.host)}:${options['hub-port'] || project.ports.hub}`;
-  if (!origins.includes(configured)) origins.push(configured);
+  if (!project.discovered && !origins.includes(configured)) origins.push(configured);
   let failure;
   for (const origin of origins) {
     try {
-      const response = await fetch(`${origin}/`, {signal:AbortSignal.timeout(5000)});
+      const response = await suiteFetch(`${origin}/`, {signal:AbortSignal.timeout(5000)});
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return {origin, status:await response.json(), locator};
     } catch (error) { failure ??= error; }
@@ -54,7 +118,7 @@ export async function findHub(project, options = {}) {
 // Services the running suite reports, or undefined when the hub cannot list them.
 export async function runningServices(origin) {
   try {
-    const response = await fetch(`${origin}/emulators`, {signal:AbortSignal.timeout(5000)});
+    const response = await suiteFetch(`${origin}/emulators`, {signal:AbortSignal.timeout(5000)});
     if (!response.ok) return undefined;
     const body = await response.json();
     return body && typeof body === 'object' ? body : undefined;
@@ -105,7 +169,7 @@ export async function exportEmulators(target, options, cwd = process.cwd(), log 
   if (!existsSync(destination)) mkdirSync(destination, {recursive:true});
   log.error(`Found running emulator hub for project ${project.project} at ${origin}; exporting ${targets.join(', ')} to ${destination}`);
   // No Origin header: the hub refuses requests that carry one.
-  const response = await fetch(`${origin}/_admin/export`, {method:'POST', headers:{'content-type':'application/json'},
+  const response = await suiteFetch(`${origin}/_admin/export`, {method:'POST', headers:{'content-type':'application/json'},
     body:JSON.stringify({path:destination, targets, initiatedBy:'firenook emulators:export'})});
   const text = await response.text();
   let message;
@@ -141,7 +205,7 @@ export async function firestoreDelete(path, options, argv = [], cwd = process.cw
   if (options['all-collections']) {
     if (path) throw new Error('--all-collections takes no path');
     if (!options.force) throw new Error(`Refusing to delete THE ENTIRE ${database} database of ${project.project} without --force. Re-run: ${rerun}`);
-    const response = await fetch(await base(), {method:'DELETE', headers});
+    const response = await suiteFetch(await base(), {method:'DELETE', headers});
     return finish(response, {path:null, mode:'all-collections'});
   }
   if (!path) throw new Error('Must specify a path.');
@@ -155,6 +219,6 @@ export async function firestoreDelete(path, options, argv = [], cwd = process.cw
     throw new Error(`Refusing to recursively delete the collection ${trimmed} of ${project.project} without --force. Re-run: ${rerun}`);
   }
   const url = `${await base()}/${segments.map(encodeURIComponent).join('/')}?mode=${mode}`;
-  const response = await fetch(url, {method:'DELETE', headers});
+  const response = await suiteFetch(url, {method:'DELETE', headers});
   return finish(response, {path:trimmed, mode});
 }

@@ -679,8 +679,8 @@ const DATA = {
   {
     "name": "mcp (local MCP server)",
     "status": "done",
-    "note": "Dependency-free stdio server: status, Firestore, Auth, Storage, Functions, Pub/Sub, Tasks, export (next.9)",
-    "remaining": "Planned for next.7: firenook mcp add, the init offer, a no-argument start, the console's Coding agent tab, and tools for logs and function calls, Security Rules, more of Auth, reset, Storage files, Eventarc, Extensions, Pub/Sub, Tasks and schedules",
+    "note": "Dependency-free stdio server (next.9); 54 tools since next.7: Firestore with counts and collection groups, Auth with tokens and claims, Storage files, function calls and the log, Security Rules decisions, Pub/Sub, Tasks, schedules, Eventarc, Extensions and reset. firenook mcp add writes the agents' project files, init offers it, a start with no arguments finds the running suite, and the console's Coding agent tab shows the setup and the last call",
+    "remaining": "A route that lists rule decisions (denials come from the log today)",
     "size": "—"
   },
   {
@@ -759,22 +759,22 @@ const DATA = {
   backlog: [
   {
     "item": "Keeping data without a seed",
-    "why": "Planned for next.7: --resume-state needs --import, so a project made with init cannot keep its data between runs; resume from an empty seed, add --keep-data for the pair of flags, and have init print it",
+    "why": "Built for next.7: --resume-state no longer needs --import (a seedless state records an empty seed, and next.6 refuses it cleanly); --keep-data keeps the data in .firenook/state, and init prints it",
     "size": "days"
   },
   {
     "item": "Coding agent setup",
-    "why": "Planned for next.7: firenook mcp add writes each agent's project file, init offers it, the server finds the running suite with no arguments, and the console's Connect dialog gets a Coding agent tab",
+    "why": "Built for next.7: firenook mcp add writes .mcp.json, .cursor/mcp.json and .vscode/mcp.json for the agents a project uses, init offers it once, the server finds the running suite with no arguments, and the console's Connect dialog has a Coding agent tab with install links and the last call",
     "size": "days"
   },
   {
     "item": "MCP coverage",
-    "why": "Planned for next.7: the 19 tools cover data basics but not logs and function calls, Security Rules, Auth tokens and claims, reset or Storage files; the console API already serves each, so these are new tools over existing routes",
+    "why": "Built for next.7: 19 tools became 54, over the console API: logs and function calls, Security Rules evaluation and denials, Auth tokens and claims, reset with the project-id safeguard, Storage files, Eventarc, Extensions, Pub/Sub, Tasks, schedules, Firestore counts",
     "size": "days"
   },
   {
     "item": "Demo and benchmark fixes",
-    "why": "Planned for next.7: round timestamps finer than a microsecond at write (the export refuses them), Functions discovery taking about 6 s against 0.2 s by hand, float noise in the log line's duration, the console's document panel crashing on a bare id",
+    "why": "Built for next.7: timestamps rounded down to the microsecond at write (and in the export), Functions discovery 6.2 s to 0.2 s, a seven-function project ready in 0.78 s against 6.82 s on the acceptance host (an idle keep-alive connection kept the SDK's server from exiting), the log line's duration rounded, the document panel reads a bare id",
     "size": "days"
   },
   {
