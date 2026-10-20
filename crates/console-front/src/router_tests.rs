@@ -702,3 +702,136 @@ fn the_header_family_has_one_spelling() {
     }
     assert!(CAUSE_HEADER_PREFIX.starts_with("x-firenook-cause-"));
 }
+
+/// What the MCP server sends from Node: JSON, no `Origin`, no
+/// `Sec-Fetch-Site`, the engine's own address as the `Host`.
+const NODE_BEACON: [(&str, &str); 3] = [
+    ("content-type", "application/json"),
+    ("host", "127.0.0.1:4000"),
+    ("x-firenook-client", "firenook-mcp/0.2.0-next.7"),
+];
+
+#[tokio::test]
+async fn a_coding_agents_call_passes_the_guard_from_node_and_is_read_back() {
+    let router = router();
+    let (status, body) = send(&router, request(Method::GET, "/api/v1/agents", &[], "")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, serde_json::json!({ "lastCall": null, "calls": 0 }));
+
+    let node = NODE_BEACON;
+    for tool in ["status", "firestore_query"] {
+        let response = router
+            .clone()
+            .oneshot(request(
+                Method::POST,
+                "/api/v1/agents/calls",
+                &node,
+                &serde_json::json!({ "client": "firenook-mcp/0.2.0-next.7", "tool": tool })
+                    .to_string(),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT, "{tool}");
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        assert!(bytes.is_empty());
+    }
+    let (status, body) = send(&router, request(Method::GET, "/api/v1/agents", &[], "")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["calls"], 2);
+    assert_eq!(body["lastCall"]["tool"], "firestore_query");
+    assert_eq!(body["lastCall"]["client"], "firenook-mcp/0.2.0-next.7");
+    let at = body["lastCall"]["at"].as_str().expect("at");
+    assert!(
+        ::time::OffsetDateTime::parse(at, &::time::format_description::well_known::Rfc3339).is_ok(),
+        "{at}"
+    );
+    assert!(at.ends_with('Z') && at.len() == 24, "{at}");
+
+    // A newer server may say more; the engine reads the two fields it knows.
+    let (status, _) = send(
+        &router,
+        request(
+            Method::POST,
+            "/api/v1/agents/calls",
+            &node,
+            r#"{"client":"firenook-mcp/9.0.0","tool":"logs_search","durationMs":12}"#,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, body) = send(&router, request(Method::GET, "/api/v1/agents", &[], "")).await;
+    assert_eq!(body["calls"], 3);
+    assert_eq!(body["lastCall"]["tool"], "logs_search");
+}
+
+#[tokio::test]
+async fn a_coding_agents_call_that_is_not_one_is_refused_and_not_recorded() {
+    let router = router();
+    let node = NODE_BEACON;
+    for (body, field) in [
+        (r#"{"client":"","tool":"status"}"#, "client"),
+        (
+            r#"{"client":"firenook-mcp/0.2.0-next.7","tool":"drop;table"}"#,
+            "tool",
+        ),
+        (
+            &serde_json::json!({ "client": "c".repeat(65), "tool": "status" }).to_string()[..],
+            "client",
+        ),
+    ] {
+        let (status, answer) = send(
+            &router,
+            request(Method::POST, "/api/v1/agents/calls", &node, body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(answer["error"]["code"], "invalid-argument");
+        let message = answer["error"]["message"].as_str().expect("message");
+        assert!(
+            message.starts_with(&format!("The call's {field} ")),
+            "{message}"
+        );
+    }
+    let (status, answer) = send(
+        &router,
+        request(
+            Method::POST,
+            "/api/v1/agents/calls",
+            &node,
+            r#"{"tool":"status"}"#,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(answer["error"]["code"], "invalid-argument");
+    // The guard's rules hold here too: a form post, another site.
+    let (status, _) = send(
+        &router,
+        request(
+            Method::POST,
+            "/api/v1/agents/calls",
+            &[("content-type", "text/plain")],
+            r#"{"client":"x","tool":"y"}"#,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    let (status, _) = send(
+        &router,
+        request(
+            Method::POST,
+            "/api/v1/agents/calls",
+            &[
+                ("content-type", "application/json"),
+                ("sec-fetch-site", "cross-site"),
+            ],
+            r#"{"client":"x","tool":"y"}"#,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (_, body) = send(&router, request(Method::GET, "/api/v1/agents", &[], "")).await;
+    assert_eq!(body, serde_json::json!({ "lastCall": null, "calls": 0 }));
+}

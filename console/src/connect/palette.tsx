@@ -29,8 +29,15 @@ export function useConnectPalette({
     const items = CONNECT_TABS.map<PaletteItem>((tab) => ({
       id: `connect:copy:${tab.param}`,
       title: `Copy the ${tab.label} snippet`,
-      description: 'With this engine’s host, ports and project id',
-      keywords: `copy clipboard connect snippet ${tab.param}`,
+      // The agent's entry names no host or port: the server finds the engine.
+      description:
+        tab.target === 'agent'
+          ? 'The MCP server entry an agent’s mcpServers settings take'
+          : 'With this engine’s host, ports and project id',
+      keywords:
+        tab.target === 'agent'
+          ? `copy clipboard connect snippet ${tab.param} mcp coding agent claude cursor`
+          : `copy clipboard connect snippet ${tab.param}`,
       icon: <CopyIcon size={16} />,
       run: () => {
         void copyToClipboard(snippet(tab.param), {

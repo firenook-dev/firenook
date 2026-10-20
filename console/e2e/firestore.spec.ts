@@ -416,6 +416,55 @@ test('the inspector saves typed edits and the change flashes back through the li
   await expect(page.getByTestId('live-state')).toHaveCount(0)
 })
 
+test('a bare id in doc= opens that document of the open collection; anything else is not found', async ({
+  page,
+}) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  const refused: string[] = []
+  page.on('response', (response) => {
+    if (response.url().includes('/console/api/') && response.status() >= 400)
+      refused.push(`${response.status()} ${response.url()}`)
+  })
+  const inspector = page.getByTestId('inspector')
+
+  // `doc=t_real` beside `path=teams` is `teams/t_real`, and its row is the open one.
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=t_real`)
+  await expect(inspector).toContainText('teams/t_real')
+  await expect(inspector.getByLabel('seats value')).toBeVisible()
+  await expect(
+    page.locator('tr[data-path="teams/t_real"]').getByTestId('open-row'),
+  ).toHaveAttribute('aria-pressed', 'true')
+  // An id the collection does not hold is a document not written yet.
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=nobody_here`)
+  await expect(inspector).toContainText('teams/nobody_here')
+  await expect(inspector).toContainText('No document here')
+  // (Reading it was the engine's 404; from here on nothing is read at all.)
+  refused.length = 0
+
+  // What names no document is said in the panel, and nothing is asked of
+  // the engine for it: an id at the root, where there is no collection to
+  // read it in; a collection's path; an id in a collection group, whose
+  // rows live in many collections. Each crashed the panel before.
+  for (const [address, written, example] of [
+    ['doc=x', 'x', 'orders/x'],
+    ['path=users&doc=users%2Fu1%2Forders', 'users/u1/orders', 'users/orders'],
+    ['path=orders&group=true&doc=x', 'x', 'orders/x'],
+  ] as const) {
+    await page.goto(`${origin()}/console/firestore?${address}`)
+    const notFound = inspector.getByTestId('inspector-not-a-document')
+    await expect(notFound).toContainText('Document not found')
+    await expect(notFound).toContainText(`${written} is not a document’s path`)
+    await expect(notFound).toContainText(`as in ${example}.`)
+    // Closing it leaves the page as it was.
+    await inspector.getByRole('button', { name: 'Close the document' }).click()
+    await expect(inspector).toHaveCount(0)
+    await expect(page).not.toHaveURL(/doc=/)
+  }
+  expect(errors).toEqual([])
+  expect(refused).toEqual([])
+})
+
 test('a dropped live channel says so once, in the engine badge, and replays what it missed', async ({
   page,
 }) => {

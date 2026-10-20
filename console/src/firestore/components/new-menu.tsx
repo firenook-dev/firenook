@@ -15,6 +15,7 @@ import {
 } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useCreateDialog } from '../create'
+import { isDocumentPath } from '../document-path'
 import { documentQuery } from '../queries'
 import { useWorkbench } from './workbench-context'
 
@@ -26,7 +27,7 @@ export function NewMenu() {
   const selected = workbench.selectedDocument
   const document = useQuery({
     ...documentQuery(workbench.scope, selected ?? ''),
-    enabled: Boolean(selected),
+    enabled: selected !== undefined && isDocumentPath(selected),
   })
   const selectedId = selected?.split('/').at(-1)
   return (

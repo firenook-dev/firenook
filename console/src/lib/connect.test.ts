@@ -182,10 +182,18 @@ describe('connection snippets', () => {
 
   it('writes every target without throwing', () => {
     const targets: ConnectTarget[] = CONNECT_TABS.map((tab) => tab.target)
-    expect(new Set(targets).size).toBe(10)
+    expect(new Set(targets).size).toBe(11)
     for (const target of targets)
       for (const services of [ALL, [], ['firestore']])
         expect(typeof connectSnippet(target, { services, status: status() })).toBe('string')
+  })
+
+  it('gives a coding agent the MCP server entry, which names no host, port or project', () => {
+    const entry = connectSnippet('agent', { services: ALL, status: status() })
+    expect(JSON.parse(entry)).toEqual({
+      mcpServers: { firenook: { command: 'npx', args: ['firenook', 'mcp'] } },
+    })
+    expect(entry).not.toContain(status().projectId)
   })
 
   it('draws a CodeBlock’s tabs from the one tab list, named by their connect value', () => {
