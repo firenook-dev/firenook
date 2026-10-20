@@ -1358,7 +1358,22 @@ README already makes work without reading the docs first.
   cannot keep its data at all: the second start with the same `--state-dir`
   is refused. Allow `--resume-state` without `--import`, with an empty seed
   as the data's identity, so `--state-dir ./.firenook/state --resume-state`
-  works from the first start of a new project.
+  works from the first start of a new project. The launcher drops its
+  `--import` requirement; the engine writes the receipt with an empty seed
+  path and skips the seed read. The receipt keeps its format (it rejects
+  unknown fields), so 0.2.0-next.6 still reads a seedless receipt and refuses
+  it cleanly as a changed seed path. Both refusals stay: a seedless state
+  started with `--import`, and a seeded state started without it. Tests: the
+  first start, a resume, both refusals, and 0.2.0-next.6 on a seedless
+  receipt.
+- [ ] **`--keep-data`**, short for `--state-dir ./.firenook/state
+  --resume-state` (with the seed when `--import` is given). Keeping data stays
+  opt-in for `emulators:start`: someone switching from the official emulator
+  expects `--import ./data` to start from that data every time, and
+  `emulators:exec` stays fresh for tests.
+- [ ] **`init` uses it.** The start command `init` prints for a new project
+  carries `--keep-data`; a new project never had the official behaviour to
+  keep. The README's "Your data stays" then shows `--keep-data`.
 - [ ] **Set up a coding agent in one command: `firenook mcp add`.** Today
   the agent's MCP configuration is written by hand from one generic line in
   `docs/mcp.md`, and each agent keeps it somewhere else. `mcp add` finds the
