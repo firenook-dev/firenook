@@ -33,7 +33,7 @@
 **Already using the Firebase emulators?** Install Firenook and change one word:
 
 ```sh
-npm install --save-dev --save-exact firenook
+npm install --save-dev firenook
 ```
 
 ```diff
@@ -170,6 +170,9 @@ deploying):
 npm install --save-dev --save-exact firenook    # or: bun add --dev --exact firenook
 ```
 
+`--save-exact` keeps you on the release you installed until you upgrade on
+purpose: Firenook is in preview, and a preview can change between releases.
+
 Every run keeps its working data under `.firenook/`, so add that folder to
 your `.gitignore`.
 
@@ -276,7 +279,3 @@ Firenook is licensed under the [Apache License 2.0](LICENSE); see
 Firebase, Cloud Firestore, Cloud Functions, Cloud Storage, Cloud Pub/Sub and
 Cloud Tasks are trademarks of Google LLC. Firenook is not affiliated with or
 endorsed by Google.
-
-Firenook (formerly Fireside) is the same project under its new name;
-[the former name](docs/former-name.md) says how to move from the packages
-published before the rename.
