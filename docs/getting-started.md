@@ -69,13 +69,13 @@ data you already have, and every emulator listens on the port `firebase.json`
 gives it. Your app needs no change.
 
 **3. Keep your data without exporting (optional).** Instead of an import at
-every start and an export at every stop, drop `--export-on-exit` and give
-Firenook a state directory: the
-first start imports `./data`, every later start picks the data up where you
-left it, and `./data` itself is never written:
+every start and an export at every stop, replace `--export-on-exit` with
+`--keep-data`: the first start imports `./data` into `.firenook/state`, every
+later start picks the data up where you left it, and `./data` itself is never
+written:
 
 ```sh
-npx firenook emulators:start --import ./data --state-dir ./.firenook/state --resume-state
+npx firenook emulators:start --import ./data --keep-data
 ```
 
 **What is different**
@@ -98,7 +98,7 @@ on the same ports or the same working directory.
 ```sh
 npx firenook init
 cd functions && npm install && cd ..
-npx firenook emulators:start
+npx firenook emulators:start --keep-data
 ```
 
 `init` writes `firebase.json` with every emulator on its usual port,
@@ -107,6 +107,12 @@ Storage rules and indexes, and a JavaScript Functions codebase
 (`--no-functions` leaves it out). It installs nothing and never overwrites an
 existing `firebase.json` unless you pass `--force`. A `demo-` project id never
 reaches a real Firebase project.
+
+The start command it prints carries `--keep-data`, so a new project keeps its
+data between runs from the first start. When the folder shows a coding agent
+(`.claude/`, `.cursor/`, `.vscode/`, or `claude` on the PATH), `init` asks
+once whether to give it the [MCP server](mcp.md); `npx firenook mcp add` does
+the same at any time.
 
 ## Start
 
@@ -145,13 +151,18 @@ in.
 ## Keep your data between runs
 
 ```sh
-npx firenook emulators:start --import ./seed --state-dir ./.firenook/state --resume-state
+npx firenook emulators:start --keep-data                  # a project with no seed
+npx firenook emulators:start --keep-data --import ./seed  # starting from a seed
 ```
 
-The first start imports the seed into `./.firenook/state`. Every start after
-that opens the data where you left it, in well under a second whatever its
-size, and every stop closes it cleanly. The seed stays untouched. The official way, an import at
-every start and an export at every stop, works too:
+`--keep-data` keeps the data in `.firenook/state` (it is short for
+`--state-dir ./.firenook/state --resume-state`). The first start creates it,
+importing the seed when you give one. Every start after that opens the data
+where you left it, in well under a second whatever its size, and every stop
+closes it cleanly. The seed stays untouched. Keeping data is opt-in, so
+`--import ./data` alone still starts from that data every time, as the
+official emulator does. The official way, an import at every start and an
+export at every stop, works too:
 
 ```sh
 npx firenook emulators:start --import ./data --export-on-exit

@@ -43,8 +43,7 @@ npm install --save-dev firenook
 
 Same flags, same ports, and your `firebase.json`, rules, Functions code and app
 stay as they are. In a terminal, run it as `npx firenook emulators:start`. To
-keep your data between runs, with no export at every stop, add
-`--state-dir ./.firenook/state --resume-state`.
+keep your data between runs, with no export at every stop, add `--keep-data`.
 
 Firenook needs Node 24, on macOS, Linux or Windows. Starting a new project?
 `npx firenook init` sets one up. [Get started](#get-started) covers both.
@@ -63,9 +62,9 @@ not in a Java heap. On a real application's two-hour workload, Firenook
 peaked at 2.16 GiB of memory where the official emulator reached 19.56 GiB,
 answered writes in 5.3 ms against 203 ms at the median, and used 61% less CPU.
 
-**Your data stays.** Give Firenook a state directory and Firestore, Auth and
-Storage come back with all your data in about half a second, even with
-millions of documents: no export at every stop, no import at every start. A
+**Your data stays.** Add `--keep-data` and Firestore, Auth and Storage come
+back with all your data in about half a second, even with millions of
+documents: no export at every stop, no import at every start. A
 crash loses at most the last second of writes, where the official emulator
 loses everything since its last export, and a stop always closes the data
 cleanly.
@@ -81,11 +80,12 @@ live as your app runs, and a terminal screen that shows each function call,
 what triggered it, how long it took, and the stack trace when it fails.
 
 **Ready for your agent.** `firenook mcp` gives a coding agent the running
-suite: read and write Firestore, manage users and their codes, list Storage,
-invoke functions, publish to Pub/Sub. In Claude Code, from the project folder:
-`claude mcp add --scope project firenook -- npx firenook mcp`;
-[other agents](docs/mcp.md#connect-your-agent) run the same
-`npx firenook mcp`. Nothing leaves your machine.
+suite: read and write Firestore, manage users and sign in as them, read the
+logs and each function call with its error, ask the Security Rules why a
+request is denied, and work with Storage files, Pub/Sub, Cloud Tasks and
+Eventarc. `npx firenook mcp add` sets it up for Claude Code, Cursor and VS Code
+in the project's own files; [other agents](docs/mcp.md#connect-your-agent) run
+the same `npx firenook mcp`. Nothing leaves your machine.
 
 ## What it emulates
 
@@ -206,12 +206,12 @@ Your app connects to the same ports as before, so no code changes:
 and the rest work unchanged.
 
 **4. Optionally, stop exporting at every stop.** In place of
-`--export-on-exit`, give Firenook a state directory and it keeps your data
-between runs. Every start after the first picks the data up where you left
-it, and `./data` itself stays untouched:
+`--export-on-exit`, add `--keep-data` and Firenook keeps your data between runs
+in `.firenook/state`. Every start after the first picks the data up where you
+left it, and `./data` itself stays untouched:
 
 ```sh
-npx firenook emulators:start --import ./data --state-dir ./.firenook/state --resume-state
+npx firenook emulators:start --import ./data --keep-data
 ```
 
 Going back is just as short: stop Firenook (it saves first), export with
@@ -224,12 +224,13 @@ export.
 npm install --save-dev --save-exact firenook
 npx firenook init                       # firebase.json, rules, indexes and a Functions codebase
 cd functions && npm install && cd ..
-npx firenook emulators:start
+npx firenook emulators:start --keep-data
 ```
 
 `init` sets up every emulator on its usual port with a `demo-<folder>` project,
 so nothing can reach a real Firebase project, and adds `.firenook/` to your
-`.gitignore`. Point your app at it:
+`.gitignore`. A new project keeps its data from the first start, and `init`
+offers to connect the coding agent it finds. Point your app at it:
 
 ```js
 connectFirestoreEmulator(db, '127.0.0.1', 8080);

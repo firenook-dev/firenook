@@ -6,6 +6,7 @@ Keeping your data between runs, starting from a seed, exports, durability, keepi
 
 ```sh
 firenook emulators:start --project demo-my-app --import ./seed --export-on-exit ./export
+firenook emulators:start --project demo-my-app --keep-data       # data kept in .firenook/state
 firenook emulators:exec --project demo-my-app -- node ./integration-test.mjs
 ```
 
@@ -27,9 +28,16 @@ for recovery, including after errors. They are **data**, not disposable caches.
 The installer never deletes them. Retain a completed export before removing old
 stopped working directories. Do not point state at your seed/export directory.
 
-Explicit native resume needs both `--state-dir ./local-state` and
-`--resume-state --import ./seed`. The seed must stay immutable; export elsewhere.
-Without resume, never reuse a state directory as an implicit reset/reimport.
+To keep data between runs, add `--keep-data`: it is short for
+`--state-dir ./.firenook/state --resume-state`, and `--state-dir` names another
+directory. `--import ./seed` is optional. With a seed, the first start imports
+it and every later start picks up the saved data; without one, the first start
+begins empty. Saved data remembers how it began, so data started from a seed
+refuses a start without that `--import`, and data started without a seed
+refuses one with `--import` (import a seed into a new `--state-dir` instead).
+The seed must stay immutable; export elsewhere. Without resume, never reuse a
+state directory as an implicit reset/reimport. Data kept without a seed needs
+0.2.0-next.7 or later; an earlier release refuses it and changes nothing.
 `--export-on-exit` without a directory follows `--import`; never use this with
 an immutable resume seed. Ctrl-C requests graceful export; await completion.
 
