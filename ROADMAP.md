@@ -1435,3 +1435,21 @@ In priority order:
 
 Each tool gets a test against a running suite beside the existing ones in
 `packaging/cli-commands.test.mjs`, and `docs/mcp.md` lists every tool.
+
+**Fixes the README demo and the next.6 benchmark found** (recorded in
+`benchmarks/next6-paired-acceptance.json` `followUps`):
+
+- [ ] **Timestamps finer than a microsecond.** Firestore accepts them, then
+  the export refuses them ("export timestamps must have microsecond
+  precision"). Production rounds them down at write; do the same, and let
+  the export round down any finer value already saved.
+- [ ] **Functions discovery takes about 6 s** inside the runtime for a
+  codebase the SDK's discovery server answers in 0.2 s by hand (the attempt-13
+  receipt saw the inventory answer 7 s after the bind). Find where the time
+  goes, fix it, and record start-to-ready before and after.
+- [ ] **The Functions log line's duration** prints floating-point noise
+  (`1.6076249999999999ms`); round it as the console does.
+- [ ] **The console's document panel crashes** with a TypeError when `doc=`
+  in the URL holds a bare id rather than a full path (`x` instead of
+  `orders/x`). Read a bare id against the open collection, and show "not
+  found" for anything else instead of crashing.

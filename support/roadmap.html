@@ -773,6 +773,11 @@ const DATA = {
     "size": "days"
   },
   {
+    "item": "Demo and benchmark fixes",
+    "why": "Planned for next.7: round timestamps finer than a microsecond at write (the export refuses them), Functions discovery taking about 6 s against 0.2 s by hand, float noise in the log line's duration, the console's document panel crashing on a bare id",
+    "size": "days"
+  },
+  {
     "item": "Closing the data on stop",
     "why": "Built for next.6: since next.3 a clean stop left Firestore's file marked open (and Storage's since next.4), so every start after a stop repaired it; both now close, the file is tested after each kind of stop, and a killed engine is reported as a failure",
     "size": "days"
