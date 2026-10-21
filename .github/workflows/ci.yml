@@ -229,6 +229,7 @@ jobs:
           node --test conformance/test/functions-readiness-receipts.test.mjs
           node --test conformance/test/rest-read-options-fixture.test.mjs
           node --test conformance/test/rule-bindings-fixture.test.mjs
+          node --test conformance/test/request-identity-fixture.test.mjs
           node --test conformance/test/functions-topic-reload-fixture.test.mjs
           node --test conformance/test/lifecycle-receipts.test.mjs
           node --test conformance/test/rest-encoding-profile.test.mjs
