@@ -1122,29 +1122,32 @@ fn resolve_storage_rules(
     };
     let project_targets = firebase_rc.targets.get(project);
     let mut buckets = Vec::with_capacity(storage.len());
+    let mut default_bucket = None;
     for entry in storage {
-        let bucket = overrides.get(&entry.target).or_else(|| {
-            project_targets
+        // Every bucket `.firebaserc` names for the target gets its rules, as
+        // the official emulator gives them; `--storage-bucket` names one.
+        let named = match overrides.get(&entry.target) {
+            Some(bucket) => std::slice::from_ref(bucket),
+            None => project_targets
                 .and_then(|targets| targets.storage.get(&entry.target))
-                .and_then(|buckets| buckets.first())
-        });
-        let bucket = bucket.ok_or_else(|| {
-            format!(
+                .map_or(&[][..], Vec::as_slice),
+        };
+        if named.is_empty() {
+            return Err(format!(
                 "storage target {} has no bucket for {project}; pass --storage-bucket {}=<bucket>",
                 entry.target, entry.target
-            )
-        })?;
-        buckets.push(StorageBucketConfig {
+            ));
+        }
+        if entry.target == "default" && default_bucket.is_none() {
+            default_bucket = named.first().cloned();
+        }
+        buckets.extend(named.iter().map(|bucket| StorageBucketConfig {
             bucket: bucket.clone(),
             rules: project_path(config_dir, &entry.rules),
-        });
+        }));
     }
-    let default_bucket = storage
-        .iter()
-        .position(|entry| entry.target == "default")
-        .and_then(|index| buckets.get(index))
-        .or_else(|| buckets.first())
-        .map(|bucket| bucket.bucket.clone())
+    let default_bucket = default_bucket
+        .or_else(|| buckets.first().map(|bucket| bucket.bucket.clone()))
         .ok_or_else(|| "firebase.json configures no Storage buckets".to_owned())?;
     Ok((StorageRulesConfig::PerBucket(buckets), default_bucket))
 }
@@ -2503,6 +2506,64 @@ mod tests {
             targets.storage,
             Some(FirebaseStorageSection::Targets(ref entries)) if entries.len() == 1
         ));
+    }
+
+    /// `.firebaserc` may map a Storage target to several buckets; the
+    /// official emulator gives every one of them the target's rules
+    /// (`getStorageRulesConfig` maps each resource of the target).
+    #[test]
+    fn a_storage_target_governs_every_bucket_it_names() {
+        let config: FirebaseProjectConfig = serde_json::from_str(
+            r#"{ "storage": [
+                { "target": "media", "rules": "media.rules" },
+                { "target": "default", "rules": "storage.rules" }
+            ] }"#,
+        )
+        .expect("targets storage config");
+        let firebase_rc: FirebaseRc = serde_json::from_str(
+            r#"{ "targets": { "demo-media": { "storage": {
+                "media": ["demo-media-images", "demo-media-video"],
+                "default": ["demo-media.appspot.com"]
+            } } } }"#,
+        )
+        .expect(".firebaserc with targets parses");
+        let resolve = |overrides: &BTreeMap<String, String>| {
+            resolve_storage_rules(
+                std::path::Path::new("/project"),
+                config.storage.as_ref(),
+                &firebase_rc,
+                "demo-media",
+                overrides,
+                true,
+            )
+            .expect("targets resolve")
+        };
+        let bucket = |bucket: &str, rules: &str| StorageBucketConfig {
+            bucket: bucket.to_owned(),
+            rules: PathBuf::from(format!("/project/{rules}")),
+        };
+        let (rules, default_bucket) = resolve(&BTreeMap::new());
+        assert_eq!(
+            rules,
+            StorageRulesConfig::PerBucket(vec![
+                bucket("demo-media-images", "media.rules"),
+                bucket("demo-media-video", "media.rules"),
+                bucket("demo-media.appspot.com", "storage.rules"),
+            ])
+        );
+        assert_eq!(default_bucket, "demo-media.appspot.com");
+        // `--storage-bucket target=bucket` names the one bucket instead.
+        let (rules, _) = resolve(&BTreeMap::from([(
+            "media".to_owned(),
+            "demo-media-local".to_owned(),
+        )]));
+        assert_eq!(
+            rules,
+            StorageRulesConfig::PerBucket(vec![
+                bucket("demo-media-local", "media.rules"),
+                bucket("demo-media.appspot.com", "storage.rules"),
+            ])
+        );
     }
 
     #[test]

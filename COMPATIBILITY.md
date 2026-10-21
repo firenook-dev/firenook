@@ -79,7 +79,8 @@ file.
 
 Storage rules files are watched and reloaded on change the same way, whether
 or not Firestore runs: a `storage: { rules }` file governs every bucket, and
-each `storage` target's file governs its bucket. A file that does not compile
+each `storage` target's file governs every bucket `.firebaserc` maps the
+target to. A file that does not compile
 leaves the previous rules in force, as the official watcher keeps its previous
 ruleset. (`/internal/setRules` keeps the official semantics: a body that does
 not compile leaves no ruleset until the next valid one.)
