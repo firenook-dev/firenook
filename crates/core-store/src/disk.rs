@@ -614,6 +614,12 @@ impl DiskSnapshot {
         DiskKeyCursor::open(self, database, prefix)
     }
 
+    /// Every document key of `database`, read from the collection index,
+    /// with this snapshot's overlay merged in. See [`DiskDocumentKeys`].
+    pub(crate) fn document_keys(&self, database: &DatabaseName) -> DiskDocumentKeys {
+        DiskDocumentKeys::open(self, database)
+    }
+
     pub(crate) fn iter_documents(&self, database: &DatabaseName) -> DiskDocumentIterator {
         let scope = DiskDocumentScope::Database(database.clone());
         let source = database_prefix(database)
@@ -993,6 +999,63 @@ impl DiskKeyCursor {
         {
             self.overlay_position += 1;
         }
+    }
+}
+
+/// Every document key of one database, read from the collection index.
+///
+/// The documents table keeps each body beside its key, so walking its keys
+/// still reads every page of every body: the whole file, tens of gigabytes
+/// on a large store. The collection index holds one short entry per
+/// document (its collection, its id and its key), and walking it reads a
+/// small fraction of that. Keys come in collection order, not path order.
+/// The overlay of the owning snapshot decides for every key it holds: a key
+/// it deleted is hidden, a key it wrote is reported once, after the disk.
+pub(crate) struct DiskDocumentKeys {
+    range: Option<redb::Range<'static, &'static [u8], &'static [u8]>>,
+    overlay: im::OrdMap<DocumentKey, Option<Arc<Document>>>,
+    written: std::vec::IntoIter<DocumentKey>,
+}
+
+impl DiskDocumentKeys {
+    fn open(snapshot: &DiskSnapshot, database: &DatabaseName) -> Self {
+        let range = database_prefix(database)
+            .ok()
+            .and_then(|prefix| bounded_range(&snapshot.transaction, COLLECTIONS, &prefix));
+        let written = snapshot
+            .overlay
+            .range(DocumentKey::unchecked(database.clone(), "")..)
+            .take_while(|(key, _)| key.database() == database)
+            .filter(|(_, document)| document.is_some())
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
+        Self {
+            range,
+            overlay: snapshot.overlay.clone(),
+            written: written.into_iter(),
+        }
+    }
+}
+
+impl Iterator for DiskDocumentKeys {
+    type Item = DocumentKey;
+
+    fn next(&mut self) -> Option<DocumentKey> {
+        if let Some(range) = self.range.as_mut() {
+            for entry in range.by_ref() {
+                let Ok((_, key)) = entry else {
+                    continue;
+                };
+                let Ok(key) = decode_document_key(key.value()) else {
+                    continue;
+                };
+                if !self.overlay.contains_key(&key) {
+                    return Some(key);
+                }
+            }
+            self.range = None;
+        }
+        self.written.next()
     }
 }
 
