@@ -2526,13 +2526,9 @@ async fn load_extensions(
 pub fn extensions_config(
     config: &SuiteConfig,
 ) -> Result<firenook_extensions::ExtensionsConfig, SuiteRuntimeError> {
-    // The official emulator rewrites POSTINSTALL console links to the UI only
-    // when the UI is enabled in firebase.json (`unknown` otherwise).
-    let ui_enabled = std::fs::read_to_string(&config.firebase_json)
-        .ok()
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .and_then(|json| json.get("emulators")?.get("ui")?.get("enabled")?.as_bool())
-        .unwrap_or(true);
+    // The official emulator rewrites POSTINSTALL console links to the UI
+    // when the UI runs (`unknown` otherwise): firebase.json's
+    // `emulators.ui.enabled`, unless `--ui` started it anyway.
     extensions_config_from(&ExtensionsInputs {
         project_id: config.project_id.clone(),
         project_dir: config.project_dir.clone(),
@@ -2540,7 +2536,8 @@ pub fn extensions_config(
         default_bucket: config.default_bucket.clone(),
         node: config.node.clone(),
         offline: config.offline,
-        ui_origin: (ui_enabled && config.ui_enabled)
+        ui_origin: config
+            .ui_enabled
             .then(|| format!("{}/", config.origin(config.ports.ui))),
     })
 }

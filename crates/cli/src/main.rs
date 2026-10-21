@@ -413,8 +413,12 @@ struct SuiteArgs {
     only: Option<String>,
     /// Do not start the Emulator UI (nor the logging emulator), as
     /// `emulators.ui.enabled: false` does officially.
-    #[arg(long = "no-ui")]
+    #[arg(long = "no-ui", conflicts_with = "ui")]
     no_ui: bool,
+    /// Start the Emulator UI even when `emulators.ui.enabled` is false, as
+    /// the official `--ui` does.
+    #[arg(long)]
+    ui: bool,
     /// `emulators.singleProjectMode`: warn about requests naming another
     /// project (default true).
     #[arg(long = "single-project-mode", value_name = "BOOL")]
@@ -977,13 +981,15 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
     let firestore_databases =
         resolve_firestore_databases(&config_dir, raw_config.firestore.as_ref())?;
     let ports = resolve_suite_ports(arguments, &raw_config.emulators);
-    let ui_enabled = !arguments.no_ui
-        && raw_config
-            .emulators
-            .ui
-            .as_ref()
-            .and_then(|ui| ui.enabled)
-            .unwrap_or(true);
+    // As the official CLI decides: --ui first, then emulators.ui.enabled.
+    let ui_enabled = arguments.ui
+        || (!arguments.no_ui
+            && raw_config
+                .emulators
+                .ui
+                .as_ref()
+                .and_then(|ui| ui.enabled)
+                .unwrap_or(true));
     Ok(SuiteConfig {
         host: arguments.host.clone(),
         allowed_hosts: arguments
@@ -2199,6 +2205,60 @@ mod tests {
         assert_eq!(launch.args, ["--only", "firestore"]);
         let error = resolve("{oops").expect_err("refused");
         assert!(error.starts_with("--launch-context "), "{error}");
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn ui_starts_the_console_that_firebase_json_turns_off() {
+        let project = std::env::temp_dir().join(format!(
+            "firenook-cli-ui-{}-{}",
+            std::process::id(),
+            TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&project).expect("project");
+        fs::write(
+            project.join("firebase.json"),
+            r#"{"emulators":{"ui":{"enabled":false}}}"#,
+        )
+        .expect("firebase.json");
+        let project_dir = project.display().to_string();
+        let state = project.join("state").display().to_string();
+        let parse = |extra: &[&str]| {
+            Cli::try_parse_from(
+                [
+                    "firenook",
+                    "suite",
+                    "--project-dir",
+                    &project_dir,
+                    "--project-id",
+                    "demo-ui",
+                    "--node",
+                    "node",
+                    "--state-dir",
+                    &state,
+                ]
+                .into_iter()
+                .chain(extra.iter().copied()),
+            )
+        };
+        let resolve = |extra: &[&str]| {
+            let Command::Suite(arguments) = parse(extra).expect("parsed").command else {
+                panic!("expected suite command");
+            };
+            resolve_suite_config(&arguments).expect("resolved")
+        };
+        assert!(!resolve(&[]).ui_enabled, "firebase.json turns it off");
+        assert!(
+            resolve(&["--ui"]).ui_enabled,
+            "--ui comes first, as officially"
+        );
+        assert!(
+            parse(&["--ui", "--no-ui"]).is_err(),
+            "the two are exclusive"
+        );
+        fs::write(project.join("firebase.json"), "{}").expect("firebase.json");
+        assert!(resolve(&[]).ui_enabled);
+        assert!(!resolve(&["--no-ui"]).ui_enabled);
         let _ = fs::remove_dir_all(&project);
     }
 

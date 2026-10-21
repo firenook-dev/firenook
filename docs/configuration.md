@@ -27,7 +27,8 @@ How Firenook reads `firebase.json`, `.firebaserc` and the command line, and what
   `firebase.json` has no `functions` codebase and no `extensions`.
 - **UI.** `emulators.ui.enabled: false` turns off the UI port, and with it
   the console and the logging listener, as in the official suite; `--ui`
-  cannot re-enable it. `emulators:exec` keeps it off unless `--ui` is given or
+  turns it on all the same, as the official `--ui` comes before that
+  setting. `emulators:exec` keeps it off unless `--ui` is given or
   `ui.enabled` is explicitly `true`; `emulators:start` keeps it on unless
   disabled.
   `emulators.singleProjectMode` (default `true`) is passed through.

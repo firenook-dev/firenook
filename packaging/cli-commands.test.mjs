@@ -1449,7 +1449,7 @@ test('MCP console tools name the cause when the suite runs without the UI', asyn
   const {ui: _, ...withoutUi} = fake.full;
   await withSuite(withoutUi, async () => {
     for (const [name, args] of [['logs_search', {}], ['rules_get', {service:'firestore'}], ['auth_mint_token', {uid:'alice'}], ['emulators_clear', {sections:['auth']}], ['storage_read', {path:'a'}]]) {
-      assert.match((await callTool(name, args, true)).error, /uses the console API, which the suite serves on the Emulator UI port, and the running suite for demo-fixture was started without the UI .*emulators\.ui\.enabled in firebase\.json, or firenook emulators:start --ui/, name);
+      assert.match((await callTool(name, args, true)).error, /uses the console API, which the suite serves on the Emulator UI port, and the running suite for demo-fixture was started without the UI .*Restart it with --ui \(firenook emulators:start --ui, or emulators:exec --ui\), which starts the UI even where firebase\.json sets emulators\.ui\.enabled to false; or set that to true/, name);
     }
     assert.equal((await callTool('firestore_get', {path:'users/alice'})).exists, true, 'the emulator tools need no UI');
   });
