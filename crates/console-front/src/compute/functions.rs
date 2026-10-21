@@ -217,6 +217,8 @@ pub(crate) struct FunctionTriggerKey {
 pub(crate) enum FunctionEnvSource {
     DotEnv,
     SecretLocal,
+    /// A param no env file sets: its default, as the worker gets it.
+    ParamDefault,
     Emulator,
     ExtensionParam,
 }
@@ -243,7 +245,8 @@ pub(crate) struct FunctionEnvVariable {
     pub(crate) value: Option<String>,
     pub(crate) secret: bool,
     pub(crate) source: FunctionEnvSource,
-    /// The file it came from, for dotenv and secret variables.
+    /// The file it came from, for dotenv and secret variables (null for a
+    /// param's default).
     pub(crate) file: Option<FunctionEnvFile>,
     pub(crate) file_name: Option<String>,
 }
@@ -274,12 +277,14 @@ pub(crate) struct FunctionParam {
     pub(crate) label: Option<String>,
     pub(crate) default: Option<String>,
     pub(crate) description: Option<String>,
-    /// Null for a secret param.
+    /// The value the codebase loaded with: an env file's, or the param's
+    /// default when no file sets it (`file` is then null). Null for a
+    /// secret param.
     pub(crate) value: Option<String>,
     pub(crate) secret: bool,
     pub(crate) file: Option<String>,
-    /// No value in any env file: the official emulator would prompt and
-    /// write .env.local.
+    /// No value in any env file: the official emulator would prompt (with
+    /// the default, if any, filled in) and write .env.local.
     pub(crate) unresolved: bool,
 }
 
@@ -1736,6 +1741,7 @@ fn environment_of(view: EnvironmentView) -> FunctionEnvironment {
                 source: match variable.source {
                     EnvSource::DotEnv => FunctionEnvSource::DotEnv,
                     EnvSource::SecretLocal => FunctionEnvSource::SecretLocal,
+                    EnvSource::ParamDefault => FunctionEnvSource::ParamDefault,
                     EnvSource::Emulator => FunctionEnvSource::Emulator,
                     EnvSource::ExtensionParam => FunctionEnvSource::ExtensionParam,
                 },

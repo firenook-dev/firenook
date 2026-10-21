@@ -184,6 +184,8 @@ pub struct FunctionView {
 pub enum EnvSource {
     DotEnv,
     SecretLocal,
+    /// A param no env file sets: its default, as the worker gets it.
+    ParamDefault,
     /// Set by the emulator for every worker.
     Emulator,
     /// An Extension instance's parameter.
@@ -789,6 +791,19 @@ impl ConsoleHandle {
                 source: EnvSource::DotEnv,
                 file: file_name.as_deref().map(|name| self.env_file_of(name)),
                 file_name,
+            });
+        }
+        for (key, value) in &loaded.param_env {
+            if loaded.user_env.contains_key(key) {
+                continue;
+            }
+            variables.push(EnvVariableView {
+                key: key.clone(),
+                value: Some(value.clone()),
+                secret: false,
+                source: EnvSource::ParamDefault,
+                file: None,
+                file_name: None,
             });
         }
         for key in loaded.secrets.keys() {

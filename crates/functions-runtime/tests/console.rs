@@ -30,6 +30,9 @@ params:
   - name: UNSET
     type: string
     default: later
+  - name: TAGS
+    type: list
+    default: [a, b]
 endpoints:
   api:
     entryPoint: api
@@ -235,6 +238,31 @@ async fn environments_name_each_file_and_never_list_inherited_values() {
         .find(|variable| variable.key == "API_KEY")
         .expect("listed");
     assert!(secret.secret && secret.value.is_none());
+    // A param no env file sets is listed with the default the worker gets,
+    // from no file; a list as the JSON `.value()` parses.
+    let variable = |key: &str| {
+        environment
+            .variables
+            .iter()
+            .find(|variable| variable.key == key)
+            .cloned()
+            .expect("listed")
+    };
+    let unset = variable("UNSET");
+    assert_eq!(unset.value.as_deref(), Some("later"));
+    assert_eq!(unset.source, EnvSource::ParamDefault);
+    assert_eq!((unset.file, unset.file_name), (None, None));
+    assert_eq!(variable("TAGS").value.as_deref(), Some(r#"["a","b"]"#));
+    assert_eq!(variable("TAGS").source, EnvSource::ParamDefault);
+    assert!(
+        environment
+            .variables
+            .iter()
+            .filter(|variable| variable.key == "GREETING")
+            .count()
+            == 1,
+        "an env file value is listed once, from its file"
+    );
     assert!(
         environment
             .variables
