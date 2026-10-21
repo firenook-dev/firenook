@@ -268,6 +268,20 @@ impl RulesRuntime {
         self.events.installed(RulesOrigin::Startup);
     }
 
+    /// The database whose own ruleset governs `database`, which has none of
+    /// its own: the stand-in [`govern_unlisted_with`](Self::govern_unlisted_with)
+    /// named. `None` when `database` has its own ruleset, a project-wide
+    /// reload governs it, or no stand-in has rules.
+    #[must_use]
+    pub fn stand_in_for(&self, database: &DatabaseName) -> Option<DatabaseName> {
+        let state = read_lock(&self.state);
+        if state.projects.contains_key(database.project_id()) {
+            return None;
+        }
+        let governing = state.governed_as(database);
+        (governing != database).then(|| governing.clone())
+    }
+
     /// Serializes policy evaluation and installation of a store write across
     /// every frontend sharing this runtime.
     #[must_use]

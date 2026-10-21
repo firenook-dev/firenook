@@ -155,7 +155,7 @@ function RulesBody({ project, diagnostics }: { project: string; diagnostics: boo
     [queryClient, project, database, claimKeys],
   )
 
-  const rulesFile = fileName(document?.path) ?? 'firestore.rules'
+  const rulesFile = fileName(document?.path ?? document?.governedBy?.path) ?? 'firestore.rules'
   const exportFile = (list: readonly TestCase[]) => ({
     name: 'firestore.rules.test.ts',
     text: exportTests(list, { project, rulesFile }),
@@ -230,13 +230,25 @@ function RulesBody({ project, diagnostics }: { project: string; diagnostics: boo
       coverageQuery={coverageQuery(project, database)}
       coverageAvailable={diagnostics}
       banners={
-        document &&
-        !document.enforced && (
+        document && !document.enforced ? (
           <SectionBanner tone="warning" testId="rules-not-enforced">
             No rules are loaded for this database, so the emulator allows every request. Apply a
             ruleset to start checking them.
           </SectionBanner>
-        )
+        ) : document?.governedBy ? (
+          <SectionBanner tone="info" testId="rules-governed-by">
+            firebase.json does not list this database, so the rules of{' '}
+            <span className="font-mono">{document.governedBy.database}</span>
+            {document.governedBy.path && (
+              <>
+                {' '}
+                (<span className="font-mono">{fileName(document.governedBy.path)}</span>)
+              </>
+            )}{' '}
+            govern it, as the official emulator applies its one rules file to every database.
+            Applying rules here gives this database its own.
+          </SectionBanner>
+        ) : undefined
       }
       impact={check.compiles ? impact.data : undefined}
       onShowFlips={() => update({ panel: undefined, decision: undefined, flips: true })}

@@ -88,8 +88,9 @@ pub use observe::ObserveConsole;
 pub use paging::{BatchGetItem, BatchGetRequest, BatchGetResponse, ListMeta, Page, Total};
 pub use rules::{
     CollectionRules, GoverningMatch, OutlineAllow, OutlineMatch, RulesChanged, RulesCheck,
-    RulesDiagnostic, RulesDocument, RulesEditor, RulesFileStatus, RulesInstalled, RulesLintCode,
-    RulesMap, RulesOperation, RulesOrigin, RulesOutline, RulesSeverity, RulesVersion, UnusedMatch,
+    RulesDiagnostic, RulesDocument, RulesEditor, RulesFileStatus, RulesGovernor, RulesInstalled,
+    RulesLintCode, RulesMap, RulesOperation, RulesOrigin, RulesOutline, RulesSeverity,
+    RulesVersion, UnusedMatch,
 };
 pub use rules_eval::{
     AllowTrace, DecisionDetail, EvaluateAuth, EvaluateFieldReference, EvaluateOrder, EvaluateQuery,

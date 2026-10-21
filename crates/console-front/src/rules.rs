@@ -136,6 +136,20 @@ pub struct RulesDocument {
     /// found it did not compile, or could not read it. Empty otherwise.
     /// Positions refer to `fileSource`.
     pub file_problems: Vec<RulesDiagnostic>,
+    /// For a database `firebase.json` does not list, the database whose
+    /// rules govern it (the `(default)` entry's, or the first entry's), as
+    /// the official emulator applies its one rules file to every database.
+    /// `null` when the database has rules of its own.
+    pub governed_by: Option<RulesGovernor>,
+}
+
+/// The database whose rules another follows.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RulesGovernor {
+    pub database: String,
+    /// Its configured rules file.
+    pub path: Option<String>,
 }
 
 /// What a change did.
@@ -463,6 +477,13 @@ impl RulesEditor {
                 .file_problems(&database)
                 .map(|problems| diagnostics(&problems))
                 .unwrap_or_default(),
+            governed_by: self.rules.stand_in_for(&database).map(|governor| {
+                let database = governor.database_id().to_owned();
+                RulesGovernor {
+                    path: self.path(&database),
+                    database,
+                }
+            }),
         })
     }
 
@@ -1483,6 +1504,33 @@ mod tests {
         let (name, _, data) = told(&mut stream).await;
         assert_eq!(name, "file", "another database's install says nothing here");
         assert!(data["problems"].to_string().contains("broken"));
+    }
+
+    /// A database firebase.json does not list says whose rules it follows,
+    /// and stops once it has its own.
+    #[tokio::test]
+    async fn an_unlisted_database_names_the_rules_that_govern_it() {
+        let file = TempRules::new(&allow(false));
+        let (runtime, editor) = editor(Some(&file.0));
+        runtime.govern_unlisted_with(&database());
+        let (status, body) = request(editor.clone(), get("/rules?database=elsewhere")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["enforced"], true);
+        assert!(body["path"].is_null(), "{body}");
+        assert_eq!(body["governedBy"]["database"], "(default)");
+        assert_eq!(
+            body["governedBy"]["path"],
+            file.0.display().to_string(),
+            "{body}"
+        );
+        let (_, default) = request(editor.clone(), get("/rules")).await;
+        assert!(default["governedBy"].is_null(), "{default}");
+        let elsewhere = DatabaseName::new(PROJECT, "elsewhere").expect("database");
+        runtime
+            .install_database(&elsewhere, &allow(true))
+            .expect("own rules");
+        let (_, own) = request(editor, get("/rules?database=elsewhere")).await;
+        assert!(own["governedBy"].is_null(), "{own}");
     }
 
     #[test]
