@@ -940,9 +940,18 @@ impl RuntimeState {
         )
     }
 
-    /// Environment for the discovery process (`spawnFunctionsProcess`).
-    fn discovery_environment(&self, backend: &Backend) -> BTreeMap<String, String> {
-        let mut env = self.system_envs();
+    /// Environment for the discovery process (`spawnFunctionsProcess`): the
+    /// codebase's env file values under the emulator's own variables, as
+    /// `discoverBuild(runtimeConfig, {...userEnvs, ...environment})` passes
+    /// them. A param's default is not among them (it resolves after
+    /// discovery), nor is a secret.
+    fn discovery_environment(
+        &self,
+        backend: &Backend,
+        user_env: &BTreeMap<String, String>,
+    ) -> BTreeMap<String, String> {
+        let mut env = user_env.clone();
+        env.extend(self.system_envs());
         env.extend(self.emulator_envs());
         env.insert("FIREBASE_CONFIG".to_owned(), self.firebase_config());
         if let Some(extension) = &backend.read_source().extension {
@@ -1254,7 +1263,7 @@ impl RuntimeState {
                         ..base
                     };
                 };
-                let environment = self.discovery_environment(backend);
+                let environment = self.discovery_environment(backend, &user_env);
                 discovery::discover_from_sdk(&self.config.node, &sdk_root, &directory, &environment)
                     .await
             }

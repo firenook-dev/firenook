@@ -129,6 +129,101 @@ async fn defaulted_params_load_and_reach_the_function() {
     harness.stop().await;
 }
 
+/// A codebase that reads `process.env` while its module loads: in the
+/// discovery process (where the options become the manifest) and in the
+/// worker alike.
+const LOAD_TIME_INDEX: &str = r#"
+const { onRequest } = require("firebase-functions/v2/https");
+const { defineString } = require("firebase-functions/params");
+defineString("GREETING", { default: "hello" });
+const loaded = {
+  shopRegion: process.env.SHOP_REGION ?? null,
+  aliasValue: process.env.ALIAS_VALUE ?? null,
+  localValue: process.env.LOCAL_VALUE ?? null,
+  greeting: process.env.GREETING ?? null,
+  secret: process.env.API_KEY ?? null,
+};
+exports.api = onRequest({ region: process.env.SHOP_REGION || "us-central1" }, (req, res) => res.json(loaded));
+exports[`seen_${process.env.GREETING ? "greeting" : "nogreeting"}_${process.env.API_KEY ? "secret" : "nosecret"}_${process.env.ALIAS_VALUE || "none"}`] =
+  onRequest((req, res) => res.json(loaded));
+"#;
+
+#[tokio::test]
+async fn discovery_sees_the_env_files_as_the_official_emulator_passes_them() {
+    let harness = match Harness::start_configured(
+        LOAD_TIME_INDEX,
+        "",
+        LogDelivery::Attributed,
+        &[
+            (
+                ".env",
+                "SHOP_REGION=europe-west3\nALIAS_VALUE=base\nLOCAL_VALUE=base\n",
+            ),
+            (".env.staging", "ALIAS_VALUE=staging\n"),
+            (".env.local", "LOCAL_VALUE=local\n"),
+            (".secret.local", "API_KEY=local-secret\n"),
+        ],
+        // No functions.yaml: the SDK's own discovery runs.
+        |source| std::fs::remove_file(source.join("functions.yaml")).expect("removed"),
+        |config| config.project_alias = Some("staging".to_owned()),
+    )
+    .await
+    {
+        Ok(harness) => harness,
+        Err(reason) => {
+            eprintln!("skipped: {reason}");
+            return;
+        }
+    };
+    let codebase = harness.monitor.codebase("default").expect("registered");
+    assert_eq!(
+        codebase.state,
+        FunctionLoadState::Ready,
+        "{:?}",
+        codebase.error
+    );
+    let console = harness.runtime.console();
+    let mut ids: Vec<String> = console
+        .functions()
+        .await
+        .into_iter()
+        .map(|view| view.id)
+        .collect();
+    ids.sort();
+    // The region an env file set reached the options, the alias file and
+    // `.env.local` were read; a param's default and the secrets were not
+    // there yet, as in a first official start (the official emulator writes
+    // the default to `.env.local` after discovery; Firenook never does).
+    assert_eq!(
+        ids,
+        [
+            "europe-west3-api",
+            "us-central1-seen_nogreeting_nosecret_staging"
+        ]
+    );
+    let (response, body) = harness
+        .call_text(
+            Request::get(format!("/{PROJECT}/europe-west3/api"))
+                .body(Body::empty())
+                .expect("a request"),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK, "{body}");
+    // The worker loads the module with what discovery saw, and the default
+    // and the secret on top, as the official worker does.
+    assert_eq!(
+        serde_json::from_str::<Value>(&body).expect("JSON"),
+        json!({
+            "shopRegion": "europe-west3",
+            "aliasValue": "staging",
+            "localValue": "local",
+            "greeting": "hello",
+            "secret": "local-secret",
+        })
+    );
+    harness.stop().await;
+}
+
 const REQUIRED_MANIFEST: &str = "specVersion: v1alpha1
 params:
   - name: GREETING
