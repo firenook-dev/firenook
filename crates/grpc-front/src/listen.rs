@@ -296,7 +296,7 @@ async fn add_target(
         }
         Err(error) => return Err(error),
     };
-    let authorization = context.authorization.resolve(database.project_id())?;
+    let authorization = context.authorization.resolve()?;
     let (spec, policy) = match decode_target_spec(&database, target.target_type) {
         Ok(decoded) => decoded,
         Err(error) => {

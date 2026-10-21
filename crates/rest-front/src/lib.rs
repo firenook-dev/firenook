@@ -479,7 +479,6 @@ async fn patch_document(
     Json(body): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, RestError> {
     let parameters = WriteParameters::from_pairs(&pairs)?;
-    let project = path.project.clone();
     let key = document_key(path)?;
     let fields = decode_document_fields(&body)?;
     let precondition = decode_precondition(&parameters)?;
@@ -512,7 +511,7 @@ async fn patch_document(
     }
     // As the store keeps it, before rules see it (see `decode_write`).
     .at_stored_precision();
-    let authorization = request_authorization(&headers, &project)?;
+    let authorization = request_authorization(&headers)?;
     let _guard = state.rules.write_lock();
     let snapshot = state.store.snapshot();
     let request_time = now_timestamp();
@@ -546,9 +545,8 @@ async fn delete_document(
     headers: HeaderMap,
 ) -> Result<Json<JsonValue>, RestError> {
     let parameters = WriteParameters::from_pairs(&pairs)?;
-    let project = path.project.clone();
     let key = document_key(path)?;
-    let authorization = request_authorization(&headers, &project)?;
+    let authorization = request_authorization(&headers)?;
     let database = key.database().clone();
     let write = Write::Delete {
         key,
@@ -850,7 +848,6 @@ async fn commit(
     if body.get("transaction").is_some() {
         return read_options::commit(&state, path, headers, body).await;
     }
-    let project = path.project.clone();
     let database = database_name(path)?;
     let writes = body
         .get("writes")
@@ -860,7 +857,7 @@ async fn commit(
         .map(|write| decode_write(write, &database))
         .collect::<Result<Vec<_>, _>>()?;
     validate_commit_write_sequence(&writes)?;
-    let authorization = request_authorization(&headers, &project)?;
+    let authorization = request_authorization(&headers)?;
     let _guard = state.rules.write_lock();
     let snapshot = state.store.snapshot();
     let verdict = state
@@ -927,14 +924,13 @@ async fn run_query_at_root(
     headers: HeaderMap,
     Json(body): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, RestError> {
-    let project = path.project.clone();
     let preview = Preview::from_headers(&headers)?;
     run_query(
         &state,
         &database_name(path)?,
         None,
         &body,
-        &request_authorization(&headers, &project)?,
+        &request_authorization(&headers)?,
         preview.as_ref(),
     )
     .await
@@ -946,8 +942,7 @@ async fn run_query_at_parent(
     headers: &HeaderMap,
     Json(body): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, RestError> {
-    let project = path.project.clone();
-    let authorization = request_authorization(headers, &project)?;
+    let authorization = request_authorization(headers)?;
     let database = DatabaseName::new(path.project, path.database)
         .map_err(|error| RestError::invalid(error.to_string()))?;
     if let Some(parent) = path.document.strip_suffix(":runQuery") {
@@ -976,13 +971,12 @@ async fn run_aggregation_query_at_root(
     headers: HeaderMap,
     Json(body): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, RestError> {
-    let project = path.project.clone();
     run_aggregation_query(
         &state,
         &database_name(path)?,
         None,
         &body,
-        &request_authorization(&headers, &project)?,
+        &request_authorization(&headers)?,
     )
     .await
 }
@@ -1175,14 +1169,15 @@ fn authorize_query(
     ))
 }
 
-fn request_authorization(headers: &HeaderMap, project: &str) -> Result<Authorization, RestError> {
+/// Who a REST request is from; a header the emulator cannot read is
+/// `INVALID_ARGUMENT`, as on the official emulator.
+fn request_authorization(headers: &HeaderMap) -> Result<Authorization, RestError> {
     let header = headers
         .get(AUTHORIZATION)
         .map(HeaderValue::to_str)
         .transpose()
-        .map_err(|_| RestError::unauthenticated("Authorization header is not valid text"))?;
-    Authorization::parse(header, project, now_timestamp().seconds())
-        .map_err(|error| RestError::unauthenticated(error.to_string()))
+        .map_err(|_| RestError::invalid("Authorization header is not valid text"))?;
+    Authorization::parse(header).map_err(|error| RestError::invalid(error.to_string()))
 }
 
 fn require_allowed(verdict: firenook_rules_runtime::EvaluationResult) -> Result<(), RestError> {

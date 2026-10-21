@@ -484,7 +484,7 @@ impl RulesEvaluator {
             .iter()
             .enumerate()
             .map(|(index, request)| {
-                self.decode(&database, request)
+                Self::decode(&database, request)
                     .map_err(|message| ApiError::invalid(format!("requests[{index}]: {message}")))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -574,11 +574,7 @@ impl RulesEvaluator {
 
     /// The dry-run request a wire request describes, decoded the way the
     /// REST front decodes the same request.
-    fn decode(
-        &self,
-        database: &DatabaseName,
-        request: &EvaluateRequest,
-    ) -> Result<Decoded, String> {
+    fn decode(database: &DatabaseName, request: &EvaluateRequest) -> Result<Decoded, String> {
         let writes = matches!(request.method, RulesMethod::Create | RulesMethod::Update);
         if request.data.is_some() && !writes {
             return Err("data is only for create and update".to_owned());
@@ -630,7 +626,7 @@ impl RulesEvaluator {
             method: request.method,
             dry_run: DryRunRequest {
                 operation,
-                auth: self.auth(request)?,
+                auth: Self::auth(request)?,
                 time: match &request.time {
                     Some(time) => parse_time(time)?,
                     None => now(),
@@ -640,13 +636,11 @@ impl RulesEvaluator {
         })
     }
 
-    fn auth(&self, request: &EvaluateRequest) -> Result<Option<Auth>, String> {
+    fn auth(request: &EvaluateRequest) -> Result<Option<Auth>, String> {
         match (&request.authorization, &request.auth) {
             (Some(_), Some(_)) => Err("give authorization or auth, not both".to_owned()),
             (Some(header), None) => {
-                match Authorization::parse(Some(header), &self.project, now().seconds())
-                    .map_err(|error| error.to_string())?
-                {
+                match Authorization::parse(Some(header)).map_err(|error| error.to_string())? {
                     Authorization::Owner => Err(
                         "the owner credential skips the rules, so there is nothing to evaluate"
                             .to_owned(),

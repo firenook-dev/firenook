@@ -92,7 +92,7 @@ pub(super) async fn root_ids(
         "projects/{}/databases/{}/documents",
         path.project, path.database
     );
-    ids(&state, &path.project, parent, headers, &body).await
+    ids(&state, parent, headers, &body).await
 }
 
 pub(super) async fn post_document_operation(
@@ -106,7 +106,7 @@ pub(super) async fn post_document_operation(
             "projects/{}/databases/{}/documents/{parent}",
             path.project, path.database
         );
-        return ids(&state, &path.project, parent, headers, &body).await;
+        return ids(&state, parent, headers, &body).await;
     }
     let value = serde_json::from_slice(&body).map_err(|e| RestError::invalid(e.to_string()))?;
     run_query_at_parent(State(state), Path(path), &headers, Json(value)).await
@@ -114,14 +114,13 @@ pub(super) async fn post_document_operation(
 
 async fn ids(
     state: &RestState,
-    project: &str,
     parent: String,
     headers: HeaderMap,
     body: &[u8],
 ) -> Result<Json<JsonValue>, RestError> {
     // The official REST metadata operation requires owner authentication, even
     // when a client's document rules would allow reads.
-    if !request_authorization(&headers, project)?.is_owner() {
+    if !request_authorization(&headers)?.is_owner() {
         return Err(RestError::permission_denied(
             "Metadata operations require admin authentication.",
         ));
