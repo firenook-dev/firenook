@@ -2,7 +2,7 @@
   <img alt="Firenook" src="https://raw.githubusercontent.com/firenook-dev/firenook/main/brand/logo/firenook-logo.svg" height="64">
 </p>
 
-<h3 align="center">A drop-in replacement for the Firebase Local Emulator Suite</h3>
+<h3 align="center">A faster drop-in replacement for the Firebase Local Emulator Suite</h3>
 
 <p align="center">
   Keep your <code>firebase.json</code>, SDKs and ports. Get 38× faster writes,

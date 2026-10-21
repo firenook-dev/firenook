@@ -15,7 +15,7 @@ import { mcpAdd } from '../src/agents.mjs';
 import { targetApply, targetClear, use } from '../src/rc.mjs';
 import { adopt, scaffold } from '../src/init.mjs';
 
-const help = `Firenook ${manifest.version} — a drop-in replacement for the Firebase Local Emulator Suite
+const help = `Firenook ${manifest.version} — a faster drop-in replacement for the Firebase Local Emulator Suite
 
 Project
   firenook init [--force] [--dry-run] [--no-functions]   Scaffold firebase.json, rules, a Functions codebase
