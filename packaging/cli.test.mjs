@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { manifest, platformKey, release, sha256, verifyBinary } from '../packages/cli/src/binary.mjs';
 import { canonical, inspectProject, launchContext, loadProject, parseOptions, selectProject } from '../packages/cli/src/options.mjs';
-import { prepareLaunch, requireNode, supervise } from '../packages/cli/src/runtime.mjs';
+import { prepareLaunch, requireNode, supervise, vendorExtensions } from '../packages/cli/src/runtime.mjs';
 
 function project() {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-cli-test-'));
@@ -146,6 +146,20 @@ test('the project alias is chosen like the official applyRC and handed to the en
   assert.deepEqual(selectProject(undefined,{default:'prod',prod:'demo-p'}),{project:'demo-p',alias:'default'});
   assert.deepEqual(selectProject('prod',{default:'demo-a',prod:'demo-p'}),{project:'demo-p',alias:'prod'});
   assert.deepEqual(selectProject('demo-x',{}),{project:'demo-x'});
+});
+test('ext:vendor --offline reaches the engine', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-vendor-test-'));
+  const record = join(dir,'args.txt');
+  const binary = join(dir,'firenook');
+  writeFileSync(binary,`#!/bin/sh\nprintf '%s\\n' "$@" > '${record}'\n`,{mode:0o755});
+  const project = {config:join(dir,'firebase.json'),project:'demo-shop',directory:dir};
+  const args = () => readFileSync(record,'utf8').trim().split('\n');
+  assert.equal(vendorExtensions(binary,project,['stripe'],{offline:true}),0);
+  assert.deepEqual(args().slice(0,2),['extensions','vendor']);
+  assert.ok(args().includes('--offline'));
+  assert.deepEqual(args().slice(args().indexOf('--instance'),args().indexOf('--instance')+2),['--instance','stripe']);
+  assert.equal(vendorExtensions(binary,project),0);
+  assert.ok(!args().includes('--offline'));
 });
 test('services are derived from top-level sections and emulators entries like the official CLI', () => {
   const {dir,options,save} = project();

@@ -15,13 +15,18 @@ use firenook_functions_runtime::LogSink;
 /// The sidecar Firenook writes next to a downloaded or vendored source so
 /// later starts need neither the registry nor a token.
 pub const REGISTRY_SIDECAR: &str = "firenook-registry.json";
+/// The sidecar's name in the releases published under the former name: read
+/// when [`REGISTRY_SIDECAR`] is absent, so a source cached or vendored then
+/// still starts offline, and never written.
+pub const LEGACY_REGISTRY_SIDECAR: &str = "fireside-registry.json";
 /// Vendored sources live under the project's `extensions/` parameter directory.
 pub const VENDOR_DIRECTORY: &str = ".sources";
 /// Maps an unresolved ref (as written in `firebase.json`) to the vendored version.
 pub const VENDOR_MANIFEST: &str = "manifest.json";
 const REQUIRED_FILES: [&str; 2] = ["extension.yaml", "functions/package.json"];
 
-/// `FIREBASE_EXTENSIONS_CACHE_PATH` or `~/.cache/firebase/extensions`.
+/// `FIREBASE_EXTENSIONS_CACHE_PATH` or `<home>/.cache/firebase/extensions`
+/// (the official emulator's `os.homedir()`, [`crate::home::home_dir`]).
 #[must_use]
 pub fn cache_directory() -> PathBuf {
     if let Some(path) =
@@ -29,10 +34,11 @@ pub fn cache_directory() -> PathBuf {
     {
         return PathBuf::from(path);
     }
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map_or_else(|| PathBuf::from("."), PathBuf::from);
-    home.join(".cache").join("firebase").join("extensions")
+    crate::home::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".cache")
+        .join("firebase")
+        .join("extensions")
 }
 
 /// `<project>/extensions/.sources`.
@@ -94,15 +100,34 @@ pub struct RegistrySidecar {
     pub extension_version: Value,
 }
 
-/// Reads the sidecar if present.
+/// Reads the sidecar if present, under its current name or, failing that,
+/// its former one.
 #[must_use]
 pub fn read_sidecar(directory: &Path) -> Option<RegistrySidecar> {
-    let text = std::fs::read_to_string(directory.join(REGISTRY_SIDECAR)).ok()?;
-    let parsed: Value = serde_json::from_str(&text).ok()?;
-    Some(RegistrySidecar {
-        extension: parsed.get("extension")?.clone(),
-        extension_version: parsed.get("extensionVersion")?.clone(),
-    })
+    [REGISTRY_SIDECAR, LEGACY_REGISTRY_SIDECAR]
+        .iter()
+        .find_map(|name| {
+            let text = std::fs::read_to_string(directory.join(name)).ok()?;
+            let parsed: Value = serde_json::from_str(&text).ok()?;
+            Some(RegistrySidecar {
+                extension: parsed.get("extension")?.clone(),
+                extension_version: parsed.get("extensionVersion")?.clone(),
+            })
+        })
+}
+
+/// Removes a sidecar written under the former name from a copy that now
+/// holds the current one.
+pub fn remove_legacy_sidecar(directory: &Path) -> Result<(), ExtensionsError> {
+    let path = directory.join(LEGACY_REGISTRY_SIDECAR);
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(ExtensionsError(format!(
+            "failed to remove {}: {error}",
+            path.display()
+        ))),
+    }
 }
 
 /// Writes the sidecar.

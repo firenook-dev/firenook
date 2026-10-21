@@ -40,10 +40,13 @@ export function extensionsStatus(binary, project) {
 }
 
 // Copies registry extensions into <project>/extensions/.sources with their
-// registry metadata; later starts need no network and no token.
-export function vendorExtensions(binary, project, instances = []) {
+// registry metadata; later starts need no network and no token. Offline, only
+// what the shared cache holds with its sidecar is copied, and the registry is
+// never contacted.
+export function vendorExtensions(binary, project, instances = [], {offline = false} = {}) {
   const args = ['extensions', 'vendor', '--config', project.config, '--project-id', project.project, '--node', process.execPath];
   for (const instance of instances) args.push('--instance', instance);
+  if (offline) args.push('--offline');
   const result = spawnSync(binary, args, {cwd:project.directory, env:nativeEnvironment(), stdio:'inherit', windowsHide:true});
   if (result.error) throw result.error;
   return result.status ?? 1;

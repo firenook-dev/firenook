@@ -12,6 +12,7 @@ use firenook_functions_runtime::{
 use serde_json::{Map, Value};
 
 pub mod control;
+pub mod home;
 pub mod params;
 pub mod refs;
 pub mod registry;
@@ -824,7 +825,8 @@ fn warn_unemulated_apis(config: &ExtensionsConfig, loaded: &[LoadedExtension], l
 }
 
 /// Vendors one ref into the project: copies the cached source (downloading
-/// it first when absent), writes the sidecar and records the resolution.
+/// it first when absent, unless `config.offline`), writes the sidecar and
+/// records the resolution.
 pub async fn vendor(
     config: &ExtensionsConfig,
     instance_id: &str,
@@ -845,8 +847,13 @@ pub async fn vendor(
     let target = source::source_path(&source::vendor_directory(&config.project_dir), &reference)?;
     if origin != SourceOrigin::Vendored {
         source::copy_tree(&directory, &target)?;
+    }
+    // The copy holds the sidecar under its current name only, whatever the
+    // cache or an earlier vendoring wrote.
+    if origin != SourceOrigin::Vendored || !target.join(source::REGISTRY_SIDECAR).is_file() {
         source::write_sidecar(&target, &sidecar)?;
     }
+    source::remove_legacy_sidecar(&target)?;
     source::record_vendored_version(&config.project_dir, written, &resolved)?;
     Ok(target)
 }
@@ -1268,6 +1275,48 @@ mod tests {
                 .0
                 .contains("the auth emulator does not exist or is not running")
         );
+    }
+
+    #[tokio::test]
+    async fn vendoring_offline_copies_the_cache_and_writes_only_the_current_sidecar() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = stripe_project(directory.path());
+        config.offline = true;
+        let (log, _events) = LogSink::recording();
+        let written = "invertase/firestore-stripe-payments@0.3.12";
+        // Nothing cached: offline never asks the registry, and says so.
+        let error = vendor(&config, "stripe", written, &log).await.unwrap_err();
+        assert!(
+            error.0.contains("is not vendored under") && error.0.contains("with network access"),
+            "{}",
+            error.0
+        );
+        // A source cached under the former name of the sidecar is read,
+        // vendored, and the copy holds the sidecar under its current name.
+        let cached = stripe_source(&config.cache_dir, source::LEGACY_REGISTRY_SIDECAR);
+        assert!(source::read_sidecar(&cached).is_some());
+        let target = vendor(&config, "stripe", written, &log).await.unwrap();
+        assert!(target.join(source::REGISTRY_SIDECAR).is_file());
+        assert!(!target.join(source::LEGACY_REGISTRY_SIDECAR).exists());
+        assert!(
+            cached.join(source::LEGACY_REGISTRY_SIDECAR).is_file(),
+            "the cache is left as it is"
+        );
+        let loaded = load(&config, &log).await.unwrap();
+        assert_eq!(loaded[0].origin, SourceOrigin::Vendored);
+        // A project vendored under the former name is brought up to date.
+        std::fs::remove_dir_all(&target).unwrap();
+        stripe_source(
+            &source::vendor_directory(directory.path()),
+            source::LEGACY_REGISTRY_SIDECAR,
+        );
+        assert_eq!(
+            load(&config, &log).await.unwrap()[0].origin,
+            SourceOrigin::Vendored
+        );
+        let target = vendor(&config, "stripe", written, &log).await.unwrap();
+        assert!(target.join(source::REGISTRY_SIDECAR).is_file());
+        assert!(!target.join(source::LEGACY_REGISTRY_SIDECAR).exists());
     }
 
     #[tokio::test]
