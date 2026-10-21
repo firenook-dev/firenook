@@ -184,7 +184,7 @@ fn page_size(requested: i32) -> usize {
     }
 }
 
-fn authorized<T>(value: T, headers: &HeaderMap) -> Result<tonic::Request<T>, RestError> {
+pub(super) fn authorized<T>(value: T, headers: &HeaderMap) -> Result<tonic::Request<T>, RestError> {
     let mut request = tonic::Request::new(value);
     if let Some(value) = headers.get(AUTHORIZATION) {
         request.metadata_mut().insert(

@@ -165,7 +165,7 @@ pub(super) async fn batch_write(
     let request: BatchWriteRequest = message(body, "database", &database(&path))?;
     let response = state
         .service
-        .batch_write(tonic::Request::new(request))
+        .batch_write(super::listing::authorized(request, &headers)?)
         .await
         .map_err(|error| listing::status(&error))?;
     read_json::batch_write(&response.into_inner()).map(Json)
@@ -197,7 +197,7 @@ pub(super) async fn partition(
     let request: PartitionQueryRequest = message(body, "parent", &parent)?;
     let response = state
         .service
-        .partition_query(tonic::Request::new(request))
+        .partition_query(super::listing::authorized(request, headers)?)
         .await
         .map_err(|error| listing::status(&error))?;
     read_json::partition(&response.into_inner()).map(Json)
@@ -218,7 +218,7 @@ pub(super) async fn execute_pipeline(
     let request: ExecutePipelineRequest = message(body, "database", &database(&path))?;
     let mut stream = state
         .service
-        .execute_pipeline(tonic::Request::new(request))
+        .execute_pipeline(super::listing::authorized(request, &headers)?)
         .await
         .map_err(|error| listing::status(&error))?
         .into_inner();
