@@ -25,8 +25,10 @@ npm run build --prefix console     # console/dist, read at runtime by debug engi
 
 `npm run engine` prints the origin to give the dev server. Profiles are
 `data`, `auth`, `storage`, `compute`, `messaging`, `observe` and `all`
-(`scripts/profiles/`); `FIRENOOK_BINARY` points at the engine to run, and
-`FIRENOOK_SEED_SCALE=large` asks the seeders for their perf datasets.
+(`scripts/profiles/`); `FIRENOOK_BINARY` points at the engine to run,
+`FIRENOOK_NODE` at the Node it runs Functions on (default: the Node running
+the script), and `FIRENOOK_SEED_SCALE=large` asks the seeders for their perf
+datasets.
 
 Checks, all run in CI:
 
