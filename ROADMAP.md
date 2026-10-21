@@ -1581,3 +1581,20 @@ Swift, Kotlin and Java snippets marked as JavaScript. Built on 2026-10-21.
   console does not read the `PORT` that `portless run` sets. Checked in a
   browser through portless's HTTPS: every page, the live event stream and
   Storage previews, 248 requests, none failed.
+- [ ] **`npx firenook` gets the release on any Node.** On Node 26,
+  `npx firenook init` in an empty folder installed `firenook@0.0.0`, the
+  placeholder that held the name before the first release, and printed its
+  old advice. Every release declared `engines.node` as `>=24 <25`. npm
+  installs a release whose engines do not match with a warning only, but for
+  a bare name it takes `latest` only when its engines admit the running
+  Node, and otherwise the highest version that is not a preview: for this
+  name, the placeholder. Node 20, 22, 25 and 27 did the same, checked with
+  npm's own version picker; `firenook@latest`, `firenook@next` and
+  `npm install firenook` were not affected. `engines.node` is now `>=20`,
+  the floor npm itself runs on, and the Node 24 check stays in the CLI:
+  `init`, `use`, `mcp add` and the rest run on any Node (checked on 20.20,
+  22.23, 24.20 and 26.9), and the emulators stop with what to switch to:
+  "the emulators need Node 24, since your Functions run on it; this is Node
+  26.9.0. Switch to Node 24 (with nvm: nvm install 24) and run it again". A
+  test holds the floor. The placeholder cannot change; on a Node older than
+  20 it is still what npx finds.

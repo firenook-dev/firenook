@@ -8,7 +8,7 @@
   "bin": {"firenook": "bin/firenook.mjs"},
   "exports": {"./binary": "./src/binary.mjs"},
   "files": ["bin", "src", "release.json", "README.md", "LICENSE", "NOTICE"],
-  "engines": {"node": ">=24 <25"},
+  "engines": {"node": ">=20"},
   "license": "Apache-2.0",
   "repository": {"type": "git", "url": "git+https://github.com/firenook-dev/firenook.git", "directory": "packages/cli"},
   "bugs": {"url": "https://github.com/firenook-dev/firenook/issues"},

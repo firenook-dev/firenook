@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { manifest, platformKey, release, sha256, verifyBinary } from '../packages/cli/src/binary.mjs';
 import { canonical, inspectProject, launchContext, loadProject, parseOptions } from '../packages/cli/src/options.mjs';
-import { prepareLaunch, supervise } from '../packages/cli/src/runtime.mjs';
+import { prepareLaunch, requireNode, supervise } from '../packages/cli/src/runtime.mjs';
 
 function project() {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-cli-test-'));
@@ -48,6 +48,14 @@ test('registry-only exact dependencies; no lifecycle scripts or source-build ins
   assert.equal(manifest.name,'firenook');
   for (const version of Object.values({...manifest.dependencies,...manifest.optionalDependencies})) assert.match(version,/^\d+\.\d+\.\d+(?:-[a-z]+\.\d+)?$/);
   assert.equal(manifest.bin.firenook,'bin/firenook.mjs');
+});
+test('npx gets this release on any Node npm runs on; the emulators ask for Node 24 themselves', () => {
+  // A release whose engines exclude the running Node is skipped for the
+  // 0.0.0 placeholder by `npx firenook`, with no word about why.
+  assert.equal(manifest.engines.node,'>=20');
+  requireNode('24.20.0');
+  assert.throws(()=>requireNode('26.9.0'),/need Node 24, since your Functions run on it; this is Node 26\.9\.0\. Switch to Node 24 \(with nvm: nvm install 24\)/);
+  assert.throws(()=>requireNode('22.20.0'),/this is Node 22\.20\.0/);
 });
 test('explicit supported platforms; untested architectures and musl rejected', () => {
   assert.equal(platformKey('linux','x64',{header:{glibcVersionRuntime:'2.39'}}),'linux-x64');

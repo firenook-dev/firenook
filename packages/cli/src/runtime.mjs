@@ -5,9 +5,17 @@ import { binaryPath, manifest, release } from './binary.mjs';
 import { SERVICES, connectHost, launchContext, loadProject } from './options.mjs';
 import { nativeEnvironment, requestNativeStop } from './processes.mjs';
 
+// The Functions workers run on this Node and are tested on Node 24. The check
+// is here and not in package.json's engines: npm refuses no release for its
+// engines, it quietly installs an older one (for this name, the 0.0.0
+// placeholder), so engines names only the floor npm itself runs on.
+export function requireNode(version = process.versions.node) {
+  if (Number(version.split('.')[0]) !== 24) throw new Error(`the emulators need Node 24, since your Functions run on it; this is Node ${version}. Switch to Node 24 (with nvm: nvm install 24) and run it again`);
+}
+
 // `quiet`: the terminal UI shows the configuration findings itself.
 export async function diagnose(options, cwd = process.cwd(), {quiet = false} = {}) {
-  if (Number(process.versions.node.split('.')[0]) !== 24) throw new Error(`Node 24 is required for the tested Functions workers; received ${process.versions.node}`);
+  requireNode();
   // Configuration findings first: they need no installed engine.
   const project = loadProject(options, cwd);
   if (!quiet) for (const warning of project.warnings) console.error(warning);
