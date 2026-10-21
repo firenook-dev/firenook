@@ -8,6 +8,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { applyAgents, planAgents, shown } from './agents.mjs';
+import { nodeCheck } from './binary.mjs';
 
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[c78]/g;
@@ -212,7 +213,9 @@ export function nextSteps(choices, steps, {manager, node = process.versions.node
   const find = id => steps.find(item => item.id === id);
   const typescript = choices.language === 'typescript';
   const lines = [];
-  if (Number(node.split('.')[0]) !== 24) lines.push({label: 'Node', command: 'nvm use 24', why: `the emulators need Node 24, and this is ${node} (nvm install 24 if you have no Node 24)`});
+  // Node 22, 24 and 26 start the emulators, and an untested newer one starts
+  // them with a warning; only a Node they refuse needs a switch first.
+  if (nodeCheck(node).problem) lines.push({label: 'Node', command: 'nvm use 24', why: `the emulators need Node 22, 24 or 26, and this is ${node} (nvm install 24 if you have no Node 24)`});
   if (choices.language !== 'none' && find('packages')?.state !== 'done') {
     // --prefix rather than cd: one command every shell runs as it is.
     lines.push({label: 'Packages', command: 'npm install --prefix functions', why: 'installs the Functions codebase\'s packages'});

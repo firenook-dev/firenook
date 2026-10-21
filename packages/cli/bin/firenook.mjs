@@ -69,7 +69,7 @@ Start/exec: --only auth,functions,firestore,storage,pubsub (extensions=functions
 firebase.json service subsets, storage {rules} or targets, several Firestore databases, ui.enabled and
 singleProjectMode are honoured; database/hosting/dataconnect/apphosting entries are skipped with a
 warning. Any lowercase project id is accepted; demo-* ids never reach cloud services. Functions run on
-the owned runtime with Node 24 workers; Storage rules are evaluated natively. Not provided:
+the owned runtime with Node workers (22, 24, 26); Storage rules are evaluated natively. Not provided:
 functions:shell (Firenook never starts a second Functions runtime; use functions:invoke), and every
 deploy/login command (never intercepted). Disk/WAL state by default; runs are kept, never deleted.
 `;
@@ -184,8 +184,10 @@ async function run(action, args) {
   // In a terminal, emulators:start draws its own UI; everything else, and
   // any pipe, CI or log file, gets the plain line protocol.
   const drawn = action === 'emulators:start' && interactive({plain:Boolean(options.plain)});
-  const diagnostic = await diagnose(options, process.cwd(), {quiet:drawn});
-  if (action === 'doctor') { console.log(JSON.stringify(diagnostic, null, 2)); return 0; }
+  // doctor reports every check, a refused Node or a missing engine among
+  // them, and exits 1 when any check found a problem.
+  const diagnostic = await diagnose(options, process.cwd(), {quiet:drawn, report:action === 'doctor'});
+  if (action === 'doctor') { console.log(JSON.stringify(diagnostic, null, 2)); return diagnostic.problems.length ? 1 : 0; }
   if (action === 'ext:vendor') return vendorExtensions(diagnostic.binary, diagnostic.project, options.instance);
   if (drawn) {
     const project = diagnostic.project;

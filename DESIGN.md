@@ -674,6 +674,14 @@ emulator), replayed by `npm run replay:functions:runtime`:
   control headers and become `FUNCTION_TARGET` / `FUNCTION_SIGNATURE_TYPE` /
   `K_SERVICE` per invocation (left unset in `--inspect-functions` debug mode,
   as the official single-process runtime does).
+- **Node**: every worker runs on the one `--node` (the npm CLI passes the
+  Node running it; the CLI starts on 22, 24 and 26, refuses older ones and
+  warns on untested newer ones). The worker uses only Node's standard
+  modules. A user codebase that asks for another Node (firebase.json
+  `runtime`, else package.json `engines.node`, read as an npm range) gets
+  one warning on the load that finds it, as the official emulator warns
+  when the majors differ; the version comes from one `node --version`
+  started beside the first loads.
 - **Routing** reproduces the official Express surface: `/backends`,
   `/functions/projects/{p}/triggers/{key}`, `trigger_multicast`, the
   `/{project}/{region}/{name}` HTTPS routes, the Eventarc router, the 404

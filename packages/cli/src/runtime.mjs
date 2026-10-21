@@ -1,32 +1,34 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { binaryPath, manifest, release } from './binary.mjs';
+import { binaryPath, manifest, nodeCheck, release } from './binary.mjs';
 import { SERVICES, connectHost, launchContext, loadProject } from './options.mjs';
 import { nativeEnvironment, requestNativeStop } from './processes.mjs';
 import { buildPlan, errorPlace, startBuild } from './build.mjs';
 
-// The Functions workers run on this Node and are tested on Node 24. The check
-// is here and not in package.json's engines: npm refuses no release for its
-// engines, it quietly installs an older one (for this name, the 0.0.0
-// placeholder), so engines names only the floor npm itself runs on.
-export function requireNode(version = process.versions.node) {
-  if (Number(version.split('.')[0]) !== 24) throw new Error(`the emulators need Node 24, since your Functions run on it; this is Node ${version}. Switch to Node 24 (with nvm: nvm install 24) and run it again`);
-}
-
+// The Functions workers run on this Node, so a Node the emulators are not
+// tested on is refused or warned about first (nodeCheck). The check is here
+// and not in package.json's engines: npm refuses no release for its engines,
+// it quietly installs an older one (for this name, the 0.0.0 placeholder),
+// so engines names only the floor npm itself runs on.
 // `quiet`: the terminal UI shows the configuration findings itself.
-export async function diagnose(options, cwd = process.cwd(), {quiet = false} = {}) {
-  requireNode();
+// `report` (doctor): a refused Node or a missing engine is one of the
+// report's `problems` instead of an error, so every check is reported.
+export async function diagnose(options, cwd = process.cwd(), {quiet = false, report = false, node = nodeCheck(), locate = binaryPath} = {}) {
+  if (node.problem && !report) throw new Error(node.problem);
+  const problems = node.problem ? [node.problem] : [];
   // Configuration findings first: they need no installed engine.
   const project = loadProject(options, cwd);
+  if (node.note) project.warnings.unshift(`Firenook: ${node.note}`);
   if (!quiet) for (const warning of project.warnings) console.error(warning);
-  const binary = binaryPath();
+  let binary;
+  try { binary = locate(); } catch (error) { if (!report) throw error; problems.push(error.message); }
   // Functions run on the owned runtime with Node workers; Extensions are
   // resolved natively; the console is in the binary. Neither firebase-tools,
   // Java nor a downloaded asset is consulted.
-  const extensions = extensionsStatus(binary, project);
-  return {binary, project, extensions, services:project.services, demo:project.demo, ui:project.ui,
-    singleProjectMode:project.singleProjectMode, warnings:project.warnings, version:manifest.version, engineRevision:release.engineRevision};
+  const extensions = binary ? extensionsStatus(binary, project) : [];
+  return {binary, node:{...node, path:process.execPath}, project, extensions, services:project.services, demo:project.demo, ui:project.ui,
+    singleProjectMode:project.singleProjectMode, warnings:project.warnings, problems, version:manifest.version, engineRevision:release.engineRevision};
 }
 
 // Read-only: which extension instances start offline, and which still need the

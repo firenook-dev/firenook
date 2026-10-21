@@ -56,10 +56,12 @@ contain document data and decoded auth claims, so keep them local.
 
 ## Requirements and boundaries
 
-- Node 24; macOS x64/arm64, Linux x64/arm64 with glibc 2.28 or newer, or
-  native Windows x64. Each platform requires passing native packaging CI. The
-  Linux engine is linked against glibc 2.28 (the manylinux_2_28 image), and
-  CI starts it on AlmaLinux 8, Debian 11, Ubuntu 22.04 and node:24-slim.
+- Node 22, 24 or 26, which your Functions run on (see
+  [Functions and Extensions](functions-and-extensions.md#node)); macOS
+  x64/arm64, Linux x64/arm64 with glibc 2.28 or newer, or native Windows x64.
+  Each platform requires passing native packaging CI. The Linux engine is
+  linked against glibc 2.28 (the manylinux_2_28 image), and CI starts it on
+  AlmaLinux 8, Debian 11, Ubuntu 22.04 and node:24-slim.
   Windows builds statically link the C runtime; no separate C++ redistributable
   is required by the Firenook executable.
 - No Java: Storage Security Rules are compiled and evaluated natively
@@ -74,7 +76,8 @@ contain document data and decoded auth claims, so keep them local.
 - Nothing is downloaded: no postinstall step and no setup step; the console
   is part of the engine. `setup`, which fetched Google's Emulator UI until
   `0.2.0-next.3`, does nothing now, so scripts that still run it pass.
-  `doctor` is read-only and names missing dependencies.
+  `doctor` is read-only and names missing dependencies and a Node the
+  emulators do not start on, in its `problems`.
 - The existing `firebase.json`, `.firebaserc` (aliases, Storage targets) and
   rules/index files are read as the official CLI reads them; see
   [Configuration](configuration.md). No app SDK replacement is needed.

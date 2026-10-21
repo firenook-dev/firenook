@@ -46,7 +46,7 @@ It then writes the files, gives the agents the server, writes
 or a pin already there is kept), runs `npm install` in `functions/` and the
 project's package manager's install beside it (the lockfile's, else the one
 that ran `init`, else npm), builds a TypeScript codebase once, and offers to
-start the emulators in the same terminal; on Node other than 24 it says how
+start the emulators in the same terminal; on a Node older than 22 it says how
 to switch instead. Ctrl-C stops the installs and keeps what was written.
 
 The files are the same without a terminal: `firebase.json` (Firestore,

@@ -59,6 +59,23 @@ export function checkLoads(binary, {run = spawnSync, ...context} = {}) {
   return binary;
 }
 
+// The Node majors the emulators are tested on. Your Functions run on the
+// Node that runs Firenook, as the official emulator runs them on its own.
+export const NODE_TESTED = [22, 24, 26];
+
+// What this Node means for the emulators. Older than the oldest tested line
+// is refused (`problem`): those lines are past their end of life. An odd or
+// a newer major starts with a warning (`note`): the official CLI runs on any
+// Node from its floor up, and refusing a newer one would stop a start that
+// works.
+export function nodeCheck(version = process.versions.node) {
+  const major = Number(String(version).split('.')[0]);
+  const check = {version, major, tested:NODE_TESTED.includes(major)};
+  if (check.tested) return check;
+  if (!(major > NODE_TESTED[0])) return {...check, problem:`the emulators need Node 22, 24 or 26, since your Functions run on it; this is Node ${version}. Switch to Node 24 (with nvm: nvm install 24) and run it again`};
+  return {...check, note:`Node ${version} is not one the emulators are tested on (22, 24 and 26); they start on it, and your Functions run on it. If something behaves differently, switch to Node 24 (with nvm: nvm install 24)`};
+}
+
 export function verifyBinary(directory, key) {
   const pkg = JSON.parse(readFileSync(join(directory, 'package.json')));
   const receipt = JSON.parse(readFileSync(join(directory, 'receipt.json')));

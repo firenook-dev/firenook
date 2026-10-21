@@ -49,6 +49,12 @@ const PORT_ATTEMPTS = 3
 const KEEP_DIRECTORIES = Boolean(process.env.FIRENOOK_KEEP_ENGINE_DIR)
 
 /**
+ * The Node the engine runs Functions on: this one, unless FIRENOOK_NODE
+ * names another (CI runs the Functions journeys on each supported Node).
+ */
+const FUNCTIONS_NODE = process.env.FIRENOOK_NODE ?? process.execPath
+
+/**
  * Removes an engine's project directory, unless FIRENOOK_KEEP_ENGINE_DIR is
  * set. Each one is 15 to 75 MB (a Functions codebase, its SDK link, the
  * state), and a suite run starts hundreds.
@@ -304,7 +310,7 @@ async function launch(
       '--host',
       HOST,
       '--node',
-      process.execPath,
+      FUNCTIONS_NODE,
       '--state-dir',
       join(directory, 'state'),
       '--minimum-functions',

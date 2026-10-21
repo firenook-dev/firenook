@@ -78,7 +78,39 @@ impl Harness {
         prepare: impl FnOnce(&Path),
     ) -> Result<Self, String> {
         let (node, sdk) = requirements()?;
-        Self::launch(index, manifest, delivery, files, prepare, node, Some(sdk)).await
+        Self::launch(
+            index,
+            manifest,
+            delivery,
+            files,
+            prepare,
+            node,
+            Some(sdk),
+            Some("nodejs22"),
+        )
+        .await
+    }
+
+    /// [`Harness::start_with_files`] with the codebase's firebase.json
+    /// `runtime` (`None`: package.json's `engines.node` decides).
+    pub async fn start_with_runtime(
+        index: &str,
+        manifest: &str,
+        files: &[(&str, &str)],
+        runtime: Option<&str>,
+    ) -> Result<Self, String> {
+        let (node, sdk) = requirements()?;
+        Self::launch(
+            index,
+            manifest,
+            LogDelivery::Attributed,
+            files,
+            |_| {},
+            node,
+            Some(sdk),
+            runtime,
+        )
+        .await
     }
 
     /// A runtime whose worker can never start (no Node, no SDK needed):
@@ -92,6 +124,7 @@ impl Harness {
             |_| {},
             PathBuf::from("/nonexistent/firenook-test-node"),
             None,
+            Some("nodejs22"),
         )
         .await
         .expect("the runtime starts")
@@ -106,6 +139,7 @@ impl Harness {
         prepare: impl FnOnce(&Path),
         node: PathBuf,
         sdk: Option<PathBuf>,
+        runtime: Option<&str>,
     ) -> Result<Self, String> {
         let directory = tempfile::Builder::new()
             .prefix("firenook-dispatch-")
@@ -160,7 +194,7 @@ impl Harness {
             codebases: vec![CodebaseConfig {
                 id: "default".to_owned(),
                 source_dir: source,
-                runtime: Some("nodejs22".to_owned()),
+                runtime: runtime.map(str::to_owned),
                 ignore: Vec::new(),
                 config_dir: None,
             }],

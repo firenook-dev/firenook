@@ -41,6 +41,34 @@ the start. `emulators:exec --build` runs `build` once and runs no test when it
 fails. The scripts are the project's own, the ones a deploy's `predeploy`
 runs, so what loads locally is what a deploy builds.
 
+## Node
+
+Your functions run on the Node that runs Firenook, as the official emulator
+runs them on its own Node. Firenook is tested on Node 22, 24 and 26:
+
+- On Node 22, 24 or 26 the emulators start.
+- On a Node older than 22, `emulators:start` and `emulators:exec` stop at once
+  and say how to switch (`nvm install 24`); `firenook doctor` reports it with
+  its other findings and exits 1.
+- On an odd or a newer major (23, 25, 27 and up) the emulators start with a
+  warning, since nobody has tested that Node; the official CLI also runs on
+  any Node from its oldest supported one up.
+
+A codebase says which Node it deploys on with `engines.node` in its
+`package.json`, or with `runtime` (`nodejs22`) on its entry in `firebase.json`,
+which comes first. When the Node running the emulators is not the one it asks
+for, the start says so, as the official emulator does ("doesn't match your
+global version"), and goes on. In a terminal it is one of the start-up
+warnings on the card (`w` lists them); in plain output it is a line:
+
+```text
+firenook functions: functions/package.json asks for Node 22 in engines.node, but these functions run on Node 24.20.0, the Node running the emulators; start the emulators with Node 22 to run them on the Node they ask for (with nvm: nvm use 22)
+```
+
+A range in `engines.node` (`>=22`, `22 || 24`) is checked as npm reads it.
+The warning comes once per change: a reload that leaves the codebase asking
+for the same Node does not repeat it.
+
 ## Invoking a function by hand
 
 `functions:invoke` finds the running suite through the hub locator (so a
