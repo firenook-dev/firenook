@@ -183,7 +183,12 @@ export function inspectProject(options, cwd = process.cwd()) {
     }
     for (const name of wanted) {
       if (configured.includes(name)) continue;
-      skips.push(`Firenook: not starting the ${name} emulator; firebase.json does not configure it (run firenook init --adopt or add emulators.${name}).`);
+      // What configures it, as the official init writes it: a codebase for
+      // Functions, an emulators entry with its port for the others. adopt
+      // adds entries only for the services firebase.json already names.
+      skips.push(name === 'functions'
+        ? 'Firenook: not starting the functions emulator; firebase.json has no Functions codebase (add a "functions" section naming its source, as firebase init functions writes it).'
+        : `Firenook: not starting the ${name} emulator; firebase.json does not configure it (add "${name}": {"port": ${DEFAULT_PORTS[name]}} under "emulators" in firebase.json, as firebase init emulators writes it).`);
       warnings.push(skips.at(-1));
     }
     services = configured.filter(name => wanted.has(name));

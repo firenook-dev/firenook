@@ -100,7 +100,19 @@ test('pinning writes Firenook exactly and a start script, keeps what a package.j
   const kept = pinPlan(dir, {version: '0.2.0-next.9'});
   assert.deepEqual(JSON.parse(kept.content), {name: 'shop', scripts: {emulators: 'my own', test: 'x'}, devDependencies: {firenook: '0.2.0-next.7'}});
   assert.deepEqual(kept.kept, ['your emulators script', 'firenook 0.2.0-next.7']);
-  assert.equal(kept.changed, true, 'formatting is the only change');
+  assert.equal(kept.changed, false, 'nothing to add, nothing written');
+  // A package.json keeps every byte it had: only the pin and the script are
+  // added, each in the layout of the object it joins.
+  const own = '{\r\n    "name": "shop",\r\n    "scripts": {"test": "node --test"},\r\n    "devDependencies": {\r\n        "typescript": "^7.0.0"\r\n    }\r\n}';
+  writeFileSync(join(dir, 'package.json'), own);
+  const added = pinPlan(dir, {version: '0.2.0'});
+  assert.equal(added.content, own
+    .replace('{"test": "node --test"}', '{"test": "node --test", "emulators": "firenook emulators:start --keep-data"}')
+    .replace('"typescript": "^7.0.0"\r\n', '"typescript": "^7.0.0",\r\n        "firenook": "0.2.0"\r\n'));
+  assert.equal(added.changed, true);
+  writeFileSync(join(dir, 'package.json'), '{\n  "name": "shop"\n}\n');
+  assert.equal(pinPlan(dir, {version: '0.2.0'}).content,
+    '{\n  "name": "shop",\n  "scripts": {\n    "emulators": "firenook emulators:start --keep-data"\n  },\n  "devDependencies": {\n    "firenook": "0.2.0"\n  }\n}\n');
   writeFileSync(join(dir, 'package.json'), '{oops');
   assert.throws(() => pinPlan(dir, {version: '1.0.0'}), /package\.json is not valid JSON/);
   const outer = folder();

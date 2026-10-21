@@ -171,7 +171,15 @@ test('existing config, project aliases and full or partial --only selection', ()
   const {dir:bare,save} = project();
   save({firestore:{rules:'firestore.rules'}});
   assert.throws(()=>loadProject({...options,only:'auth'},bare),/No emulators to start, run firenook init/);
-  assert.match(inspectProject({...options,only:'auth'},bare).warnings.join('\n'),/not starting the auth emulator/);
+  // The advice is what configures the service, as firebase init writes it.
+  const skipped = inspectProject({...options,only:'auth,pubsub,functions'},bare).warnings.join('\n');
+  assert.match(skipped,/not starting the auth emulator; firebase\.json does not configure it \(add "auth": \{"port": 9099\} under "emulators" in firebase\.json, as firebase init emulators writes it\)/);
+  assert.match(skipped,/not starting the pubsub emulator; firebase\.json does not configure it \(add "pubsub": \{"port": 8085\} under "emulators"/);
+  assert.match(skipped,/not starting the functions emulator; firebase\.json has no Functions codebase \(add a "functions" section naming its source, as firebase init functions writes it\)/);
+  assert.doesNotMatch(skipped,/init --adopt/, 'adopt adds entries for the services firebase.json configures, never others');
+  // Following the advice is enough.
+  save({firestore:{rules:'firestore.rules'},emulators:{auth:{port:9099}}});
+  assert.deepEqual(loadProject({...options,only:'auth'},bare).services,['auth']);
 });
 test('the project alias is chosen like the official applyRC and handed to the engine', () => {
   const {dir,options} = project();
@@ -517,6 +525,8 @@ test('emulators:exec argument forms are decided before any binary is touched', (
   assert.match(run('emulators:start','--project','demo-fixture','npm','test').stderr,/Unexpected argument npm/);
   assert.match(run('emulators:start','--recursive').stderr,/--recursive is not an option of firenook emulators:start/);
   assert.match(run('doctor','--only','database').stderr,/not implemented by Firenook/);
+  // doctor checks every Extension instance; --instance belongs to ext:vendor.
+  assert.match(run('doctor','--instance','greeter').stderr,/--instance is not an option of firenook doctor/);
   // One script string is accepted; the shell notice precedes the binary check.
   assert.match(run('emulators:exec','--project','demo-fixture','exit 3').stderr,/running the script through the shell as the official CLI does/);
 });

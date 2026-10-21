@@ -127,17 +127,22 @@ fn tasks_input(line: TasksLogLine) -> LogInput {
     }
 }
 
+/// Says a Cloud Tasks line as the suite prints it: warnings and errors on
+/// stderr, debug lines nowhere, the rest on stdout; with the terminal's
+/// events on, a line of the log (a warning before readiness is a start-up
+/// warning). The runtime is built with the same printer.
+pub(crate) fn print_tasks_line(level: &str, text: &str) {
+    if level != "DEBUG" {
+        terminal::print(level, "tasks", text, &format!("firenook tasks: {text}"));
+    }
+}
+
 /// The Cloud Tasks runtime's log sink: the suite's printing, unchanged
-/// (warnings and errors to stderr, debug lines nowhere, the rest to
-/// stdout), and the line with its refs for every log.
+/// ([`print_tasks_line`]), and the line with its refs for every log.
 pub(crate) fn tasks_log_sink(logging: &LoggingRuntime) -> LogSink {
     let logging = logging.clone();
     LogSink::new(move |line: TasksLogLine| {
-        if line.level == "WARN" || line.level == "ERROR" {
-            eprintln!("firenook tasks: {}", line.text);
-        } else if line.level != "DEBUG" {
-            println!("firenook tasks: {}", line.text);
-        }
+        print_tasks_line(line.level, &line.text);
         logging.emit(tasks_input(line));
     })
 }
