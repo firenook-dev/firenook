@@ -11,6 +11,7 @@ mod pipeline;
 mod query_codec;
 mod service;
 mod timestamp_json;
+mod wire;
 mod write_stream;
 
 pub use codec::decode_document;

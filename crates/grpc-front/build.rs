@@ -11,6 +11,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     tonic_prost_build::configure()
         .build_client(true)
         .build_server(true)
+        // prost's own encoding, except that documents in responses are
+        // measured once instead of once per level of nesting.
+        .codec_path("crate::wire::FirestoreCodec")
         // The official emulator returns stable document field order across
         // repeated reads. Preserve it deterministically at the wire boundary,
         // including nested maps, without changing the core-store format.

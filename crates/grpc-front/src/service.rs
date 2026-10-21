@@ -1105,6 +1105,10 @@ impl Firestore for FirestoreService {
         };
         let read_time = Some(encode_system_read_time(now()));
         let request_time = now();
+        // Rules decide nothing for the owner, nor where none are installed:
+        // the documents are then not converted for an evaluation that never
+        // runs, which cost as much as encoding them.
+        let evaluated = !authorization.is_owner() && self.rules.rules_for(&database).is_some();
         // Decoding, masking and the atomic rules check of every requested
         // document run on the read pool.
         let (responses, reads) = {
@@ -1129,14 +1133,16 @@ impl Firestore for FirestoreService {
                         ));
                     }
                     let document = snapshot.get(&key);
-                    evaluations.push(evaluation_request(
-                        RequestOperation::Get,
-                        &key,
-                        request_time,
-                        document.as_deref(),
-                        None,
-                        RulesQuery::default(),
-                    ));
+                    if evaluated {
+                        evaluations.push(evaluation_request(
+                            RequestOperation::Get,
+                            &key,
+                            request_time,
+                            document.as_deref(),
+                            None,
+                            RulesQuery::default(),
+                        ));
+                    }
                     reads.push((key.clone(), document.clone()));
                     let result = if let Some(document) = document {
                         batch_get_documents_response::Result::Found(encode_document_masked(
