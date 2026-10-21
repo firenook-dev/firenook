@@ -88,8 +88,9 @@ jobs:
           if [[ "$RUNNER_OS" == "Linux" ]]; then cargo=(node packaging/cargo-glibc.mjs "$TOOLCHAIN"); fi
           "${cargo[@]}" build --manifest-path accepted-engine/Cargo.toml --locked --release --bin firenook
           "${cargo[@]}" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-suite-runtime --lib control::tests
-          "${cargo[@]}" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-auth-front --lib password_tests
-          "${cargo[@]}" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-auth-front --lib tests::oauth
+          # Every Auth unit test in release mode: the filters these replaced
+          # (password_tests, tests::oauth) had matched none since a rename.
+          "${cargo[@]}" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-auth-front --lib
       - name: Pack actual public artifacts
         env:
           LOCAL_REVISION: ${{ steps.engine.outputs.local_revision }}

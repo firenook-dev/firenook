@@ -1612,7 +1612,7 @@ Swift, Kotlin and Java snippets marked as JavaScript. Built on 2026-10-21.
   test holds the floor. The placeholder cannot change; on a Node older than
   20 it is still what npx finds.
 
-## `firenook init` in a terminal, and TypeScript compiled as you save (`0.2.0-next.9`)
+## `firenook init` in a terminal, and TypeScript compiled as you save (`0.2.0`)
 
 Found on 2026-10-21, trying the published next.8 the way a newcomer would:
 `npx firenook init` in an empty folder wrote the files and printed two next
@@ -1681,4 +1681,123 @@ emulators running. Built on 2026-10-21.
 - [x] **A recording for the README** (`docs/assets/init.gif`, 289 KB):
   Enter on the choices, the set-up, a yes, and a call, from a folder named
   `~/shop`.
-- [ ] Record it again on the published release, whose banner says next.9.
+- [ ] Record it again on the published release, whose banner says 0.2.0.
+
+## Ordered and range field indexes (`0.2.0`)
+
+Found in the next.6 paired benchmark (10,918 large documents in one
+collection): Firenook was faster than the official emulator on 20 of 26 query
+shapes and about twice as slow on six. Every order other than `__name__` with
+a limit read every document of the collection to keep the first few, and the
+equality index could order nothing; a batch get of 50 documents copied and
+re-measured every document. Built on 2026-10-22.
+
+- [x] **One order-preserving index.** `field_order_v1` keys every top-level
+  value of every document, arrays, maps and vectors included, in the engine's
+  own value order: integers and doubles in one exact numeric domain, NaN
+  first, strings and bytes escaped so the document id after them cannot
+  change the order. Long values and non-empty arrays, maps and vectors share
+  a group key, and the engine sorts each group itself. It replaces
+  `field_equality_v1` (equality is a range of the same keys), with its own
+  revision key: a store written by an older release builds it once on open
+  (about 0.14 s per 1,000 documents), and an older release opening a 0.2.0
+  store builds its own index again instead of trusting an empty one.
+- [x] **Queries walk it.** One top-level order field (plus `__name__`) walks
+  the index in either direction; range, `==` and `in` filters and cursors set
+  where the walk starts and stops; `==` and `in` on other fields are checked
+  in the index before a document is read; the walk stops at the limit. Every
+  candidate still passes the engine's own filter, order and cursor check. A
+  very selective equality on another field keeps the equality lookup. The
+  console's explain view names the new plan.
+- [x] **The batch get.** No copy of each document, no rules conversion for
+  the owner, each length measured once, and stored documents transcoded
+  straight into the reply when nothing else reads them.
+- [x] **Proven against the old path.** Over a million random value pairs
+  against the comparator in both editions, and over 11,000 random queries
+  (mixed types, missing fields, shared long prefixes, NaN, -0.0, big
+  integers, ranges, cursors, offsets) answered identically by a memory store,
+  a disk store without the index and one with it. Writes are unchanged
+  (2,000 sequential writes p50 0.31-0.34 ms against 0.32 ms) and the store is
+  0.7% larger.
+- [x] Measured on a developer machine (11,000 documents of about 45 KB, p50
+  ms, next.8 / 0.2.0 / official): `orderBy createdAt desc limit 20`
+  127 / 14 / 46; `orderBy slideNumber limit 20` 135 / 12 / 83; a range with a
+  limit 141 / 12 / 69; five cursor pages 656 / 59 / 348; a batch get of 50
+  58 / 27 / 29; `==` with `orderBy` on another field 15 / 11 / 64.
+- [ ] The paired benchmark on the acceptance host with the 0.2.0 candidate.
+
+## Node 22 and 26, and older Linux (`0.2.0`)
+
+- [x] **Node 22, 24 and 26.** The emulators start on any of them; an older
+  Node is refused with how to switch, and an odd or newer major starts with
+  a warning, as the official CLI runs on any Node from its floor up. The
+  engine never checked the version; the launcher, `init` and `doctor` did.
+- [x] **A codebase asking for another Node is warned about**, as the official
+  emulator warns: `runtime` in `firebase.json`, else `engines.node` in its
+  `package.json`, once per change.
+- [x] **`doctor` reports the Node** it runs on and every problem in its JSON
+  instead of stopping at the first.
+- [x] **CI runs the Functions runtime, its replays and the console Functions
+  journeys on Node 22 and 26** beside 24.
+- [x] **glibc 2.28.** The Linux engines were linked on Ubuntu 24.04 and
+  needed glibc 2.39, which ruled out Ubuntu 22.04, Debian 12 and the
+  node:24-slim image. They are now linked in the manylinux_2_28 image; CI
+  reads the symbol versions and starts each packed engine on AlmaLinux 8,
+  Debian 11, Ubuntu 22.04 and node:24-slim, and checks that Alpine and Amazon
+  Linux 2 are refused in plain words.
+- [x] **A system the engine cannot run on says what it lacks** (glibc version,
+  musl, a missing loader or library) and what to use instead, rather than the
+  loader's own line.
+
+## Before the first public release (`0.2.0`)
+
+An outside review of the published next.8 on 2026-10-21 found wrong answers,
+data reaching production services, and projects that would not start. Each
+became a failing test first, checked against the official emulator where its
+behaviour was the question.
+
+- [x] **Security Rules.** A gRPC request without an `Authorization` header is
+  signed out, not the owner (`ListCollectionIds`, `PartitionQuery` and
+  Enterprise pipelines check too). `@firebase/rules-unit-testing` works: its
+  unsigned tokens are read as the official emulator reads them, and the rules
+  route takes `text/plain`; CI runs the library against both emulators. A
+  database `firebase.json` does not list follows the default database's
+  rules. A Storage target mapped to several buckets applies its rules to each,
+  and a demo project's targets without buckets fall back to open rules as
+  officially. A denial names the rule line that decided it.
+- [x] **Nothing reaches production.** The console's Python snippet sets
+  `STORAGE_EMULATOR_HOST`, the Apple snippet turns TLS off, and every snippet
+  reaches the Tasks and Eventarc emulators. `emulators:exec` sets the official
+  variables for the emulators that run and no others, keeps credentials of
+  your own, and its demo credentials take their token from the hub; every
+  firebase-admin release tested (Node 11 to 14, Python 6 and 7) works under
+  it with no connection leaving the machine.
+- [x] **Functions.** Params' defaults are applied, `.env.<alias>` is read,
+  discovery sees the `.env` values, the project `firebase use` chose comes
+  before `.firebaserc`'s default, a trigger on a service that is not running
+  says so as officially, `functions:invoke --help` calls nothing,
+  `ext:vendor --offline` is honoured, and the Firebase login is found under
+  `USERPROFILE` on Windows.
+- [x] **Starts and stops.** Two suites with one project id each keep their
+  hub; Firestore closes after a browser session; a killed launcher stops its
+  engine, which saves the data; an engine that dies says why; `--import`
+  without metadata and an invalid indexes file warn as officially;
+  `firebase.json` is found from a folder inside the project; `localhost` binds
+  as officially, `::1` included.
+- [x] **REST.** `createDocument` answered 404. It now matches the official
+  emulator, and an audit of every v1 method against it fixed the rest: list
+  options, preconditions, transactions, `batchWrite`, `partitionQuery` and
+  the `:` routes (the differences kept are listed in `COMPATIBILITY.md`).
+- [x] **Polish.** `init --force` keeps the rules there are; `init --adopt`
+  edits `firebase.json` as text and keeps its formatting; `--ui` comes before
+  `ui.enabled: false`; counts agree with their nouns; schedule, Cloud Tasks,
+  Auth and Storage lines reach the screen; `CI=false` is not CI; six docs
+  that disagreed with the code are corrected.
+- [ ] `npm deprecate firenook@0.0.0` (needs the maintainer's npm login).
+
+## 0.2.0, the first stable release
+
+- [ ] The paired acceptance against the official emulator on the acceptance
+  host, with the exact candidate.
+- [ ] Release PR (version `0.2.0`, the changelog), tag `npm-v0.2.0`, publish
+  the CLI to `latest`; move `next` to 0.2.0 by hand.

@@ -219,9 +219,9 @@ const DATA = {
   // dependency status: required | optional | asset | gone
   dependencies: [
   {
-    "name": "Node 24",
+    "name": "Node 22, 24 or 26",
     "status": "required",
-    "note": "The npm wrapper and the Functions worker run on it; it is the user's Functions runtime, as in production."
+    "note": "The npm wrapper and the Functions worker run on it; it is the user's Functions runtime, as in production. Older is refused, an odd or newer major starts with a warning, and a codebase whose engines.node asks for another Node is warned about (0.2.0)."
   },
   {
     "name": "Java",
@@ -630,7 +630,7 @@ const DATA = {
   {
     "name": "init",
     "status": "done",
-    "note": "In a terminal, one screen with every choice made, then the set-up (installs, Firenook pinned, the first build) and the emulators started (0.2.0-next.9); without one, the official templates and the commands that finish it, or --yes; --adopt diagnoses and completes an existing project (0.1.0-next.9)",
+    "note": "In a terminal, one screen with every choice made, then the set-up (installs, Firenook pinned, the first build) and the emulators started (0.2.0); without one, the official templates and the commands that finish it, or --yes; --adopt diagnoses and completes an existing project (0.1.0-next.9)",
     "remaining": "—",
     "size": "—"
   },
@@ -759,12 +759,12 @@ const DATA = {
   backlog: [
   {
     "item": "init in a terminal",
-    "why": "Built for next.9: npx firenook init chose everything, installed nothing and printed a start command the folder did not have; it now opens on one screen with every choice made (project id, emulators, Functions language, coding agents, set-up), runs the installs, the pin and the first build as rows of the card, and starts the emulators in the same terminal",
+    "why": "Built for 0.2.0: npx firenook init chose everything, installed nothing and printed a start command the folder did not have; it now opens on one screen with every choice made (project id, emulators, Functions language, coding agents, set-up), runs the installs, the pin and the first build as rows of the card, and starts the emulators in the same terminal",
     "size": "days"
   },
   {
     "item": "TypeScript compiled as you save",
-    "why": "Built for next.9: --build runs each Functions codebase's own build:watch beside the engine, starts it after the first compile, and shows TypeScript's errors in the log; exec --build runs no test on code that did not build. init's TypeScript projects start with it",
+    "why": "Built for 0.2.0: --build runs each Functions codebase's own build:watch beside the engine, starts it after the first compile, and shows TypeScript's errors in the log; exec --build runs no test on code that did not build. init's TypeScript projects start with it",
     "size": "days"
   },
   {
@@ -823,8 +823,18 @@ const DATA = {
     "size": "days"
   },
   {
+    "item": "Ordered and range indexes",
+    "why": "Built for 0.2.0: an order-preserving field index (field_order_v1) serves orderBy, range filters and cursors on a top-level field, and equality on other fields is checked in it before a document is read; the batch get transcodes stored documents straight into the reply. The six shapes the next.6 benchmark found about 2x slower than the official emulator are now faster than it",
+    "size": "days"
+  },
+  {
+    "item": "Older Linux (glibc 2.28)",
+    "why": "Built for 0.2.0: the Linux engines are linked against glibc 2.28 in the manylinux_2_28 image instead of the runner's 2.39, so RHEL 8, Debian 11, Ubuntu 22.04 and node:24-slim run them; CI checks the symbol versions and starts each in a container, and Alpine or an older glibc gets a plain message",
+    "size": "days"
+  },
+  {
     "item": "Node 22 and 26",
-    "why": "Node 26 is Homebrew's node and the next LTS, and many Functions codebases declare 22; the worker uses only standard Node modules, and a first run on Node 26 served an HTTP function and a Firestore trigger. Needs the Functions conformance and console journeys on 22 and 26 in CI, and a warning when the Node differs from the codebase's engines, as the official emulator gives",
+    "why": "Built for 0.2.0: the emulators run on Node 22, 24 and 26 (older is refused, an odd or newer major warns), a codebase whose engines.node or firebase.json runtime asks for another Node is warned about as the official emulator warns, doctor reports the Node instead of failing, and CI runs the Functions runtime, its replays and the console Functions journeys on 22 and 26",
     "size": "days"
   },
   {
