@@ -52,6 +52,9 @@ pub mod google {
         pub mod v1 {
             tonic::include_proto!("google.firestore.v1");
             include!(concat!(env!("OUT_DIR"), "/google.firestore.v1.serde.rs"));
+            pub use crate::wire::{
+                BatchGetDocumentsResponse, FoundDocument, batch_get_documents_response,
+            };
         }
     }
 

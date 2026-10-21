@@ -34,7 +34,7 @@ pub use disk::{
 pub mod maintenance {
     pub use crate::disk::{Compaction, StoreSize, TableSize, compact, inspect};
 }
-pub use lazy::{EncodedDocument, LazyDocument};
+pub use lazy::{EncodedDocument, LazyDocument, StoredToken};
 use lazy::{decode_stored_document, encode_stored_document, stored_index_fields};
 
 /// Firestore document fields in deterministic field-name order.
@@ -1414,6 +1414,18 @@ impl Snapshot {
         match &self.documents {
             SnapshotDocuments::Memory { documents, .. } => documents.get(key).cloned(),
             SnapshotDocuments::Disk(documents) => documents.get(key),
+        }
+    }
+
+    /// Reads one document without decoding it when it is stored on disk, so
+    /// a caller that only re-encodes it can walk its encoding instead.
+    #[must_use]
+    pub fn get_lazy(&self, key: &DocumentKey) -> Option<LazyDocument> {
+        match &self.documents {
+            SnapshotDocuments::Memory { documents, .. } => {
+                documents.get(key).cloned().map(LazyDocument::Decoded)
+            }
+            SnapshotDocuments::Disk(documents) => documents.get_lazy(key),
         }
     }
 

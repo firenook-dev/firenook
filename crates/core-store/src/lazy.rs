@@ -328,6 +328,126 @@ impl EncodedDocument {
     pub fn decode(&self) -> Result<Document, DecodeError> {
         decode_stored_document(&self.bytes)
     }
+
+    /// The document as one flat walk over its encoding, without decoding it
+    /// into values: its top-level fields, each a [`StoredToken::Key`] and
+    /// then its value's tokens, appended to `tokens`, which borrow strings
+    /// and bytes from this document. Returns the number of top-level fields,
+    /// the creation time and the update time.
+    pub fn tokens<'a>(
+        &'a self,
+        tokens: &mut Vec<StoredToken<'a>>,
+    ) -> Result<(usize, Timestamp, Timestamp), DecodeError> {
+        let body = document_body(&self.bytes)?;
+        let mut decoder = decoder(body);
+        let fields = length(&mut decoder)?;
+        for _ in 0..fields {
+            tokens.push(StoredToken::Key(borrowed_str(body, &mut decoder)?));
+            push_tokens(body, &mut decoder, tokens)?;
+        }
+        let create_time = Timestamp::decode(&mut decoder)?;
+        let update_time = Timestamp::decode(&mut decoder)?;
+        Ok((fields, create_time, update_time))
+    }
+}
+
+/// One step of [`EncodedDocument::tokens`]: a key, a scalar value, or the
+/// start of an array, a map or a vector, whose members follow it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StoredToken<'a> {
+    /// A field name or map key; its value's tokens follow.
+    Key(&'a str),
+    Null,
+    Boolean(bool),
+    Integer(i64),
+    Double(f64),
+    Timestamp(Timestamp),
+    String(&'a str),
+    Bytes(&'a [u8]),
+    Reference(&'a str),
+    GeoPoint {
+        latitude: f64,
+        longitude: f64,
+    },
+    /// An array of this many values, whose tokens follow.
+    Array(usize),
+    /// A map of this many entries, each a `Key` and its value's tokens.
+    Map(usize),
+    /// A vector of this many doubles, which follow as `Double` tokens.
+    Vector(usize),
+}
+
+/// The next length-prefixed bytes, borrowed from `body` itself rather than
+/// from the reader, so they outlive the walk.
+fn borrowed<'a>(body: &'a [u8], decoder: &mut SliceDecoder<'a>) -> Result<&'a [u8], DecodeError> {
+    let len = length(decoder)?;
+    let start = decoder.reader().consumed;
+    let end = start
+        .checked_add(len)
+        .ok_or(DecodeError::Other("length overflows"))?;
+    let bytes = body
+        .get(start..end)
+        .ok_or(DecodeError::UnexpectedEnd { additional: len })?;
+    decoder.reader().consume(len);
+    Ok(bytes)
+}
+
+fn borrowed_str<'a>(
+    body: &'a [u8],
+    decoder: &mut SliceDecoder<'a>,
+) -> Result<&'a str, DecodeError> {
+    std::str::from_utf8(borrowed(body, decoder)?)
+        .map_err(|_| DecodeError::Other("string is not UTF-8"))
+}
+
+/// The tokens of the value at the decoder, mirroring `skip_value`.
+fn push_tokens<'a>(
+    body: &'a [u8],
+    decoder: &mut SliceDecoder<'a>,
+    tokens: &mut Vec<StoredToken<'a>>,
+) -> Result<(), DecodeError> {
+    let token = match u32::decode(decoder)? {
+        VARIANT_NULL => StoredToken::Null,
+        VARIANT_BOOLEAN => StoredToken::Boolean(bool::decode(decoder)?),
+        VARIANT_INTEGER => StoredToken::Integer(i64::decode(decoder)?),
+        VARIANT_DOUBLE => StoredToken::Double(f64::decode(decoder)?),
+        VARIANT_TIMESTAMP => StoredToken::Timestamp(Timestamp::decode(decoder)?),
+        VARIANT_STRING => StoredToken::String(borrowed_str(body, decoder)?),
+        VARIANT_BYTES => StoredToken::Bytes(borrowed(body, decoder)?),
+        VARIANT_REFERENCE => StoredToken::Reference(borrowed_str(body, decoder)?),
+        VARIANT_GEO_POINT => StoredToken::GeoPoint {
+            latitude: f64::decode(decoder)?,
+            longitude: f64::decode(decoder)?,
+        },
+        VARIANT_ARRAY => {
+            let len = length(decoder)?;
+            tokens.push(StoredToken::Array(len));
+            for _ in 0..len {
+                push_tokens(body, decoder, tokens)?;
+            }
+            return Ok(());
+        }
+        VARIANT_MAP => {
+            let len = length(decoder)?;
+            tokens.push(StoredToken::Map(len));
+            for _ in 0..len {
+                tokens.push(StoredToken::Key(borrowed_str(body, decoder)?));
+                push_tokens(body, decoder, tokens)?;
+            }
+            return Ok(());
+        }
+        VARIANT_VECTOR => {
+            let len = length(decoder)?;
+            tokens.push(StoredToken::Vector(len));
+            for _ in 0..len {
+                tokens.push(StoredToken::Double(f64::decode(decoder)?));
+            }
+            return Ok(());
+        }
+        _ => return Err(DecodeError::Other("unknown Value variant")),
+    };
+    tokens.push(token);
+    Ok(())
 }
 
 /// A scanned document that is decoded only when its contents are needed.
@@ -737,6 +857,72 @@ mod tests {
             assert_eq!(format!("{actual:?}"), format!("{expected:?}"), "{layout}");
             assert!(actual.contains(&("empty".to_owned(), StoredField::Map { empty: true })));
             assert!(actual.contains(&("array".to_owned(), StoredField::Array { empty: false })));
+        }
+    }
+
+    /// Rebuilds the values a token walk describes.
+    fn rebuild(tokens: &mut std::slice::Iter<'_, StoredToken<'_>>) -> Value {
+        match *tokens.next().expect("a value") {
+            StoredToken::Null => Value::Null,
+            StoredToken::Boolean(value) => Value::Boolean(value),
+            StoredToken::Integer(value) => Value::Integer(value),
+            StoredToken::Double(value) => Value::Double(value),
+            StoredToken::Timestamp(value) => Value::Timestamp(value),
+            StoredToken::String(value) => Value::String(value.into()),
+            StoredToken::Bytes(value) => Value::Bytes(Arc::from(value)),
+            StoredToken::Reference(value) => Value::Reference(Arc::from(value)),
+            StoredToken::GeoPoint {
+                latitude,
+                longitude,
+            } => Value::GeoPoint {
+                latitude,
+                longitude,
+            },
+            StoredToken::Array(len) => Value::Array((0..len).map(|_| rebuild(tokens)).collect()),
+            StoredToken::Map(len) => Value::Map(
+                (0..len)
+                    .map(|_| {
+                        let StoredToken::Key(key) = *tokens.next().expect("a key") else {
+                            panic!("a map entry starts with its key");
+                        };
+                        (key.to_owned(), rebuild(tokens))
+                    })
+                    .collect(),
+            ),
+            StoredToken::Vector(len) => Value::Vector(
+                (0..len)
+                    .map(|_| match tokens.next() {
+                        Some(StoredToken::Double(value)) => *value,
+                        other => panic!("a vector holds doubles, not {other:?}"),
+                    })
+                    .collect(),
+            ),
+            StoredToken::Key(key) => panic!("a key {key} where a value belongs"),
+        }
+    }
+
+    #[test]
+    fn tokens_walk_every_value_in_both_layouts() {
+        for (layout, encoded, document) in layouts(rich_fields()) {
+            let mut tokens = Vec::new();
+            let (fields, create_time, update_time) = encoded.tokens(&mut tokens).unwrap();
+            assert_eq!(fields, document.fields().len(), "{layout}");
+            assert_eq!(create_time, document.create_time(), "{layout}");
+            assert_eq!(update_time, document.update_time(), "{layout}");
+            let mut walk = tokens.iter();
+            let mut rebuilt = Fields::new();
+            for _ in 0..fields {
+                let Some(StoredToken::Key(key)) = walk.next() else {
+                    panic!("{layout}: a field starts with its name");
+                };
+                rebuilt.insert((*key).to_owned(), rebuild(&mut walk));
+            }
+            assert!(walk.next().is_none(), "{layout}: no token is left over");
+            let rebuilt = Document {
+                fields: rebuilt,
+                ..document.clone()
+            };
+            assert_eq!(bytes_of(&rebuilt), bytes_of(&document), "{layout}");
         }
     }
 

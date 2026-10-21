@@ -673,6 +673,17 @@ impl DiskSnapshot {
         decode_stored_document(value.value()).ok().map(Arc::new)
     }
 
+    /// [`DiskSnapshot::get`] without decoding a document read from redb.
+    pub(crate) fn get_lazy(&self, key: &DocumentKey) -> Option<LazyDocument> {
+        if let Some(document) = self.overlay.get(key) {
+            return document.clone().map(LazyDocument::Decoded);
+        }
+        let encoded_key = encode_document_key(key).ok()?;
+        let table = self.transaction.open_table(DOCUMENTS).ok()?;
+        let value = table.get(encoded_key.as_slice()).ok()??;
+        Some(LazyDocument::Encoded(EncodedDocument::new(value.value())))
+    }
+
     /// Key-only cursor over the documents whose path starts with `prefix`,
     /// in byte order, with this snapshot's overlay merged in.
     pub(crate) fn key_cursor(&self, database: &DatabaseName, prefix: &str) -> DiskKeyCursor {
