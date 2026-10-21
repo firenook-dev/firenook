@@ -64,7 +64,8 @@ test('explicit supported platforms; untested architectures and musl rejected', (
     const [os, cpu] = key.split('-');
     assert.equal(platformKey(os,cpu,{header:{glibcVersionRuntime:'2.39'}}),key);
   }
-  for (const args of [['linux','x64',{}],['linux','arm64',{}],['win32','ia32',{}],['darwin','ia32',{}]]) assert.throws(()=>platformKey(...args),/Unsupported/);
+  for (const args of [['win32','ia32',{}],['darwin','ia32',{}]]) assert.throws(()=>platformKey(...args),/Unsupported/);
+  for (const args of [['linux','x64',{}],['linux','arm64',{}]]) assert.throws(()=>platformKey(...args),/needs glibc 2\.28 or newer, and this system has no glibc/);
 });
 test('binary checks identity, target, checksum and executable bit', () => {
   const {dir,receipt} = binaryPackage();

@@ -53,7 +53,10 @@ the native Windows checks cover local-disk writes, reopen, export and import.
 
 Release CI builds and checks the native packages on macOS arm64/x64, Linux
 glibc arm64/x64 and Windows x64; a platform is supported for a release only by
-that release's passing run. Behaviour is pinned to the official emulator by
+that release's passing run. The Linux engines are linked against glibc 2.28;
+the run reads each packed engine's glibc symbol versions, fails one that asks
+for more, and starts it in AlmaLinux 8, Debian 11, Ubuntu 22.04 and
+node:24-slim containers. Behaviour is pinned to the official emulator by
 recorded conformance fixtures that every pull request replays. Releases are
 also run side by side with the official emulator under a real application's
 workload (the [benchmarks](benchmarks.md) come from the 0.2.0-next.6 run). Publication needs

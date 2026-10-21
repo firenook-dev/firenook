@@ -56,8 +56,10 @@ contain document data and decoded auth claims, so keep them local.
 
 ## Requirements and boundaries
 
-- Node 24; macOS x64/arm64, Linux x64/arm64 glibc (Ubuntu 24.04 baseline),
-  or native Windows x64. Each platform requires passing native packaging CI.
+- Node 24; macOS x64/arm64, Linux x64/arm64 with glibc 2.28 or newer, or
+  native Windows x64. Each platform requires passing native packaging CI. The
+  Linux engine is linked against glibc 2.28 (the manylinux_2_28 image), and
+  CI starts it on AlmaLinux 8, Debian 11, Ubuntu 22.04 and node:24-slim.
   Windows builds statically link the C runtime; no separate C++ redistributable
   is required by the Firenook executable.
 - No Java: Storage Security Rules are compiled and evaluated natively
@@ -86,6 +88,8 @@ contain document data and decoded auth claims, so keep them local.
   password storage. Never commit real credentials or emulator user exports.
 - Firenook never prompts: destructive commands need `--force`, and
   `--non-interactive` is accepted as a no-op. Windows ARM64/32-bit and Linux
-  musl/Alpine are not claimed supported.
+  musl/Alpine are not claimed supported. On Alpine, or a glibc older than
+  2.28, the CLI says what the engine needs and what the system has, and
+  suggests a glibc image such as node:24-slim.
 - `firenook native ...` exposes the existing advanced native CLI explicitly.
   It does not receive the adapter's project, state or credential safeguards.

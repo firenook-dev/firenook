@@ -11,8 +11,12 @@ interactive release-owner operations.
   baselines and reports stay in private receipts, never in npm metadata.
   Package version and engine version/source are reported separately; old
   acceptance is never attributed to a changed engine.
-- Required platform matrix: macOS x64/arm64, Linux x64/arm64 glibc (Ubuntu 24.04),
-  and Windows x64. Every cell must pass before publication.
+- Required platform matrix: macOS x64/arm64, Linux x64/arm64 glibc (built and
+  tested on Ubuntu 24.04, linked against glibc 2.28 in the pinned
+  manylinux_2_28 image), and Windows x64. Every cell must pass before
+  publication. A Linux engine whose symbol versions ask for more than glibc
+  2.28, or which does not start on AlmaLinux 8, Debian 11, Ubuntu 22.04 and
+  node:24-slim, fails its cell (packaging/smoke-glibc.mjs).
   Reject other platforms; do not compile or download a replacement on install.
 - Registry platform packages contain executables and source/hash receipts.
   The launcher pins exact platform versions and verifies its installed binary.

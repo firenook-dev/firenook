@@ -1,0 +1,40 @@
+ 0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]
+ 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [ld-linux-x86-64.so.2]
+Version needs section '.gnu.version_r' contains 4 entries:
+ Addr: 0x0000000000001710  Offset: 0x00001710  Link: 8 (.dynstr)
+  000000: Version: 1  File: libgcc_s.so.1  Cnt: 3
+  0x0040:   Name: GCC_3.0  Flags: none  Version: 4
+  0x0050:   Name: GCC_3.3  Flags: none  Version: 23
+  0x0060:   Name: GCC_4.2.0  Flags: none  Version: 31
+  0x0010: Version: 1  File: libm.so.6  Cnt: 3
+  0x0070:   Name: GLIBC_2.2.5  Flags: none  Version: 12
+  0x0080:   Name: GLIBC_2.29  Flags: none  Version: 11
+  0x0090:   Name: GLIBC_2.35  Flags: none  Version: 17
+  0x0020: Version: 1  File: libc.so.6  Cnt: 23
+  0x00a0:   Name: GLIBC_2.2.5  Flags: none  Version: 3
+  0x00b0:   Name: GLIBC_2.3  Flags: none  Version: 9
+  0x00c0:   Name: GLIBC_2.3.2  Flags: none  Version: 16
+  0x00d0:   Name: GLIBC_2.3.4  Flags: none  Version: 7
+  0x00e0:   Name: GLIBC_2.4  Flags: none  Version: 6
+  0x00f0:   Name: GLIBC_2.5  Flags: none  Version: 28
+  0x0100:   Name: GLIBC_2.7  Flags: none  Version: 15
+  0x0110:   Name: GLIBC_2.9  Flags: none  Version: 13
+  0x0120:   Name: GLIBC_2.10  Flags: none  Version: 14
+  0x0130:   Name: GLIBC_2.14  Flags: none  Version: 5
+  0x0140:   Name: GLIBC_2.15  Flags: none  Version: 22
+  0x0150:   Name: GLIBC_2.16  Flags: none  Version: 30
+  0x0160:   Name: GLIBC_2.17  Flags: none  Version: 8
+  0x0170:   Name: GLIBC_2.18  Flags: none  Version: 27
+  0x0180:   Name: GLIBC_2.25  Flags: none  Version: 26
+  0x0190:   Name: GLIBC_2.27  Flags: none  Version: 29
+  0x01a0:   Name: GLIBC_2.28  Flags: none  Version: 25
+  0x01b0:   Name: GLIBC_2.29  Flags: none  Version: 21
+  0x01c0:   Name: GLIBC_2.30  Flags: none  Version: 19
+  0x01d0:   Name: GLIBC_2.32  Flags: none  Version: 24
+  0x01e0:   Name: GLIBC_2.33  Flags: none  Version: 18
+  0x01f0:   Name: GLIBC_2.34  Flags: none  Version: 2
+  0x0200:   Name: GLIBC_2.39  Flags: none  Version: 20
+  0x0030: Version: 1  File: ld-linux-x86-64.so.2  Cnt: 1
+  0x0210:   Name: GLIBC_2.3  Flags: none  Version: 10

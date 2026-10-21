@@ -24,7 +24,9 @@ first use; `firenook ext:vendor` copies it into the project so even that is
 offline.
 
 Firenook needs Node 24 (it runs your Functions) on macOS (Apple silicon or
-Intel), Linux (x64 or arm64, glibc) or Windows x64. Firenook is in preview
+Intel), Linux (x64 or arm64, glibc 2.28 or newer: RHEL 8, Debian 10,
+Ubuntu 20.04, the node:24 and node:24-slim images and later, but not Alpine)
+or Windows x64. Firenook is in preview
 (`0.2.0-next` releases): pin an exact version and upgrade on purpose.
 
 ## Switching from the official emulator
