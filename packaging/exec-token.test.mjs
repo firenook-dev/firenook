@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -27,11 +27,11 @@ globalThis.fetch = async (input) => { left.push('fetch ' + String(input instance
 `;
 const DEMO = 'client_id=demo&client_secret=demo&refresh_token=demo&grant_type=refresh_token';
 
-function inProcess(script) {
+function inProcess(script, env = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-exec-token-'));
   writeFileSync(join(dir, 'recorder.cjs'), RECORDER);
   writeFileSync(join(dir, 'script.cjs'), script);
-  const result = spawnSync(process.execPath, ['--require', join(dir, 'recorder.cjs'), '--require', EXEC_TOKEN_PRELOAD, join(dir, 'script.cjs')], {encoding:'utf8'});
+  const result = spawnSync(process.execPath, ['--require', join(dir, 'recorder.cjs'), '--require', EXEC_TOKEN_PRELOAD, join(dir, 'script.cjs')], {encoding:'utf8', env:{...process.env, ...env}});
   assert.equal(result.status, 0, result.stderr);
   const out = Object.fromEntries(result.stdout.trim().split('\n').map(line => [line.slice(0, line.indexOf(' ')), JSON.parse(line.slice(line.indexOf(' ') + 1))]));
   return out;
@@ -77,6 +77,17 @@ fetch('https://oauth2.googleapis.com/token', {method:'POST', body:'grant_type=ur
   .catch(error => process.stdout.write('ANSWER ' + JSON.stringify({error:error.message}) + '\n'));
 `);
   assert.deepEqual(fetched.LEFT, ['fetch https://oauth2.googleapis.com/token']);
+});
+
+test('the answerer’s socket goes with its process, and one a killed process left is removed', {skip:process.platform === 'win32' && 'a named pipe leaves no file'}, () => {
+  const sockets = mkdtempSync('/tmp/fnt-');
+  const gone = Number(spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], {encoding:'utf8'}).stdout);
+  writeFileSync(join(sockets, `firenook-token-${gone}-stale0.sock`), '');
+  writeFileSync(join(sockets, `firenook-token-${process.pid}-alive0.sock`), '');
+  writeFileSync(join(sockets, 'firenook-token-notes.txt'), '');
+  const out = inProcess(viaHttps('https://oauth2.googleapis.com/token', DEMO), {TMPDIR:sockets});
+  assert.equal(out.ANSWER.status, 200);
+  assert.deepEqual(readdirSync(sockets).sort(), [`firenook-token-${process.pid}-alive0.sock`, 'firenook-token-notes.txt']);
 });
 
 test('the preload leaves a process alone when it cannot install itself', () => {
