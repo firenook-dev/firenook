@@ -60,10 +60,41 @@ mod preview;
 use preview::Preview;
 mod coverage;
 mod listing;
+mod methods;
 mod read_json;
 mod read_options;
 #[cfg(test)]
 mod read_options_tests;
+
+/// The official emulator's answer to a request body it cannot read.
+const PAYLOAD_INVALID: &str = "Payload isn't valid for request.";
+
+/// A Firestore REST request body as the official emulator reads one: of any
+/// content type, empty as `{}`, and refused as "Payload isn't valid for
+/// request." unless it is a JSON object.
+struct RestBody(JsonValue);
+
+impl<S: Send + Sync> axum::extract::FromRequest<S> for RestBody {
+    type Rejection = RestError;
+
+    async fn from_request(request: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
+        let bytes = axum::body::Bytes::from_request(request, state)
+            .await
+            .map_err(|_| RestError::invalid(PAYLOAD_INVALID))?;
+        request_json(&bytes).map(Self)
+    }
+}
+
+/// [`RestBody`] from bytes already read.
+fn request_json(bytes: &[u8]) -> Result<JsonValue, RestError> {
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Ok(json!({}));
+    }
+    match serde_json::from_slice::<JsonValue>(bytes) {
+        Ok(value @ JsonValue::Object(_)) => Ok(value),
+        _ => Err(RestError::invalid(PAYLOAD_INVALID)),
+    }
+}
 
 /// Creates the HTTP/1 router that shares the Firestore store with gRPC.
 pub fn router(store: Store) -> Router {
@@ -150,8 +181,24 @@ pub fn router_with_shared_service(
                 .delete(delete_document)
                 .post(listing::post_document_operation),
         )
+        .route(
+            "/v1/projects/{project}/databases/{database}/documents/",
+            get(listing::root_documents),
+        )
         .route(COMMIT_ROUTE, axum::routing::post(commit))
         .route(BATCH_GET_ROUTE, axum::routing::post(batch_get))
+        .route(
+            "/v1/projects/{project}/databases/{database}/documents:batchWrite",
+            axum::routing::post(methods::batch_write),
+        )
+        .route(
+            "/v1/projects/{project}/databases/{database}/documents:partitionQuery",
+            axum::routing::post(methods::partition_at_root),
+        )
+        .route(
+            "/v1/projects/{project}/databases/{database}/documents:executePipeline",
+            axum::routing::post(methods::execute_pipeline),
+        )
         .route(
             "/v1/projects/{project}/databases/{database}/documents:beginTransaction",
             axum::routing::post(read_options::begin),
@@ -441,6 +488,7 @@ struct WriteParameters {
     exists: Option<bool>,
     update_time: Option<String>,
     update_mask: Vec<String>,
+    mask: Vec<String>,
 }
 
 impl WriteParameters {
@@ -463,6 +511,7 @@ impl WriteParameters {
                 }
                 "currentDocument.updateTime" => parameters.update_time = Some(value.clone()),
                 "updateMask.fieldPaths" => parameters.update_mask.push(value.clone()),
+                "mask.fieldPaths" => parameters.mask.push(value.clone()),
                 _ => {}
             }
         }
@@ -487,11 +536,17 @@ async fn patch_document(
     Path(path): Path<DocumentPath>,
     Query(pairs): Query<Vec<(String, String)>>,
     headers: HeaderMap,
-    Json(body): Json<JsonValue>,
+    RestBody(body): RestBody,
 ) -> Result<Json<JsonValue>, RestError> {
     let parameters = WriteParameters::from_pairs(&pairs)?;
     let key = document_key(path)?;
-    let fields = decode_document_fields(&body)?;
+    // A body without fields writes an empty document, as the official
+    // emulator's does; fields it cannot read are the payload's fault.
+    let fields = if body.get("fields").is_none() {
+        Fields::new()
+    } else {
+        decode_document_fields(&body).map_err(|_| RestError::invalid(PAYLOAD_INVALID))?
+    };
     let precondition = decode_precondition(&parameters)?;
     let write = if parameters.update_mask.is_empty() {
         if precondition == Precondition::Exists(false) {
@@ -546,7 +601,16 @@ async fn patch_document(
         .snapshot()
         .get(&key)
         .ok_or_else(|| RestError::internal("patched document disappeared"))?;
-    Ok(Json(encode_document(&key, &document)?))
+    if parameters.mask.is_empty() {
+        return Ok(Json(encode_document(&key, &document)?));
+    }
+    // `mask` shapes the answer only, as on every other read.
+    let mask = firenook_grpc_front::google::firestore::v1::DocumentMask {
+        field_paths: parameters.mask,
+    };
+    let masked = firenook_grpc_front::encode_document_masked(&key, &document, Some(&mask))
+        .map_err(|error| listing::status(&error))?;
+    read_json::document(&masked).map(Json)
 }
 
 async fn delete_document(
@@ -619,14 +683,20 @@ async fn post_eventarc_trigger(
     Ok(Json(body))
 }
 
+/// The emulator's project operations, and the answer to every path the
+/// router does not know: a JSON `NOT_FOUND` whatever the request's body.
 async fn project_operation(
     State(state): State<RestState>,
     method: Method,
     OriginalUri(uri): OriginalUri,
-    Json(body): Json<JsonValue>,
+    body: axum::body::Bytes,
 ) -> Result<Json<JsonValue>, RestError> {
     let Some(operation) = uri.path().strip_prefix("/emulator/v1/projects/") else {
         return Err(RestError::not_found("unknown HTTP endpoint"));
+    };
+    let json = || -> Result<JsonValue, RestError> {
+        serde_json::from_slice(&body)
+            .map_err(|error| RestError::invalid(format!("invalid request body: {error}")))
     };
     let (project, suffix) = operation
         .split_once(':')
@@ -636,6 +706,7 @@ async fn project_operation(
     }
     match (method, suffix) {
         (Method::PUT, "securityRules") => {
+            let body = json()?;
             let source = rules_source(&body)?;
             state
                 .rules
@@ -645,7 +716,7 @@ async fn project_operation(
                 })?;
             Ok(Json(json!({})))
         }
-        (Method::POST, "export") => export_database(&state, project, body).await,
+        (Method::POST, "export") => export_database(&state, project, json()?).await,
         _ => Err(RestError::not_found("unknown emulator project operation")),
     }
 }
@@ -854,19 +925,27 @@ async fn commit(
     State(state): State<RestState>,
     Path(path): Path<DatabasePath>,
     headers: HeaderMap,
-    Json(body): Json<JsonValue>,
+    RestBody(body): RestBody,
 ) -> Result<Json<JsonValue>, RestError> {
     if body.get("transaction").is_some() {
         return read_options::commit(&state, path, headers, body).await;
     }
     let database = database_name(path)?;
-    let writes = body
-        .get("writes")
-        .and_then(JsonValue::as_array)
-        .ok_or_else(|| RestError::invalid("commit writes must be an array"))?
-        .iter()
-        .map(|write| decode_write(write, &database))
-        .collect::<Result<Vec<_>, _>>()?;
+    let writes = match body.get("writes") {
+        None => Vec::new(),
+        Some(writes) => writes
+            .as_array()
+            .ok_or_else(|| RestError::invalid(PAYLOAD_INVALID))?
+            .iter()
+            .map(|write| decode_write(write, &database))
+            .collect::<Result<Vec<_>, _>>()?,
+    };
+    // A commit without writes changes nothing, and the official emulator
+    // answers it with an empty object (no commitTime).
+    if writes.is_empty() {
+        request_authorization(&headers)?;
+        return Ok(Json(json!({})));
+    }
     validate_commit_write_sequence(&writes)?;
     let authorization = request_authorization(&headers)?;
     let _guard = state.rules.write_lock();
@@ -924,7 +1003,7 @@ async fn batch_get(
     State(state): State<RestState>,
     Path(path): Path<DatabasePath>,
     headers: HeaderMap,
-    Json(body): Json<JsonValue>,
+    RestBody(body): RestBody,
 ) -> Result<Json<JsonValue>, RestError> {
     read_options::batch(&state, path, headers, body).await
 }
@@ -933,8 +1012,15 @@ async fn run_query_at_root(
     State(state): State<RestState>,
     Path(path): Path<DatabasePath>,
     headers: HeaderMap,
-    Json(body): Json<JsonValue>,
+    RestBody(body): RestBody,
 ) -> Result<Json<JsonValue>, RestError> {
+    if methods::has_consistency_selector(&body) {
+        let parent = format!(
+            "projects/{}/databases/{}/documents",
+            path.project, path.database
+        );
+        return methods::run_query(&state, parent, body, &headers).await;
+    }
     let preview = Preview::from_headers(&headers)?;
     run_query(
         &state,
@@ -956,8 +1042,16 @@ async fn run_query_at_parent(
     let authorization = request_authorization(headers)?;
     let database = DatabaseName::new(path.project, path.database)
         .map_err(|error| RestError::invalid(error.to_string()))?;
+    let root = format!(
+        "projects/{}/databases/{}/documents",
+        database.project_id(),
+        database.database_id()
+    );
     if let Some(parent) = path.document.strip_suffix(":runQuery") {
-        validate_parent(parent)?;
+        validate_parent(&root, parent)?;
+        if methods::has_consistency_selector(&body) {
+            return methods::run_query(&state, format!("{root}/{parent}"), body, headers).await;
+        }
         let preview = Preview::from_headers(headers)?;
         return run_query(
             &state,
@@ -970,7 +1064,16 @@ async fn run_query_at_parent(
         .await;
     }
     if let Some(parent) = path.document.strip_suffix(":runAggregationQuery") {
-        validate_parent(parent)?;
+        validate_parent(&root, parent)?;
+        if methods::has_consistency_selector(&body) {
+            return methods::run_aggregation_query(
+                &state,
+                format!("{root}/{parent}"),
+                body,
+                headers,
+            )
+            .await;
+        }
         return run_aggregation_query(&state, &database, Some(parent), &body, &authorization).await;
     }
     Err(RestError::not_found("unknown REST document operation"))
@@ -980,8 +1083,15 @@ async fn run_aggregation_query_at_root(
     State(state): State<RestState>,
     Path(path): Path<DatabasePath>,
     headers: HeaderMap,
-    Json(body): Json<JsonValue>,
+    RestBody(body): RestBody,
 ) -> Result<Json<JsonValue>, RestError> {
+    if methods::has_consistency_selector(&body) {
+        let parent = format!(
+            "projects/{}/databases/{}/documents",
+            path.project, path.database
+        );
+        return methods::run_aggregation_query(&state, parent, body, &headers).await;
+    }
     run_aggregation_query(
         &state,
         &database_name(path)?,
@@ -1076,16 +1186,17 @@ fn run_query_blocking(
     let mut responses = documents
         .iter()
         .map(|document| {
+            let fields = match preview {
+                Some(preview) => preview.encode_fields(document.fields(), encode_value)?,
+                None => encode_fields(document.fields())?,
+            };
             Ok(json!({
-                "document": {
-                    "name": document.key().to_string(),
-                    "fields": match preview {
-                        Some(preview) => preview.encode_fields(document.fields(), encode_value)?,
-                        None => encode_fields(document.fields())?,
-                    },
-                    "createTime": format_timestamp(document.document().create_time())?,
-                    "updateTime": format_timestamp(document.document().update_time())?,
-                },
+                "document": document_json(
+                    document.key(),
+                    fields,
+                    document.document().create_time(),
+                    document.document().update_time(),
+                )?,
                 "readTime": read_time,
             }))
         })
@@ -1616,15 +1727,19 @@ fn decode_query_field(path: &str) -> Result<QueryFieldPath, RestError> {
     QueryFieldPath::parse_wire(path).map_err(|error| RestError::invalid(error.to_string()))
 }
 
-fn validate_parent(parent: &str) -> Result<(), RestError> {
+/// A query's parent under the database's `root`: a document, refused with
+/// the official emulator's message otherwise.
+fn validate_parent(root: &str, parent: &str) -> Result<(), RestError> {
     let segments = parent.split('/').collect::<Vec<_>>();
     if parent.is_empty()
         || segments.len() % 2 != 0
         || segments.iter().any(|segment| segment.is_empty())
     {
-        return Err(RestError::invalid(
-            "runQuery parent must be a document path",
-        ));
+        let name = format!("{root}/{parent}");
+        return Err(RestError::invalid(format!(
+            "Document parent name \"{name}\" lacks \"/\" at index {}.",
+            name.len()
+        )));
     }
     for segment in segments {
         validate_resource_id(segment).map_err(|error| RestError::invalid(error.to_string()))?;
@@ -2031,12 +2146,36 @@ fn decode_special_map(fields: Fields) -> Result<Value, RestError> {
 }
 
 fn encode_document(key: &DocumentKey, document: &Document) -> Result<JsonValue, RestError> {
-    Ok(json!({
-        "name": key.to_string(),
-        "fields": encode_fields(document.fields())?,
-        "createTime": format_timestamp(document.create_time())?,
-        "updateTime": format_timestamp(document.update_time())?,
-    }))
+    document_json(
+        key,
+        encode_fields(document.fields())?,
+        document.create_time(),
+        document.update_time(),
+    )
+}
+
+/// A REST document: a document without fields has no `fields` key, as the
+/// official emulator and protobuf JSON write it.
+fn document_json(
+    key: &DocumentKey,
+    fields: Map<String, JsonValue>,
+    create_time: Timestamp,
+    update_time: Timestamp,
+) -> Result<JsonValue, RestError> {
+    let mut document = Map::new();
+    document.insert("name".to_owned(), JsonValue::String(key.to_string()));
+    if !fields.is_empty() {
+        document.insert("fields".to_owned(), JsonValue::Object(fields));
+    }
+    document.insert(
+        "createTime".to_owned(),
+        JsonValue::String(format_timestamp(create_time)?),
+    );
+    document.insert(
+        "updateTime".to_owned(),
+        JsonValue::String(format_timestamp(update_time)?),
+    );
+    Ok(JsonValue::Object(document))
 }
 
 fn encode_fields(fields: &Fields) -> Result<Map<String, JsonValue>, RestError> {
@@ -2267,18 +2406,37 @@ impl RestError {
     }
 
     fn commit(error: &CommitError) -> Self {
-        let (status, code) = match error {
-            CommitError::AlreadyExists(_) => (StatusCode::CONFLICT, "ALREADY_EXISTS"),
-            CommitError::ExistencePrecondition { expected: true, .. } => {
-                (StatusCode::NOT_FOUND, "NOT_FOUND")
-            }
-            CommitError::ExistencePrecondition { .. }
-            | CommitError::UpdateTimePrecondition { .. } => {
-                (StatusCode::PRECONDITION_FAILED, "FAILED_PRECONDITION")
-            }
-            CommitError::InvalidNumericTransformOperand { .. } => {
-                (StatusCode::BAD_REQUEST, "INVALID_ARGUMENT")
-            }
+        // A failed precondition is answered as the official emulator and
+        // production answer it: an existing document is ALREADY_EXISTS (409),
+        // a missing one NOT_FOUND (404), and FAILED_PRECONDITION is HTTP 400.
+        let (status, code, message) = match error {
+            CommitError::AlreadyExists(key)
+            | CommitError::ExistencePrecondition {
+                key,
+                expected: false,
+            } => (
+                StatusCode::CONFLICT,
+                "ALREADY_EXISTS",
+                format!("document already exists: {key}"),
+            ),
+            CommitError::ExistencePrecondition {
+                key,
+                expected: true,
+            } => (
+                StatusCode::NOT_FOUND,
+                "NOT_FOUND",
+                format!("document not found: {key}"),
+            ),
+            CommitError::UpdateTimePrecondition { key, .. } => (
+                StatusCode::BAD_REQUEST,
+                "FAILED_PRECONDITION",
+                format!("update time precondition failed: {key}"),
+            ),
+            CommitError::InvalidNumericTransformOperand { .. } => (
+                StatusCode::BAD_REQUEST,
+                "INVALID_ARGUMENT",
+                error.to_string(),
+            ),
             CommitError::RevisionExhausted => {
                 return Self::internal(error.to_string());
             }
@@ -2294,7 +2452,7 @@ impl RestError {
         Self {
             status,
             code,
-            message: error.to_string(),
+            message,
             streaming: false,
         }
     }
@@ -3180,7 +3338,8 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(response[0]["document"]["fields"], json!({}));
+        // No `fields` key at all, as the official emulator answers.
+        assert!(response[0]["document"].get("fields").is_none());
         assert_eq!(
             response[0]["document"]["name"],
             "projects/demo-select/databases/(default)/documents/items/item-000"

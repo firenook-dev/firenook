@@ -1,7 +1,8 @@
 //! REST transcoding to the shared native listing service, not a second scan engine.
 use super::{
-    AUTHORIZATION, DatabasePath, DocumentPath, HeaderMap, Json, JsonValue, Path, RestError,
-    RestState, State, StatusCode, json, request_authorization, run_query_at_parent,
+    AUTHORIZATION, DatabasePath, DocumentPath, HeaderMap, Json, JsonValue, Path, Query, RestError,
+    RestState, State, StatusCode, json, methods, request_authorization, request_json,
+    run_query_at_parent,
 };
 use axum::body::Bytes;
 use firenook_grpc_front::google::firestore::v1::{
@@ -42,11 +43,9 @@ pub(super) async fn documents(
                 );
             }
             "pageToken" | "orderBy" | "transaction" | "readTime" => input[key] = json!(value),
-            _ => {
-                return Err(RestError::invalid(format!(
-                    "unsupported listing parameter: {key}"
-                )));
-            }
+            // Standard Google API parameters (key, prettyPrint, …) and any
+            // other unknown one are ignored, as the official emulator does.
+            _ => {}
         }
     }
     if !mask.is_empty() {
@@ -82,6 +81,23 @@ pub(super) async fn documents(
     Ok(Json(listed))
 }
 
+/// `GET …/documents/`: the documents directly under the database, from
+/// every collection (`ListDocuments` without a collection id), as the official
+/// emulator lists them.
+pub(super) async fn root_documents(
+    State(state): State<RestState>,
+    Path(path): Path<DatabasePath>,
+    Query(parameters): Query<Vec<(String, String)>>,
+    headers: HeaderMap,
+) -> Result<Json<JsonValue>, RestError> {
+    let path = DocumentPath {
+        project: path.project,
+        database: path.database,
+        document: String::new(),
+    };
+    documents(&state, path, parameters, headers).await
+}
+
 pub(super) async fn root_ids(
     State(state): State<RestState>,
     Path(path): Path<DatabasePath>,
@@ -95,21 +111,35 @@ pub(super) async fn root_ids(
     ids(&state, parent, headers, &body).await
 }
 
+/// A POST under a document path: one of the methods that take a parent
+/// document (`…/documents/{parent}:runQuery`), and otherwise createDocument,
+/// as the official emulator reads it: its last segment is the collection id,
+/// a `:` and all, so `orders/a:other` creates under the collection `orders`
+/// and is refused.
 pub(super) async fn post_document_operation(
     State(state): State<RestState>,
     Path(path): Path<DocumentPath>,
+    Query(parameters): Query<Vec<(String, String)>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<JsonValue>, RestError> {
+    let root = format!(
+        "projects/{}/databases/{}/documents",
+        path.project, path.database
+    );
     if let Some(parent) = path.document.strip_suffix(":listCollectionIds") {
-        let parent = format!(
-            "projects/{}/databases/{}/documents/{parent}",
-            path.project, path.database
-        );
+        let parent = format!("{root}/{parent}");
         return ids(&state, parent, headers, &body).await;
     }
-    let value = serde_json::from_slice(&body).map_err(|e| RestError::invalid(e.to_string()))?;
-    run_query_at_parent(State(state), Path(path), &headers, Json(value)).await
+    if let Some(parent) = path.document.strip_suffix(":partitionQuery") {
+        let parent = format!("{root}/{parent}");
+        return methods::partition(&state, parent, request_json(&body)?, &headers).await;
+    }
+    if path.document.ends_with(":runQuery") || path.document.ends_with(":runAggregationQuery") {
+        let value = request_json(&body)?;
+        return run_query_at_parent(State(state), Path(path), &headers, Json(value)).await;
+    }
+    methods::create_document(&state, path, parameters, &headers, &body).await
 }
 
 async fn ids(
@@ -125,17 +155,10 @@ async fn ids(
             "Metadata operations require admin authentication.",
         ));
     }
-    let mut input = if body.is_empty() {
-        json!({})
-    } else {
-        serde_json::from_slice(body).map_err(|e| RestError::invalid(e.to_string()))?
-    };
-    if !input.is_object() {
-        return Err(RestError::invalid("listing body must be an object"));
-    }
+    let mut input = request_json(body)?;
     input["parent"] = json!(parent);
     let message: ListCollectionIdsRequest =
-        serde_json::from_value(input).map_err(|e| RestError::invalid(e.to_string()))?;
+        serde_json::from_value(input).map_err(|_| RestError::invalid(super::PAYLOAD_INVALID))?;
     let page_size = page_size(message.page_size);
     let result = state
         .service
@@ -179,8 +202,17 @@ fn authorized<T>(value: T, headers: &HeaderMap) -> Result<tonic::Request<T>, Res
 pub(super) fn status(error: &tonic::Status) -> RestError {
     use tonic::Code;
     let (http, code) = match error.code() {
-        Code::InvalidArgument | Code::OutOfRange => (StatusCode::BAD_REQUEST, "INVALID_ARGUMENT"),
+        Code::InvalidArgument => (StatusCode::BAD_REQUEST, "INVALID_ARGUMENT"),
+        Code::OutOfRange => (StatusCode::BAD_REQUEST, "OUT_OF_RANGE"),
         Code::NotFound => (StatusCode::NOT_FOUND, "NOT_FOUND"),
+        Code::AlreadyExists => (StatusCode::CONFLICT, "ALREADY_EXISTS"),
+        Code::Unimplemented => (StatusCode::NOT_IMPLEMENTED, "UNIMPLEMENTED"),
+        Code::Cancelled => (
+            StatusCode::from_u16(499).unwrap_or(StatusCode::BAD_REQUEST),
+            "CANCELLED",
+        ),
+        Code::DataLoss => (StatusCode::INTERNAL_SERVER_ERROR, "DATA_LOSS"),
+        Code::Unknown => (StatusCode::INTERNAL_SERVER_ERROR, "UNKNOWN"),
         Code::PermissionDenied => (StatusCode::FORBIDDEN, "PERMISSION_DENIED"),
         Code::Unauthenticated => (StatusCode::UNAUTHORIZED, "UNAUTHENTICATED"),
         Code::FailedPrecondition => (StatusCode::BAD_REQUEST, "FAILED_PRECONDITION"),

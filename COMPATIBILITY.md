@@ -98,6 +98,31 @@ is rounded down before rules see the write, on REST, gRPC and WebChannel
 alike. Since `0.2.0-next.7`; an export of data saved earlier with a finer
 value rounds it down too, where it used to refuse the whole export.
 
+Every Firestore REST v1 method the official emulator answers is answered with
+its status and body (most error messages are Firenook's own words), checked by
+`conformance/test/rest-methods.test.ts` and `rest-rules.test.ts`, which run
+against both emulators: get, list (`pageSize`,
+`pageToken`, `orderBy`, `mask`, `showMissing`), createDocument (`documentId`
+or a 20-character automatic id, `mask`, ALREADY_EXISTS, Security Rules as a
+create), patch (`updateMask`, `mask`, `currentDocument`), delete, batchGet,
+beginTransaction, commit, rollback, runQuery and runAggregationQuery at the
+root or under a document with a transaction, a new transaction or a read time,
+listCollectionIds and batchWrite. An empty body is `{}`, and a body that is not
+a JSON object is "Payload isn't valid for request.". A transaction that has
+ended is ABORTED. Since `0.2.0`. Firenook keeps production's behaviour where
+the official REST adapter departs from it: it answers partitionQuery (the
+official emulator: UNIMPLEMENTED), compares a `currentDocument.updateTime`
+given in the query string (the official adapter reads it as 0 and refuses
+every one), reads `readTime` and `transaction` given to get and list (the
+official adapter refuses the first and never answers the second), applies
+`mask` with `showMissing`, refuses two `currentDocument` preconditions at once,
+refuses writes and reads naming another project, ends a runQuery stream without
+`"done": true` (as production does), and answers ExecutePipeline on a Standard
+edition database with FAILED_PRECONDITION (the official emulator:
+INVALID_ARGUMENT). Its transactions are optimistic: a write that conflicts
+with a read-write transaction succeeds and the transaction's commit is
+ABORTED, where the official emulator holds a lock and aborts the write.
+
 Each configured Firestore rules file is watched while the suite runs and
 reloaded on change, as the official CLI watches the configured rules file
 (chokidar) and re-uploads it. One second after the last change in a burst the

@@ -20,6 +20,7 @@ const BACKEND_TEST_FILES = [
   "test/query-features.test.ts",
   "test/query-ordering.test.ts",
   "test/rest.test.ts",
+  "test/rest-methods.test.ts",
   "test/streaming-write.test.ts",
   "test/vector-query.test.ts",
   "test/write-transforms.test.ts",
@@ -72,7 +73,9 @@ try {
   await waitUntilListening(server, port);
   await runTests(port, testFiles);
   if (!strictIndexes && !enterprise) {
-    await runTests(port, ["test/control-api.test.ts"]);
+    // These replace the database or its rules, so they run one at a time
+    // after the parallel suite.
+    await runTests(port, ["test/control-api.test.ts", "test/rest-rules.test.ts"], { serial: true });
   }
 } finally {
   await stop(server);
@@ -81,11 +84,15 @@ try {
   }
 }
 
-async function runTests(port: number, files: readonly string[]): Promise<void> {
+async function runTests(
+  port: number,
+  files: readonly string[],
+  { serial = false }: { readonly serial?: boolean } = {},
+): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
     const child = spawn(
       process.execPath,
-      ["--import", "tsx", "--test", ...files],
+      ["--import", "tsx", "--test", ...(serial ? ["--test-concurrency=1"] : []), ...files],
       {
         cwd: process.cwd(),
         env: {

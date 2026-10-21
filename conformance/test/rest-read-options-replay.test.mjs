@@ -63,8 +63,10 @@ test('native HTTP read options replay in memory and disk/WAL with explicit Java 
         if(row.status===null||row.id==='get-read-time'){
           // Do not reproduce the official GET query transcoder hang/invalid
           // timestamp conversion. Validate usable native gRPC semantics instead.
+          // A rolled-back transaction is ABORTED, as the official gRPC
+          // GetDocument with it answers (code 10, recorded in the README).
           const valid=['get-in-read-only','get-read-only-after-mutation','get-read-time'].includes(row.id);
-          assert.equal(response.status,valid?200:400,row.id);
+          assert.equal(response.status,valid?200:row.id==='get-rolled-back'?409:400,row.id);
           if(valid)assert.equal(actual.fields.title.stringValue,'before 火🔥');
         }else{
           assert.equal(response.status,row.status,row.id);
