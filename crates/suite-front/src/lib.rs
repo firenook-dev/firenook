@@ -47,7 +47,7 @@ use tokio::sync::{mpsc, oneshot};
 pub const FIREBASE_TOOLS_COMPATIBILITY_VERSION: &str = "15.22.0";
 /// Maximum in-memory log records replayed to a newly connected UI.
 pub const LOG_REPLAY_CAPACITY: usize = 1_024;
-/// The hub's token endpoint: the `token_url` of the demo credentials
+/// The hub's token endpoint: the `token_uri` of the demo credentials
 /// `firenook emulators:exec` hands its command and the console's server
 /// snippets name. It answers every request with the emulators' `owner`
 /// token, so an Admin SDK that asks for an access token gets one from this
@@ -249,7 +249,7 @@ impl HubRuntime {
             .route("/", get(hub_root))
             .route("/emulators", get(emulators))
             .route("/_admin/export", post(export))
-            .route(DEMO_TOKEN_PATH, get(demo_token).post(demo_token))
+            .route(DEMO_TOKEN_PATH, post(demo_token))
             .route(
                 "/functions/disableBackgroundTriggers",
                 put(disable_background),
@@ -342,17 +342,16 @@ async fn export(
     }
 }
 
-/// The demo credentials' token, whatever the request: the
-/// `external_account_authorized_user` refresh the Admin SDKs send, and both
-/// steps of an `external_account` whose subject token is read from here
-/// (a GET, its `access_token` field) and exchanged here (an STS POST). The
-/// emulators take `owner` as an administrator's token and check no other.
+/// The demo credentials' token, whatever the request: the refresh the Go
+/// and Java Admin SDKs send to the file's `token_uri` (the Python SDK takes
+/// the file's own token, and the Node.js SDKs' refresh is answered in their
+/// process). The emulators take `owner` as an administrator's token and
+/// check no other.
 async fn demo_token() -> Json<JsonValue> {
     Json(json!({
         "access_token": "owner",
         "expires_in": 3600,
         "token_type": "Bearer",
-        "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
     }))
 }
 
@@ -661,24 +660,22 @@ mod tests {
             triggers: TriggerRegistry::default(),
         })
         .expect("Hub");
-        // An external_account_authorized_user refresh, an STS token
-        // exchange and an external_account's read of its subject token, as
-        // the Admin SDKs send them: each gets the same token.
+        // The refresh grant as the Go SDK (form fields) and the Java SDK
+        // (the client in a Basic header) send it: both get the same token.
         let post = |form: &'static str| {
             Request::post(DEMO_TOKEN_PATH)
-                .header(header::AUTHORIZATION, "Basic ZGVtbzpkZW1v")
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::from(form))
                 .expect("request")
         };
+        let mut basic = post("grant_type=refresh_token&refresh_token=demo");
+        basic.headers_mut().insert(
+            header::AUTHORIZATION,
+            "Basic ZGVtbzpkZW1v".parse().expect("header"),
+        );
         for request in [
-            post("grant_type=refresh_token&refresh_token=demo"),
-            post(
-                "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token=owner",
-            ),
-            Request::get(DEMO_TOKEN_PATH)
-                .body(Body::empty())
-                .expect("request"),
+            post("client_id=demo&client_secret=demo&grant_type=refresh_token&refresh_token=demo"),
+            basic,
         ] {
             let response = runtime.application().oneshot(request).await.expect("token");
             assert_eq!(response.status(), StatusCode::OK);
@@ -688,7 +685,6 @@ mod tests {
                     "access_token": "owner",
                     "expires_in": 3600,
                     "token_type": "Bearer",
-                    "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
                 })
             );
         }

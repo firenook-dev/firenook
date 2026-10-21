@@ -296,20 +296,22 @@ pub(crate) fn connection_env(
 }
 
 /// The demo credentials file at `path` (its path and compact content),
-/// when it is the stub `emulators:exec` writes, whose token comes from a
-/// hub's [`DEMO_TOKEN_PATH`]; any other file is a developer's real
-/// credentials and is never shown.
+/// when it is the stub `emulators:exec` writes: the emulators' own token,
+/// and a hub's [`DEMO_TOKEN_PATH`] to refresh it from. Any other file is a
+/// developer's real credentials and is never shown.
 pub(crate) fn demo_credentials(path: &std::path::Path) -> Option<(String, String)> {
     let text = std::fs::read_to_string(path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let demo = value["type"] == "external_account_authorized_user"
+    let demo = value["type"] == "authorized_user"
         && value["client_id"] == "demo"
         && value["client_secret"] == "demo"
         && value["refresh_token"] == "demo"
-        && value["token_url"]
+        && value["token"] == "owner"
+        && value["expiry"].is_string()
+        && value["token_uri"]
             .as_str()
             .is_some_and(|url| url.starts_with("http://") && url.ends_with(DEMO_TOKEN_PATH))
-        && value.as_object().is_some_and(|fields| fields.len() == 5);
+        && value.as_object().is_some_and(|fields| fields.len() == 7);
     demo.then(|| (path.display().to_string(), value.to_string()))
 }
 

@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { binaryPath, manifest, release } from './binary.mjs';
 import { SERVICES, connectHost, launchContext, loadProject } from './options.mjs';
 import { nativeEnvironment, requestNativeStop } from './processes.mjs';
@@ -11,19 +12,29 @@ import { runningServices } from './hub.mjs';
 // refresh with the emulators' owner token.
 export const DEMO_TOKEN_PATH = '/firenook/oauth2/token';
 
-// The demo credentials emulators:exec hands its command, whose token comes
-// from the hub at `hub` (host:port). The Python, Go and Java Admin SDKs look
-// up default credentials when they start, and this keeps the developer's
-// own out of the tests. Every Admin SDK reads this kind's token_url, so one
-// that asks for an access token (Python's Storage client does) asks this
-// machine and never calls Google; an authorized_user file would send the
-// Node.js SDK to oauth2.googleapis.com whatever it held. The Node.js SDK
-// takes no token from this kind, so its Eventarc publish (the one Node call
-// that wants a token here) fails without calling anyone; the Java SDK
-// refuses the kind that would serve Node (an external_account) over HTTP.
+// The demo credentials emulators:exec hands its command (unless yours are
+// set): the Python, Go and Java Admin SDKs look up default credentials when
+// they start, and these keep the developer's own out of the tests. They are
+// an authorized_user file, the one kind every release of every Admin SDK
+// reads (firebase-admin for Node 12 and earlier refuses any other kind at
+// initializeApp, the other SDKs' older releases refuse a newer kind). No SDK
+// ever asks Google for their token: the Python SDK takes the emulators' own
+// `token` as it is (google-auth 1.22 and later), the Go and Java SDKs
+// refresh from the hub at `hub` (host:port), their `token_uri`, and the
+// Node.js SDKs, which send any refresh to Google, have it answered in the
+// process by EXEC_TOKEN_PRELOAD.
 export function demoCredentials(hub) {
-  return {type:'external_account_authorized_user', client_id:'demo', client_secret:'demo', refresh_token:'demo', token_url:`http://${hub}${DEMO_TOKEN_PATH}`};
+  return {type:'authorized_user', client_id:'demo', client_secret:'demo', refresh_token:'demo',
+    token_uri:`http://${hub}${DEMO_TOKEN_PATH}`, token:'owner', expiry:'2999-12-31T23:59:59Z'};
 }
+
+// What each Node.js process of the command loads first while it holds the
+// demo credentials: it answers their refresh in the process.
+export const EXEC_TOKEN_PRELOAD = fileURLToPath(new URL('./exec-token.cjs', import.meta.url));
+
+// `--require <path>` as NODE_OPTIONS reads it: quoted, a backslash or a quote
+// inside escaped.
+const requireOption = path => `--require "${path.replace(/[\\"]/g, character => `\\${character}`)}"`;
 
 // The variables of each emulator the hub lists as running, as the official
 // setEnvVarsForEmulators writes them; a service that is not running gets
@@ -48,12 +59,14 @@ function emulatorVariables(listing) {
 // runScript builds it from `env` (which has GCLOUD_PROJECT): FIREBASE_CONFIG
 // unless `env` has one, then the variables of the emulators in the hub's
 // `listing`. Firenook's additions (GOOGLE_CLOUD_PROJECT, the demo
-// credentials and a gcloud directory of the run's own) are in `env`.
-export function execEnvironment(env, listing) {
+// credentials and a gcloud directory of the run's own) are in `env`; with
+// the demo credentials, `preload` joins NODE_OPTIONS after yours.
+export function execEnvironment(env, listing, preload) {
   const project = env.GCLOUD_PROJECT;
   const config = project && !env.FIREBASE_CONFIG
     ? {FIREBASE_CONFIG:JSON.stringify({projectId:project, storageBucket:`${project}.appspot.com`, databaseURL:`https://${project}.firebaseio.com`})} : {};
-  return {...env, ...config, ...emulatorVariables(listing)};
+  const node = preload ? {NODE_OPTIONS:[env.NODE_OPTIONS, requireOption(preload)].filter(Boolean).join(' ')} : {};
+  return {...env, ...config, ...emulatorVariables(listing), ...node};
 }
 
 // The Functions workers run on this Node and are tested on Node 24. The check
@@ -140,8 +153,10 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {
   const rc = existsSync(p.rc) ? p.rc : join(run, '.firebaserc');
   if (!existsSync(rc)) writeFileSync(rc, '{}\n', {flag:'wx', mode:0o600});
   const host = connectHost(p.host);
-  const credentials = join(run, 'demo-adc.json');
-  writeFileSync(credentials, JSON.stringify(demoCredentials(`${host}:${p.ports.hub}`)), {flag:'wx', mode:0o600});
+  // Credentials of your own are kept, as the official exec passes them on.
+  const own = process.env.GOOGLE_APPLICATION_CREDENTIALS || undefined;
+  const credentials = own ?? join(run, 'demo-adc.json');
+  if (!own) writeFileSync(credentials, JSON.stringify(demoCredentials(`${host}:${p.ports.hub}`)), {flag:'wx', mode:0o600});
   // The engine reads emulators.ui.enabled itself, so --ui cannot re-enable a
   // console the configuration disables; it only keeps it on for exec.
   const ui = p.ui && (mode !== 'exec' || Boolean(options.ui) || p.uiExplicit);
@@ -192,6 +207,7 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {
   say(`Services: ${p.services.join(', ')}; Emulator UI ${ui ? 'on' : 'off'}; host ${p.host}`);
   if (p.demo) say(`Demo project ${p.project}: no cloud service is contacted, but user Functions can still reach external providers; this CLI is not a network sandbox.`);
   else say(`Firenook: real project id ${p.project}; every Functions worker is started with the emulator hosts and without Google credentials, but this CLI is not a network sandbox.`);
+  if (own && mode === 'exec') say(`Firenook: keeping your GOOGLE_APPLICATION_CREDENTIALS (${own}), as the official exec does; a call that needs an access token gets it with those credentials`);
   if (debugLog) say(`Debug log: ${debugLog}`);
   if (options['log-verbosity'] && options['log-verbosity'] !== 'DEBUG') say(`note: --log-verbosity ${options['log-verbosity']} is accepted for compatibility; Firenook prints its full log`);
   say(`Working data and launch receipt are preserved in ${run}. No automatic deletion.`);
@@ -199,7 +215,8 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {
   const builds = options.build ? buildPlan(p, mode) : [];
   for (const entry of builds) say(entry.script ? `Build: ${entry.shown} runs its ${entry.script} script${entry.watch ? ', and Firenook loads what it writes on every save' : ' before the emulators start'}`
     : `note: ${entry.shown} has no build or build:watch script, so --build builds nothing there`);
-  return {binary:diagnostic.binary, args, env:nativeEnvironment(env), hub:`http://${host}:${p.ports.hub}`, cwd:p.directory, run, ui, services:p.services, debugLog, builds};
+  return {binary:diagnostic.binary, args, env:nativeEnvironment(env), hub:`http://${host}:${p.ports.hub}`, preload:own ? undefined : EXEC_TOKEN_PRELOAD,
+    cwd:p.directory, run, ui, services:p.services, debugLog, builds};
 }
 
 // --build without the terminal UI: each build's lines on stderr, marked
@@ -290,7 +307,7 @@ export async function supervise(launch, command) {
         stop('SIGTERM');
         return;
       }
-      env = execEnvironment(launch.env, listing);
+      env = execEnvironment(launch.env, listing, launch.preload);
     }
     if (requestedStop) return;
     testChild = typeof command === 'string'

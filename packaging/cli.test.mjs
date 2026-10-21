@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { manifest, platformKey, release, sha256, verifyBinary } from '../packages/cli/src/binary.mjs';
 import { canonical, inspectProject, launchContext, loadProject, parseOptions } from '../packages/cli/src/options.mjs';
-import { DEMO_TOKEN_PATH, execEnvironment, prepareLaunch, requireNode, supervise } from '../packages/cli/src/runtime.mjs';
+import { DEMO_TOKEN_PATH, EXEC_TOKEN_PRELOAD, execEnvironment, prepareLaunch, requireNode, supervise } from '../packages/cli/src/runtime.mjs';
 
 function project() {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-cli-test-'));
@@ -39,6 +39,16 @@ function launchFor(dir, options, mode = 'start', typed = []) {
   } finally { console.error = original; }
 }
 const flagValue = (args, flag) => args[args.indexOf(flag) + 1];
+// Runs `body` with GOOGLE_APPLICATION_CREDENTIALS set to `value` (unset when undefined).
+function withoutCredentials(body, value) {
+  const saved = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (value === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  else process.env.GOOGLE_APPLICATION_CREDENTIALS = value;
+  try { return body(); } finally {
+    if (saved === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    else process.env.GOOGLE_APPLICATION_CREDENTIALS = saved;
+  }
+}
 
 test('CLI source oracle pins export conventions', () => {
   const oracle = JSON.parse(readFileSync(new URL('fixtures/firebase-cli-15.22.0.json', import.meta.url)));
@@ -246,9 +256,9 @@ test('host binding accepts any address with a warning; per-service conflicts sti
   const launch = launchFor(dir,{...options,host:'0.0.0.0'});
   assert.equal(flagValue(launch.args,'--host'),'0.0.0.0');
   assert.equal(launch.hub,'http://127.0.0.1:4400', 'clients connect through the loopback address');
-  const tokenUrl = launch => JSON.parse(readFileSync(launch.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')).token_url;
-  assert.equal(tokenUrl(launch),'http://127.0.0.1:4400/firenook/oauth2/token');
-  assert.equal(tokenUrl(launchFor(dir,{...options,host:'::'})),'http://[::1]:4400/firenook/oauth2/token');
+  const tokenUrl = launch => JSON.parse(readFileSync(launch.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')).token_uri;
+  assert.equal(tokenUrl(withoutCredentials(() => launchFor(dir,{...options,host:'0.0.0.0'}))),'http://127.0.0.1:4400/firenook/oauth2/token');
+  assert.equal(tokenUrl(withoutCredentials(() => launchFor(dir,{...options,host:'::'}))),'http://[::1]:4400/firenook/oauth2/token');
   assert.equal(inspectProject(options,dir).warnings.length,0);
   config.emulators.auth.host = '192.0.2.10';
   save(config);
@@ -334,21 +344,52 @@ test('state and credential isolation stay outside original config and seed', () 
   assert.equal(launch.env.GCLOUD_PROJECT,'demo-fixture');
   assert.equal(launch.env.FIREBASE_TOKEN,undefined);
 });
-test('the demo credentials get their token from the hub, never from Google', () => {
+test('the demo credentials load in every Admin SDK and never send a token request to Google', () => {
   const {dir,options} = project();
-  const launch = launchFor(dir,{...options,'hub-port':'31400'},'exec');
+  const launch = withoutCredentials(() => launchFor(dir,{...options,'hub-port':'31400'},'exec'));
   assert.equal(launch.hub,'http://127.0.0.1:31400');
-  // An authorized_user file sends the Node.js SDK to oauth2.googleapis.com
-  // for its token whatever it holds; every Admin SDK reads this kind's
-  // token_url, which is the hub's.
+  // authorized_user is the one kind every release of every Admin SDK reads
+  // (firebase-admin for Node 12 and earlier refuses any other kind at
+  // initializeApp). It carries the emulators' own token, which the Python
+  // SDK takes as it is, and the hub as its token_uri, which the Go and Java
+  // SDKs refresh from; the Node.js SDKs, which send any refresh to Google,
+  // have theirs answered in the process by the preload.
   assert.deepEqual(JSON.parse(readFileSync(launch.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')),
-    {type:'external_account_authorized_user',client_id:'demo',client_secret:'demo',refresh_token:'demo',token_url:'http://127.0.0.1:31400/firenook/oauth2/token'});
+    {type:'authorized_user',client_id:'demo',client_secret:'demo',refresh_token:'demo',
+      token_uri:'http://127.0.0.1:31400/firenook/oauth2/token',token:'owner',expiry:'2999-12-31T23:59:59Z'});
   assert.equal(DEMO_TOKEN_PATH,'/firenook/oauth2/token');
+  assert.equal(launch.preload,EXEC_TOKEN_PRELOAD);
+  assert.ok(existsSync(EXEC_TOKEN_PRELOAD),EXEC_TOKEN_PRELOAD);
+  // The engine runs no Node.js of the command's: the preload is the command's alone.
+  assert.equal(launch.env.NODE_OPTIONS,process.env.NODE_OPTIONS);
   assert.equal(launch.env.CLOUDSDK_CONFIG,join(launch.run,'gcloud'));
   // The engine is told its ports by its arguments; the emulators' variables
   // are the command's, from the hub's listing once they run.
   for (const name of ['FIRESTORE_EMULATOR_HOST','FIREBASE_AUTH_EMULATOR_HOST','FIREBASE_STORAGE_EMULATOR_HOST','STORAGE_EMULATOR_HOST','FIREBASE_EMULATOR_HUB','PUBSUB_EMULATOR_HOST'])
     assert.equal(launch.env[name],undefined,name);
+});
+test('exec keeps a GOOGLE_APPLICATION_CREDENTIALS of your own, as the official exec passes it on', () => {
+  const {dir,options} = project();
+  const own = join(dir,'my-service-account.json');
+  const launch = withoutCredentials(() => launchFor(dir,options,'exec'),own);
+  assert.equal(launch.env.GOOGLE_APPLICATION_CREDENTIALS,own);
+  assert.equal(launch.preload,undefined);
+  assert.ok(!existsSync(join(launch.run,'demo-adc.json')),'no demo credentials are written');
+  assert.match(launch.stderr,/keeping your GOOGLE_APPLICATION_CREDENTIALS/);
+  const env = execEnvironment(launch.env,{},launch.preload);
+  assert.equal(env.GOOGLE_APPLICATION_CREDENTIALS,own);
+  assert.equal(env.NODE_OPTIONS,process.env.NODE_OPTIONS);
+  // An empty value is no credentials at all.
+  assert.notEqual(withoutCredentials(() => launchFor(dir,options,'exec'),'').env.GOOGLE_APPLICATION_CREDENTIALS,'');
+});
+test('the command’s Node.js processes load the token preload, after your own NODE_OPTIONS', () => {
+  assert.equal(execEnvironment({},{},'/opt/firenook/src/exec-token.cjs').NODE_OPTIONS,'--require "/opt/firenook/src/exec-token.cjs"');
+  assert.equal(execEnvironment({NODE_OPTIONS:'--max-old-space-size=4096'},{},'/a b/exec-token.cjs').NODE_OPTIONS,
+    '--max-old-space-size=4096 --require "/a b/exec-token.cjs"');
+  // NODE_OPTIONS reads a backslash or a quote inside quotes as escaping the next character.
+  assert.equal(execEnvironment({},{},'C:\\Program Files\\firenook\\exec-token.cjs').NODE_OPTIONS,
+    '--require "C:\\\\Program Files\\\\firenook\\\\exec-token.cjs"');
+  assert.equal(execEnvironment({NODE_OPTIONS:'--trace-warnings'},{}).NODE_OPTIONS,'--trace-warnings');
 });
 test('exec gives its command the official emulators:exec variables, for the emulators that run', () => {
   // Captured from the official emulators:exec (setEnvVarsForEmulators over

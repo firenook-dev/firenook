@@ -1,5 +1,7 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import {
@@ -175,20 +177,20 @@ describe('connection snippets', () => {
 
   it('points the server SDKs at demo credentials, which they look up when they start', () => {
     const credentials =
-      '{"type":"external_account_authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo","token_url":"http://127.0.0.1:4400/firenook/oauth2/token"}'
+      '{"type":"authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo","token_uri":"http://127.0.0.1:4400/firenook/oauth2/token","token":"owner","expiry":"2999-12-31T23:59:59Z"}'
     expect(demoCredentials('127.0.0.1:4400')).toBe(credentials)
     for (const target of ['python', 'go', 'java'] as const) {
       const snippet = connectSnippet(target, { services: ALL, status: status() })
       expect(snippet).toContain('firenook emulators:exec --')
       expect(snippet).toContain('GOOGLE_APPLICATION_CREDENTIALS')
-      // An authorized_user file would get its token from Google.
+      // The kind every release of every Admin SDK reads, holding the
+      // emulators' own token, with the hub to refresh it from.
       expect(snippet).toContain(credentials)
-      expect(snippet).not.toContain('"authorized_user"')
       expect(snippet).toContain('demo-shop')
     }
     // The credentials name the hub as the app reaches it.
     expect(connectSnippet('go', { services: ALL, status: status(), host: '10.0.2.2' })).toContain(
-      '"token_url":"http://10.0.2.2:4400/firenook/oauth2/token"',
+      '"token_uri":"http://10.0.2.2:4400/firenook/oauth2/token"',
     )
     expect(connectSnippet('python', { services: ALL, status: status() })).toContain(
       'firebase_admin.initialize_app(options={"projectId": "demo-shop", "storageBucket": "demo-shop.appspot.com"})',
@@ -209,8 +211,8 @@ describe('connection snippets', () => {
         '#   firenook emulators:exec -- python your_script.py',
         '# Or set these before initialize_app. The SDK looks up default credentials',
         '# when it starts, so point it at a demo credentials file holding:',
-        '#   {"type":"external_account_authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo","token_url":"http://127.0.0.1:4400/firenook/oauth2/token"}',
-        "# Its token comes from the emulators' hub, never from Google.",
+        '#   {"type":"authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo","token_uri":"http://127.0.0.1:4400/firenook/oauth2/token","token":"owner","expiry":"2999-12-31T23:59:59Z"}',
+        "# It holds the emulators' own token, so the SDK never asks Google for one.",
         '# Storage reads STORAGE_EMULATOR_HOST, a URL; Python ignores FIREBASE_STORAGE_EMULATOR_HOST.',
         'import os',
         'os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "demo-credentials.json"',
@@ -230,9 +232,10 @@ describe('connection snippets', () => {
 
   it('sends the Node Admin SDK’s task queue and Eventarc channel to the emulators', () => {
     // Without CLOUD_EVENTARC_EMULATOR_HOST a publish goes to Google, and
-    // with it the SDK still asks for an access token: from your own
-    // default credentials (Google's token endpoint) unless it is given the
-    // demo ones, whose token the hub hands out.
+    // with it the SDK still asks for an access token, which only
+    // emulators:exec answers on this machine: no credentials file does for
+    // every firebase-admin release (12 and earlier read only kinds whose
+    // refresh goes to Google).
     expect(connectSnippet('admin-node', { services: ALL, status: status() })).toBe(
       [
         "// Easiest: run your script with the emulators' environment set for you:",
@@ -245,11 +248,8 @@ describe('connection snippets', () => {
         "process.env.PUBSUB_EMULATOR_HOST = '127.0.0.1:8085'",
         "process.env.CLOUD_TASKS_EMULATOR_HOST = '127.0.0.1:9499'",
         "process.env.CLOUD_EVENTARC_EMULATOR_HOST = 'http://127.0.0.1:9299'",
-        "// Eventarc's publish asks for an access token: these demo credentials get it",
-        "// from the emulators' hub, never from Google. Set them under emulators:exec too,",
-        '// whose own the Node.js SDK cannot use. The file holds:',
-        '//   {"type":"external_account","audience":"firenook","subject_token_type":"urn:ietf:params:oauth:token-type:access_token","token_url":"http://127.0.0.1:4400/firenook/oauth2/token","credential_source":{"url":"http://127.0.0.1:4400/firenook/oauth2/token","format":{"type":"json","subject_token_field_name":"access_token"}}}',
-        "process.env.GOOGLE_APPLICATION_CREDENTIALS = 'demo-credentials.json'",
+        "// Eventarc's publish asks for an access token: under emulators:exec it gets the",
+        "// emulators' own; run otherwise, it asks your default credentials for one.",
         '',
         "import { initializeApp } from 'firebase-admin/app'",
         "initializeApp({ projectId: 'demo-shop', storageBucket: 'demo-shop.appspot.com' })",
@@ -301,6 +301,23 @@ describe('connection snippets', () => {
     expect(connectSnippet('java', { services: ['firestore'], status: status() })).not.toMatch(
       /Storage|Pub\/Sub|ManagedChannel/,
     )
+  })
+
+  it('shows the demo credentials emulators:exec writes, to the byte', () => {
+    // The CLI's own function, run where the CLI runs.
+    const cli = pathToFileURL(
+      join(import.meta.dirname, '..', '..', '..', 'packages/cli/src/runtime.mjs'),
+    ).href
+    const written = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `import { demoCredentials } from ${JSON.stringify(cli)}; process.stdout.write(JSON.stringify(demoCredentials('127.0.0.1:4400')))`,
+      ],
+      { encoding: 'utf8' },
+    )
+    expect(demoCredentials('127.0.0.1:4400')).toBe(written)
   })
 
   it('names the token endpoint the engine and the CLI serve and write', () => {

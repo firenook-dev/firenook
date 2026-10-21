@@ -31,14 +31,35 @@ as running and for no other, its variables: `FIRESTORE_EMULATOR_HOST` and
 `CLOUD_TASKS_EMULATOR_HOST` and `CLOUD_EVENTARC_EMULATOR_HOST` (a URL).
 Firenook adds `GOOGLE_CLOUD_PROJECT`, a gcloud directory of the run's own
 (`CLOUDSDK_CONFIG`) and `GOOGLE_APPLICATION_CREDENTIALS`, pointing at demo
-credentials it writes in the run directory: the Python, Go and Java Admin
+credentials it writes in the run directory. The Python, Go and Java Admin
 SDKs look up credentials when they start, and these keep yours out of the
-tests. Their token comes from the hub (`/firenook/oauth2/token` on the hub
-port), so a call that asks for an access token never reaches Google. The
-Node.js Admin SDK takes no token from them, so an Eventarc publish in the
-command fails without calling anyone; set `GOOGLE_APPLICATION_CREDENTIALS` in
-the script to the file the console's Connect dialog shows for Node, or publish
-from a function, where it works.
+tests. When your environment already sets `GOOGLE_APPLICATION_CREDENTIALS`,
+exec passes it on unchanged, as the official `emulators:exec` does, writes no
+demo credentials and says so on stderr; a call that needs an access token
+then gets one with your credentials, from Google.
+
+The demo credentials are an `authorized_user` file, the one kind every release
+of every Admin SDK reads (firebase-admin for Node.js 12 and earlier refuses
+any newer kind when it starts, and so do the other SDKs' auth libraries from
+before late 2022 to late 2023).
+None of the SDKs sends their token request to Google:
+
+| Admin SDK | Its token |
+| --- | --- |
+| Node.js, firebase-admin 11 to 14 | Every Node.js SDK sends its refresh to Google whatever the file says, so exec adds `--require` of the CLI's `src/exec-token.cjs` to `NODE_OPTIONS` (after yours): in each Node.js process of the command it answers that one request with the emulators' token, and passes any other on unchanged |
+| Python, google-auth 1.22 or later (every firebase-admin 6 or 7 install has 1.25 or later) | The file holds the emulators' own token, which the SDK uses as it is and never refreshes |
+| Go, golang.org/x/oauth2 from May 2021 (firebase-admin-go 4.8 or later) | Refreshed from the hub, the file's `token_uri` (`/firenook/oauth2/token` on the hub port) |
+| Java, google-auth-library 1.32 or later (firebase-admin 9.5 or later) | Refreshed from the hub, the file's `token_uri` |
+
+Only two calls to the emulators need a token at all: an Eventarc publish from
+Node.js and any Python Storage call. The Go and Java SDKs need none for the
+emulators, so their older releases, which refresh at Google whatever
+`token_uri` says, reach Google only for a service the suite does not
+emulate. A runtime that does not read `NODE_OPTIONS` (Bun, Deno) gives a
+Node.js SDK no preload, so its Eventarc publish asks Google for a token,
+which refuses these credentials. A call to a service the suite does not
+emulate goes to Google whatever the credentials, as with the official exec,
+and fails there with these.
 
 Disk/WAL is the default. Fresh runs use a new `.firenook/runs/session-*` working
 directory; add `.firenook/` to your own gitignore. These directories are retained

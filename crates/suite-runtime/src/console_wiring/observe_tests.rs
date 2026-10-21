@@ -651,7 +651,7 @@ fn the_connection_ends_with_the_demo_credentials_exec_hands_its_command() {
         &test_config(),
         Some((
             "/work/demo-adc.json".to_owned(),
-            "{\"type\":\"external_account_authorized_user\"}".to_owned(),
+            "{\"type\":\"authorized_user\"}".to_owned(),
         )),
     );
     let credentials = with_credentials.last().expect("listed");
@@ -659,7 +659,7 @@ fn the_connection_ends_with_the_demo_credentials_exec_hands_its_command() {
     assert_eq!(credentials.value, "/work/demo-adc.json");
     assert_eq!(
         credentials.note.as_deref(),
-        Some("{\"type\":\"external_account_authorized_user\"}")
+        Some("{\"type\":\"authorized_user\"}")
     );
 }
 
@@ -671,11 +671,11 @@ fn only_the_demo_credentials_stub_is_ever_shown() {
     let stub = directory.join("demo-adc.json");
     std::fs::write(
         &stub,
-        r#"{"type":"external_account_authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo","token_url":"http://127.0.0.1:4400/firenook/oauth2/token"}"#,
+        r#"{"type":"authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo","token_uri":"http://127.0.0.1:4400/firenook/oauth2/token","token":"owner","expiry":"2999-12-31T23:59:59Z"}"#,
     )
     .expect("written");
-    // The stub before 0.2.0, whose token came from Google, is no longer
-    // written, and a file shaped like it is somebody's own.
+    // The stub before 0.2.0, without the emulators' token and token_uri, is
+    // no longer written, and a file shaped like it is somebody's own.
     let old = directory.join("old-adc.json");
     std::fs::write(
         &old,
@@ -685,7 +685,7 @@ fn only_the_demo_credentials_stub_is_ever_shown() {
     let elsewhere = directory.join("elsewhere-adc.json");
     std::fs::write(
         &elsewhere,
-        r#"{"type":"external_account_authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo","token_url":"https://sts.googleapis.com/v1/oauthtoken"}"#,
+        r#"{"type":"authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo","token_uri":"https://oauth2.googleapis.com/token","token":"owner","expiry":"2999-12-31T23:59:59Z"}"#,
     )
     .expect("written");
     let real = directory.join("adc.json");
