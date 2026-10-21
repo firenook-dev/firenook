@@ -47,6 +47,7 @@
     "test:rules:query-replay": "node --import tsx --test test/query-rules-replay.test.ts",
     "capture:rules:identity": "node --import tsx src/rules/capture-request-identity.ts",
     "test:rules:identity-replay": "node --import tsx --test test/request-identity-replay.test.ts",
+    "test:rules:unit-testing": "node --import tsx src/rules/run-rules-unit-testing.ts",
     "capture:suite:firestore-triggers": "node --import tsx src/suite/capture-firestore-triggers.ts",
     "capture:suite:auth": "node --import tsx src/suite/capture-auth.ts",
     "capture:suite:storage": "node --import tsx src/suite/capture-storage.ts",
@@ -91,6 +92,7 @@
     "test:tasks-fixtures": "node --test test/tasks-fixtures.test.mjs"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.2",
     "@google-cloud/firestore": "9.3.1",
     "@grpc/grpc-js": "1.14.6",
     "@types/node": "26.6.5",
