@@ -11,6 +11,8 @@
 // Data only: the Overview's route schema reads the values in the first
 // route, so the snippet writers stay in `lib/connect.ts`.
 
+import type { CodeLanguage } from './code-language'
+
 /** What `connectSnippet` writes a snippet for. */
 export type ConnectTarget =
   | 'web'
@@ -32,35 +34,70 @@ export interface ConnectTab {
   label: string
   /** The title over the code. */
   title: string
+  /** What the snippet is written in, which colours it. */
+  language: CodeLanguage
 }
 
 /** Every snippet, in the order the tabs show them. */
 export const CONNECT_TABS = [
-  { param: 'web', target: 'web', label: 'Web', title: 'Web app (modular SDK)' },
-  { param: 'flutter', target: 'flutter', label: 'Flutter', title: 'Flutter app' },
-  { param: 'apple', target: 'apple', label: 'Apple', title: 'Apple app (Swift)' },
-  { param: 'android', target: 'android', label: 'Android', title: 'Android app (Kotlin)' },
-  { param: 'node', target: 'admin-node', label: 'Admin (Node)', title: 'Admin SDK for Node.js' },
-  { param: 'python', target: 'python', label: 'Python', title: 'Admin SDK for Python' },
-  { param: 'go', target: 'go', label: 'Go', title: 'Admin SDK for Go' },
-  { param: 'java', target: 'java', label: 'Java', title: 'Admin SDK for Java' },
+  { param: 'web', target: 'web', label: 'Web', title: 'Web app (modular SDK)', language: 'js' },
+  {
+    param: 'flutter',
+    target: 'flutter',
+    label: 'Flutter',
+    title: 'Flutter app',
+    language: 'dart',
+  },
+  {
+    param: 'apple',
+    target: 'apple',
+    label: 'Apple',
+    title: 'Apple app (Swift)',
+    language: 'swift',
+  },
+  {
+    param: 'android',
+    target: 'android',
+    label: 'Android',
+    title: 'Android app (Kotlin)',
+    language: 'kotlin',
+  },
+  {
+    param: 'node',
+    target: 'admin-node',
+    label: 'Admin (Node)',
+    title: 'Admin SDK for Node.js',
+    language: 'js',
+  },
+  {
+    param: 'python',
+    target: 'python',
+    label: 'Python',
+    title: 'Admin SDK for Python',
+    language: 'python',
+  },
+  { param: 'go', target: 'go', label: 'Go', title: 'Admin SDK for Go', language: 'go' },
+  { param: 'java', target: 'java', label: 'Java', title: 'Admin SDK for Java', language: 'java' },
   {
     param: 'env',
     target: 'env',
     label: 'Environment variables',
     title: 'Environment variables, for .env or export',
+    language: 'dotenv',
   },
   {
     param: 'firebase-json',
     target: 'firebase-json',
     label: 'firebase.json',
     title: 'The emulators block of firebase.json',
+    language: 'json',
   },
   {
     param: 'agent',
     target: 'agent',
     label: 'Coding agent',
     title: 'The MCP server for a coding agent',
+    language: 'json',
   },
 ] as const satisfies readonly ConnectTab[]
 

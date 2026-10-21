@@ -150,17 +150,7 @@ export function ConnectBody({
           <CodeBlock
             label={tab.title}
             code={code}
-            language={
-              tab.target === 'firebase-json'
-                ? 'json'
-                : tab.target === 'env'
-                  ? 'shell'
-                  : tab.target === 'python'
-                    ? 'python'
-                    : tab.target === 'go'
-                      ? 'go'
-                      : 'js'
-            }
+            language={tab.language}
             testId="connect-snippet"
           />
           <p className="max-w-[72ch] text-[13px] text-kumo-subtle" data-testid="connect-note">

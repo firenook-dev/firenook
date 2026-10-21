@@ -7,6 +7,11 @@
 // collection group it names, so every order in every user is one click,
 // without walking through a user first. The foot says what the open shape
 // holds.
+//
+// The tree waits on the engine's first walk of a database, minutes on one
+// of millions of documents. Meanwhile the root collections, which one
+// `ListCollectionIds` answers at once, stand in for it, each with its own
+// count, and say that the subcollections are still being found.
 
 import { InputGroup, Text, Tooltip } from '@cloudflare/kumo'
 import {
@@ -27,13 +32,19 @@ import {
   workbenchSchemaQuery,
   useSchemaTree,
 } from '../schema'
+import { collectionsQuery } from '../queries'
 import { formatNumber } from '../value'
 import { DatabasePicker } from './database-picker'
+import { RootCount } from './root-count'
 import { useWorkbench } from './workbench-context'
 
 export function SchemaPanel() {
   const workbench = useWorkbench()
   const schema = useQuery(workbenchSchemaQuery(workbench))
+  const rootIds = useQuery({
+    ...collectionsQuery(workbench.ownerScope, ''),
+    enabled: schema.isPending,
+  })
   const expanded = useSchemaTree((state) => state.expanded)
   const collapsed = useSchemaTree((state) => state.collapsed)
   const filter = useSchemaTree((state) => state.filter)
@@ -96,10 +107,44 @@ export function SchemaPanel() {
         className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-1.5"
         data-testid="schema-tree"
       >
-        {schema.isPending && (
-          <div className="animate-pulse px-1.5 py-2">
+        {schema.isPending && !(rootIds.data && rootIds.data.length > 0) && (
+          <div className="animate-pulse px-1.5 py-2" data-testid="schema-mapping">
             <Text variant="secondary" size="sm">
               Mapping the database…
+            </Text>
+          </div>
+        )}
+        {schema.isPending && rootIds.data && rootIds.data.length > 0 && (
+          <ul
+            role="tree"
+            aria-label="Collections"
+            className="grid grid-cols-[minmax(0,1fr)] gap-px"
+            data-testid="schema-roots-only"
+          >
+            {rootIds.data
+              .filter((id) => id.toLowerCase().includes(filter.trim().toLowerCase()))
+              .map((id) => (
+                <RootOnlyNode
+                  key={id}
+                  id={id}
+                  current={current === id}
+                  onOpen={() => workbench.setPath(id)}
+                />
+              ))}
+          </ul>
+        )}
+        {/* Last, and held at the panel's foot while the list scrolls: when the
+            tree arrives and it goes, no row above it moves. */}
+        {schema.isPending && rootIds.data && rootIds.data.length > 0 && (
+          <div
+            className="sticky -bottom-1.5 -mx-1.5 -mb-1.5 flex h-[42px] items-center border-t border-kumo-line bg-kumo-base px-3"
+            data-testid="schema-mapping"
+          >
+            {/* The sidebar's footer is 42 px tall, so the two feet line up.
+                Steady, not pulsing: at a pulse's faintest the secondary grey
+                was too pale to read. */}
+            <Text variant="secondary" size="sm">
+              Finding subcollections…
             </Text>
           </div>
         )}
@@ -287,6 +332,51 @@ function TreeNode({
           ))}
         </ul>
       )}
+    </li>
+  )
+}
+
+/**
+ * A root collection before the tree is known: no caret, since what lies
+ * below is still being found, and its own count. Drawn like a root of the
+ * tree, so nothing moves when the tree arrives.
+ */
+function RootOnlyNode({
+  id,
+  current,
+  onOpen,
+}: {
+  id: string
+  current: boolean
+  onOpen: () => void
+}) {
+  return (
+    <li role="treeitem" className="min-w-0">
+      <div
+        className={`group flex h-7 items-center rounded-md pr-1.5 ${
+          current ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-firenook-flame)]' : 'hover:ink'
+        }`}
+        data-testid="schema-node"
+        data-pattern={id}
+        aria-current={current ? 'location' : undefined}
+      >
+        <span className="size-5 shrink-0" />
+        <button
+          type="button"
+          className="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-0.5 text-left"
+          onClick={onOpen}
+          data-testid="schema-node-open"
+        >
+          <DatabaseIcon
+            size={13}
+            className={current ? 'shrink-0 text-kumo-default' : 'shrink-0 text-kumo-subtle'}
+          />
+          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-kumo-default">
+            {id}
+          </span>
+          <RootCount path={id} />
+        </button>
+      </div>
     </li>
   )
 }

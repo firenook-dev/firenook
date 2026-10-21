@@ -1022,6 +1022,31 @@ impl Store {
         }
     }
 
+    /// Saves a reader's note for the data as it is at `revision`; see
+    /// [`DiskStore::save_note`]. The in-memory backend keeps none: its data
+    /// ends with the process.
+    pub fn save_note(
+        &self,
+        name: &str,
+        revision: Revision,
+        bytes: &[u8],
+    ) -> Result<bool, DiskError> {
+        match &self.backend {
+            StoreBackend::Memory(_) => Ok(false),
+            StoreBackend::Disk(store) => store.save_note(name, revision, bytes),
+        }
+    }
+
+    /// The note saved as `name` while the data is unchanged since; see
+    /// [`DiskStore::note`].
+    #[must_use]
+    pub fn note(&self, name: &str) -> Option<Vec<u8>> {
+        match &self.backend {
+            StoreBackend::Memory(_) => None,
+            StoreBackend::Disk(store) => store.note(name),
+        }
+    }
+
     /// A handle that does not keep this store open; see [`WeakStore`].
     #[must_use]
     pub fn downgrade(&self) -> WeakStore {
@@ -3717,6 +3742,42 @@ mod tests {
             );
         }
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_note_is_read_only_while_the_data_is_as_it_was_saved() {
+        let directory = temporary_directory("notes");
+        let db = database("(default)");
+        let store = Store::open_disk(&directory, DiskOptions::default()).expect("disk store");
+        store.commit(&[create(&db, "users/a")]).expect("seed");
+        let saved_at = store.snapshot().revision();
+        assert!(store.save_note("map", saved_at, b"one").expect("save"));
+        assert_eq!(store.note("map").as_deref(), Some(&b"one"[..]));
+        assert_eq!(store.note("other"), None);
+        store.close(Duration::from_secs(5)).expect("close");
+
+        let store = Store::open_disk(&directory, DiskOptions::default()).expect("reopen");
+        assert_eq!(
+            store.note("map").as_deref(),
+            Some(&b"one"[..]),
+            "kept across a reopen"
+        );
+        store.commit(&[create(&db, "users/b")]).expect("move on");
+        assert_eq!(store.note("map"), None, "a commit since leaves it unread");
+        assert!(
+            !store.save_note("map", saved_at, b"two").expect("refused"),
+            "never saved for a revision the store has moved past"
+        );
+        store.close(Duration::from_secs(5)).expect("close");
+        let _ = std::fs::remove_dir_all(&directory);
+
+        let memory = Store::default();
+        assert!(
+            !memory
+                .save_note("map", memory.snapshot().revision(), b"x")
+                .expect("memory")
+        );
+        assert_eq!(memory.note("map"), None);
     }
 
     #[test]

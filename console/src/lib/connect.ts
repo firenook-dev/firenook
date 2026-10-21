@@ -11,6 +11,7 @@
 
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import { mcpServersJson } from './agent-config'
+import type { CodeLanguage } from './code-language'
 import { CONNECT_TABS, type ConnectParam, type ConnectTarget } from './connect-tabs'
 
 /** The Android emulator's name for the machine it runs on. */
@@ -388,11 +389,12 @@ export function connectDialects(
     params?: readonly ConnectParam[] | undefined
     host?: string | undefined
   },
-): { id: ConnectParam; label: string; code: string }[] {
+): { id: ConnectParam; label: string; code: string; language: CodeLanguage }[] {
   return CONNECT_TABS.filter((tab) => !options.params || options.params.includes(tab.param)).map(
     (tab) => ({
       id: tab.param,
       label: tab.label,
+      language: tab.language,
       code: connectSnippet(tab.target, {
         services: options.services,
         status,

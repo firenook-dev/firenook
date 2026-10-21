@@ -758,6 +758,16 @@ const DATA = {
 ],
   backlog: [
   {
+    "item": "The Firestore tree at once",
+    "why": "Built for next.8: the tree's first walk reads the collection index instead of the documents (37 s instead of 133 s on 2.7 million documents), a clean stop saves the tree with the data so the next start shows it in under a millisecond, and the root collections are listed while a walk runs",
+    "size": "days"
+  },
+  {
+    "item": "Code in colour",
+    "why": "Built for next.8: every code block in the console is coloured with the editor's palette, each block must name its language, the Connect dialog's Flutter, Swift, Kotlin and Java snippets are no longer marked as JavaScript, and each parser loads only when a block needs it",
+    "size": "days"
+  },
+  {
     "item": "Keeping data without a seed",
     "why": "Built for next.7: --resume-state no longer needs --import (a seedless state records an empty seed, and next.6 refuses it cleanly); --keep-data keeps the data in .firenook/state, and init prints it",
     "size": "days"

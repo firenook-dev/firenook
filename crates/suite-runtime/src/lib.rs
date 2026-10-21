@@ -510,6 +510,9 @@ struct FirestoreParts {
 struct ShutdownSuite {
     config: SuiteConfig,
     store: Store,
+    /// The console's map of the collections, saved with the data on the way
+    /// out.
+    schema: Option<SchemaIndex>,
     delivery: DeliveryRuntime,
     auth: Option<Arc<AuthRuntime>>,
     storage: Option<Arc<StorageRuntime>>,
@@ -643,6 +646,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
     let firestore_rules = console_firestore
         .as_ref()
         .map(|parts| parts.rules_runtime.clone());
+    let schema = console_firestore.as_ref().map(|parts| parts.schema.clone());
     // What every console lifecycle hook can read; the later services are
     // filled in at each call.
     let hooks = HookContext {
@@ -927,6 +931,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         ShutdownSuite {
             config,
             store,
+            schema,
             delivery,
             auth,
             storage,
@@ -1579,6 +1584,12 @@ async fn finish_suite(
     drop(suite.hub);
     suite.exporter.abort();
     let _ = suite.exporter.await;
+    // Nothing writes any more: the console's map of the collections goes
+    // with the data, so the next start shows it without reading every key.
+    // Its handle to the store goes with it, before the store closes.
+    if let Some(schema) = suite.schema.take() {
+        let _ = tokio::task::spawn_blocking(move || schema.save()).await;
+    }
     let auth_users = suite.auth.as_ref().map_or(0, |auth| auth.user_count());
     let firestore_documents = suite.store.snapshot().logical_memory_usage().entries;
     let storage_objects = suite

@@ -26,15 +26,23 @@
 //! costs one `ListCollectionIds` and one count per rendered row, so
 //! scrolling a large collection fires thousands of small requests; the
 //! index answers a whole screen in one, from memory.
+//!
+//! A clean stop saves the index with the data as a note of the store
+//! (`save`), and the next start loads it instead of walking, when the store
+//! opens at the revision it was saved for. A commit since, or a stop that
+//! did not save it, means a walk on first use, as before.
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use axum::extract::{Query, State};
 use axum::{Json, Router};
-use firenook_core_store::{CommitObservation, CommitObserver, DatabaseName, Snapshot, Store};
+use firenook_core_store::{
+    CommitObservation, CommitObserver, DatabaseName, Revision, Snapshot, Store,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use tokio::sync::futures::OwnedNotified;
@@ -126,6 +134,10 @@ pub struct SchemaIndex {
     store: Store,
     project: Arc<str>,
     databases: Arc<Mutex<HashMap<String, Entry>>>,
+    /// The newest commit the observer has been told of, or the revision
+    /// the store opened at: what `save` checks the store has not moved
+    /// past behind the index's back.
+    observed: Arc<AtomicU64>,
 }
 
 /// What the store calls on each commit: the index without its handle to
@@ -133,6 +145,30 @@ pub struct SchemaIndex {
 struct SchemaObserver {
     project: Arc<str>,
     databases: Arc<Mutex<HashMap<String, Entry>>>,
+    observed: Arc<AtomicU64>,
+}
+
+/// The note a stop saves the index as, read back by the next start.
+const SAVED_NOTE: &str = "console_schema";
+
+/// The layout of the note; a note of another version is never read.
+const SAVED_VERSION: u32 = 1;
+
+/// The index as a note: every built database, its patterns and its concrete
+/// collections, each as `(path, documents, parents or below)`.
+#[derive(Serialize, Deserialize)]
+struct SavedIndex {
+    version: u32,
+    project: String,
+    revision: u64,
+    databases: Vec<SavedDatabase>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SavedDatabase {
+    id: String,
+    patterns: Vec<(String, u64, u64)>,
+    collections: Vec<(String, u64, u64)>,
 }
 
 enum Entry {
@@ -206,16 +242,67 @@ impl SchemaIndex {
     /// commit observer. Nothing is walked until a database is asked for.
     #[must_use]
     pub fn attach(store: &Store, project: &str) -> Self {
+        let opened = store.snapshot().revision();
         let index = Self {
             store: store.clone(),
             project: Arc::from(project),
-            databases: Arc::new(Mutex::new(HashMap::new())),
+            databases: Arc::new(Mutex::new(saved_databases(store, project, opened))),
+            observed: Arc::new(AtomicU64::new(opened.get())),
         };
         store.add_commit_observer(Arc::new(SchemaObserver {
             project: Arc::clone(&index.project),
             databases: Arc::clone(&index.databases),
+            observed: Arc::clone(&index.observed),
         }));
+        // A commit between the note and the observer would be missing from
+        // what was loaded: forget it, and walk on first use instead.
+        if store.snapshot().revision() != opened {
+            lock(&index.databases).clear();
+        }
         index
+    }
+
+    /// Saves every built database with the data, for the next start to load
+    /// instead of walking; `false` when nothing was saved. Called once the
+    /// services have stopped and before the store closes. It saves only
+    /// when no document changed since the newest commit the index was told
+    /// of, so a commit the observer had not been given yet, or a store moved
+    /// on, leaves the next start to walk.
+    #[must_use]
+    pub fn save(&self) -> bool {
+        let revision = self.store.snapshot().revision();
+        let observed = Revision::from_u64(self.observed.load(Ordering::Acquire));
+        if !self
+            .store
+            .changes_since(observed)
+            .is_ok_and(|changes| changes.is_empty())
+        {
+            return false;
+        }
+        let saved = {
+            let databases = lock(&self.databases);
+            let mut saved: Vec<SavedDatabase> = databases
+                .iter()
+                .filter_map(|(id, entry)| match entry {
+                    Entry::Ready(index) => Some(index.saved(id)),
+                    Entry::Building { .. } => None,
+                })
+                .collect();
+            saved.sort_by(|a, b| a.id.cmp(&b.id));
+            saved
+        };
+        if saved.is_empty() {
+            return false;
+        }
+        let Ok(bytes) = serde_json::to_vec(&SavedIndex {
+            version: SAVED_VERSION,
+            project: self.project.to_string(),
+            revision: revision.get(),
+            databases: saved,
+        }) else {
+            return false;
+        };
+        matches!(self.store.save_note(SAVED_NOTE, revision, &bytes), Ok(true))
     }
 
     pub(crate) fn router(self) -> Router {
@@ -385,6 +472,10 @@ impl SchemaIndex {
 impl CommitObserver for SchemaObserver {
     fn committed(&self, observation: &CommitObservation) {
         let mut databases = lock(&self.databases);
+        // Under the lock, so `save` never reads a revision whose changes are
+        // not in the index yet.
+        self.observed
+            .fetch_max(observation.result.revision.get(), Ordering::AcqRel);
         if databases.is_empty() {
             return;
         }
@@ -436,6 +527,42 @@ impl DatabaseIndex {
             }
         }
         Some(index)
+    }
+
+    /// The database as the note saves it.
+    fn saved(&self, id: &str) -> SavedDatabase {
+        SavedDatabase {
+            id: id.to_owned(),
+            patterns: self
+                .patterns
+                .iter()
+                .map(|(pattern, counts)| (pattern.clone(), counts.documents, counts.parents))
+                .collect(),
+            collections: self
+                .collections
+                .iter()
+                .map(|(path, counts)| (path.to_string(), counts.documents, counts.below))
+                .collect(),
+        }
+    }
+
+    /// The database a note saved, as of `revision`.
+    fn from_saved(saved: SavedDatabase, revision: u64) -> Self {
+        Self {
+            revision,
+            patterns: saved
+                .patterns
+                .into_iter()
+                .map(|(pattern, documents, parents)| (pattern, Counts { documents, parents }))
+                .collect(),
+            collections: saved
+                .collections
+                .into_iter()
+                .map(|(path, documents, below)| {
+                    (Box::from(path), CollectionCounts { documents, below })
+                })
+                .collect(),
+        }
     }
 
     /// Moves the counts for one document coming (`created`) or going.
@@ -617,6 +744,33 @@ fn pattern_of(path: &str) -> String {
         pattern.push_str(if index % 2 == 0 { segment } else { "*" });
     }
     pattern
+}
+
+/// The databases a clean stop saved, ready to answer, when the store opened
+/// at the revision they describe and the note is this project's in this
+/// layout; none otherwise.
+fn saved_databases(store: &Store, project: &str, opened: Revision) -> HashMap<String, Entry> {
+    let Some(saved) = store
+        .note(SAVED_NOTE)
+        .and_then(|bytes| serde_json::from_slice::<SavedIndex>(&bytes).ok())
+    else {
+        return HashMap::new();
+    };
+    if saved.version != SAVED_VERSION || saved.project != project || saved.revision != opened.get()
+    {
+        return HashMap::new();
+    }
+    saved
+        .databases
+        .into_iter()
+        .map(|database| {
+            let id = database.id.clone();
+            (
+                id,
+                Entry::Ready(DatabaseIndex::from_saved(database, saved.revision)),
+            )
+        })
+        .collect()
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -1223,5 +1377,94 @@ mod tests {
             index.snapshot("no/slashes").await,
             Err(SchemaError::InvalidDatabase(_))
         ));
+    }
+
+    fn reopen(directory: &std::path::Path) -> Store {
+        Store::open_disk(directory, firenook_core_store::DiskOptions::default()).expect("store")
+    }
+
+    /// A clean stop saves the map with the data, and the next start answers
+    /// from it without a walk, then moves it with each commit as a walked
+    /// map moves. A note older than the data is never read.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_saved_map_answers_the_next_start_until_the_data_moves_on() {
+        let directory =
+            std::env::temp_dir().join(format!("firenook-schema-saved-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        let wait = std::time::Duration::from_secs(5);
+
+        let store = reopen(&directory);
+        store
+            .commit(&[
+                create("users/u1"),
+                create("users/u1/orders/o1"),
+                create("users/u2/orders/o2"),
+                create("teams/t1"),
+            ])
+            .expect("seed");
+        let index = SchemaIndex::attach(&store, PROJECT);
+        assert!(!index.save(), "nothing is built yet");
+        let walked = index.snapshot("(default)").await.expect("walk");
+        // A commit that changes nothing moves the revision without telling
+        // the index, and does not stop the save.
+        store
+            .commit(&[Write::Verify {
+                key: key("teams/t1"),
+                precondition: Precondition::None,
+            }])
+            .expect("verify");
+        assert!(index.save(), "saved");
+        drop(index);
+        store.close(wait).expect("close");
+
+        let store = reopen(&directory);
+        let index = SchemaIndex::attach(&store, PROJECT);
+        let loaded = index
+            .snapshot_if_ready("(default)")
+            .expect("answered without a walk");
+        assert_eq!(patterns(&loaded), patterns(&walked));
+        assert_eq!(loaded.documents, walked.documents);
+        assert_eq!(
+            ask(&index, &["users/u1", "users/u2", ""]).await,
+            vec![
+                ("users/u1".to_owned(), vec![("orders".to_owned(), 1)]),
+                ("users/u2".to_owned(), vec![("orders".to_owned(), 1)]),
+                (
+                    String::new(),
+                    vec![("teams".to_owned(), 1), ("users".to_owned(), 1)]
+                ),
+            ]
+        );
+        store
+            .commit(&[create("users/u2/orders/o3"), delete("teams/t1")])
+            .expect("mutate");
+        let moved = index.snapshot("(default)").await.expect("moved");
+        let fresh = SchemaIndex::attach(&store, PROJECT);
+        assert!(
+            fresh.snapshot_if_ready("(default)").is_none(),
+            "the note is older than the data"
+        );
+        let rewalked = fresh.snapshot("(default)").await.expect("walk");
+        assert_eq!(patterns(&moved), patterns(&rewalked));
+        assert_eq!(moved.documents, rewalked.documents);
+        drop((index, fresh));
+        store.close(wait).expect("close");
+
+        // That stop saved nothing, so the note is still the older one.
+        let store = reopen(&directory);
+        let index = SchemaIndex::attach(&store, PROJECT);
+        assert!(index.snapshot_if_ready("(default)").is_none());
+        drop(index);
+        store.close(wait).expect("close");
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[tokio::test]
+    async fn an_index_over_memory_saves_nothing() {
+        let store = Store::default();
+        store.commit(&[create("users/u1")]).expect("seed");
+        let index = SchemaIndex::attach(&store, PROJECT);
+        index.snapshot("(default)").await.expect("walk");
+        assert!(!index.save());
     }
 }

@@ -56,6 +56,8 @@ const ORDERED_SCOPE_INDEX_MIGRATION_KEY: &str = "ordered_scope_indexes_v2_migrat
 /// The documents' count and logical bytes, saved with every commit; see
 /// [`PersistedUsage`].
 const DOCUMENT_USAGE_KEY: &str = "document_usage_v1";
+/// Where a reader's note is kept: the name follows the prefix.
+const NOTE_KEY_PREFIX: &str = "note_v1:";
 const DATABASE_FILE: &str = "firenook.redb";
 const JOURNAL_FILE: &str = "firenook.wal";
 // File names written by releases up to 0.1.0-next.9, before the project was renamed.
@@ -332,6 +334,57 @@ impl DiskStore {
     pub fn flush(&self) -> Result<(), DiskError> {
         let mut state = self.state();
         flush_state(&mut state, &self.write_buffers)
+    }
+
+    /// Saves `bytes` as the note `name` for the data as it is at
+    /// `revision`, durably. A note is a reader's own record of the data,
+    /// such as the console's map of its collections, kept so the next open
+    /// need not rebuild it. Nothing is saved, and `false` returned, once a
+    /// commit has moved the store past `revision`.
+    pub fn save_note(
+        &self,
+        name: &str,
+        revision: Revision,
+        bytes: &[u8],
+    ) -> Result<bool, DiskError> {
+        // Commits take this lock too, so none lands between the check and
+        // the write.
+        let state = self.state();
+        if state.memory.revision != revision {
+            return Ok(false);
+        }
+        let note = encode(&PersistedNote {
+            revision,
+            bytes: bytes.to_vec(),
+        })?;
+        let mut transaction = state.database.begin_write().map_err(DiskError::redb)?;
+        transaction
+            .set_durability(Durability::Immediate)
+            .map_err(DiskError::redb)?;
+        transaction.set_quick_repair(true);
+        {
+            let mut metadata = transaction.open_table(METADATA).map_err(DiskError::redb)?;
+            metadata
+                .insert(format!("{NOTE_KEY_PREFIX}{name}").as_str(), note.as_slice())
+                .map_err(DiskError::redb)?;
+        }
+        transaction.commit().map_err(DiskError::redb)?;
+        Ok(true)
+    }
+
+    /// The note saved as `name`, while the data is still at the revision it
+    /// was saved for: any commit since, by this engine or another, leaves it
+    /// unread.
+    #[must_use]
+    pub fn note(&self, name: &str) -> Option<Vec<u8>> {
+        let state = self.state();
+        let transaction = state.database.begin_read().ok()?;
+        let metadata = transaction.open_table(METADATA).ok()?;
+        let saved = metadata
+            .get(format!("{NOTE_KEY_PREFIX}{name}").as_str())
+            .ok()??;
+        let note: PersistedNote = decode(saved.value()).ok()?;
+        (note.revision == state.memory.revision).then_some(note.bytes)
     }
 
     /// A handle that does not keep the store open; see [`WeakDiskStore`].
@@ -1447,6 +1500,13 @@ struct PersistedUsage {
     revision: Revision,
     entries: u64,
     logical_bytes: u64,
+}
+
+/// A reader's note and the revision of the data it describes.
+#[derive(Debug, Encode, Decode)]
+struct PersistedNote {
+    revision: Revision,
+    bytes: Vec<u8>,
 }
 
 #[derive(Debug, Encode, Decode)]
