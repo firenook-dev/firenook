@@ -48,11 +48,47 @@ exports every database of the project into the one `firestore_export`, which
 an import restores in full. A `firebase.json` `firestore` array lists one
 entry per database (`database`, `rules`, `indexes`; an entry without
 `database` is `(default)`, and a project may list only named databases); each
-entry's rules govern that database alone until a project-wide
+entry's rules govern that database until a project-wide
 `PUT /emulator/v1/projects/{project}:securityRules` hot reload, which replaces
-the project's rules for every database as it does on the official emulator. The official emulator refuses more than one
+the project's rules for every database as it does on the official emulator. A
+database `firebase.json` does not list is governed by the `(default)` entry's
+rules, or by the first entry's when there is no `(default)` entry, and follows
+them as they change: the official emulator applies its one rules file to
+every database, an unlisted one included
+(`conformance/fixtures/request-identity-v1`), so an unlisted database is never
+open while rules are configured. The official emulator refuses more than one
 database (`Cloud Firestore Emulator does not support multiple databases yet.`)
 and then loads no rules at all.
+
+Who a Firestore request is from follows the official emulator on gRPC, REST
+and WebChannel alike (`conformance/fixtures/request-identity-v1`). A request
+without an `Authorization` header is a signed-out client, which is what the
+client SDKs send while nobody is signed in, and the rules decide it;
+`Bearer owner`, in any letter case, which the Admin SDKs send, skips them.
+Any other `Bearer` token is read, not verified: its times, its project
+(`aud`, `iss`), its algorithm, its signature and its claims are not checked,
+`request.auth.uid` is its `sub` claim when that is a string (null otherwise)
+and `request.auth.token` is its payload, so the tokens
+`@firebase/rules-unit-testing` mints, issued at time 0, are read like any
+other. A header that is not three base64 JSON segments is `INVALID_ARGUMENT`,
+as on the official emulator, which answers a credential that is not `Bearer`
+with an empty `UNKNOWN` instead. `ListCollectionIds` needs the owner, with
+rules or without, as officially; so does `PartitionQuery`, which the
+official emulator does not implement, and Enterprise pipelines are ruled as
+the query they run. Since `0.2.0`; before it, a gRPC request without a
+header was the owner and skipped the rules, and an expired token or one for
+another project was `UNAUTHENTICATED`.
+
+A request the rules refuse is `PERMISSION_DENIED` with production's text,
+`Missing or insufficient permissions.`, followed on the next line by what the
+official emulator adds: each allow that refused it (`false for 'get' @ L4`,
+or the condition's failure in place of `false`), or `No matching allow
+statements` when no allow applies. The console log's line for the refusal
+names the rules file and line (`firestore.rules:4`), and the console's
+request view marks the lines in the rules. The REST front reads a body typed
+`text/plain` (with any parameters) or not typed at all as JSON, as the
+official emulator does, so the reload route takes the rules
+`@firebase/rules-unit-testing` sends.
 
 Firestore timestamp values are stored to the microsecond, as production
 stores them ("any additional precision is rounded down") and as the official
@@ -73,7 +109,8 @@ file.
 
 Storage rules files are watched and reloaded on change the same way, whether
 or not Firestore runs: a `storage: { rules }` file governs every bucket, and
-each `storage` target's file governs its bucket. A file that does not compile
+each `storage` target's file governs every bucket `.firebaserc` maps the
+target to. A file that does not compile
 leaves the previous rules in force, as the official watcher keeps its previous
 ruleset. (`/internal/setRules` keeps the official semantics: a body that does
 not compile leaves no ruleset until the next valid one.)

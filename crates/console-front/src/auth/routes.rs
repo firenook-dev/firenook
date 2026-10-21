@@ -416,8 +416,7 @@ fn rules_fail(reason: String, fix: &str) -> AuthTokenCheck {
     }
 }
 
-/// What the rules make of a token before reading it: not an ID token, or
-/// signed by production.
+/// What the rules make of a token before reading it: not an ID token.
 fn rules_refusal(inspection: &AuthTokenInspection) -> Option<AuthTokenCheck> {
     match inspection.kind {
         wire::AuthTokenKind::CustomToken => Some(rules_fail(
@@ -428,23 +427,25 @@ fn rules_refusal(inspection: &AuthTokenInspection) -> Option<AuthTokenCheck> {
             "The rules take an ID token; this is a refresh token.".to_owned(),
             "Exchange it for an ID token with the refresh grant first.",
         )),
+        wire::AuthTokenKind::SessionCookie => Some(rules_fail(
+            "A session cookie is not an ID token: the client never sends one to Firestore."
+                .to_owned(),
+            "Send the ID token from the client instead.",
+        )),
         wire::AuthTokenKind::Unknown if inspection.payload.is_none() => Some(rules_fail(
             "This is not a token the rules can read.".to_owned(),
             "Paste the ID token the app sends (user.getIdToken()).",
-        )),
-        _ if inspection.signed => Some(rules_fail(
-            "Signed by production Firebase (RS256): the emulator accepts only the unsigned tokens its own Auth emulator issues."
-                .to_owned(),
-            "Point the app at the Auth emulator (connectAuthEmulator) and sign in again.",
         )),
         _ => None,
     }
 }
 
 /// What Firestore and Storage rules make of the token: the rules runtime's
-/// own check, in words.
+/// own reading, in words. The rules read a token's claims and check none of
+/// them, as the official emulator does, so a token they can read is
+/// accepted; the reason adds when production would refuse it anyway.
 fn rules_check(project: &str, token: &str, inspection: &AuthTokenInspection) -> AuthTokenCheck {
-    use firenook_rules_runtime::{Authorization, AuthorizationError};
+    use firenook_rules_runtime::Authorization;
     if let Some(refusal) = rules_refusal(inspection) {
         return refusal;
     }
@@ -454,6 +455,19 @@ fn rules_check(project: &str, token: &str, inspection: &AuthTokenInspection) -> 
         .or_else(|| token.strip_prefix("bearer "))
         .unwrap_or(token)
         .trim();
+    let Ok(Authorization::Client(Some(auth))) =
+        Authorization::parse(Some(&format!("Bearer {token}")))
+    else {
+        return rules_fail(
+            "This is not a token the rules can read: Firestore answers 400 (invalid jwt)."
+                .to_owned(),
+            "Paste the ID token the app sends (user.getIdToken()).",
+        );
+    };
+    let sees = auth.uid.as_ref().map_or_else(
+        || "The rules see request.auth with a null uid (the token has no string `sub`) and the token's claims.".to_owned(),
+        |uid| format!("The rules see request.auth with uid `{uid}` and the token's claims."),
+    );
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let payload = inspection.payload.as_ref();
     let number = |key: &str| {
@@ -461,75 +475,39 @@ fn rules_check(project: &str, token: &str, inspection: &AuthTokenInspection) -> 
             .and_then(|payload| payload.get(key))
             .and_then(serde_json::Value::as_i64)
     };
-    match Authorization::parse(Some(&format!("Bearer {token}")), project, now) {
-        Ok(_) => AuthTokenCheck {
-            consumer: AuthTokenConsumer::Rules,
-            ok: true,
-            reason: inspection.uid.as_ref().map(|uid| {
-                format!("The rules see request.auth with uid `{uid}` and the token's claims.")
-            }),
-            fix: None,
-        },
-        Err(AuthorizationError::ExpiredOrFutureToken) => match (number("exp"), number("iat")) {
-            (Some(exp), _) if exp <= now => rules_fail(
-                format!(
-                    "Expired {} ago (exp {}): the rules see no signed-in user, and Firestore answers 401.",
-                    span(now - exp),
-                    clock(exp)
-                ),
-                "Get a fresh token: the app's SDK refreshes it on its own; sign in again otherwise.",
-            ),
-            (_, Some(iat)) => rules_fail(
-                format!(
-                    "Issued {} in the future (iat {}).",
-                    span(iat - now),
-                    clock(iat)
-                ),
-                "Check this machine's clock.",
-            ),
-            _ => rules_fail(
-                "The token's times are not valid.".to_owned(),
-                "Use a token the Auth emulator issued.",
-            ),
-        },
-        Err(AuthorizationError::InvalidClaim) => {
-            let audience = payload
-                .and_then(|payload| payload.get("aud"))
-                .and_then(serde_json::Value::as_str);
-            if inspection.kind == wire::AuthTokenKind::SessionCookie {
-                rules_fail(
-                    "A session cookie is not an ID token: the rules refuse it.".to_owned(),
-                    "Send the ID token from the client instead.",
-                )
-            } else if let Some(audience) = audience.filter(|audience| *audience != project) {
-                rules_fail(
-                    format!(
-                        "This token is for project `{audience}`; the emulator runs `{project}`."
-                    ),
-                    &format!(
-                        "Initialize the app with projectId `{project}` (initializeApp({{ projectId: '{project}' }}))."
-                    ),
-                )
-            } else {
-                rules_fail(
-                    "The token's user or issuer does not match this project.".to_owned(),
-                    "Use a token the Auth emulator issued for this project.",
-                )
-            }
-        }
-        Err(AuthorizationError::MissingClaim) => rules_fail(
-            "A claim the rules need is missing (sub, user_id, iat, exp, iss or aud).".to_owned(),
-            "Use a token the Auth emulator issued.",
+    let audience = payload
+        .and_then(|payload| payload.get("aud"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|audience| *audience != project);
+    let refused = match (number("exp"), number("iat")) {
+        (Some(exp), _) if exp <= now => Some(format!(
+            "It expired {} ago (exp {})",
+            span(now - exp),
+            clock(exp)
+        )),
+        (_, Some(iat)) if iat > now => Some(format!(
+            "It is issued {} in the future (iat {})",
+            span(iat - now),
+            clock(iat)
+        )),
+        _ => audience.map(|audience| {
+            format!("It is for project `{audience}`; the emulator runs `{project}`")
+        }),
+    };
+    let reason = match refused {
+        Some(refused) => format!(
+            "{sees} {refused}: the rules read it anyway, as the official emulator does; production refuses it."
         ),
-        Err(
-            AuthorizationError::MalformedBearer
-            | AuthorizationError::MalformedJwt
-            | AuthorizationError::InvalidEncoding
-            | AuthorizationError::UnsupportedAlgorithm,
-        ) => rules_fail(
-            "This is not an unsigned emulator ID token.".to_owned(),
-            "Paste the ID token the app sends (user.getIdToken()).",
+        None if inspection.signed => format!(
+            "{sees} It is signed by production Firebase: the rules read its claims without checking the signature, as the official emulator does."
         ),
+        None => sees,
+    };
+    AuthTokenCheck {
+        consumer: AuthTokenConsumer::Rules,
+        ok: true,
+        reason: Some(reason),
+        fix: None,
     }
 }
 

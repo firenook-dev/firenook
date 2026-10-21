@@ -53,6 +53,11 @@ fn denial(origin: DenialOrigin, operation: RequestOperation, path: &str) -> Arc<
         path: format!("/databases/(default)/documents/{path}"),
         uid: Some("u_9f3k2".to_owned()),
         error: None,
+        refused_by: vec![firenook_rules_runtime::RefusingAllow {
+            line: 5,
+            operation,
+            error: None,
+        }],
         request_id: Some(Arc::from("r_12")),
         origin,
     })
@@ -60,16 +65,18 @@ fn denial(origin: DenialOrigin, operation: RequestOperation, path: &str) -> Arc<
 
 #[test]
 fn a_denial_says_who_was_refused_what_and_links_its_decision() {
-    let app = denial_input(&denial(
-        DenialOrigin::App,
-        RequestOperation::Get,
-        "users/u_2fc4c",
-    ));
+    let app = denial_input(
+        &denial(DenialOrigin::App, RequestOperation::Get, "users/u_2fc4c"),
+        Some("firestore.rules"),
+    );
     assert_eq!(app.kind, Some(kinds::RULES_DENIED));
     assert_eq!(app.level, LogLevel::Warn);
     assert_eq!(app.audience, Audience::Console);
     assert_eq!(app.service, "firestore");
-    assert_eq!(app.message, "Rules denied get on users/u_2fc4c for u_9f3k2");
+    assert_eq!(
+        app.message,
+        "Rules denied get on users/u_2fc4c for u_9f3k2 at firestore.rules:5"
+    );
     assert_eq!(
         app.refs,
         [
@@ -86,28 +93,116 @@ fn a_denial_says_who_was_refused_what_and_links_its_decision() {
             "uid": "u_9f3k2",
             "requestId": "r_12",
             "origin": "app",
+            "lines": [5],
+            "rulesFile": "firestore.rules",
         }))
     );
-    let list = denial_input(&denial(DenialOrigin::App, RequestOperation::List, "users"));
-    assert_eq!(list.message, "Rules denied list on users for u_9f3k2");
+    // Rules from the console or the reload route: the line alone.
+    let list = denial_input(
+        &denial(DenialOrigin::App, RequestOperation::List, "users"),
+        None,
+    );
+    assert_eq!(
+        list.message,
+        "Rules denied list on users for u_9f3k2 at line 5"
+    );
+    let unmatched = denial_input(
+        &Denial {
+            refused_by: Vec::new(),
+            ..(*denial(DenialOrigin::App, RequestOperation::Get, "users/u_2")).clone()
+        },
+        Some("firestore.rules"),
+    );
+    assert_eq!(
+        unmatched.message,
+        "Rules denied get on users/u_2 for u_9f3k2: no allow statement matches"
+    );
     assert_eq!(
         list.refs[0],
         EntityRef::firestore_collection("(default)", "users")
     );
-    let console = denial_input(&Denial {
-        uid: None,
-        error: Some("Null value error".to_owned()),
-        request_id: None,
-        ..(*denial(DenialOrigin::Console, RequestOperation::Get, "users/u_2")).clone()
-    });
+    let console = denial_input(
+        &Denial {
+            uid: None,
+            error: Some("Null value error".to_owned()),
+            request_id: None,
+            ..(*denial(DenialOrigin::Console, RequestOperation::Get, "users/u_2")).clone()
+        },
+        Some("firestore.rules"),
+    );
     assert_eq!(console.kind, Some(kinds::RULES_DENIED_CONSOLE));
     assert_eq!(console.level, LogLevel::Info);
     assert_eq!(
         console.message,
-        "Rules denied get on users/u_2 from the console (viewing as an unauthenticated client): Null value error"
+        "Rules denied get on users/u_2 from the console (viewing as an unauthenticated client) at firestore.rules:5: Null value error"
     );
     assert_eq!(console.refs.len(), 1, "no decision was kept");
     assert!(!kinds::is_problem(kinds::RULES_DENIED_CONSOLE));
+}
+
+/// A denial names the file its lines are in: the database's own entry, the
+/// entry that governs databases firebase.json does not list, and no file
+/// once the rules came from somewhere else.
+#[test]
+fn a_denial_names_the_rules_file_that_governs_its_database() {
+    let root = std::env::temp_dir().join(format!(
+        "firenook-observe-files-{}-{}",
+        std::process::id(),
+        time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+    ));
+    std::fs::create_dir_all(root.join("rules")).expect("root");
+    let rules = |name: &str| {
+        let path = root.join("rules").join(name);
+        std::fs::write(&path, "rules_version = '2'; service cloud.firestore { match /databases/{db}/documents/{doc=**} { allow read: if false; } }").expect("rules");
+        path
+    };
+    let mut config = test_config();
+    config.project_dir = root.clone();
+    config.firestore_databases = vec![
+        crate::FirestoreDatabaseConfig {
+            database_id: "(default)".to_owned(),
+            rules: Some(rules("firestore.rules")),
+            indexes: None,
+        },
+        crate::FirestoreDatabaseConfig {
+            database_id: "orders".to_owned(),
+            rules: Some(rules("orders.rules")),
+            indexes: None,
+        },
+    ];
+    let runtime = crate::firestore_rules(&config).expect("rules");
+    let files = RulesFiles::new(&config, &runtime);
+    let named = |id: &str| DatabaseName::new(config.project_id.as_str(), id).expect("database");
+    let in_rules = |file: &str| {
+        std::path::Path::new("rules")
+            .join(file)
+            .display()
+            .to_string()
+    };
+    assert_eq!(
+        files.file(&named("(default)")),
+        Some(in_rules("firestore.rules").as_str())
+    );
+    assert_eq!(
+        files.file(&named("orders")),
+        Some(in_rules("orders.rules").as_str())
+    );
+    assert_eq!(
+        files.file(&named("unlisted")),
+        Some(in_rules("firestore.rules").as_str())
+    );
+    runtime
+        .install_project(
+            &config.project_id,
+            "rules_version = '2'; service cloud.firestore { match /databases/{db}/documents/{doc=**} { allow read: if true; } }",
+        )
+        .expect("reload");
+    assert_eq!(
+        files.file(&named("orders")),
+        None,
+        "the reload route's rules are no file"
+    );
+    std::fs::remove_dir_all(&root).expect("clean up");
 }
 
 #[tokio::test]
@@ -115,7 +210,7 @@ async fn denials_are_logged_fifty_a_second_per_origin_and_the_rest_summed_up() {
     let (logging, lines) = captured();
     let (stop, shutdown) = stop_signal();
     let (sender, receiver) = broadcast::channel(512);
-    spawn_denial_log(receiver, &logging, &shutdown);
+    spawn_denial_log(receiver, RulesFiles::default(), &logging, &shutdown);
     for _ in 0..120 {
         sender
             .send(denial(
@@ -198,7 +293,7 @@ async fn a_forwarder_that_fell_behind_says_how_many_denials_it_lost() {
             ))
             .expect("sent");
     }
-    spawn_denial_log(receiver, &logging, &shutdown);
+    spawn_denial_log(receiver, RulesFiles::default(), &logging, &shutdown);
     tokio::time::sleep(Duration::from_millis(200)).await;
     let seen = lines.take();
     assert_eq!(

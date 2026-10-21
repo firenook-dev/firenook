@@ -52,7 +52,7 @@ where
         ));
     };
     let database = decode_database_name(&first.database)?;
-    let authorization = authorization_source.resolve(database.project_id())?;
+    let authorization = authorization_source.resolve()?;
     if !first.writes.is_empty() {
         return Err(Status::invalid_argument(
             "streaming Write handshake cannot contain writes",

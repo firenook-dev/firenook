@@ -372,7 +372,12 @@ pub(crate) fn prepared(context: &HookContext<'_>) {
         return;
     };
     if let Some(rules) = context.firestore_rules {
-        spawn_denial_log(rules.subscribe_denials(), context.logging, shutdown);
+        spawn_denial_log(
+            rules.subscribe_denials(),
+            RulesFiles::new(context.config, rules),
+            context.logging,
+            shutdown,
+        );
         spawn_rules_applied_log(rules, context.logging, shutdown);
     }
     spawn_background_log(context.triggers, context.logging, shutdown);
@@ -648,7 +653,87 @@ const fn operation_name(operation: RequestOperation) -> &'static str {
 /// One refused request as a console line: `rules.denied` (a warning, a
 /// problem) for an app's request, `rules.denied.console` (info, never a
 /// problem) for one the console made while viewing as someone.
-pub(crate) fn denial_input(denial: &Denial) -> LogInput {
+/// Which configured rules file a denial's lines refer to: the database's
+/// own `firebase.json` entry, or the entry that governs the databases it
+/// does not list, while the rules in force came from that file (at start-up
+/// or reloaded from it) rather than the console's editor or the reload
+/// route.
+#[derive(Clone, Default)]
+pub(crate) struct RulesFiles {
+    rules: Option<RulesRuntime>,
+    project: String,
+    /// Each listed database with rules, and its file as the log names it.
+    files: Vec<(String, String)>,
+    /// The file governing the databases `firebase.json` does not list.
+    unlisted: Option<String>,
+}
+
+impl RulesFiles {
+    pub(crate) fn new(config: &SuiteConfig, rules: &RulesRuntime) -> Self {
+        let project_dir = std::fs::canonicalize(&config.project_dir)
+            .unwrap_or_else(|_| config.project_dir.clone());
+        let shown = |path: &std::path::Path| {
+            let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+            path.strip_prefix(&project_dir)
+                .unwrap_or(&path)
+                .display()
+                .to_string()
+        };
+        Self {
+            rules: Some(rules.clone()),
+            project: config.project_id.clone(),
+            files: config
+                .firestore_databases
+                .iter()
+                .filter_map(|entry| Some((entry.database_id.clone(), shown(entry.rules.as_ref()?))))
+                .collect(),
+            unlisted: crate::stand_in(&config.firestore_databases)
+                .and_then(|entry| entry.rules.as_deref())
+                .map(shown),
+        }
+    }
+
+    /// The file whose lines `database`'s rules are, when they came from it.
+    fn file(&self, database: &firenook_core_store::DatabaseName) -> Option<&str> {
+        let version = self.rules.as_ref()?.current_version(database)?;
+        if database.project_id() != self.project
+            || !matches!(version.origin, RulesOrigin::Startup | RulesOrigin::File)
+        {
+            return None;
+        }
+        self.files
+            .iter()
+            .find(|(id, _)| id == database.database_id())
+            .map(|(_, file)| file.as_str())
+            .or(self.unlisted.as_deref())
+    }
+}
+
+/// Where in the rules a denial was decided, as ` at firestore.rules:4`:
+/// each allow that refused it, by file and line when the file is known, by
+/// line otherwise; `: no allow statement matches` when none applied.
+fn refused_at(denial: &Denial, file: Option<&str>) -> String {
+    let mut lines: Vec<usize> = Vec::new();
+    for refusal in &denial.refused_by {
+        if !lines.contains(&refusal.line) {
+            lines.push(refusal.line);
+        }
+    }
+    if lines.is_empty() {
+        return if denial.error.is_some() {
+            String::new()
+        } else {
+            ": no allow statement matches".to_owned()
+        };
+    }
+    let places = lines
+        .iter()
+        .map(|line| file.map_or_else(|| format!("line {line}"), |file| format!("{file}:{line}")))
+        .collect::<Vec<_>>();
+    format!(" at {}", places.join(", "))
+}
+
+pub(crate) fn denial_input(denial: &Denial, file: Option<&str>) -> LogInput {
     let operation = operation_name(denial.operation);
     let path = denial.relative_path();
     let database = denial.database.database_id();
@@ -656,6 +741,7 @@ pub(crate) fn denial_input(denial: &Denial) -> LogInput {
         .uid
         .as_deref()
         .map_or_else(|| "an unauthenticated client".to_owned(), str::to_owned);
+    let at = refused_at(denial, file);
     let reason = denial
         .error
         .as_deref()
@@ -665,13 +751,13 @@ pub(crate) fn denial_input(denial: &Denial) -> LogInput {
         DenialOrigin::App => (
             kinds::RULES_DENIED,
             LogLevel::Warn,
-            format!("Rules denied {operation} on {path} for {who}{reason}"),
+            format!("Rules denied {operation} on {path} for {who}{at}{reason}"),
         ),
         DenialOrigin::Console => (
             kinds::RULES_DENIED_CONSOLE,
             LogLevel::Info,
             format!(
-                "Rules denied {operation} on {path} from the console (viewing as {who}){reason}"
+                "Rules denied {operation} on {path} from the console (viewing as {who}){at}{reason}"
             ),
         ),
     };
@@ -695,6 +781,8 @@ pub(crate) fn denial_input(denial: &Denial) -> LogInput {
             "uid": denial.uid,
             "requestId": denial.request_id.as_deref(),
             "origin": denial.origin.as_str(),
+            "lines": denial.refused_by.iter().map(|refusal| refusal.line).collect::<Vec<_>>(),
+            "rulesFile": file,
         })),
         refs,
         audience: Audience::Console,
@@ -764,6 +852,7 @@ fn held_back_input(origin: DenialOrigin, held: u64) -> LogInput {
 /// tap and denials were lost.
 pub(crate) fn spawn_denial_log(
     mut denials: broadcast::Receiver<Arc<Denial>>,
+    files: RulesFiles,
     logging: &LoggingRuntime,
     shutdown: &Shutdown,
 ) {
@@ -785,7 +874,7 @@ pub(crate) fn spawn_denial_log(
                             .entry(denial.origin)
                             .or_insert_with(|| Bucket::new(now));
                         if bucket.take(now) {
-                            logging.emit(denial_input(&denial));
+                            logging.emit(denial_input(&denial, files.file(&denial.database)));
                         }
                     }
                     Err(RecvError::Lagged(missed)) => logging.emit(LogInput {

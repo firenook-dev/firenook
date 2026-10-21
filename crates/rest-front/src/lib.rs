@@ -204,11 +204,7 @@ async fn browser_cors(mut request: Request<Body>, next: Next) -> Response {
         .get(ACCESS_CONTROL_REQUEST_HEADERS)
         .cloned();
     let is_preflight = request.method() == Method::OPTIONS;
-    if request
-        .headers()
-        .get(CONTENT_TYPE)
-        .is_some_and(|value| value.as_bytes().eq_ignore_ascii_case(b"text/plain"))
-    {
+    if body_is_json(request.headers().get(CONTENT_TYPE)) {
         request
             .headers_mut()
             .insert(CONTENT_TYPE, JSON_CONTENT_TYPE);
@@ -233,6 +229,21 @@ async fn browser_cors(mut request: Request<Body>, next: Next) -> Response {
     }
 
     response
+}
+
+/// Whether a body typed `text/plain` (any parameters, any letter case) or
+/// not typed at all is read as JSON, as the official emulator reads it: the
+/// browser SDK posts `text/plain` to avoid a CORS preflight, and `fetch`
+/// types a string body `text/plain;charset=UTF-8`, which is how
+/// `@firebase/rules-unit-testing` sends its rules.
+fn body_is_json(content_type: Option<&HeaderValue>) -> bool {
+    content_type.is_none_or(|value| {
+        value
+            .to_str()
+            .ok()
+            .and_then(|value| value.split(';').next())
+            .is_some_and(|media| media.trim().eq_ignore_ascii_case("text/plain"))
+    })
 }
 
 /// Supplies allocator-owned process statistics to the debug-memory endpoint.
@@ -479,7 +490,6 @@ async fn patch_document(
     Json(body): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, RestError> {
     let parameters = WriteParameters::from_pairs(&pairs)?;
-    let project = path.project.clone();
     let key = document_key(path)?;
     let fields = decode_document_fields(&body)?;
     let precondition = decode_precondition(&parameters)?;
@@ -512,7 +522,7 @@ async fn patch_document(
     }
     // As the store keeps it, before rules see it (see `decode_write`).
     .at_stored_precision();
-    let authorization = request_authorization(&headers, &project)?;
+    let authorization = request_authorization(&headers)?;
     let _guard = state.rules.write_lock();
     let snapshot = state.store.snapshot();
     let request_time = now_timestamp();
@@ -526,7 +536,7 @@ async fn patch_document(
             request_time,
         )
         .map_err(|error| RestError::commit(&error))?;
-    require_atomic_allowed(verdict)?;
+    require_atomic_allowed(&verdict)?;
     state
         .store
         .commit(&[write])
@@ -546,9 +556,8 @@ async fn delete_document(
     headers: HeaderMap,
 ) -> Result<Json<JsonValue>, RestError> {
     let parameters = WriteParameters::from_pairs(&pairs)?;
-    let project = path.project.clone();
     let key = document_key(path)?;
-    let authorization = request_authorization(&headers, &project)?;
+    let authorization = request_authorization(&headers)?;
     let database = key.database().clone();
     let write = Write::Delete {
         key,
@@ -566,7 +575,7 @@ async fn delete_document(
             now_timestamp(),
         )
         .map_err(|error| RestError::commit(&error))?;
-    require_atomic_allowed(verdict)?;
+    require_atomic_allowed(&verdict)?;
     state
         .store
         .commit(&[write])
@@ -850,7 +859,6 @@ async fn commit(
     if body.get("transaction").is_some() {
         return read_options::commit(&state, path, headers, body).await;
     }
-    let project = path.project.clone();
     let database = database_name(path)?;
     let writes = body
         .get("writes")
@@ -860,7 +868,7 @@ async fn commit(
         .map(|write| decode_write(write, &database))
         .collect::<Result<Vec<_>, _>>()?;
     validate_commit_write_sequence(&writes)?;
-    let authorization = request_authorization(&headers, &project)?;
+    let authorization = request_authorization(&headers)?;
     let _guard = state.rules.write_lock();
     let snapshot = state.store.snapshot();
     let verdict = state
@@ -873,7 +881,7 @@ async fn commit(
             now_timestamp(),
         )
         .map_err(|error| RestError::commit(&error))?;
-    require_atomic_allowed(verdict)?;
+    require_atomic_allowed(&verdict)?;
     let result = state
         .store
         .commit(&writes)
@@ -927,14 +935,13 @@ async fn run_query_at_root(
     headers: HeaderMap,
     Json(body): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, RestError> {
-    let project = path.project.clone();
     let preview = Preview::from_headers(&headers)?;
     run_query(
         &state,
         &database_name(path)?,
         None,
         &body,
-        &request_authorization(&headers, &project)?,
+        &request_authorization(&headers)?,
         preview.as_ref(),
     )
     .await
@@ -946,8 +953,7 @@ async fn run_query_at_parent(
     headers: &HeaderMap,
     Json(body): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, RestError> {
-    let project = path.project.clone();
-    let authorization = request_authorization(headers, &project)?;
+    let authorization = request_authorization(headers)?;
     let database = DatabaseName::new(path.project, path.database)
         .map_err(|error| RestError::invalid(error.to_string()))?;
     if let Some(parent) = path.document.strip_suffix(":runQuery") {
@@ -976,13 +982,12 @@ async fn run_aggregation_query_at_root(
     headers: HeaderMap,
     Json(body): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, RestError> {
-    let project = path.project.clone();
     run_aggregation_query(
         &state,
         &database_name(path)?,
         None,
         &body,
-        &request_authorization(&headers, &project)?,
+        &request_authorization(&headers)?,
     )
     .await
 }
@@ -1167,7 +1172,7 @@ fn authorize_query(
         None,
         query,
     );
-    require_allowed(state.rules.evaluate(
+    require_allowed(&state.rules.evaluate(
         database,
         authorization,
         &request,
@@ -1175,41 +1180,41 @@ fn authorize_query(
     ))
 }
 
-fn request_authorization(headers: &HeaderMap, project: &str) -> Result<Authorization, RestError> {
+/// Who a REST request is from; a header the emulator cannot read is
+/// `INVALID_ARGUMENT`, as on the official emulator.
+fn request_authorization(headers: &HeaderMap) -> Result<Authorization, RestError> {
     let header = headers
         .get(AUTHORIZATION)
         .map(HeaderValue::to_str)
         .transpose()
-        .map_err(|_| RestError::unauthenticated("Authorization header is not valid text"))?;
-    Authorization::parse(header, project, now_timestamp().seconds())
-        .map_err(|error| RestError::unauthenticated(error.to_string()))
+        .map_err(|_| RestError::invalid("Authorization header is not valid text"))?;
+    Authorization::parse(header).map_err(|error| RestError::invalid(error.to_string()))
 }
 
-fn require_allowed(verdict: firenook_rules_runtime::EvaluationResult) -> Result<(), RestError> {
+/// A refusal is 403 `PERMISSION_DENIED` with production's text, followed by
+/// the allows that refused it as the official emulator names them.
+fn require_allowed(verdict: &firenook_rules_runtime::EvaluationResult) -> Result<(), RestError> {
     if verdict.allowed {
         Ok(())
     } else {
-        Err(RestError::permission_denied(verdict.error.map_or_else(
-            || "Security Rules denied the request".to_owned(),
-            |error| error.message,
-        )))
+        Err(RestError::permission_denied(verdict.denial_message()))
     }
 }
 
+/// An atomic request is refused for its first refused operation.
 fn require_atomic_allowed(
-    verdict: firenook_rules_runtime::AtomicEvaluationResult,
+    verdict: &firenook_rules_runtime::AtomicEvaluationResult,
 ) -> Result<(), RestError> {
     if verdict.allowed {
         return Ok(());
     }
     let message = verdict
         .operations
-        .into_iter()
+        .iter()
         .find(|operation| !operation.allowed)
-        .and_then(|operation| operation.error)
         .map_or_else(
-            || "Security Rules denied the request".to_owned(),
-            |error| error.message,
+            || firenook_rules_runtime::PRODUCTION_DENIAL.to_owned(),
+            firenook_rules_runtime::EvaluationResult::denial_message,
         );
     Err(RestError::permission_denied(message))
 }
@@ -2499,6 +2504,63 @@ mod tests {
                 .rules_for(&database)
                 .expect("previous rules retained")
         ));
+    }
+
+    /// `@firebase/rules-unit-testing` sends its rules as a `fetch` string
+    /// body (`text/plain;charset=UTF-8`); the official emulator reads any
+    /// REST body as JSON when it is text/plain or untyped
+    /// (`conformance/fixtures/request-identity-v1`, `reload`).
+    #[tokio::test]
+    async fn bodies_typed_text_plain_or_untyped_are_read_as_json() {
+        let runtime = RulesRuntime::default();
+        let database = DatabaseName::new("demo-hot-reload", "(default)").expect("database");
+        let application = router_with_query_policy_memory_and_rules(
+            Store::default(),
+            QueryPolicy::default(),
+            None,
+            runtime.clone(),
+        );
+        for content_type in [Some("text/plain;charset=UTF-8"), Some("Text/Plain"), None] {
+            let previous = runtime.rules_for(&database);
+            let mut request = Request::put("/emulator/v1/projects/demo-hot-reload:securityRules");
+            if let Some(content_type) = content_type {
+                request = request.header(CONTENT_TYPE, content_type);
+            }
+            let response = application
+                .clone()
+                .oneshot(
+                    request
+                        .body(Body::from(
+                            json!({"rules":{"files":[{"content":test_rules("false")}]}})
+                                .to_string(),
+                        ))
+                        .expect("reload request"),
+                )
+                .await
+                .expect("reload response");
+            assert_eq!(response.status(), StatusCode::OK, "{content_type:?}");
+            let installed = runtime.rules_for(&database).expect("installed rules");
+            assert!(
+                previous.is_none_or(|previous| !Arc::ptr_eq(&previous, &installed)),
+                "{content_type:?}"
+            );
+        }
+        let commit = application
+            .oneshot(
+                Request::post("/v1/projects/demo-hot-reload/databases/(default)/documents:commit")
+                    .header(AUTHORIZATION, "Bearer owner")
+                    .body(Body::from(
+                        json!({"writes":[{"update":{
+                            "name":"projects/demo-hot-reload/databases/(default)/documents/items/one",
+                            "fields":{"n":{"integerValue":"1"}}
+                        }}]})
+                        .to_string(),
+                    ))
+                    .expect("commit request"),
+            )
+            .await
+            .expect("commit response");
+        assert_eq!(commit.status(), StatusCode::OK);
     }
 
     const MULTI_DATABASE_PROJECT: &str = "demo-multi-db";

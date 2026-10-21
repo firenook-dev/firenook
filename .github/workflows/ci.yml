@@ -361,6 +361,7 @@ jobs:
           node --test conformance/test/functions-readiness-receipts.test.mjs
           node --test conformance/test/rest-read-options-fixture.test.mjs
           node --test conformance/test/rule-bindings-fixture.test.mjs
+          node --test conformance/test/request-identity-fixture.test.mjs
           node --test conformance/test/functions-topic-reload-fixture.test.mjs
           node --test conformance/test/lifecycle-receipts.test.mjs
           node --test conformance/test/rest-encoding-profile.test.mjs
@@ -532,6 +533,10 @@ jobs:
         run: npm run test:serialization:replay --prefix conformance
       - name: Replay query rules through native and browser transports
         run: npm run test:rules:query-replay --prefix conformance
+      - name: Replay who a request is from over gRPC and REST
+        run: npm run test:rules:identity-replay --prefix conformance
+      - name: Run rules-unit-testing and the console's exported rules tests against Firenook
+        run: npm run test:rules:unit-testing --prefix conformance -- --target firenook
       - name: Run WebChannel browser demo
         run: npm run test:webchannel:browser --prefix conformance
       - name: Run WebChannel browser demo in disk/WAL mode
@@ -555,6 +560,8 @@ jobs:
         run: npm run test:official --prefix conformance
       - name: Test the official Java emulator in Enterprise mode
         run: npm run test:official:enterprise --prefix conformance
+      - name: Run rules-unit-testing and the console's exported rules tests against the official emulators
+        run: npm run test:rules:unit-testing --prefix conformance -- --target java
       - name: Re-import a Firenook-written export into Java
         run: npm run test:official-export-import --prefix conformance
       - name: Export through Firenook and import into Java

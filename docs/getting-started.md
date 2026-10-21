@@ -245,5 +245,15 @@ emulators that run and no others, and demo credentials (see
 }
 ```
 
+Security Rules tests written with `@firebase/rules-unit-testing` run as they
+do on the official emulator: `initializeTestEnvironment` loads the rules,
+`authenticatedContext()` and `unauthenticatedContext()` are ruled as a
+signed-in and a signed-out client (the rules read a token's claims without
+checking its times or project, as the official emulator does), and
+`withSecurityRulesDisabled()` skips them. The test file the console exports
+from saved rules tests runs the same way. A refused request says which rule
+lines refused it, after production's `Missing or insufficient permissions.`
+(`false for 'get' @ L4`).
+
 Next: [configuration](configuration.md) · [CLI reference](cli.md) ·
 [compatibility](../COMPATIBILITY.md)

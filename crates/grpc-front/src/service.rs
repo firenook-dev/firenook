@@ -74,13 +74,13 @@ pub(crate) enum AuthorizationSource {
 }
 
 impl AuthorizationSource {
-    pub(crate) fn resolve(&self, project: &str) -> Result<Authorization, Status> {
+    /// The identity a header names. A header the emulator cannot read is
+    /// `INVALID_ARGUMENT`, as on the official emulator.
+    pub(crate) fn resolve(&self) -> Result<Authorization, Status> {
         match self {
             Self::Owner => Ok(Authorization::Owner),
-            Self::ClientHeader(header) => {
-                Authorization::parse(header.as_deref(), project, now().seconds())
-                    .map_err(|error| Status::unauthenticated(error.to_string()))
-            }
+            Self::ClientHeader(header) => Authorization::parse(header.as_deref())
+                .map_err(|error| Status::invalid_argument(error.to_string())),
         }
     }
 }
@@ -232,9 +232,9 @@ impl FirestoreService {
     }
 
     /// REST client listing with explicit client authentication, including an
-    /// anonymous caller. Unlike the native gRPC administrator convention, a
-    /// missing REST header must not become owner bypass. The extension is local
-    /// to this call and cannot be supplied through network gRPC metadata.
+    /// anonymous caller: a missing header is a signed-out client, as it is on
+    /// gRPC. The extension is local to this call and cannot be supplied
+    /// through network gRPC metadata.
     pub async fn list_documents_for_client(
         &self,
         message: ListDocumentsRequest,
@@ -483,7 +483,7 @@ impl FirestoreService {
     ) -> Result<(), Status> {
         let current = snapshot.get(key);
         let request = evaluation_request(operation, key, now(), current.as_deref(), None, query);
-        require_rules_allowed(self.rules.evaluate_with_read_transaction(
+        require_rules_allowed(&self.rules.evaluate_with_read_transaction(
             key.database(),
             authorization,
             &request,
@@ -502,7 +502,7 @@ impl FirestoreService {
     ) -> Result<(), Status> {
         let request =
             evaluation_request(RequestOperation::List, candidate, now(), None, None, query);
-        require_rules_allowed(self.rules.evaluate_with_read_transaction(
+        require_rules_allowed(&self.rules.evaluate_with_read_transaction(
             candidate.database(),
             authorization,
             &request,
@@ -527,7 +527,7 @@ impl FirestoreService {
             .rules
             .evaluate_writes(database, authorization, &writes, snapshot, request_time)
             .map_err(commit_status)?;
-        require_atomic_rules_allowed(verdict)
+        require_atomic_rules_allowed(&verdict)
     }
 
     pub(crate) async fn apply_stream_writes(
@@ -739,39 +739,58 @@ impl Default for FirestoreService {
     }
 }
 
+/// Who a network gRPC request is from. A request without `authorization`
+/// metadata is a signed-out client, as on REST and `WebChannel` and as on the
+/// official emulator: the client SDKs send no header when nobody is signed
+/// in, and the Admin SDKs send `Bearer owner`
+/// (`conformance/fixtures/request-identity-v1`).
 fn grpc_authorization_source(metadata: &MetadataMap) -> Result<AuthorizationSource, Status> {
     let header = metadata
         .get("authorization")
         .map(|value| value.to_str())
         .transpose()
-        .map_err(|_| Status::unauthenticated("Authorization metadata is not valid text"))?;
-    Ok(header.map_or(AuthorizationSource::Owner, |header| {
-        AuthorizationSource::ClientHeader(Some(header.to_owned()))
-    }))
+        .map_err(|_| Status::invalid_argument("Authorization metadata is not valid text"))?;
+    Ok(AuthorizationSource::ClientHeader(header.map(str::to_owned)))
 }
 
-pub(crate) fn require_rules_allowed(verdict: EvaluationResult) -> Result<(), Status> {
+/// The official emulator's answer to a metadata read from anyone but the
+/// owner, with rules or without (`conformance/fixtures/request-identity-v1`).
+const METADATA_NEEDS_OWNER: &str = "Metadata operations require admin authentication.";
+
+/// The answer to a partition query from anyone but the owner.
+const PARTITIONS_NEED_OWNER: &str = "Partition queries require admin authentication.";
+
+/// Refuses a read no rule governs unless the owner asks for it.
+fn require_owner<T>(request: &Request<T>, refusal: &str) -> Result<(), Status> {
+    if client_or_grpc_authorization(request)?.resolve()?.is_owner() {
+        Ok(())
+    } else {
+        Err(Status::permission_denied(refusal))
+    }
+}
+
+/// A refusal is `PERMISSION_DENIED` with production's text, followed by the
+/// allows that refused it as the official emulator names them
+/// ([`EvaluationResult::denial_message`]).
+pub(crate) fn require_rules_allowed(verdict: &EvaluationResult) -> Result<(), Status> {
     if verdict.allowed {
         return Ok(());
     }
-    Err(Status::permission_denied(verdict.error.map_or_else(
-        || "Security Rules denied the request".to_owned(),
-        |error| error.message,
-    )))
+    Err(Status::permission_denied(verdict.denial_message()))
 }
 
-pub(crate) fn require_atomic_rules_allowed(verdict: AtomicEvaluationResult) -> Result<(), Status> {
+/// An atomic request is refused for its first refused operation.
+pub(crate) fn require_atomic_rules_allowed(verdict: &AtomicEvaluationResult) -> Result<(), Status> {
     if verdict.allowed {
         return Ok(());
     }
     let message = verdict
         .operations
-        .into_iter()
+        .iter()
         .find(|operation| !operation.allowed)
-        .and_then(|operation| operation.error)
         .map_or_else(
-            || "Security Rules denied the request".to_owned(),
-            |error| error.message,
+            || firenook_rules_runtime::PRODUCTION_DENIAL.to_owned(),
+            EvaluationResult::denial_message,
         );
     Err(Status::permission_denied(message))
 }
@@ -808,7 +827,7 @@ impl Firestore for FirestoreService {
         let authorization_source = client_or_grpc_authorization(&request)?;
         let request = request.into_inner();
         let key = decode_document_name(&request.name)?;
-        let authorization = authorization_source.resolve(key.database().project_id())?;
+        let authorization = authorization_source.resolve()?;
         let token = match request.consistency_selector {
             None => Vec::new(),
             Some(get_document_request::ConsistencySelector::Transaction(token)) => token,
@@ -870,7 +889,7 @@ impl Firestore for FirestoreService {
         };
         let request = request.into_inner();
         let (database, parent) = decode_parent(&request.parent)?;
-        let authorization = authorization_source.resolve(database.project_id())?;
+        let authorization = authorization_source.resolve()?;
         let (token, historical) = match request.consistency_selector.as_ref() {
             None => (Vec::new(), None),
             Some(list_documents_request::ConsistencySelector::Transaction(token)) => {
@@ -1012,7 +1031,7 @@ impl Firestore for FirestoreService {
         };
         let decoded = decode_write(write)?;
         let key = decoded.key.clone();
-        let authorization = authorization_source.resolve(key.database().project_id())?;
+        let authorization = authorization_source.resolve()?;
         self.run_write(move |service| {
             let _guard = service.write_lock();
             let snapshot = service.store.snapshot();
@@ -1048,7 +1067,7 @@ impl Firestore for FirestoreService {
             operation: Some(Operation::Delete(request.name)),
             ..proto::Write::default()
         })?;
-        let authorization = authorization_source.resolve(decoded.key.database().project_id())?;
+        let authorization = authorization_source.resolve()?;
         self.run_write(move |service| {
             let _guard = service.write_lock();
             let snapshot = service.store.snapshot();
@@ -1075,7 +1094,7 @@ impl Firestore for FirestoreService {
         let authorization_source = client_or_grpc_authorization(&request)?;
         let request = request.into_inner();
         let database = decode_database_name(&request.database)?;
-        let authorization = authorization_source.resolve(database.project_id())?;
+        let authorization = authorization_source.resolve()?;
         let (token, new_transaction, historical) = match request.consistency_selector {
             None => (Vec::new(), false, None),
             Some(batch_get_documents_request::ConsistencySelector::Transaction(token)) => {
@@ -1157,13 +1176,15 @@ impl Firestore for FirestoreService {
                         result: Some(result),
                     });
                 }
-                require_atomic_rules_allowed(service.rules.evaluate_atomic_with_read_transaction(
-                    &database,
-                    &authorization,
-                    &evaluations,
-                    &SnapshotAccess::current(snapshot, database.project_id()),
-                    read_write_transaction,
-                ))?;
+                require_atomic_rules_allowed(
+                    &service.rules.evaluate_atomic_with_read_transaction(
+                        &database,
+                        &authorization,
+                        &evaluations,
+                        &SnapshotAccess::current(snapshot, database.project_id()),
+                        read_write_transaction,
+                    ),
+                )?;
                 Ok((responses, reads))
             })
             .await?
@@ -1199,7 +1220,7 @@ impl Firestore for FirestoreService {
         let authorization_source = client_or_grpc_authorization(&request)?;
         let request = request.into_inner();
         let database = decode_database_name(&request.database)?;
-        let authorization = authorization_source.resolve(database.project_id())?;
+        let authorization = authorization_source.resolve()?;
         let decoded = request
             .writes
             .into_iter()
@@ -1276,7 +1297,7 @@ impl Firestore for FirestoreService {
         let request = request.into_inner();
         let explain_options = request.explain_options;
         let (database, parent) = decode_parent(&request.parent)?;
-        let authorization = authorization_source.resolve(database.project_id())?;
+        let authorization = authorization_source.resolve()?;
         let Some(run_query_request::QueryType::StructuredQuery(structured)) = request.query_type
         else {
             return Err(Status::invalid_argument("structured query is required"));
@@ -1484,8 +1505,10 @@ impl Firestore for FirestoreService {
                 "Pipeline Operations are only available for Firestore databases in Enterprise edition.\n\nPlease switch to an Enterprise edition database to take advantage of such functionality.",
             ));
         }
+        let authorization_source = grpc_authorization_source(request.metadata())?;
         let request = request.into_inner();
         let database = decode_database_name(&request.database)?;
+        let authorization = authorization_source.resolve()?;
         if request.consistency_selector.is_some() {
             return Err(Status::unimplemented(
                 "pipeline consistency selectors are not supported yet",
@@ -1506,6 +1529,17 @@ impl Firestore for FirestoreService {
             .validate(&plan.query)
             .map_err(|error| index_status(&error))?;
         let snapshot = self.store.snapshot();
+        // A pipeline is ruled as the query it runs, a `list`, as the
+        // official emulator rules it.
+        let rules_candidate = firenook_rules_runtime::query_candidate(&database, &plan.query)
+            .map_err(Status::invalid_argument)?;
+        self.authorize_query(
+            &authorization,
+            &rules_candidate,
+            &snapshot,
+            firenook_rules_runtime::query_policy(&plan.query),
+            false,
+        )?;
         let results = {
             let edition = self.query_policy.edition();
             self.run_read(move || {
@@ -1537,7 +1571,7 @@ impl Firestore for FirestoreService {
         let request = request.into_inner();
         let explain_options = request.explain_options;
         let (database, parent) = decode_parent(&request.parent)?;
-        let authorization = authorization_source.resolve(database.project_id())?;
+        let authorization = authorization_source.resolve()?;
         let Some(run_aggregation_query_request::QueryType::StructuredAggregationQuery(
             aggregation_query,
         )) = request.query_type
@@ -1644,6 +1678,10 @@ impl Firestore for FirestoreService {
         &self,
         request: Request<PartitionQueryRequest>,
     ) -> Result<Response<PartitionQueryResponse>, Status> {
+        // No rule governs a partition's cursors, which carry document
+        // values: the Admin SDKs' `getPartitions()` sends the owner, and no
+        // client SDK partitions a query.
+        require_owner(&request, PARTITIONS_NEED_OWNER)?;
         let request = request.into_inner();
         let snapshot = match request.consistency_selector {
             None => self.store.snapshot(),
@@ -1755,6 +1793,7 @@ impl Firestore for FirestoreService {
         &self,
         request: Request<ListCollectionIdsRequest>,
     ) -> Result<Response<ListCollectionIdsResponse>, Status> {
+        require_owner(&request, METADATA_NEEDS_OWNER)?;
         let request = request.into_inner();
         let snapshot = match request.consistency_selector {
             None => self.store.snapshot(),
@@ -1798,7 +1837,7 @@ impl Firestore for FirestoreService {
         let authorization_source = grpc_authorization_source(request.metadata())?;
         let request = request.into_inner();
         let database = decode_database_name(&request.database)?;
-        let authorization = authorization_source.resolve(database.project_id())?;
+        let authorization = authorization_source.resolve()?;
         let decoded = request
             .writes
             .into_iter()
@@ -1853,7 +1892,7 @@ impl Firestore for FirestoreService {
         let authorization_source = grpc_authorization_source(request.metadata())?;
         let request = request.into_inner();
         let (database, parent) = decode_parent(&request.parent)?;
-        let authorization = authorization_source.resolve(database.project_id())?;
+        let authorization = authorization_source.resolve()?;
         if request.collection_id.is_empty() || request.collection_id.contains('/') {
             return Err(Status::invalid_argument("invalid collection_id"));
         }
@@ -2905,13 +2944,29 @@ mod tests {
     async fn security_rules_enforce_grpc_clients_and_preserve_admin_bypass() {
         let service = rules_service();
 
-        service
+        // A client SDK sends no header while nobody is signed in; the
+        // official emulator rules it as a signed-out client.
+        let signed_out = service
             .get_document(Request::new(GetDocumentRequest {
                 name: rules_document("users/alice"),
                 ..GetDocumentRequest::default()
             }))
             .await
-            .expect("missing gRPC auth is the backend/admin owner policy");
+            .expect_err("missing gRPC auth is a signed-out client");
+        assert_eq!(signed_out.code(), tonic::Code::PermissionDenied);
+        for owner in ["Bearer owner", "bearer owner"] {
+            let mut admin = Request::new(GetDocumentRequest {
+                name: rules_document("users/alice"),
+                ..GetDocumentRequest::default()
+            });
+            admin
+                .metadata_mut()
+                .insert("authorization", owner.parse().expect("metadata"));
+            service
+                .get_document(admin)
+                .await
+                .expect("the Admin SDKs' owner credential skips the rules");
+        }
 
         service
             .get_document(authenticated(
@@ -2942,11 +2997,13 @@ mod tests {
         malformed
             .metadata_mut()
             .insert("authorization", "Bearer broken".parse().expect("metadata"));
-        let unauthenticated = service
+        let unreadable = service
             .get_document(malformed)
             .await
             .expect_err("malformed emulator auth must be rejected");
-        assert_eq!(unauthenticated.code(), tonic::Code::Unauthenticated);
+        // INVALID_ARGUMENT, as the official emulator answers ("invalid
+        // jwt"): an SDK retries UNAUTHENTICATED forever with a mock token.
+        assert_eq!(unreadable.code(), tonic::Code::InvalidArgument);
 
         service
             .update_document(authenticated(
@@ -3004,6 +3061,126 @@ mod tests {
             panic!("unbounded query must be denied");
         };
         assert_eq!(denied_query.code(), tonic::Code::PermissionDenied);
+    }
+
+    fn owner<T>(message: T) -> Request<T> {
+        let mut request = Request::new(message);
+        request
+            .metadata_mut()
+            .insert("authorization", "Bearer owner".parse().expect("metadata"));
+        request
+    }
+
+    #[tokio::test]
+    async fn reads_no_rule_governs_need_the_owner_with_rules_and_without() {
+        for (service, project) in [
+            (rules_service(), RULES_PROJECT),
+            (FirestoreService::default(), "demo-open"),
+        ] {
+            let ids = ListCollectionIdsRequest {
+                parent: format!("projects/{project}/databases/(default)/documents"),
+                ..ListCollectionIdsRequest::default()
+            };
+            let partitions = PartitionQueryRequest {
+                parent: format!("projects/{project}/databases/(default)/documents"),
+                query_type: Some(partition_query_request::QueryType::StructuredQuery(
+                    StructuredQuery {
+                        from: vec![CollectionSelector {
+                            collection_id: "public".to_owned(),
+                            all_descendants: true,
+                        }],
+                        order_by: vec![Order {
+                            field: Some(FieldReference {
+                                field_path: "__name__".to_owned(),
+                            }),
+                            direction: Direction::Ascending as i32,
+                        }],
+                        ..StructuredQuery::default()
+                    },
+                )),
+                partition_count: 2,
+                ..PartitionQueryRequest::default()
+            };
+            for request in [
+                Request::new(ids.clone()),
+                authenticated(ids.clone(), "alice"),
+            ] {
+                let refused = service
+                    .list_collection_ids(request)
+                    .await
+                    .expect_err("collection ids are the owner's");
+                assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+                assert_eq!(
+                    refused.message(),
+                    "Metadata operations require admin authentication."
+                );
+            }
+            service
+                .list_collection_ids(owner(ids))
+                .await
+                .expect("the owner lists collection ids");
+            for request in [
+                Request::new(partitions.clone()),
+                authenticated(partitions.clone(), "alice"),
+            ] {
+                let refused = service
+                    .partition_query(request)
+                    .await
+                    .expect_err("partition cursors are the owner's");
+                assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+            }
+            service
+                .partition_query(owner(partitions))
+                .await
+                .expect("the owner partitions a query");
+        }
+    }
+
+    #[tokio::test]
+    async fn pipelines_are_ruled_as_the_query_they_run() {
+        use crate::google::firestore::v1::{Pipeline, StructuredPipeline, pipeline};
+        let rules = rules_service();
+        let service = FirestoreService::new_with_query_policy_and_rules(
+            rules.store().clone(),
+            QueryPolicy::new(DatabaseEdition::Enterprise),
+            rules.rules().clone(),
+        );
+        let request = |collection: &str| ExecutePipelineRequest {
+            database: RULES_DATABASE.to_owned(),
+            pipeline_type: Some(execute_pipeline_request::PipelineType::StructuredPipeline(
+                StructuredPipeline {
+                    pipeline: Some(Pipeline {
+                        stages: vec![pipeline::Stage {
+                            name: "collection".to_owned(),
+                            args: vec![proto::Value {
+                                value_type: Some(proto::value::ValueType::ReferenceValue(format!(
+                                    "/{collection}"
+                                ))),
+                            }],
+                            options: std::collections::HashMap::new(),
+                        }],
+                    }),
+                    options: std::collections::HashMap::new(),
+                },
+            )),
+            ..ExecutePipelineRequest::default()
+        };
+        for refused in [
+            Request::new(request("users")),
+            authenticated(request("users"), "alice"),
+        ] {
+            let Err(error) = service.execute_pipeline(refused).await else {
+                panic!("no rule allows listing users");
+            };
+            assert_eq!(error.code(), tonic::Code::PermissionDenied);
+        }
+        assert!(
+            service
+                .execute_pipeline(owner(request("users")))
+                .await
+                .is_ok(),
+            "the owner skips the rules"
+        );
     }
 
     #[tokio::test]
@@ -3590,7 +3767,7 @@ mod tests {
         let service = seeded_query_service().await;
 
         let partition = service
-            .partition_query(Request::new(PartitionQueryRequest {
+            .partition_query(owner(PartitionQueryRequest {
                 parent: format!("{DATABASE}/documents"),
                 partition_count: 1,
                 query_type: Some(partition_query_request::QueryType::StructuredQuery(

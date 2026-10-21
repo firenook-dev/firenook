@@ -17,7 +17,9 @@ How Firenook reads `firebase.json`, `.firebaserc` and the command line, and what
   `.apphosting` entries are skipped with a warning; unknown keys are errors.
 - **Storage** accepts the `{rules}` object, the array of `{target, rules}`
   entries (with `.firebaserc` targets or `--storage-bucket target=bucket`), or
-  no section at all (open default rules for the project bucket).
+  no section at all (open default rules for the project bucket). A target's
+  rules govern every bucket `.firebaserc` maps it to, as officially; a bucket
+  no rules govern refuses every client request.
 - **Firestore** accepts the object form or an array of `{database, rules,
   indexes}` entries (one entry may omit `database` for `(default)`); the
   engine serves every listed database.

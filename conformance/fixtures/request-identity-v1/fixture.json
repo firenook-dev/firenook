@@ -1,0 +1,2775 @@
+{
+  "schemaVersion": 1,
+  "syntheticOnly": true,
+  "project": "demo-firenook-identity",
+  "capturedAt": "2026-10-21T16:39:21.059Z",
+  "captureSha256": "a4a402fa400f2e8bfffba046a5fa807f73a82e7b75fdc0bb6c36fef4a1728ec6",
+  "casesSha256": "ffb77177dc65453dd208bb419b1a46a6d7587beb89c3e582f946d6d92a05cfcb",
+  "oracle": {
+    "target": "java",
+    "firestore": "1.22.0",
+    "jarSha256": "9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c",
+    "node": "v24.20.0",
+    "java": "java version \"25.0.1\" 2025-10-21 LTS"
+  },
+  "rules": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /deny/{doc} { allow read, write: if false; }\n    match /anon/{doc} { allow read, write: if request.auth == null; }\n    match /alice/{doc} { allow read, write: if request.auth.uid == 'alice'; }\n    match /uid-null/{doc} { allow get: if request.auth != null && request.auth.uid == null; }\n    match /token-sub/{doc} { allow get: if request.auth.token.sub == 'alice'; }\n    match /token-keys/{doc} { allow get: if request.auth.token.keys().hasOnly(['sub']); }\n    match /two/{doc} {\n      allow get: if false;\n      allow get: if request.auth.uid == 'x';\n    }\n    match /writes/{doc} { allow create: if request.resource.data.n > 1; }\n  }\n}\n",
+  "identities": [
+    {
+      "id": "absent",
+      "header": "no Authorization header (a signed-out client SDK)"
+    },
+    {
+      "id": "owner",
+      "header": "Bearer owner (the Admin SDKs' emulator credential)"
+    },
+    {
+      "id": "owner-lowercase",
+      "header": "bearer owner"
+    },
+    {
+      "id": "owner-uppercase",
+      "header": "BEARER OWNER"
+    },
+    {
+      "id": "user",
+      "header": "a current unsigned token for alice"
+    },
+    {
+      "id": "user-lowercase-scheme",
+      "header": "bearer <current unsigned token for alice>"
+    },
+    {
+      "id": "issued-at-zero",
+      "header": "the token createMockUserToken builds without iat: iat 0, exp 3600"
+    },
+    {
+      "id": "issued-tomorrow",
+      "header": "a token issued a day from now"
+    },
+    {
+      "id": "other-project",
+      "header": "a token whose aud and iss name another project"
+    },
+    {
+      "id": "other-audience",
+      "header": "a token whose aud alone names another project"
+    },
+    {
+      "id": "sub-only",
+      "header": "an unsigned token with only sub: alice"
+    },
+    {
+      "id": "user-id-only",
+      "header": "an unsigned token with only user_id: alice"
+    },
+    {
+      "id": "empty-claims",
+      "header": "an unsigned token with no claims"
+    },
+    {
+      "id": "numeric-sub",
+      "header": "an unsigned token with sub: 7"
+    },
+    {
+      "id": "no-alg",
+      "header": "a token whose header has no alg"
+    },
+    {
+      "id": "signed",
+      "header": "an RS256 header and a signature nobody checks"
+    },
+    {
+      "id": "padded-base64",
+      "header": "standard padded base64 segments"
+    },
+    {
+      "id": "two-segments",
+      "header": "a token of two segments"
+    },
+    {
+      "id": "array-claims",
+      "header": "a token whose payload is an array"
+    },
+    {
+      "id": "not-a-jwt",
+      "header": "Bearer not-a-jwt"
+    },
+    {
+      "id": "basic",
+      "header": "a Basic credential"
+    },
+    {
+      "id": "firebase-owner",
+      "header": "Firebase owner (Storage's admin credential)"
+    }
+  ],
+  "reads": [
+    {
+      "database": "(default)",
+      "identity": "absent",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "absent",
+      "path": "anon/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/anon/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/anon/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "absent",
+      "path": "alice/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nNull value error. for 'get' @ L6, Null value error. for 'get' @ L6"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nNull value error. for 'get' @ L6, Null value error. for 'get' @ L6"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "owner",
+      "path": "deny/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/deny/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/deny/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "owner",
+      "path": "anon/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/anon/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/anon/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "owner",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "owner-lowercase",
+      "path": "deny/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/deny/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/deny/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "owner-lowercase",
+      "path": "anon/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/anon/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/anon/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "owner-lowercase",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "owner-uppercase",
+      "path": "deny/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/deny/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/deny/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "owner-uppercase",
+      "path": "anon/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/anon/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/anon/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "owner-uppercase",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "user",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "user",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "user",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "user-lowercase-scheme",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "user-lowercase-scheme",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "user-lowercase-scheme",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "issued-at-zero",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "issued-at-zero",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "issued-at-zero",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "issued-tomorrow",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "issued-tomorrow",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "issued-tomorrow",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "other-project",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "other-project",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "other-project",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "other-audience",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "other-audience",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "other-audience",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "sub-only",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "sub-only",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "sub-only",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "user-id-only",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "user-id-only",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "user-id-only",
+      "path": "alice/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L6"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L6"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "empty-claims",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "empty-claims",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "empty-claims",
+      "path": "alice/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L6"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L6"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "numeric-sub",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "numeric-sub",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "numeric-sub",
+      "path": "alice/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L6"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L6"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "no-alg",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "no-alg",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "no-alg",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "signed",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "signed",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "signed",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "padded-base64",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "padded-base64",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "padded-base64",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "two-segments",
+      "path": "deny/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "two-segments",
+      "path": "anon/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "two-segments",
+      "path": "alice/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "array-claims",
+      "path": "deny/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "array-claims",
+      "path": "anon/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "array-claims",
+      "path": "alice/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "not-a-jwt",
+      "path": "deny/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "not-a-jwt",
+      "path": "anon/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "not-a-jwt",
+      "path": "alice/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "basic",
+      "path": "deny/x",
+      "grpc": {
+        "code": 2,
+        "message": ""
+      },
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "basic",
+      "path": "anon/x",
+      "grpc": {
+        "code": 2,
+        "message": ""
+      },
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "basic",
+      "path": "alice/x",
+      "grpc": {
+        "code": 2,
+        "message": ""
+      },
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "firebase-owner",
+      "path": "deny/x",
+      "grpc": {
+        "code": 2,
+        "message": ""
+      },
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "firebase-owner",
+      "path": "anon/x",
+      "grpc": {
+        "code": 2,
+        "message": ""
+      },
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "database": "(default)",
+      "identity": "firebase-owner",
+      "path": "alice/x",
+      "grpc": {
+        "code": 2,
+        "message": ""
+      },
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "absent",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "absent",
+      "path": "anon/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/anon/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/anon/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "absent",
+      "path": "alice/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nNull value error. for 'get' @ L6, Null value error. for 'get' @ L6"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nNull value error. for 'get' @ L6, Null value error. for 'get' @ L6"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "owner",
+      "path": "deny/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/deny/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/deny/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "owner",
+      "path": "anon/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/anon/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/anon/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "owner",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "owner-lowercase",
+      "path": "deny/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/deny/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/deny/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "owner-lowercase",
+      "path": "anon/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/anon/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/anon/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "owner-lowercase",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "owner-uppercase",
+      "path": "deny/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/deny/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/deny/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "owner-uppercase",
+      "path": "anon/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/anon/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/anon/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "owner-uppercase",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "user",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "user",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "user",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "user-lowercase-scheme",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "user-lowercase-scheme",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "user-lowercase-scheme",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "issued-at-zero",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "issued-at-zero",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "issued-at-zero",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "issued-tomorrow",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "issued-tomorrow",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "issued-tomorrow",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "other-project",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "other-project",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "other-project",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "other-audience",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "other-audience",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "other-audience",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "sub-only",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "sub-only",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "sub-only",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "user-id-only",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "user-id-only",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "user-id-only",
+      "path": "alice/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L6"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L6"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "empty-claims",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "empty-claims",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "empty-claims",
+      "path": "alice/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L6"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L6"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "numeric-sub",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "numeric-sub",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "numeric-sub",
+      "path": "alice/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L6"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L6"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "no-alg",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "no-alg",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "no-alg",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "signed",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "signed",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "signed",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "padded-base64",
+      "path": "deny/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L4"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L4"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "padded-base64",
+      "path": "anon/x",
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L5"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L5"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "padded-base64",
+      "path": "alice/x",
+      "grpc": {
+        "code": 5,
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      },
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/unlisted/documents/alice/x) not found."
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "two-segments",
+      "path": "deny/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "two-segments",
+      "path": "anon/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "two-segments",
+      "path": "alice/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "array-claims",
+      "path": "deny/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "array-claims",
+      "path": "anon/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "array-claims",
+      "path": "alice/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "not-a-jwt",
+      "path": "deny/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "not-a-jwt",
+      "path": "anon/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "not-a-jwt",
+      "path": "alice/x",
+      "grpc": {
+        "code": 3,
+        "message": "invalid jwt"
+      },
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "basic",
+      "path": "deny/x",
+      "grpc": {
+        "code": 2,
+        "message": ""
+      },
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "basic",
+      "path": "anon/x",
+      "grpc": {
+        "code": 2,
+        "message": ""
+      },
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "basic",
+      "path": "alice/x",
+      "grpc": {
+        "code": 2,
+        "message": ""
+      },
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "firebase-owner",
+      "path": "deny/x",
+      "grpc": {
+        "code": 2,
+        "message": ""
+      },
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "firebase-owner",
+      "path": "anon/x",
+      "grpc": {
+        "code": 2,
+        "message": ""
+      },
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "database": "unlisted",
+      "identity": "firebase-owner",
+      "path": "alice/x",
+      "grpc": {
+        "code": 2,
+        "message": ""
+      },
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    }
+  ],
+  "claims": [
+    {
+      "identity": "absent",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L7"
+      }
+    },
+    {
+      "identity": "absent",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nNull value error. for 'get' @ L8, Null value error. for 'get' @ L8"
+      }
+    },
+    {
+      "identity": "absent",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nNull value error. for 'get' @ L9, Null value error. for 'get' @ L9"
+      }
+    },
+    {
+      "identity": "owner",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/uid-null/x) not found."
+      }
+    },
+    {
+      "identity": "owner",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-sub/x) not found."
+      }
+    },
+    {
+      "identity": "owner",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-keys/x) not found."
+      }
+    },
+    {
+      "identity": "owner-lowercase",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/uid-null/x) not found."
+      }
+    },
+    {
+      "identity": "owner-lowercase",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-sub/x) not found."
+      }
+    },
+    {
+      "identity": "owner-lowercase",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-keys/x) not found."
+      }
+    },
+    {
+      "identity": "owner-uppercase",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/uid-null/x) not found."
+      }
+    },
+    {
+      "identity": "owner-uppercase",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-sub/x) not found."
+      }
+    },
+    {
+      "identity": "owner-uppercase",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-keys/x) not found."
+      }
+    },
+    {
+      "identity": "user",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L7"
+      }
+    },
+    {
+      "identity": "user",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-sub/x) not found."
+      }
+    },
+    {
+      "identity": "user",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L9"
+      }
+    },
+    {
+      "identity": "user-lowercase-scheme",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L7"
+      }
+    },
+    {
+      "identity": "user-lowercase-scheme",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-sub/x) not found."
+      }
+    },
+    {
+      "identity": "user-lowercase-scheme",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L9"
+      }
+    },
+    {
+      "identity": "issued-at-zero",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L7"
+      }
+    },
+    {
+      "identity": "issued-at-zero",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-sub/x) not found."
+      }
+    },
+    {
+      "identity": "issued-at-zero",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L9"
+      }
+    },
+    {
+      "identity": "issued-tomorrow",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L7"
+      }
+    },
+    {
+      "identity": "issued-tomorrow",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-sub/x) not found."
+      }
+    },
+    {
+      "identity": "issued-tomorrow",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L9"
+      }
+    },
+    {
+      "identity": "other-project",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L7"
+      }
+    },
+    {
+      "identity": "other-project",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-sub/x) not found."
+      }
+    },
+    {
+      "identity": "other-project",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L9"
+      }
+    },
+    {
+      "identity": "other-audience",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L7"
+      }
+    },
+    {
+      "identity": "other-audience",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-sub/x) not found."
+      }
+    },
+    {
+      "identity": "other-audience",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L9"
+      }
+    },
+    {
+      "identity": "sub-only",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L7"
+      }
+    },
+    {
+      "identity": "sub-only",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-sub/x) not found."
+      }
+    },
+    {
+      "identity": "sub-only",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-keys/x) not found."
+      }
+    },
+    {
+      "identity": "user-id-only",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/uid-null/x) not found."
+      }
+    },
+    {
+      "identity": "user-id-only",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nProperty sub is undefined on object. for 'get' @ L8, Property sub is undefined on object. for 'get' @ L8"
+      }
+    },
+    {
+      "identity": "user-id-only",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L9"
+      }
+    },
+    {
+      "identity": "empty-claims",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/uid-null/x) not found."
+      }
+    },
+    {
+      "identity": "empty-claims",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nProperty sub is undefined on object. for 'get' @ L8, Property sub is undefined on object. for 'get' @ L8"
+      }
+    },
+    {
+      "identity": "empty-claims",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-keys/x) not found."
+      }
+    },
+    {
+      "identity": "numeric-sub",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/uid-null/x) not found."
+      }
+    },
+    {
+      "identity": "numeric-sub",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L8"
+      }
+    },
+    {
+      "identity": "numeric-sub",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-keys/x) not found."
+      }
+    },
+    {
+      "identity": "no-alg",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L7"
+      }
+    },
+    {
+      "identity": "no-alg",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-sub/x) not found."
+      }
+    },
+    {
+      "identity": "no-alg",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-keys/x) not found."
+      }
+    },
+    {
+      "identity": "signed",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L7"
+      }
+    },
+    {
+      "identity": "signed",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-sub/x) not found."
+      }
+    },
+    {
+      "identity": "signed",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L9"
+      }
+    },
+    {
+      "identity": "padded-base64",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L7"
+      }
+    },
+    {
+      "identity": "padded-base64",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-sub/x) not found."
+      }
+    },
+    {
+      "identity": "padded-base64",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "Document (projects/demo-firenook-identity/databases/(default)/documents/token-keys/x) not found."
+      }
+    },
+    {
+      "identity": "two-segments",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "identity": "two-segments",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "identity": "two-segments",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "identity": "array-claims",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "identity": "array-claims",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "identity": "array-claims",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "identity": "not-a-jwt",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "identity": "not-a-jwt",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "identity": "not-a-jwt",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 400,
+        "code": "INVALID_ARGUMENT",
+        "message": "invalid jwt"
+      }
+    },
+    {
+      "identity": "basic",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "identity": "basic",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "identity": "basic",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "identity": "firebase-owner",
+      "path": "uid-null/x",
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "identity": "firebase-owner",
+      "path": "token-sub/x",
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    },
+    {
+      "identity": "firebase-owner",
+      "path": "token-keys/x",
+      "rest": {
+        "status": 500,
+        "code": "UNKNOWN",
+        "message": "{\"error\":{\"code\":500,\"status\":\"UNKNOWN\"}}"
+      }
+    }
+  ],
+  "denials": {
+    "twoAllows": {
+      "grpc": {
+        "code": 7,
+        "message": "\nfalse for 'get' @ L11, false for 'get' @ L12"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'get' @ L11, false for 'get' @ L12"
+      }
+    },
+    "noMatchingAllow": {
+      "grpc": {
+        "code": 7,
+        "message": "No matching allow statements"
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "No matching allow statements"
+      }
+    },
+    "create": {
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "\nfalse for 'create' @ L14"
+      }
+    }
+  },
+  "metadata": [
+    {
+      "mode": "rules",
+      "identity": "absent",
+      "grpc": {
+        "code": 7,
+        "message": "Metadata operations require admin authentication."
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "Metadata operations require admin authentication."
+      },
+      "partition": {
+        "code": 12,
+        "message": "Method google.firestore.v1.Firestore/PartitionQuery is unimplemented"
+      }
+    },
+    {
+      "mode": "rules",
+      "identity": "user",
+      "grpc": {
+        "code": 7,
+        "message": "Metadata operations require admin authentication."
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "Metadata operations require admin authentication."
+      },
+      "partition": {
+        "code": 12,
+        "message": "Method google.firestore.v1.Firestore/PartitionQuery is unimplemented"
+      }
+    },
+    {
+      "mode": "rules",
+      "identity": "owner",
+      "grpc": {
+        "code": 0,
+        "message": ""
+      },
+      "rest": {
+        "status": 200,
+        "code": "OK",
+        "message": ""
+      },
+      "partition": {
+        "code": 12,
+        "message": "Method google.firestore.v1.Firestore/PartitionQuery is unimplemented"
+      }
+    },
+    {
+      "mode": "open",
+      "identity": "absent",
+      "grpc": {
+        "code": 7,
+        "message": "Metadata operations require admin authentication."
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "Metadata operations require admin authentication."
+      },
+      "partition": {
+        "code": 12,
+        "message": "Method google.firestore.v1.Firestore/PartitionQuery is unimplemented"
+      }
+    },
+    {
+      "mode": "open",
+      "identity": "user",
+      "grpc": {
+        "code": 7,
+        "message": "Metadata operations require admin authentication."
+      },
+      "rest": {
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "Metadata operations require admin authentication."
+      },
+      "partition": {
+        "code": 12,
+        "message": "Method google.firestore.v1.Firestore/PartitionQuery is unimplemented"
+      }
+    },
+    {
+      "mode": "open",
+      "identity": "owner",
+      "grpc": {
+        "code": 0,
+        "message": ""
+      },
+      "rest": {
+        "status": 200,
+        "code": "OK",
+        "message": ""
+      },
+      "partition": {
+        "code": 12,
+        "message": "Method google.firestore.v1.Firestore/PartitionQuery is unimplemented"
+      }
+    }
+  ],
+  "pipelines": [
+    {
+      "identity": "user",
+      "pipeline": {
+        "code": 7,
+        "message": "\nfalse for 'list' @ L4"
+      },
+      "query": {
+        "code": 7,
+        "message": "\nfalse for 'list' @ L4"
+      }
+    },
+    {
+      "identity": "owner",
+      "pipeline": {
+        "code": 0,
+        "message": ""
+      },
+      "query": {
+        "code": 0,
+        "message": ""
+      }
+    }
+  ],
+  "reload": [
+    {
+      "body": "json",
+      "status": 200,
+      "governs": 403
+    },
+    {
+      "body": "text-plain",
+      "status": 200,
+      "governs": 403
+    },
+    {
+      "body": "no-content-type",
+      "status": 200,
+      "governs": 403
+    }
+  ],
+  "sdkHeaders": [
+    {
+      "sdk": "@google-cloud/firestore (Admin SDK), gRPC",
+      "paths": [
+        "/google.firestore.v1.Firestore/BatchGetDocuments"
+      ],
+      "authorization": [
+        "Bearer owner"
+      ]
+    },
+    {
+      "sdk": "firebase/firestore (Node, gRPC), signed out",
+      "paths": [
+        "/google.firestore.v1.Firestore/Listen"
+      ],
+      "authorization": [
+        "absent"
+      ]
+    },
+    {
+      "sdk": "firebase/firestore/lite (REST), signed out",
+      "paths": [
+        "/v1/projects/demo-firenook-identity/databases/(default)/documents:batchGet"
+      ],
+      "authorization": [
+        "absent"
+      ]
+    },
+    {
+      "sdk": "firebase/firestore (Node, gRPC), mockUserToken {sub: alice}",
+      "paths": [
+        "/google.firestore.v1.Firestore/Listen"
+      ],
+      "authorization": [
+        "Bearer <unsigned JWT: alg none, sub alice, iat 0, exp 3600, signature empty>"
+      ]
+    },
+    {
+      "sdk": "firebase/firestore/lite (REST), mockUserToken {sub: alice}",
+      "paths": [
+        "/v1/projects/demo-firenook-identity/databases/(default)/documents:batchGet"
+      ],
+      "authorization": [
+        "Bearer <unsigned JWT: alg none, sub alice, iat 0, exp 3600, signature empty>"
+      ]
+    }
+  ]
+}

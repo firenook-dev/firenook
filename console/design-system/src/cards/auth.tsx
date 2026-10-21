@@ -656,10 +656,9 @@ const TOKENS: { title: string; inspection: AuthTokenInspection }[] = [
       checks: [
         {
           consumer: 'rules',
-          ok: false,
-          reason:
-            'Expired 2 h ago (exp 07:14:02 UTC): the rules see no signed-in user, and Firestore answers 401.',
-          fix: FRESH,
+          ok: true,
+          reason: `${RULES_SEE} It expired 2 h ago (exp 07:14:02 UTC): the rules read it anyway, as the official emulator does; production refuses it.`,
+          fix: null,
         },
         {
           consumer: 'authEmulator',

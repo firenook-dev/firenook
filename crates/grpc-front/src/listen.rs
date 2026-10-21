@@ -296,7 +296,7 @@ async fn add_target(
         }
         Err(error) => return Err(error),
     };
-    let authorization = context.authorization.resolve(database.project_id())?;
+    let authorization = context.authorization.resolve()?;
     let (spec, policy) = match decode_target_spec(&database, target.target_type) {
         Ok(decoded) => decoded,
         Err(error) => {
@@ -638,7 +638,7 @@ fn authorize_target(
                     )
                 })
                 .collect::<Vec<_>>();
-            require_atomic_rules_allowed(rules.evaluate_atomic(
+            require_atomic_rules_allowed(&rules.evaluate_atomic(
                 database,
                 authorization,
                 &requests,
@@ -654,7 +654,7 @@ fn authorize_target(
                 None,
                 query.clone(),
             );
-            require_rules_allowed(rules.evaluate(
+            require_rules_allowed(&rules.evaluate(
                 candidate.database(),
                 authorization,
                 &request,

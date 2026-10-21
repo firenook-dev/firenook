@@ -14,7 +14,8 @@ use crate::ast::{
 };
 use crate::model::{
     AtomicEvaluationResult, Auth, DocumentAccess, EvaluationRequest, EvaluationResult, LatLng,
-    Query, RequestOperation, Resource, RulesDuration, RulesService, RuntimeError, Timestamp, Value,
+    MAXIMUM_REFUSALS, Query, RefusingAllow, RequestOperation, Resource, RulesDuration,
+    RulesService, RuntimeError, Timestamp, Value,
 };
 use crate::{
     AllowDecision, ConstraintOperator, CoverageObserver, EvaluationTrace, ExpressionKey,
@@ -205,6 +206,11 @@ fn evaluate_with_state<A: DocumentAccess + ?Sized>(
         document_accesses: evaluator.state.document_accesses - initial_accesses,
         document_cache_hits: evaluator.state.document_cache_hits - initial_cache_hits,
         matching_allows: evaluator.matching_allows,
+        refused_by: if evaluator.allowed {
+            Vec::new()
+        } else {
+            evaluator.refused_by
+        },
     }
 }
 
@@ -292,6 +298,7 @@ struct Evaluator<'a, 'observer, A: DocumentAccess + ?Sized> {
     state: &'a mut AccessState,
     operation_document_accesses: usize,
     matching_allows: usize,
+    refused_by: Vec<RefusingAllow>,
     call_depth: usize,
     query_branch: Option<Vec<crate::FieldConstraint>>,
     trace: Option<&'a mut EvaluationTrace>,
@@ -356,6 +363,7 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             state,
             operation_document_accesses: 0,
             matching_allows: 0,
+            refused_by: Vec::new(),
             call_depth: 0,
             query_branch: None,
             trace,
@@ -439,11 +447,19 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                         self.allowed = true;
                         return;
                     }
-                    Ok(EvalValue::Data(Value::Bool(false))) => {}
-                    Ok(_) => self.record_error(RuntimeError::new(
-                        "allow condition did not evaluate to a boolean",
-                    )),
-                    Err(error) => self.record_error(error),
+                    Ok(EvalValue::Data(Value::Bool(false))) => {
+                        self.refused(allow.location.line, None);
+                    }
+                    Ok(_) => {
+                        let error =
+                            RuntimeError::new("allow condition did not evaluate to a boolean");
+                        self.refused(allow.location.line, Some(&error));
+                        self.record_error(error);
+                    }
+                    Err(error) => {
+                        self.refused(allow.location.line, Some(&error));
+                        self.record_error(error);
+                    }
                 }
             }
         }
@@ -454,6 +470,25 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 return;
             }
         }
+    }
+
+    /// Notes an allow that refused the request, for its denial message.
+    /// Alternative query branches run the same allow again; it is named once.
+    fn refused(&mut self, line: usize, error: Option<&RuntimeError>) {
+        let error = error.map(|error| error.message.as_str());
+        if self.refused_by.len() == MAXIMUM_REFUSALS
+            || self
+                .refused_by
+                .iter()
+                .any(|refusal| refusal.line == line && refusal.error.as_deref() == error)
+        {
+            return;
+        }
+        self.refused_by.push(RefusingAllow {
+            line,
+            operation: self.request.operation,
+            error: error.map(str::to_owned),
+        });
     }
 
     fn record_error(&mut self, error: RuntimeError) {

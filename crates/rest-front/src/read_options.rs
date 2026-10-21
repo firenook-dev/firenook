@@ -102,7 +102,7 @@ pub(super) async fn begin(
     headers: HeaderMap,
     Json(body): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, RestError> {
-    request_authorization(&headers, &path.project)?;
+    request_authorization(&headers)?;
     let input: BeginTransactionRequest = decode(database_input(&path, body)?)?;
     let result = state
         .service
@@ -118,7 +118,7 @@ pub(super) async fn rollback(
     headers: HeaderMap,
     Json(body): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, RestError> {
-    request_authorization(&headers, &path.project)?;
+    request_authorization(&headers)?;
     let input: RollbackRequest = decode(database_input(&path, body)?)?;
     let result = state
         .service
