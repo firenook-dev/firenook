@@ -93,6 +93,21 @@ export function connectHost(host) {
 
 export const readJson = file => JSON.parse(readFileSync(file, 'utf8'));
 const isDirectory = path => { try { return statSync(path).isDirectory(); } catch { return false; } };
+const isFile = path => { try { return statSync(path).isFile(); } catch { return false; } };
+
+// The project's firebase.json: --config, relative to the current directory,
+// or, as the official CLI finds it, the first firebase.json in the current
+// directory or a folder above it, up to the root of the file system (so a
+// command run in functions/ finds the project's). Undefined when there is
+// none.
+export function findConfig(options = {}, cwd = process.cwd()) {
+  if (options.config) return resolve(cwd, options.config);
+  for (let directory = resolve(cwd); ; directory = dirname(directory)) {
+    const candidate = join(directory, 'firebase.json');
+    if (isFile(candidate)) return candidate;
+    if (dirname(directory) === directory) return undefined;
+  }
+}
 // Resolve existing parent symlinks even for a destination that does not exist.
 export function canonical(path) {
   path = resolve(path);
@@ -113,7 +128,8 @@ export function inspectProject(options, cwd = process.cwd()) {
   const errors = [];
   const warnings = [];
   const fail = (code, message) => errors.push({code, message});
-  const config = resolve(cwd, options.config || 'firebase.json');
+  const config = findConfig(options, cwd);
+  if (!config) throw new Error(`No firebase.json in ${resolve(cwd)} or a folder above it; run firenook init in the project directory or pass --config`);
   const directory = dirname(config);
   if (!existsSync(config)) throw new Error(`No firebase.json at ${config}; run firenook init in the project directory or pass --config`);
   let data;

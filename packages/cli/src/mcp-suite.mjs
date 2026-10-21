@@ -7,6 +7,7 @@ import { manifest } from './binary.mjs';
 import { suiteFetch } from './client.mjs';
 import { encodeValue } from './firestore-values.mjs';
 import { discoverProject, findHub, needsDiscovery, resolveProject, runningServices, serviceOrigin } from './hub.mjs';
+import { findConfig } from './options.mjs';
 
 export const CLIENT = `firenook-mcp/${manifest.version}`;
 export const OWNER = {authorization:'Bearer owner'};
@@ -55,7 +56,7 @@ export function projectSource(options, cwd) {
   if (options.config) return {by:'--config', config:resolve(cwd, options.config)};
   if (needsDiscovery(options, cwd)) return {by:'locator'};
   if (options.project) return {by:'--project'};
-  return {by:'firebase.json', config:resolve(cwd, 'firebase.json')};
+  return {by:'firebase.json', config:findConfig(options, cwd)};
 }
 
 // The project a call addresses, resolved on every call so a suite started or

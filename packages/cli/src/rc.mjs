@@ -3,12 +3,14 @@
 // directory; no network, no login.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { UNIMPLEMENTED, validProjectId } from './options.mjs';
+import { UNIMPLEMENTED, findConfig, validProjectId } from './options.mjs';
 
 const TARGET_TYPES = {storage:'bucket', database:'instance', hosting:'site'};
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-export const rcPath = (options, cwd = process.cwd()) => join(dirname(resolve(cwd, options.config || 'firebase.json')), '.firebaserc');
+// Next to the project's firebase.json (found as findConfig finds it), or in
+// the current directory when there is none.
+export const rcPath = (options, cwd = process.cwd()) => join(dirname(findConfig(options, cwd) ?? resolve(cwd, 'firebase.json')), '.firebaserc');
 
 export function readRc(path) {
   if (!existsSync(path)) return {};

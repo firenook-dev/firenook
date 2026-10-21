@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { DEFAULT_PORTS, SERVICES, canonical, connectHost, contains, loadProject, validProjectId } from './options.mjs';
+import { DEFAULT_PORTS, SERVICES, canonical, connectHost, contains, findConfig, loadProject, validProjectId } from './options.mjs';
 import { suiteFetch } from './client.mjs';
 
 export const EXPORTABLE = ['firestore', 'auth', 'storage'];
@@ -24,8 +24,8 @@ export function readLocator(project) {
 // explicit --project id with default ports: export and delete only need the
 // id to find the locator file.
 // Discovery (discoverProject below) applies only when neither --project,
-// --config nor a firebase.json in cwd names a project.
-export const needsDiscovery = (options, cwd = process.cwd()) => !options.project && !options.config && !existsSync(resolve(cwd, 'firebase.json'));
+// --config nor a firebase.json in cwd or a folder above it names a project.
+export const needsDiscovery = (options, cwd = process.cwd()) => !options.project && !options.config && !findConfig(options, cwd);
 export function resolveProject(options, cwd = process.cwd()) {
   try { return loadProject(options, cwd); }
   catch (error) {
