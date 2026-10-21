@@ -29,6 +29,7 @@ params:
     type: secret
   - name: UNSET
     type: string
+    default: later
 endpoints:
   api:
     entryPoint: api
@@ -152,11 +153,16 @@ async fn functions_group_their_keys_and_read_their_status() {
         .find(|param| param.name == "API_KEY")
         .expect("declared");
     assert!(secret.secret && secret.value.is_none() && !secret.unresolved);
-    assert!(
-        api.params
-            .iter()
-            .any(|param| param.name == "UNSET" && param.unresolved)
-    );
+    // No file sets it: the codebase loaded with its default, and the
+    // console still offers to write it where the official prompt would.
+    let unset = api
+        .params
+        .iter()
+        .find(|param| param.name == "UNSET")
+        .expect("declared");
+    assert!(unset.unresolved);
+    assert_eq!(unset.value.as_deref(), Some("later"));
+    assert_eq!(unset.file, None);
     // Only functions the URL route reaches have a path.
     let nightly = console
         .function("us-central1-nightly")

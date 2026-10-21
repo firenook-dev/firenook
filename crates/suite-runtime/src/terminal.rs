@@ -271,7 +271,7 @@ pub(crate) fn functions_line(event: &LogEvent) {
         return;
     }
     if level == "warn" && event.execution.is_none() && !READY.load(Ordering::SeqCst) {
-        warn(&event.label, &event.message);
+        warn(&event.label, &startup_warning(event));
         return;
     }
     emit(&json!({
@@ -289,6 +289,17 @@ pub(crate) fn functions_line(event: &LogEvent) {
             firenook_functions_runtime::LogStream::Stderr => "stderr",
         }),
     }));
+}
+
+/// A Functions warning as the start-up list shows it. The list keeps the
+/// text alone, once, so a warning about one function or instance
+/// (`functions[us-central1-onUpload]`, `extensions[stripe]`) names it.
+fn startup_warning(event: &LogEvent) -> String {
+    if event.label.contains('[') {
+        format!("{}: {}", event.label, event.message.trim_start())
+    } else {
+        event.message.clone()
+    }
 }
 
 /// The suite is ready: every start-up warning goes with it, and later ones
@@ -462,5 +473,30 @@ mod tests {
             ))
         );
         assert_eq!(bind_failure("suite state is locked"), None);
+    }
+
+    #[test]
+    fn a_startup_warning_about_one_function_names_it() {
+        let ignored = LogEvent::new(
+            "WARN",
+            "functions[us-central1-onUpload]",
+            "function ignored because the storage emulator does not exist or is not running."
+                .to_owned(),
+        );
+        assert_eq!(
+            startup_warning(&ignored),
+            "functions[us-central1-onUpload]: function ignored because the storage emulator does not exist or is not running."
+        );
+        let instance = LogEvent::new(
+            "WARN",
+            "extensions[stripe]",
+            " ignored becuase it includes auth triggered functions".to_owned(),
+        );
+        assert_eq!(
+            startup_warning(&instance),
+            "extensions[stripe]: ignored becuase it includes auth triggered functions"
+        );
+        let general = LogEvent::new("WARN", "functions", "Something to know.".to_owned());
+        assert_eq!(startup_warning(&general), "Something to know.");
     }
 }

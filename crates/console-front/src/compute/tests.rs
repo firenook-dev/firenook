@@ -295,6 +295,7 @@ pub(crate) fn extensions_config(directory: &Scratch) -> firenook_extensions::Ext
         credential: None,
         offline: true,
         ui_origin: Some("http://127.0.0.1:4000/".to_owned()),
+        services: firenook_functions_runtime::RunningServices::ALL,
     }
 }
 
@@ -361,6 +362,7 @@ impl Suite {
         let config = RuntimeConfig {
             project_id: PROJECT.to_owned(),
             project_alias: None,
+            services: firenook_functions_runtime::RunningServices::ALL,
             host: "127.0.0.1".to_owned(),
             functions_port: 5001,
             project_dir: root.clone(),

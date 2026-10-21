@@ -77,24 +77,58 @@ impl Harness {
         files: &[(&str, &str)],
         prepare: impl FnOnce(&Path),
     ) -> Result<Self, String> {
-        let (node, sdk) = requirements()?;
-        Self::launch(index, manifest, delivery, files, prepare, node, Some(sdk)).await
+        Self::start_configured(index, manifest, delivery, files, prepare, |_| {}).await
     }
 
-    /// A runtime whose worker can never start (no Node, no SDK needed):
-    /// loads, registrations, environments and env edits work without one.
-    pub async fn start_without_worker(manifest: &str, files: &[(&str, &str)]) -> Self {
+    /// [`Harness::start_with_files`] with a last change to the runtime's
+    /// configuration (the project alias, the running services).
+    pub async fn start_configured(
+        index: &str,
+        manifest: &str,
+        delivery: LogDelivery,
+        files: &[(&str, &str)],
+        prepare: impl FnOnce(&Path),
+        configure: impl FnOnce(&mut RuntimeConfig),
+    ) -> Result<Self, String> {
+        let (node, sdk) = requirements()?;
+        Self::launch(
+            index,
+            manifest,
+            delivery,
+            files,
+            prepare,
+            configure,
+            node,
+            Some(sdk),
+        )
+        .await
+    }
+
+    /// A runtime without a worker over a configuration changed by
+    /// `configure`.
+    pub async fn start_without_worker_configured(
+        manifest: &str,
+        files: &[(&str, &str)],
+        configure: impl FnOnce(&mut RuntimeConfig),
+    ) -> Self {
         Self::launch(
             "",
             manifest,
             LogDelivery::Attributed,
             files,
             |_| {},
+            configure,
             PathBuf::from("/nonexistent/firenook-test-node"),
             None,
         )
         .await
         .expect("the runtime starts")
+    }
+
+    /// A runtime whose worker can never start (no Node, no SDK needed):
+    /// loads, registrations, environments and env edits work without one.
+    pub async fn start_without_worker(manifest: &str, files: &[(&str, &str)]) -> Self {
+        Self::start_without_worker_configured(manifest, files, |_| {}).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -104,6 +138,7 @@ impl Harness {
         delivery: LogDelivery,
         files: &[(&str, &str)],
         prepare: impl FnOnce(&Path),
+        configure: impl FnOnce(&mut RuntimeConfig),
         node: PathBuf,
         sdk: Option<PathBuf>,
     ) -> Result<Self, String> {
@@ -139,9 +174,10 @@ impl Harness {
         let monitor = Monitor::new(MonitorLimits::default());
         let (log, events) = LogSink::recording();
         let host = "127.0.0.1:1".to_owned();
-        let config = RuntimeConfig {
+        let mut config = RuntimeConfig {
             project_id: PROJECT.to_owned(),
             project_alias: None,
+            services: firenook_functions_runtime::RunningServices::ALL,
             host: "127.0.0.1".to_owned(),
             functions_port: 5001,
             project_dir: root.clone(),
@@ -167,6 +203,7 @@ impl Harness {
             extensions: Vec::new(),
             inspect: None,
         };
+        configure(&mut config);
         let runtime = FunctionsRuntime::start_with(
             config,
             TriggerRegistry::default(),

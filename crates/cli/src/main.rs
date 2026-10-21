@@ -436,6 +436,10 @@ struct SuiteArgs {
     storage_buckets: Vec<String>,
     #[arg(long = "project-id")]
     project_id: String,
+    /// The `.firebaserc` alias the project was selected by (`--project
+    /// staging`): each Functions codebase also reads `.env.<alias>`.
+    #[arg(long = "project-alias")]
+    project_alias: Option<String>,
     /// Accepted for compatibility with earlier launchers; the owned Functions
     /// runtime no longer loads firebase-tools.
     #[arg(long = "firebase-tools-root", hide = true)]
@@ -678,6 +682,7 @@ fn extensions_inputs(
         node,
         offline,
         ui_origin: None,
+        services: firenook_functions_runtime::RunningServices::ALL,
     })
 }
 
@@ -993,6 +998,10 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
             .filter(|name| !name.is_empty())
             .collect(),
         project_id: arguments.project_id.clone(),
+        project_alias: arguments
+            .project_alias
+            .clone()
+            .filter(|alias| !alias.is_empty()),
         services,
         ui_enabled,
         single_project_mode: arguments
@@ -2199,6 +2208,47 @@ mod tests {
         assert_eq!(launch.args, ["--only", "firestore"]);
         let error = resolve("{oops").expect_err("refused");
         assert!(error.starts_with("--launch-context "), "{error}");
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn the_project_alias_reaches_the_functions_runtime() {
+        let project = std::env::temp_dir().join(format!(
+            "firenook-cli-alias-{}-{}",
+            std::process::id(),
+            TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&project).expect("project");
+        fs::write(project.join("firebase.json"), "{}").expect("firebase.json");
+        let project_dir = project.display().to_string();
+        let state = project.join("state").display().to_string();
+        let base = [
+            "firenook",
+            "suite",
+            "--project-dir",
+            &project_dir,
+            "--project-id",
+            "demo-alias",
+            "--node",
+            "node",
+            "--state-dir",
+            &state,
+        ];
+        let resolve = |extra: &[&str]| {
+            let cli = Cli::try_parse_from(base.iter().copied().chain(extra.iter().copied()))
+                .expect("suite command should parse");
+            let Command::Suite(arguments) = cli.command else {
+                panic!("expected suite command");
+            };
+            resolve_suite_config(&arguments).expect("resolved")
+        };
+        assert_eq!(
+            resolve(&["--project-alias", "staging"])
+                .project_alias
+                .as_deref(),
+            Some("staging")
+        );
+        assert_eq!(resolve(&[]).project_alias, None);
         let _ = fs::remove_dir_all(&project);
     }
 

@@ -119,13 +119,15 @@ pub struct ParamView {
     pub default: Option<Value>,
     pub label: Option<String>,
     pub description: Option<String>,
-    /// `None` for a secret param (reveal it through [`ConsoleHandle::secret`]).
+    /// The value the codebase loaded with: an env file's, or the param's
+    /// default when no file sets it. `None` for a secret param (reveal it
+    /// through [`ConsoleHandle::secret`]).
     pub value: Option<String>,
     pub secret: bool,
     /// The file the value comes from.
     pub file: Option<String>,
-    /// No env file sets it: the official emulator would prompt and write
-    /// `.env.local`.
+    /// No env file sets it: the official emulator would prompt (with the
+    /// default, if any, filled in) and write `.env.local`.
     pub unresolved: bool,
 }
 
@@ -661,6 +663,7 @@ impl ConsoleHandle {
                         param_view(
                             param,
                             &loaded.user_env,
+                            &loaded.param_defaults,
                             &loaded.env_sources,
                             &loaded.secrets,
                         )
@@ -1683,6 +1686,7 @@ fn status_of(record: &Record) -> RuntimeStatus {
 fn param_view(
     param: &DeclaredParam,
     values: &BTreeMap<String, String>,
+    defaults: &BTreeMap<String, String>,
     sources: &BTreeMap<String, String>,
     secrets: &BTreeMap<String, String>,
 ) -> ParamView {
@@ -1696,7 +1700,10 @@ fn param_view(
         )
     } else {
         (
-            values.get(&param.name).cloned(),
+            values
+                .get(&param.name)
+                .or_else(|| defaults.get(&param.name))
+                .cloned(),
             sources.get(&param.name).cloned(),
         )
     };

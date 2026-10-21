@@ -29,6 +29,7 @@ pub mod env_files;
 pub mod log;
 pub mod manifest;
 pub mod monitor;
+pub mod params;
 pub mod registry;
 mod server;
 pub mod watcher;
@@ -38,7 +39,7 @@ pub use console::{ConsoleError, ConsoleHandle};
 pub use log::{LogEvent, LogSink, LogStream};
 pub use manifest::{DeclaredParam, Definition, NotLoaded};
 pub use monitor::{LiveSink, Monitor, MonitorLimits};
-pub use registry::BlockingConfig;
+pub use registry::{BlockingConfig, RunningServices};
 
 /// What the suite's log sink receives from the runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,7 +173,12 @@ pub struct ExtensionBackend {
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     pub project_id: String,
+    /// The `.firebaserc` alias the project was selected by (`--project
+    /// staging`), whose `.env.<alias>` file a codebase reads.
     pub project_alias: Option<String>,
+    /// The services running beside the runtime: a trigger on another is
+    /// ignored, with a warning that names it.
+    pub services: RunningServices,
     pub host: String,
     pub functions_port: u16,
     pub project_dir: PathBuf,
@@ -255,6 +261,11 @@ struct Loaded {
     env_hashes: BTreeMap<String, [u8; 32]>,
     /// The manifest's declared params.
     params: Vec<DeclaredParam>,
+    /// The params no env file sets that took their default.
+    param_defaults: BTreeMap<String, String>,
+    /// What the worker's environment holds for params beyond the env files
+    /// ([`params::ResolvedParams::environment`]).
+    param_env: BTreeMap<String, String>,
     /// Per function id, the options it declares that the emulator does not
     /// apply.
     declared: BTreeMap<String, Map<String, Value>>,
@@ -532,7 +543,10 @@ impl FunctionsRuntime {
             .map_err(|error| RuntimeError(format!("failed to build the worker client: {error}")))?;
         let (updates, _) = watch::channel(0);
         let state = Arc::new(RuntimeState {
-            registry: RwLock::new(registry::Registry::new(&config.project_id)),
+            registry: RwLock::new(registry::Registry::with_services(
+                &config.project_id,
+                config.services,
+            )),
             config,
             backends,
             triggers,
@@ -975,6 +989,7 @@ impl RuntimeState {
                 .to_string(),
         );
         env.extend(loaded.user_env.clone());
+        env.extend(loaded.param_env.clone());
         env.extend(self.system_envs());
         env.extend(self.emulator_envs());
         env.insert("FIREBASE_CONFIG".to_owned(), self.firebase_config());
@@ -1245,35 +1260,89 @@ impl RuntimeState {
             }
             Err(error) => Err(error),
         };
-        match manifest {
-            Ok(manifest) => match manifest::convert_manifest(
-                &manifest,
-                &self.config.project_id,
-                &self.config.default_bucket,
-                &backend.id,
-                &user_env,
-            ) {
-                Ok(conversion) => Loaded {
-                    definitions: conversion.definitions,
+        let manifest = match manifest {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                return Loaded {
                     user_env,
                     secrets,
-                    error: None,
-                    params: conversion.params,
-                    declared: conversion.declared,
-                    dropped_endpoints: conversion.not_loaded,
+                    error: Some(error.0),
                     ..base
-                },
-                Err(error) => Loaded {
+                };
+            }
+        };
+        // The params resolve before the options that reference them, as
+        // the official `resolveBackend` does; a param no one can answer
+        // stops the load with the official question.
+        let declared = manifest::declared_params(&manifest);
+        let resolved = match params::resolve(
+            &declared,
+            &user_env,
+            &manifest::builtin_params(&self.config.project_id, &self.config.default_bucket),
+        ) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                // The official question names the prompt Firenook never
+                // shows; say where the answer goes instead.
+                let error = if error.0.starts_with("Question ") {
+                    format!(
+                        "{error}. Firenook never prompts: set the value in .env, .env.{} or .env.local, or give the param a default.",
+                        self.config.project_id
+                    )
+                } else {
+                    error.0
+                };
+                return Loaded {
                     user_env,
                     secrets,
-                    error: Some(format!("Failed to parse build specification: {error}")),
+                    error: Some(error),
+                    params: declared,
                     ..base
-                },
+                };
+            }
+        };
+        let defaulted: Vec<&str> = declared
+            .iter()
+            .filter(|param| resolved.defaults.contains_key(&param.name))
+            .map(|param| param.name.as_str())
+            .collect();
+        if !defaulted.is_empty() {
+            self.log.record(
+                LogEvent::new(
+                    "INFO",
+                    "functions",
+                    format!(
+                        "Params no env file sets take their default: {}.",
+                        defaulted.join(", ")
+                    ),
+                )
+                .with_codebase(backend.id.clone()),
+            );
+        }
+        match manifest::convert_manifest(
+            &manifest,
+            &self.config.project_id,
+            &self.config.default_bucket,
+            &backend.id,
+            &resolved.values,
+        ) {
+            Ok(conversion) => Loaded {
+                definitions: conversion.definitions,
+                user_env,
+                secrets,
+                error: None,
+                params: conversion.params,
+                param_defaults: resolved.defaults,
+                param_env: resolved.environment,
+                declared: conversion.declared,
+                dropped_endpoints: conversion.not_loaded,
+                ..base
             },
             Err(error) => Loaded {
                 user_env,
                 secrets,
-                error: Some(error.0),
+                error: Some(format!("Failed to parse build specification: {error}")),
+                params: declared,
                 ..base
             },
         }

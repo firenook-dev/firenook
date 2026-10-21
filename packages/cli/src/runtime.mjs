@@ -101,6 +101,8 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {
     '--project-id', p.project, '--host', p.host,
     '--node', process.execPath, '--state-dir', state, '--minimum-functions', String(p.minimumFunctions)];
   // Absent --only means every service; the engine binds only the selected ones.
+  // The alias the project was selected by: each codebase also reads .env.<alias>.
+  if (p.alias) args.push('--project-alias', p.alias);
   if (p.services.length < SERVICES.length) args.push('--only', p.services.join(','));
   if (!ui) args.push('--no-ui');
   if (!p.singleProjectMode) args.push('--single-project-mode', 'false');
