@@ -472,6 +472,6 @@ test('an engine killed while it runs never says nothing was changed', async () =
     return {signal: 'SIGKILL'};
   });
   await runInteractive(run, {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input: keyboard(), env, platform: 'darwin', spawner, cwd: '/tmp/project'});
-  shows(text(), "this run's data stays in .firenook/runs/session-AbC123");
+  shows(text(), `this run's data stays in ${join('.firenook', 'runs', 'session-AbC123')}`);
   assert.ok(!flat(text()).includes('nothing of yours was changed'));
 });

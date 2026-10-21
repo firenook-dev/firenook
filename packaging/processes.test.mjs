@@ -48,7 +48,9 @@ test('an engine that dies without being asked says why, and the launcher exits n
   parent.stderr.on('data', chunk => { text += chunk; });
   const code = await new Promise(resolve => parent.once('exit', resolve));
   assert.notEqual(code, 0);
-  assert.match(text, /firenook: the engine was ended \(SIGKILL\) while it was running; the next start checks the data first, and repairs it if it needs to/);
+  // Windows has no signals: a process killed there ends with exit code 1.
+  const killed = process.platform === 'win32' ? 'stopped on its own \\(exit code 1\\)' : 'was ended \\(SIGKILL\\)';
+  assert.match(text, new RegExp(`firenook: the engine ${killed} while it was running; the next start checks the data first, and repairs it if it needs to`));
   // One that exits on its own once ready is no stop either.
   const ended = launcher(`console.log('All emulators ready'); setTimeout(()=>process.exit(3),50);`);
   let said = '';

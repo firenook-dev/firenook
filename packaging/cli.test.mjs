@@ -259,7 +259,7 @@ test('the Firebase CLI active project comes after --project and before .firebase
   withActiveProjects({}, () => assert.equal(loadProject(options,legacy).project,'demo-legacy'));
   withActiveProjects({[legacy]:'local'}, () => assert.equal(loadProject(options,legacy).project,'demo-local'));
 });
-test('ext:vendor --offline reaches the engine', () => {
+test('ext:vendor --offline reaches the engine', {skip: process.platform === 'win32' && 'the stand-in engine is a shell script'}, () => {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-vendor-test-'));
   const record = join(dir,'args.txt');
   const binary = join(dir,'firenook');

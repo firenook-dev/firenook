@@ -72,7 +72,7 @@ test('Linux packages are built in and checked against pinned old-glibc images', 
   assert.equal(systems[0].glibc, GLIBC_REQUIRED, 'the oldest system started is the promised floor');
   assert.deepEqual(systems.map(system => system.glibc), systems.map(system => system.glibc).sort(compareVersions), 'oldest first');
   assert.ok(compareVersions(refusals.old.glibc, GLIBC_REQUIRED) < 0);
-  const workflow = readFileSync(new URL('../.github/workflows/packages.yml', import.meta.url), 'utf8');
+  const workflow = readFileSync(new URL('../.github/workflows/packages.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   assert.match(workflow, /node packaging\/cargo-glibc\.mjs "\$TOOLCHAIN"/, 'Linux engines are linked in the manylinux image');
   assert.match(workflow, /if: runner\.os == 'Linux'\n\s+run: node packaging\/smoke-glibc\.mjs dist\/\$\{\{ matrix\.platform \}\}/, 'every Linux tarball is checked on old systems');
 });
