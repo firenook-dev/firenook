@@ -63,6 +63,8 @@ struct Inner {
     managed: Mutex<ManagedSubscriptions>,
     push_sink: Mutex<Option<PushSink>>,
     log_sink: Mutex<Option<LogSink>>,
+    /// Says a schedule's line while no sink is set.
+    printer: LinePrinter,
     streaks: Mutex<PushStreaks>,
     rejected: Mutex<RejectedRing>,
     /// Numbers console redeliveries, so each gets a fresh event id.
@@ -122,6 +124,15 @@ pub const LOG_PUSH: &str = "pubsub.push";
 
 /// Receives the runtime's log lines inline; it must not block.
 pub type LogSink = Arc<dyn Fn(PubsubLogLine) + Send + Sync>;
+
+/// Says a schedule's line while no [`LogSink`] is set, from the runtime's
+/// construction on (the problems found then included); it must not block.
+pub type LinePrinter = Arc<dyn Fn(&PubsubLogLine) + Send + Sync>;
+
+/// The printer [`PubsubRuntime::new`] uses: the line on stderr.
+fn print_to_stderr(line: &PubsubLogLine) {
+    eprintln!("firenook pubsub: {}", line.text);
+}
 
 /// What [`PubsubRuntime::reset`] removed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -392,12 +403,33 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 impl PubsubRuntime {
     /// Builds the runtime for `project` with the function targets of
     /// `inventory`; call from inside a Tokio runtime so the timer starts.
+    /// A schedule's line goes to stderr until a sink is set.
     #[must_use]
     pub fn new(
         project: &str,
         inventory: &FunctionsInventory,
         queue: DispatchQueue,
         background: TriggerRegistry,
+    ) -> Self {
+        Self::with_printer(
+            project,
+            inventory,
+            queue,
+            background,
+            Arc::new(print_to_stderr),
+        )
+    }
+
+    /// [`PubsubRuntime::new`] with `printer` saying a schedule's line until a
+    /// sink is set, starting with the schedules found here that cannot run
+    /// on a clock.
+    #[must_use]
+    pub fn with_printer(
+        project: &str,
+        inventory: &FunctionsInventory,
+        queue: DispatchQueue,
+        background: TriggerRegistry,
+        printer: LinePrinter,
     ) -> Self {
         let (targets, schedules) = discover(project, inventory);
         let mut book = ScheduleBook::default();
@@ -422,6 +454,7 @@ impl PubsubRuntime {
                 managed: Mutex::new(ManagedSubscriptions::default()),
                 push_sink: Mutex::new(None),
                 log_sink: Mutex::new(None),
+                printer,
                 streaks: Mutex::new(PushStreaks::default()),
                 rejected: Mutex::new(RejectedRing::default()),
                 redeliveries: AtomicU64::new(0),
@@ -547,12 +580,13 @@ impl PubsubRuntime {
     }
 
     /// Logs a line: to the sink when one is set; without one, a schedule's
-    /// line goes to stderr (as it always did) and a push line nowhere.
+    /// line goes to the printer (stderr, as it always did, unless the
+    /// runtime was given another) and a push line nowhere.
     fn log(&self, line: PubsubLogLine) {
         let sink = lock(&self.inner.log_sink).clone();
         match sink {
             Some(sink) => sink(line),
-            None if line.kind == LOG_SCHEDULE => eprintln!("firenook pubsub: {}", line.text),
+            None if line.kind == LOG_SCHEDULE => (self.inner.printer)(&line),
             None => {}
         }
     }

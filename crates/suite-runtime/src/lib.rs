@@ -36,7 +36,7 @@ use firenook_functions_runtime::{
     RuntimeConfig as FunctionsRuntimeConfig, codebases_from_config,
 };
 use firenook_grpc_front::FirestoreService;
-use firenook_pubsub_front::{SchedulerRuntime, router as pubsub_router};
+use firenook_pubsub_front::{SchedulerRuntime, router_with_printer as pubsub_router};
 use firenook_query_engine::{DatabaseEdition, IndexCatalog, QueryPolicy};
 use firenook_rest_front::router_with_shared_service as rest_router;
 use firenook_rules_engine::{DocumentAccess as _, DocumentAccessError, Resource};
@@ -863,6 +863,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             &inventory,
             delivery.queue(),
             triggers.clone(),
+            Arc::new(console_wiring::messaging::print_schedule_line),
         );
         schedule_count = runtime.schedules().len();
         scheduler = Some(
