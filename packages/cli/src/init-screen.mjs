@@ -212,8 +212,10 @@ export async function initInTerminal(options, {cwd = process.cwd(), out = proces
       const kind = name.startsWith('functions/') ? 'functions/' : /\.rules$|indexes\.json$/.test(name) ? 'rules' : name;
       if (!kinds.includes(kind)) kinds.push(kind);
     }
+    // What was kept goes first: a narrow card cuts the end of the row.
     const kept = plan.filter(file => file.skip).length;
-    Object.assign(files, {state: 'done', ms: Date.now() - began, detail: `${kinds.join(', ')}${kept ? `${DOT}${dim(kept === 1 ? '1 kept as it was' : `${kept} kept as they were`)}` : ''}`});
+    const note = kept ? `${dim(kept === 1 ? '1 kept as it was' : `${kept} kept as they were`)}${DOT}` : '';
+    Object.assign(files, {state: 'done', ms: Date.now() - began, detail: `${note}${kinds.join(', ')}`});
   } catch (error) {
     Object.assign(files, {state: 'failed', ms: Date.now() - began, detail: error.message});
     return finish([...section(divider(bold('Set-up')), [inside(row(files))]), bottom(), ''], 1);
