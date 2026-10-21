@@ -39,7 +39,7 @@ tokio-stream = { workspace = true, features = ["net", "sync"] }
 tonic.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-rustix.workspace = true
+rustix = { workspace = true, features = ["stdio"] }
 
 [dev-dependencies]
 redb.workspace = true

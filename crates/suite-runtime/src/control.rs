@@ -10,16 +10,42 @@ use tokio::sync::watch;
 
 use crate::{SuiteRuntimeError, failure};
 
-fn read_shutdown(input: impl BufRead) -> std::io::Result<()> {
+/// What the launcher's private pipe said.
+#[derive(Debug, PartialEq, Eq)]
+enum Control {
+    /// `FIRENOOK_SHUTDOWN`: the launcher asks for a stop.
+    Shutdown,
+    /// The pipe ended. A launcher that opts in holds its end for as long as
+    /// it runs, so it is gone: killed, or crashed.
+    Closed,
+}
+
+fn read_control(input: impl BufRead) -> std::io::Result<Control> {
     let mut line = Vec::new();
     input.take(64).read_until(b'\n', &mut line)?;
-    if line.is_empty() || line == b"FIRENOOK_SHUTDOWN\n" || line == b"FIRENOOK_SHUTDOWN\r\n" {
-        Ok(())
+    if line.is_empty() {
+        Ok(Control::Closed)
+    } else if line == b"FIRENOOK_SHUTDOWN\n" || line == b"FIRENOOK_SHUTDOWN\r\n" {
+        Ok(Control::Shutdown)
     } else {
         Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "invalid private shutdown command",
         ))
+    }
+}
+
+/// The launcher is gone, and nothing reads this process's output any more:
+/// on Unix stdout and stderr go to the null device from here, so that no
+/// line printed while the data is saved fails (`println!` panics on a closed
+/// pipe, and would end the stop part-way, leaving the files to repair).
+/// Windows has no safe way to replace them; there the stop's own lines are
+/// written without failing instead (`terminal::out` and `terminal::err`).
+fn quiet_output() {
+    #[cfg(unix)]
+    if let Ok(null) = std::fs::OpenOptions::new().write(true).open("/dev/null") {
+        let _ = rustix::stdio::dup2_stdout(&null);
+        let _ = rustix::stdio::dup2_stderr(&null);
     }
 }
 
@@ -62,8 +88,10 @@ fn request(problem: Option<String>) {
 }
 
 /// Starts listening for a stop: Ctrl-C, SIGTERM, a closed terminal (SIGHUP),
-/// or, when the launcher opted in, its private pipe; EOF on that pipe also
-/// stops, when the launcher disappears. Called first in a start, so that no
+/// or, when the launcher opted in (`FIRENOOK_CONTROL_STDIN=1`, which the npm
+/// launcher sets on every platform), its private pipe; the end of that pipe
+/// also stops, as a stop asked for would, when the launcher disappears
+/// without a word (killed, or crashed). Called first in a start, so that no
 /// stop ever takes the default of ending the process mid-write. Needs a Tokio
 /// runtime; later calls do nothing.
 pub fn listen_for_shutdown() -> Result<(), SuiteRuntimeError> {
@@ -101,8 +129,12 @@ fn install() -> Result<(), String> {
         // runtime from shutting down while stdin stays open.
         std::thread::Builder::new()
             .name("firenook-control".to_owned())
-            .spawn(|| match read_shutdown(std::io::stdin().lock()) {
-                Ok(()) => request(None),
+            .spawn(|| match read_control(std::io::stdin().lock()) {
+                Ok(Control::Shutdown) => request(None),
+                Ok(Control::Closed) => {
+                    quiet_output();
+                    request(None);
+                }
                 Err(error) => request(Some(format!("launcher control failed: {error}"))),
             })
             .map_err(|error| format!("cannot monitor launcher pipe: {error}"))?;
@@ -131,19 +163,20 @@ pub async fn wait_for_shutdown() -> Result<(), SuiteRuntimeError> {
 
 #[cfg(test)]
 mod tests {
-    use super::read_shutdown;
+    use super::{Control, read_control};
 
     #[test]
     fn bounded_control_accepts_shutdown_or_disconnect_not_arbitrary_input() {
-        for input in [
-            b"".as_slice(),
-            b"FIRENOOK_SHUTDOWN\n",
-            b"FIRENOOK_SHUTDOWN\r\n",
-        ] {
-            assert!(read_shutdown(input).is_ok());
+        for input in [b"FIRENOOK_SHUTDOWN\n".as_slice(), b"FIRENOOK_SHUTDOWN\r\n"] {
+            assert_eq!(read_control(input).expect("a stop"), Control::Shutdown);
         }
+        // The launcher's end of the pipe closed: it is gone.
+        assert_eq!(
+            read_control(b"".as_slice()).expect("an end"),
+            Control::Closed
+        );
         for input in [b"do something\n".as_slice(), &[b'x'; 128]] {
-            assert!(read_shutdown(input).is_err());
+            assert!(read_control(input).is_err());
         }
     }
 }

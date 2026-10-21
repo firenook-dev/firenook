@@ -1511,10 +1511,10 @@ async fn stopped_before_ready(prepared: Option<PreparedSuite>) -> SuiteOutcome {
         if let Some(storage) = storage
             && let Err(error) = close_storage(storage).await
         {
-            eprintln!("firenook: {error}");
+            terminal::err(&format!("firenook: {error}"));
         }
         if let Err(error) = close_store(store).await {
-            eprintln!("firenook: {error}");
+            terminal::err(&format!("firenook: {error}"));
         }
     }
     outcome
@@ -1570,7 +1570,7 @@ async fn finish_suite(
         // The same line the former Node host printed: harnesses read it as the
         // proof that Functions got an orderly stop even when export failed.
         if !terminal::enabled() {
-            println!("firenook functions host: stopping after the suite shutdown request");
+            terminal::out("firenook functions host: stopping after the suite shutdown request");
         }
         functions.shutdown().await;
     }

@@ -401,11 +401,18 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     lines.push(...space(), ...field(dim('Data'), `nothing was deleted: ${shortPath(stateDir, cwd)} is untouched`, dim));
     return lines;
   };
-  const dataLine = () => (model.opening.kind === 'resume' ? `nothing was changed: ${shortPath(stateDir, cwd)} is as you left it`
-    : model.opening.kind === 'import' && launch.args.includes('--resume-state') ? `the seed was imported into ${shortPath(stateDir, cwd)}; the next start picks it up`
-      : ephemeral ? 'nothing of yours was changed'
-        : model.opening.kind === 'fresh' && launch.args.includes('--resume-state') ? `the data is saved in ${shortPath(stateDir, cwd)}; the next start picks it up`
-          : `the data in ${shortPath(stateDir, cwd)} is kept`);
+  // What became of the data. Before readiness nothing was served, so
+  // nothing of the developer's was written; once ready, anything may have
+  // been, and is kept.
+  const dataLine = () => (model.ready ? (ephemeral ? `this run's data stays in ${shortPath(dirname(stateDir ?? ''), cwd)}` : `everything is kept in ${shortPath(stateDir, cwd)}`)
+    : model.opening.kind === 'resume' ? `nothing was changed: ${shortPath(stateDir, cwd)} is as you left it`
+      : model.opening.kind === 'import' && launch.args.includes('--resume-state') ? `the seed was imported into ${shortPath(stateDir, cwd)}; the next start picks it up`
+        : ephemeral ? 'nothing of yours was changed'
+          : model.opening.kind === 'fresh' && launch.args.includes('--resume-state') ? `the data is saved in ${shortPath(stateDir, cwd)}; the next start picks it up`
+            : `the data in ${shortPath(stateDir, cwd)} is kept`);
+  // An engine that ended without finishing a stop (killed, or crashed) may
+  // have left the files open: the next start checks them first.
+  const uncheckedLine = () => (stateDir && !ephemeral ? `the next start checks ${shortPath(stateDir, cwd)} first, and repairs it if it needs to` : dataLine());
   async function problemLines(failure) {
     if (failure.kind === 'port') {
       const listener = LISTENERS[failure.service] ?? {label: failure.service, key: `"${failure.service}": { "port": PORT }`};
@@ -998,7 +1005,9 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     screen.live(() => []);
     const lines = model.raw.slice(-12);
     const title = requestedStop ? 'Firenook did not finish stopping' : model.ready ? 'Firenook stopped unexpectedly' : 'Firenook could not start';
-    const data = requestedStop && stateDir && !ephemeral ? `the next start checks ${shortPath(stateDir, cwd)} first, and repairs it if it needs to` : dataLine();
+    // Ended by a signal, or by itself with no stop and nothing it could
+    // describe: either way it may not have closed the data.
+    const data = requestedStop || outcome.signal || model.ready ? uncheckedLine() : dataLine();
     screen.emit(() => ['', ...section(divider(`${red(G.fail)} ${bold(red(title))}`, dim(outcome.signal ? `signal ${outcome.signal}` : `exit code ${outcome.code}`)),
       [...lines.flatMap(line => field('', line, dim)), ...field(dim('Data'), data, dim)].map(inside)), bottom(), '']);
     screen.end();

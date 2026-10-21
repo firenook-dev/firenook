@@ -193,9 +193,10 @@ export async function supervise(launch, command) {
       throw new Error(`the build in ${builds[failed].entry.shown} failed (${builds[failed].command}); the tests did not run`);
     }
   }
+  // stdin is the private pipe (see nativeEnvironment): the engine stops by
+  // itself if this process is killed.
   const child = spawn(launch.binary, launch.args, {cwd:launch.cwd, env:launch.env,
-    detached:process.platform === 'win32', windowsHide:true,
-    stdio:[process.platform === 'win32' ? 'pipe' : 'inherit','pipe','pipe']});
+    detached:process.platform === 'win32', windowsHide:true, stdio:['pipe','pipe','pipe']});
   child.stdin?.on('error', error => { startupError = error; });
   let testChild;
   let ready = false;
@@ -252,8 +253,14 @@ export async function supervise(launch, command) {
       await new Promise(resolveExit => testChild.once('close', resolveExit));
     }
     if (startupError) throw startupError;
+    const checks = 'the next start checks the data first, and repairs it if it needs to';
     if (requestedStop && outcome.signal && (ready || !['SIGINT', 'SIGTERM'].includes(outcome.signal))) {
-      process.stderr.write(`firenook: the engine was ended (${outcome.signal}) before it finished stopping; the next start checks the data first, and repairs it if it needs to\n`);
+      process.stderr.write(`firenook: the engine was ended (${outcome.signal}) before it finished stopping; ${checks}\n`);
+    } else if (!requestedStop && outcome.signal) {
+      // Killed (by the system, out of memory, or by hand): it said nothing.
+      process.stderr.write(`firenook: the engine was ended (${outcome.signal}) while it was ${ready ? 'running' : 'starting'}; ${checks}\n`);
+    } else if (!requestedStop && ready && outcome.code !== 0) {
+      process.stderr.write(`firenook: the engine stopped on its own (exit code ${outcome.code}) while it was running; ${checks}\n`);
     }
     if (outcome.code !== 0) return outcome.code ?? (outcome.signal === 'SIGINT' ? 130 : 1);
     if (!requestedStop) throw new Error('Emulator exited unexpectedly before requested shutdown');

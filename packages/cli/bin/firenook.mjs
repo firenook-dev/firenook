@@ -125,7 +125,8 @@ async function main() {
   if (action === 'setup') { if (args.length) throw new Error('setup takes no arguments'); binaryPath(); console.log('Nothing to set up: the console is part of the engine, and Firenook downloads nothing.'); return 0; }
   if (action === 'native') {
     if (!args.length) throw new Error('native requires a native command');
-    const child = spawn(binaryPath(), args, {env:nativeEnvironment(),detached:process.platform === 'win32',windowsHide:true,stdio:[process.platform === 'win32' ? 'pipe' : 'inherit','inherit','inherit']});
+    // stdin is the private pipe: a server it starts stops if this is killed.
+    const child = spawn(binaryPath(), args, {env:nativeEnvironment(),detached:process.platform === 'win32',windowsHide:true,stdio:['pipe','inherit','inherit']});
     child.stdin?.on('error', error => console.error(`Native control: ${error.message}`));
     const onInt = () => requestNativeStop(child, 'SIGINT');
     const onTerm = () => requestNativeStop(child, 'SIGTERM');

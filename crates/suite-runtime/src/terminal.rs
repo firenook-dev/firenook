@@ -241,10 +241,24 @@ pub(crate) fn print(level: &str, source: &str, message: &str, plain: &str) {
     if enabled() {
         line(level, source, message);
     } else if matches!(level, "WARN" | "ERROR") {
-        eprintln!("{plain}");
+        err(plain);
     } else {
-        println!("{plain}");
+        out(plain);
     }
+}
+
+/// One line on stdout. Unlike `println!` it never panics: a launcher that
+/// is gone leaves a pipe that refuses every write, and a stop must not end
+/// part-way over a line nobody can read.
+pub fn out(line: &str) {
+    let mut stdout = std::io::stdout().lock();
+    let _ = writeln!(stdout, "{line}");
+    let _ = stdout.flush();
+}
+
+/// One line on stderr; never a panic (see [`out`]).
+pub fn err(line: &str) {
+    let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
 
 /// A line of the Functions log, with what the runtime knows of who printed
