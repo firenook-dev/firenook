@@ -33,7 +33,9 @@ exports.beforeSignIn = beforeUserSignedIn((event) =>
 
 // v2 has no account-created trigger; the 1st-gen one is what apps use.
 exports.onUserCreated = functions.auth.user().onCreate(async (user) => {
-  if (!getApps().length) initializeApp()
+  // The SDK makes an app of its own for each blocking call, so only the
+  // default app's absence says this trigger must make it.
+  if (!getApps().some((app) => app.name === '[DEFAULT]')) initializeApp()
   await getFirestore()
     .doc(`auth-triggers/${user.uid}`)
     .set({ email: user.email ?? null })
@@ -44,7 +46,9 @@ exports.onUserCreated = functions.auth.user().onCreate(async (user) => {
 // never reach it. Each run leaves `auth-deletes/<uid>`, so a journey can
 // tell that it ran, or that it did not.
 exports.onUserDeleted = functions.auth.user().onDelete(async (user) => {
-  if (!getApps().length) initializeApp()
+  // The SDK makes an app of its own for each blocking call, so only the
+  // default app's absence says this trigger must make it.
+  if (!getApps().some((app) => app.name === '[DEFAULT]')) initializeApp()
   await getFirestore()
     .doc(`auth-deletes/${user.uid}`)
     .set({ email: user.email ?? null })
