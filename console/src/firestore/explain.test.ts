@@ -48,6 +48,18 @@ describe('the sentence a person reads first', () => {
     )
   })
 
+  it('names the field an order reads the index of, and what it checks there', () => {
+    expect(
+      describeCandidates({ kind: 'orderIndex', field: 'createdAt', lookups: [] }, 'posts'),
+    ).toBe('Reads posts in createdAt order from its index')
+    expect(
+      describeCandidates(
+        { kind: 'orderIndex', field: 'rank', lookups: ['theme', 'region'] },
+        'posts',
+      ),
+    ).toBe('Reads posts in rank order from its index, checking theme and region there first')
+  })
+
   it('counts documents read by name, in the singular when there is one', () => {
     expect(describeCandidates({ kind: 'documentNames', names: 1 }, 'users')).toBe(
       'Reads one document by name',

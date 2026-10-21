@@ -89,7 +89,10 @@ pub(super) fn batch(response: &BatchGetDocumentsResponse) -> Result<JsonValue, R
     use firenook_grpc_front::google::firestore::v1::batch_get_documents_response::Result;
     let mut encoded = encode(response)?;
     if let Some(Result::Found(found)) = &response.result {
-        encoded["found"] = document(found)?;
+        let found = found
+            .document()
+            .map_err(|error| RestError::internal(error.to_string()))?;
+        encoded["found"] = document(&found)?;
     }
     utc(&mut encoded, "readTime")?;
     Ok(encoded)

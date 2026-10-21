@@ -14,7 +14,7 @@ use std::time::Duration;
 use bincode::{Decode, Encode, config};
 use redb::{
     Builder, Database, Durability, ReadOnlyTable, ReadTransaction, ReadableDatabase, ReadableTable,
-    ReadableTableMetadata as _, TableDefinition, WriteTransaction,
+    ReadableTableMetadata as _, TableDefinition, TableHandle as _, WriteTransaction,
 };
 
 use super::{
@@ -24,13 +24,14 @@ use super::{
     SnapshotError, State, StoreMemoryUsage, StoreOptions, Timestamp, TransactionMemoryUsage, Write,
     WriteBufferMemoryUsage, apply_document_transition, compare_resource_paths,
     decode_stored_document, document_entry_logical_bytes, encode_stored_document,
-    numeric_resource_id, stored_scalar_fields, usize_to_u64,
+    numeric_resource_id, stored_index_fields, usize_to_u64,
 };
 
 mod field_index;
 mod maintenance;
 
-use field_index::{EqualityJoin, PrefixIds, document_entries, entries};
+use field_index::{EqualityJoin, Indexed, OrderWalk, PrefixIds, document_entries, entries};
+pub use field_index::{FieldIndexKey, FieldOrderRange, field_index_key};
 pub use maintenance::{Compaction, StoreSize, TableSize, compact, inspect};
 
 const LEGACY_DOCUMENTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("documents_v1");
@@ -39,18 +40,26 @@ const COLLECTIONS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("collect
 const COLLECTION_GROUPS: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("collection_groups_v2");
 const METADATA: TableDefinition<&str, &[u8]> = TableDefinition::new("metadata_v1");
-/// Equality entries for top-level fields; see `field_index`.
-const FIELD_INDEX: TableDefinition<&[u8], &[u8]> = TableDefinition::new("field_equality_v1");
+/// Order-preserving entries for top-level fields; see `field_index`.
+const FIELD_INDEX: TableDefinition<&[u8], &[u8]> = TableDefinition::new("field_order_v1");
 /// The 4-byte id of each `[database][collection path][field]` the field index
-/// holds entries for.
-const FIELD_PREFIXES: TableDefinition<&[u8], u32> =
+/// holds entries for. Its own table: an older release renumbers the equality
+/// index's prefixes whenever it rebuilds that index.
+const FIELD_PREFIXES: TableDefinition<&[u8], u32> = TableDefinition::new("field_order_v1_prefixes");
+/// The equality index of releases before 0.2.0, with its prefix table and
+/// revision key. This release no longer maintains it, and drops all three
+/// together on open, so an older release opening the store afterwards finds
+/// no revision and rebuilds the index it reads.
+const LEGACY_FIELD_INDEX: TableDefinition<&[u8], &[u8]> = TableDefinition::new("field_equality_v1");
+const LEGACY_FIELD_PREFIXES: TableDefinition<&[u8], u32> =
     TableDefinition::new("field_equality_v1_prefixes");
+const LEGACY_FIELD_INDEX_REVISION_KEY: &str = "field_equality_v1_revision";
 const STATE_KEY: &str = "state";
 /// The store revision the field index describes. Written with every commit
 /// while the index is maintained; a store last written without it (an older
 /// release, or the index switched off) holds an older value or none, and the
 /// next open rebuilds the index.
-const FIELD_INDEX_REVISION_KEY: &str = "field_equality_v1_revision";
+const FIELD_INDEX_REVISION_KEY: &str = "field_order_v1_revision";
 const DOCUMENTS_V2_MIGRATION_KEY: &str = "documents_v2_migrated";
 const ORDERED_SCOPE_INDEX_MIGRATION_KEY: &str = "ordered_scope_indexes_v2_migrated";
 /// The documents' count and logical bytes, saved with every commit; see
@@ -127,10 +136,10 @@ pub struct DiskOptions {
     pub cache_size_bytes: usize,
     /// When commits reach stable storage.
     pub durability: DiskDurability,
-    /// Maintain the equality index over top-level fields and let queries use
-    /// it. Off, the store behaves as releases before the index: commits skip
-    /// it and every query scans its collection; the next open with it on
-    /// rebuilds it.
+    /// Maintain the order-preserving index over top-level fields and let
+    /// queries use it. Off, the store behaves as releases before the index:
+    /// commits skip it and every query scans its collection; the next open
+    /// with it on rebuilds it.
     pub field_indexes: bool,
 }
 
@@ -285,6 +294,9 @@ impl DiskStore {
         let counted = if options.field_indexes && !index_valid {
             Some(rebuild_field_index(&database)?)
         } else {
+            if options.field_indexes {
+                drop_legacy_field_index(&database)?;
+            }
             None
         };
 
@@ -661,6 +673,17 @@ impl DiskSnapshot {
         decode_stored_document(value.value()).ok().map(Arc::new)
     }
 
+    /// [`DiskSnapshot::get`] without decoding a document read from redb.
+    pub(crate) fn get_lazy(&self, key: &DocumentKey) -> Option<LazyDocument> {
+        if let Some(document) = self.overlay.get(key) {
+            return document.clone().map(LazyDocument::Decoded);
+        }
+        let encoded_key = encode_document_key(key).ok()?;
+        let table = self.transaction.open_table(DOCUMENTS).ok()?;
+        let value = table.get(encoded_key.as_slice()).ok()??;
+        Some(LazyDocument::Encoded(EncodedDocument::new(value.value())))
+    }
+
     /// Key-only cursor over the documents whose path starts with `prefix`,
     /// in byte order, with this snapshot's overlay merged in.
     pub(crate) fn key_cursor(&self, database: &DatabaseName, prefix: &str) -> DiskKeyCursor {
@@ -721,6 +744,60 @@ impl DiskSnapshot {
             collection_path: collection_path.to_owned(),
         };
         Some(self.iterator(scope, DiskRange::Equality { documents, join }))
+    }
+
+    /// How many direct documents of `collection_path` the field index holds
+    /// for every lookup, counted up to `at_most` without reading a document.
+    /// `None` when the index is off or there is no lookup.
+    pub(crate) fn count_collection_equal(
+        &self,
+        database: &DatabaseName,
+        collection_path: &str,
+        lookups: &[FieldEquality<'_>],
+        at_most: usize,
+    ) -> Option<usize> {
+        if !self.field_indexes || lookups.is_empty() {
+            return None;
+        }
+        let index = self.transaction.open_table(FIELD_INDEX).ok()?;
+        let prefixes = self.transaction.open_table(FIELD_PREFIXES).ok()?;
+        EqualityJoin::open(index, &prefixes, database, collection_path, lookups)
+            .map(|join| join.count(at_most))
+    }
+
+    /// The direct documents of `collection_path` that hold `field`, in the
+    /// field's query order (backwards when `descending`) inside `bounds`,
+    /// read through the field index, each satisfying every lookup by the
+    /// index before its document is read. `None` when the index is off, or
+    /// for a historical snapshot: its overlay would have to be merged in
+    /// value order, so such a read keeps the scan.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn walk_field_order(
+        &self,
+        database: &DatabaseName,
+        collection_path: &str,
+        field: &str,
+        descending: bool,
+        bounds: &FieldOrderRange,
+        lookups: &[FieldEquality<'_>],
+    ) -> Option<DiskOrderWalk> {
+        if !self.field_indexes || !self.overlay.is_empty() {
+            return None;
+        }
+        let index = self.transaction.open_table(FIELD_INDEX).ok()?;
+        let prefixes = self.transaction.open_table(FIELD_PREFIXES).ok()?;
+        let documents = self.transaction.open_table(DOCUMENTS).ok()?;
+        let walk = OrderWalk::open(
+            index,
+            &prefixes,
+            database,
+            collection_path,
+            field,
+            descending,
+            bounds,
+            lookups,
+        )?;
+        Some(DiskOrderWalk { walk, documents })
     }
 
     pub(crate) fn iter_collection_group(
@@ -898,6 +975,34 @@ fn stored_databases(
         lower = next;
     }
     databases
+}
+
+/// A [`DiskSnapshot::walk_field_order`]: each entry with its document, still
+/// encoded, and its inexact group, if any.
+pub(crate) struct DiskOrderWalk {
+    walk: OrderWalk,
+    documents: ReadOnlyTable<&'static [u8], &'static [u8]>,
+}
+
+impl Iterator for DiskOrderWalk {
+    type Item = (DocumentKey, LazyDocument, Option<u64>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let (key, group) = self.walk.next()?;
+            let Ok(encoded_key) = encode_document_key(&key) else {
+                continue;
+            };
+            let Ok(Some(document)) = self.documents.get(encoded_key.as_slice()) else {
+                continue;
+            };
+            return Some((
+                key,
+                LazyDocument::Encoded(EncodedDocument::new(document.value())),
+                group,
+            ));
+        }
+    }
 }
 
 pub(crate) struct DiskDocumentIterator {
@@ -1845,13 +1950,15 @@ fn apply_mutations(
                 // batch is accounted exactly like a live commit.
                 let previous = match documents.get(key.as_slice()).map_err(DiskError::redb)? {
                     Some(stored) => {
-                        let fields = stored_scalar_fields(stored.value())
+                        let fields = stored_index_fields(stored.value())
                             .map_err(|error| DiskError::Encoding(error.to_string()))?;
                         entries(
                             &mut prefixes,
                             false,
                             &mutation.key,
-                            fields.iter().map(|(field, value)| (field.as_str(), value)),
+                            fields
+                                .iter()
+                                .map(|(field, value)| (field.as_str(), Indexed::from(value))),
                         )?
                     }
                     None => Vec::new(),
@@ -2037,7 +2144,8 @@ fn field_index_valid(database: &Database) -> Result<bool, DiskError> {
 /// Replaces the field index with one built from every stored document, in
 /// one transaction, and stamps the persisted revision. Runs on open when the
 /// index is missing or stale; its cost is one read of every document, which
-/// also yields the documents' memory accounting, returned for the open.
+/// also yields the documents' memory accounting, returned for the open. The
+/// equality index of older releases goes in the same transaction.
 fn rebuild_field_index(database: &Database) -> Result<LogicalMemoryUsage, DiskError> {
     let started = std::time::Instant::now();
     let state = load_persisted_state(database)?;
@@ -2046,6 +2154,7 @@ fn rebuild_field_index(database: &Database) -> Result<LogicalMemoryUsage, DiskEr
         .set_durability(Durability::Immediate)
         .map_err(DiskError::redb)?;
     transaction.set_quick_repair(true);
+    delete_legacy_field_index(&transaction)?;
     transaction
         .delete_table(FIELD_INDEX)
         .map_err(DiskError::redb)?;
@@ -2103,6 +2212,53 @@ fn rebuild_field_index(database: &Database) -> Result<LogicalMemoryUsage, DiskEr
         );
     }
     Ok(counted)
+}
+
+/// Drops the equality index of releases before 0.2.0 when a store still holds
+/// it: one an older release opened since this one rebuilt the field index.
+/// Its revision key goes with it, so an older release opening the store again
+/// rebuilds the index rather than trusting an empty one.
+fn drop_legacy_field_index(database: &Database) -> Result<(), DiskError> {
+    let present = {
+        let transaction = database.begin_read().map_err(DiskError::redb)?;
+        let metadata = transaction.open_table(METADATA).map_err(DiskError::redb)?;
+        let stamped = metadata
+            .get(LEGACY_FIELD_INDEX_REVISION_KEY)
+            .map_err(DiskError::redb)?
+            .is_some();
+        let names = transaction
+            .list_tables()
+            .map_err(DiskError::redb)?
+            .map(|table| table.name().to_owned())
+            .collect::<BTreeSet<_>>();
+        stamped
+            || names.contains(LEGACY_FIELD_INDEX.name())
+            || names.contains(LEGACY_FIELD_PREFIXES.name())
+    };
+    if !present {
+        return Ok(());
+    }
+    let mut transaction = database.begin_write().map_err(DiskError::redb)?;
+    transaction
+        .set_durability(Durability::Immediate)
+        .map_err(DiskError::redb)?;
+    transaction.set_quick_repair(true);
+    delete_legacy_field_index(&transaction)?;
+    transaction.commit().map_err(DiskError::redb)
+}
+
+fn delete_legacy_field_index(transaction: &WriteTransaction) -> Result<(), DiskError> {
+    transaction
+        .delete_table(LEGACY_FIELD_INDEX)
+        .map_err(DiskError::redb)?;
+    transaction
+        .delete_table(LEGACY_FIELD_PREFIXES)
+        .map_err(DiskError::redb)?;
+    let mut metadata = transaction.open_table(METADATA).map_err(DiskError::redb)?;
+    metadata
+        .remove(LEGACY_FIELD_INDEX_REVISION_KEY)
+        .map_err(DiskError::redb)?;
+    Ok(())
 }
 
 /// A pre-serving bulk load that keeps every batch inside one redb transaction.

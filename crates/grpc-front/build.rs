@@ -11,6 +11,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     tonic_prost_build::configure()
         .build_client(true)
         .build_server(true)
+        // prost's own encoding, except that documents in responses are
+        // measured once instead of once per level of nesting.
+        .codec_path("crate::wire::FirestoreCodec")
+        // Written by hand so a found document can travel already encoded.
+        .extern_path(
+            ".google.firestore.v1.BatchGetDocumentsResponse",
+            "crate::wire::BatchGetDocumentsResponse",
+        )
         // The official emulator returns stable document field order across
         // repeated reads. Preserve it deterministically at the wire boundary,
         // including nested maps, without changing the core-store format.
@@ -35,6 +43,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         .compile_fds(descriptors.clone())?;
     pbjson_build::Builder::new()
         .register_descriptors(&descriptors.encode_to_vec())?
+        // `crate::wire` implements its JSON form.
+        .exclude([".google.firestore.v1.BatchGetDocumentsResponse"])
         .btree_map([
             ".google.firestore.v1.Document",
             ".google.firestore.v1.MapValue",

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use firenook_core_store::{
     CommitError, CommitObservation, CommitObserver, CommitResult, DatabaseName, Document,
-    DocumentKey, FieldTransform, Snapshot, SnapshotError, Store, Timestamp,
+    DocumentKey, FieldTransform, LazyDocument, Snapshot, SnapshotError, Store, Timestamp,
     TransactionMemoryRegistration, TransformOperation, Value, Write, compare_resource_paths,
     database_name_logical_bytes, document_key_logical_bytes,
 };
@@ -46,7 +46,7 @@ use crate::google::firestore::v1::{
     self as proto, BatchGetDocumentsRequest, BatchGetDocumentsResponse, BatchWriteRequest,
     BatchWriteResponse, BeginTransactionRequest, BeginTransactionResponse, CommitRequest,
     CommitResponse, CreateDocumentRequest, DeleteDocumentRequest, ExecutePipelineRequest,
-    ExecutePipelineResponse, GetDocumentRequest, ListCollectionIdsRequest,
+    ExecutePipelineResponse, FoundDocument, GetDocumentRequest, ListCollectionIdsRequest,
     ListCollectionIdsResponse, ListDocumentsRequest, ListDocumentsResponse, ListenRequest,
     ListenResponse, PartitionQueryRequest, PartitionQueryResponse, RollbackRequest,
     RunAggregationQueryRequest, RunAggregationQueryResponse, RunQueryRequest, RunQueryResponse,
@@ -55,6 +55,7 @@ use crate::google::firestore::v1::{
 use crate::google::rpc;
 use crate::pipeline::{decode_pipeline, encode_pipeline_document};
 use crate::query_codec::{decode_aggregation, decode_query, query_status};
+use crate::wire::encode_stored_document;
 
 const MAXIMUM_REQUEST_BYTES: usize = 10 * 1024 * 1024;
 
@@ -1172,6 +1173,9 @@ impl Firestore for FirestoreService {
         request: Request<BatchGetDocumentsRequest>,
     ) -> Result<Response<Self::BatchGetDocumentsStream>, Status> {
         let authorization_source = client_or_grpc_authorization(&request)?;
+        // The REST transport calls in with its own authorization source and
+        // reads the documents themselves; a gRPC caller gets them on the wire.
+        let over_grpc = request.extensions().get::<AuthorizationSource>().is_none();
         let request = request.into_inner();
         let database = decode_database_name(&request.database)?;
         let authorization = authorization_source.resolve()?;
@@ -1204,6 +1208,14 @@ impl Firestore for FirestoreService {
         };
         let read_time = Some(encode_system_read_time(now()));
         let request_time = now();
+        // Rules decide nothing for the owner, nor where none are installed:
+        // the documents are then not converted for an evaluation that never
+        // runs, which cost as much as encoding them.
+        let evaluated = !authorization.is_owner() && self.rules.rules_for(&database).is_some();
+        // When nothing reads a document but the wire (no rules, no mask, no
+        // transaction recording it), a stored document is transcoded straight
+        // into its response bytes, never decoded.
+        let transcoded = over_grpc && !evaluated && request.mask.is_none() && token.is_empty();
         // Decoding, masking and the atomic rules check of every requested
         // document run on the read pool.
         let (responses, reads) = {
@@ -1227,22 +1239,43 @@ impl Firestore for FirestoreService {
                             "batch document belongs to a different database",
                         ));
                     }
+                    if transcoded {
+                        let result = match snapshot.get_lazy(&key) {
+                            Some(LazyDocument::Encoded(encoded)) => {
+                                batch_get_documents_response::Result::Found(FoundDocument::Encoded(
+                                    encode_stored_document(&name, &encoded)?,
+                                ))
+                            }
+                            Some(LazyDocument::Decoded(document)) => {
+                                batch_get_documents_response::Result::Found(FoundDocument::Decoded(
+                                    encode_document_masked(&key, &document, None)?,
+                                ))
+                            }
+                            None => batch_get_documents_response::Result::Missing(name),
+                        };
+                        responses.push(BatchGetDocumentsResponse {
+                            transaction: Vec::new(),
+                            read_time,
+                            result: Some(result),
+                        });
+                        continue;
+                    }
                     let document = snapshot.get(&key);
-                    evaluations.push(evaluation_request(
-                        RequestOperation::Get,
-                        &key,
-                        request_time,
-                        document.as_deref(),
-                        None,
-                        RulesQuery::default(),
-                    ));
+                    if evaluated {
+                        evaluations.push(evaluation_request(
+                            RequestOperation::Get,
+                            &key,
+                            request_time,
+                            document.as_deref(),
+                            None,
+                            RulesQuery::default(),
+                        ));
+                    }
                     reads.push((key.clone(), document.clone()));
                     let result = if let Some(document) = document {
-                        batch_get_documents_response::Result::Found(encode_document_masked(
-                            &key,
-                            &document,
-                            mask.as_ref(),
-                        )?)
+                        batch_get_documents_response::Result::Found(FoundDocument::Decoded(
+                            encode_document_masked(&key, &document, mask.as_ref())?,
+                        ))
                     } else {
                         batch_get_documents_response::Result::Missing(name)
                     };

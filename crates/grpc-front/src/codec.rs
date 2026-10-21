@@ -202,14 +202,19 @@ pub fn encode_document_masked(
     document: &Document,
     mask: Option<&proto::DocumentMask>,
 ) -> Result<proto::Document, Status> {
-    let fields = if let Some(mask) = mask {
-        project_fields(document.fields(), &mask.field_paths)?
-    } else {
-        document.fields().clone()
+    // Without a mask the stored fields are encoded where they are: copying a
+    // large document first only to encode the copy doubled its cost.
+    let projected;
+    let fields = match mask {
+        Some(mask) => {
+            projected = project_fields(document.fields(), &mask.field_paths)?;
+            &projected
+        }
+        None => document.fields(),
     };
     Ok(proto::Document {
         name: key.to_string(),
-        fields: encode_fields(&fields)?,
+        fields: encode_fields(fields)?,
         create_time: Some(encode_timestamp(document.create_time())),
         update_time: Some(encode_timestamp(document.update_time())),
     })

@@ -3,4 +3,4 @@
 /**
  * How the results are produced once the candidates are chosen.
  */
-export type ExplainStrategy = "streaming" | "orderedDisk" | "buffered";
+export type ExplainStrategy = "streaming" | "indexOrder" | "orderedDisk" | "buffered";
