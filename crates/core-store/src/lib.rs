@@ -1689,6 +1689,26 @@ impl Snapshot {
         }
     }
 
+    /// How many direct documents of `collection_path` the disk store's field
+    /// index holds for every equality, counted up to `at_most` from the index
+    /// alone: what an equality lookup would read. `None` where
+    /// [`Self::iter_collection_equal`] has no index to read.
+    #[must_use]
+    pub fn count_collection_equal(
+        &self,
+        database: &DatabaseName,
+        collection_path: &str,
+        equalities: &[FieldEquality<'_>],
+        at_most: usize,
+    ) -> Option<usize> {
+        match &self.documents {
+            SnapshotDocuments::Memory { .. } => None,
+            SnapshotDocuments::Disk(documents) => {
+                documents.count_collection_equal(database, collection_path, equalities, at_most)
+            }
+        }
+    }
+
     /// The direct documents of `collection_path` that hold the top-level
     /// `field`, in its query order and then by name (both backwards when
     /// `descending`), from the disk store's field index: the order a query

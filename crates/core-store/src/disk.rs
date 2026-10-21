@@ -746,6 +746,25 @@ impl DiskSnapshot {
         Some(self.iterator(scope, DiskRange::Equality { documents, join }))
     }
 
+    /// How many direct documents of `collection_path` the field index holds
+    /// for every lookup, counted up to `at_most` without reading a document.
+    /// `None` when the index is off or there is no lookup.
+    pub(crate) fn count_collection_equal(
+        &self,
+        database: &DatabaseName,
+        collection_path: &str,
+        lookups: &[FieldEquality<'_>],
+        at_most: usize,
+    ) -> Option<usize> {
+        if !self.field_indexes || lookups.is_empty() {
+            return None;
+        }
+        let index = self.transaction.open_table(FIELD_INDEX).ok()?;
+        let prefixes = self.transaction.open_table(FIELD_PREFIXES).ok()?;
+        EqualityJoin::open(index, &prefixes, database, collection_path, lookups)
+            .map(|join| join.count(at_most))
+    }
+
     /// The direct documents of `collection_path` that hold `field`, in the
     /// field's query order (backwards when `descending`) inside `bounds`,
     /// read through the field index, each satisfying every lookup by the

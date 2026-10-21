@@ -108,7 +108,25 @@ at p50: order by a field with limit 20 went from 642 ms to 106 ms (official
 70 ms), an integer range from 630 ms to 107 ms (80 ms), `count()` from 737 ms
 to 91 ms (65 ms), `__name__ in` ten ids from 646 ms to 10 ms (403 ms), and
 `array-contains` from 257 ms to 50 ms (554 ms). The remaining gap on ordered
-scans is the read and copy of every candidate's bytes out of redb.
+scans was the read and copy of every candidate's bytes out of redb, which the
+field index's ordered walk (below) removes for one-field orders.
+
+### Batch reads on the wire
+
+A gRPC `BatchGetDocuments` that nothing but the wire reads (no rules to
+evaluate for the caller, no field mask, no transaction recording the read)
+never decodes its documents. Each stored document is walked as a flat list
+of tokens over its bincode encoding (`EncodedDocument::tokens`), and the
+`google.firestore.v1.Document` bytes are written from it in two passes: one
+measures every value once, bottom-up, the other writes. The response type is
+written by hand (`crates/grpc-front/src/wire.rs`) so a found document travels
+as those bytes; its wire and JSON forms are the generated type's, and the
+REST transport still receives decoded documents. Every other path that sends
+documents (`GetDocument`, `RunQuery`) goes through the service's codec, which
+writes the same bytes prost does with each nested length measured once
+rather than once per level of nesting. Tests compare both against prost and
+against the decoded path byte for byte. On 50 documents of many small nested
+values the engine's CPU per batch read went from 45 ms to 6.6 ms.
 
 ### Field index
 
@@ -130,7 +148,12 @@ cursors set where the walk starts and stops, a cursor naming a document of
 the collection seeking inside its value; `==`/`in` conjuncts on other fields
 are checked by one point read of their entry per value before a document is
 read, so `where(theme == x).orderBy(rank).limit(20)` reads only documents of
-that theme. Collection groups, nested or `__name__` orders, several order
+that theme. When those conjuncts leave few documents, reading them through
+their own index and sorting them is cheaper than a walk that passes every
+document they skip: the planner counts the lookup's documents from the index
+(up to 10,000) and walks only when a page's expected walk, `page × documents
+/ matches` point reads, costs less than reading the matches, each worth 16
+point reads (the store's document count standing in for the collection's). Collection groups, nested or `__name__` orders, several order
 fields, `limitToLast`, `findNearest` and pinned document names keep the old
 paths, and so do historical snapshots, whose overlay would have to be merged
 in value order.

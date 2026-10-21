@@ -812,6 +812,16 @@ pub fn execute_iter(
     }
 }
 
+/// A walk checks every entry it passes against the other fields' index, one
+/// point read each, where an equality lookup reads only its own documents,
+/// each about as costly as this many point reads (measured on 45 KB
+/// documents: 110 of them cost what a walk past 2,000 entries did).
+const DOCUMENT_READ_IN_POINT_READS: u128 = 16;
+
+/// Equality lookups are counted up to this many documents; one holding more
+/// is walked, never read whole.
+const EQUALITY_PROBE_LIMIT: usize = 10_000;
+
 /// A query answered by walking one field's index: see [`index_order`].
 struct IndexOrder {
     walk: FieldOrderWalk,
@@ -829,7 +839,9 @@ struct IndexOrder {
 /// field and the cursors bound the walk; `==`/`in` filters on other
 /// top-level fields are checked in the index before a document is read.
 /// Every candidate is still evaluated in full, so the bounds only need to
-/// keep every result.
+/// keep every result. When those filters leave few documents (see
+/// [`walk_costs_less`]) reading them through their own index and sorting
+/// is cheaper than the walk, and the query keeps that path.
 fn index_order(
     snapshot: &Snapshot,
     database: &DatabaseName,
@@ -882,6 +894,9 @@ fn index_order(
         .iter()
         .map(|(field, values)| FieldEquality { field, values })
         .collect::<Vec<_>>();
+    if !walk_costs_less(snapshot, database, collection_path, query, &equalities) {
+        return None;
+    }
     let walk = snapshot.walk_field_order(
         database,
         collection_path,
@@ -895,6 +910,39 @@ fn index_order(
         field: field.clone(),
         lookups: lookups.into_iter().map(|(field, _)| field).collect(),
     })
+}
+
+/// Whether walking the order beats reading what `equalities` leave and
+/// sorting it. The walk passes about `page × documents / candidates` entries
+/// to fill a page (the whole collection for an unlimited query), a point
+/// read each; the lookup reads `candidates` documents. The store's document
+/// count stands in for the collection's, which only favours the lookup, and
+/// counting candidates stops at [`EQUALITY_PROBE_LIMIT`].
+fn walk_costs_less(
+    snapshot: &Snapshot,
+    database: &DatabaseName,
+    collection_path: &str,
+    query: &Query,
+    equalities: &[FieldEquality<'_>],
+) -> bool {
+    let Some(candidates) = snapshot.count_collection_equal(
+        database,
+        collection_path,
+        equalities,
+        EQUALITY_PROBE_LIMIT,
+    ) else {
+        return true;
+    };
+    if candidates >= EQUALITY_PROBE_LIMIT {
+        return true;
+    }
+    let candidates = candidates as u128;
+    let page = match query.limit {
+        Some(Limit::First(limit)) => (query.offset.saturating_add(limit) as u128).min(candidates),
+        Some(Limit::Last(_)) | None => candidates,
+    };
+    let documents = u128::from(snapshot.logical_memory_usage().entries);
+    page * documents < DOCUMENT_READ_IN_POINT_READS * candidates * candidates
 }
 
 /// Narrows `bounds` by the top-level conjuncts on the order field: a range

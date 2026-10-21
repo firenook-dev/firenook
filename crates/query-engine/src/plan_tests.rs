@@ -246,6 +246,55 @@ fn a_plan_names_where_the_candidates_come_from() {
 }
 
 #[test]
+fn a_selective_equality_reads_its_documents_instead_of_walking_the_order() {
+    // One open order among many closed ones: walking `total` would pass
+    // every closed order to find it, reading the one open order is enough.
+    let directory = TestDirectory::new();
+    let disk = Store::open_disk(&directory.0, DiskOptions::default()).unwrap();
+    let writes = (0..400)
+        .map(|index| Write::Set {
+            key: DocumentKey::new(database(), format!("teams/t1/orders/o{index}")).unwrap(),
+            fields: Fields::from([
+                (
+                    "status".to_owned(),
+                    Value::String(if index == 7 { "open" } else { "closed" }.into()),
+                ),
+                ("total".to_owned(), Value::Integer(i64::from(index))),
+            ]),
+            transforms: Vec::new(),
+            precondition: Precondition::None,
+        })
+        .collect::<Vec<_>>();
+    disk.commit(&writes).unwrap();
+    let snapshot = disk.snapshot();
+    let page = |status: &str| {
+        orders()
+            .filter(equality("status", status))
+            .order_by(field("total"), Direction::Ascending)
+            .limit(Limit::First(20))
+    };
+    assert_eq!(
+        plan(&snapshot, &database(), &page("open"))
+            .unwrap()
+            .candidates,
+        QueryCandidates::EqualityIndex {
+            fields: vec!["status".to_owned()]
+        },
+        "one matching document is read, not 400 entries walked"
+    );
+    assert_eq!(
+        plan(&snapshot, &database(), &page("closed"))
+            .unwrap()
+            .candidates,
+        QueryCandidates::OrderIndex {
+            field: "total".to_owned(),
+            lookups: vec!["status".to_owned()],
+        },
+        "an equality most documents hold is checked during the walk"
+    );
+}
+
+#[test]
 fn a_memory_store_has_no_field_index_to_narrow_with() {
     let memory = Store::new(StoreOptions::default());
     seed(&memory);

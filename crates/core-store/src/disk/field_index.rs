@@ -847,6 +847,16 @@ impl EqualityJoin {
         })
     }
 
+    /// How many documents every conjunct holds, counted up to `at_most`
+    /// from the index alone.
+    pub(crate) fn count(mut self, at_most: usize) -> usize {
+        let mut count = 0;
+        while count < at_most && self.next_id().is_some() {
+            count += 1;
+        }
+        count
+    }
+
     /// The next document every conjunct holds.
     pub(crate) fn next(&mut self) -> Option<DocumentKey> {
         loop {
