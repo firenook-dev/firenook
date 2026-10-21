@@ -435,6 +435,8 @@ test('emulators:exec argument forms are decided before any binary is touched', (
   assert.match(run('emulators:start','--project','demo-fixture','npm','test').stderr,/Unexpected argument npm/);
   assert.match(run('emulators:start','--recursive').stderr,/--recursive is not an option of firenook emulators:start/);
   assert.match(run('doctor','--only','database').stderr,/not implemented by Firenook/);
+  // doctor checks every Extension instance; --instance belongs to ext:vendor.
+  assert.match(run('doctor','--instance','greeter').stderr,/--instance is not an option of firenook doctor/);
   // One script string is accepted; the shell notice precedes the binary check.
   assert.match(run('emulators:exec','--project','demo-fixture','exit 3').stderr,/running the script through the shell as the official CLI does/);
 });
