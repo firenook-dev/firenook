@@ -96,12 +96,16 @@ what a repair needs with each sync, so that repair takes moments;
 `--durability per-commit` leaves that out to keep its commit latency, and
 repairs by reading the store once, with its progress on screen.
 
-Disk state keeps an equality index over every document's top-level fields, so
-a query with `==` or `in` on them reads only the documents holding the value,
-not the whole collection. Results are identical either way. A state last
-written by an older release rebuilds the index once on the next start (one read
-of every stored document). `FIRENOOK_FIELD_INDEXES=0` turns it off for a
-comparison; queries then scan, as before.
+Disk state keeps an index over every document's top-level fields, sorted by
+value. A query with `==` or `in` on them reads only the documents holding the
+value, and a query ordered by one field (with a limit, a range on that field
+or a cursor) reads documents in that order and stops at its limit, instead of
+reading and sorting the whole collection. Results are identical either way. A
+state last written by an older release rebuilds the index once on the next
+start (one read of every stored document); a state Firenook 0.2.0 has opened
+can still be opened by an older release, which rebuilds its own index the
+same way. `FIRENOOK_FIELD_INDEXES=0` turns it off for a comparison; queries
+then scan, as before.
 
 Roll back by cleanly stopping Firenook, retaining its completed official-format
 export, then starting the official CLI on separate working state. Never run

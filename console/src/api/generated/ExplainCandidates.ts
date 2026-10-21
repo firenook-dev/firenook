@@ -5,4 +5,4 @@
  * what separates a query that touches three documents from one that reads
  * the collection.
  */
-export type ExplainCandidates = { "kind": "documentNames", names: number, } | { "kind": "equalityIndex", fields: Array<string>, } | { "kind": "collectionScan" } | { "kind": "collectionGroupScan", ancestor: string | null, };
+export type ExplainCandidates = { "kind": "documentNames", names: number, } | { "kind": "equalityIndex", fields: Array<string>, } | { "kind": "orderIndex", field: string, lookups: Array<string>, } | { "kind": "collectionScan" } | { "kind": "collectionGroupScan", ancestor: string | null, };
