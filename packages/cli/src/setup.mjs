@@ -8,6 +8,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { applyAgents, planAgents, shown } from './agents.mjs';
+import { setMember } from './json-text.mjs';
 
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[c78]/g;
@@ -42,7 +43,9 @@ export const packageName = folder => folder.toLowerCase().replace(/[^a-z0-9._~-]
 
 // The script every start runs, and what pinning writes into package.json:
 // Firenook as an exact devDependency and that script as `emulators`. A
-// script or a pin already there is kept.
+// script or a pin already there is kept, and an existing package.json is
+// edited as text: only what is added changes, in the layout of the object
+// it joins.
 export const startScript = ({build = false} = {}) => `firenook emulators:start --keep-data${build ? ' --build' : ''}`;
 export function pinPlan(directory, {version, build = false}) {
   const path = join(directory, 'package.json');
@@ -63,7 +66,9 @@ export function pinPlan(directory, {version, build = false}) {
   const pinned = devDependencies.firenook ?? data.dependencies?.firenook;
   if (pinned === undefined) devDependencies.firenook = version;
   else if (pinned !== version) kept.push(`firenook ${pinned}`);
-  const content = json({...data, scripts, devDependencies});
+  let content = exists ? original : json({...data, scripts, devDependencies});
+  if (exists && data.scripts?.emulators === undefined) content = setMember(content, ['scripts', 'emulators'], command);
+  if (exists && pinned === undefined) content = setMember(content, ['devDependencies', 'firenook'], version);
   return {path, exists, content, changed: content !== original, pinned: pinned ?? version, kept};
 }
 
