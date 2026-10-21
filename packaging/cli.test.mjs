@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { manifest, platformKey, release, sha256, verifyBinary } from '../packages/cli/src/binary.mjs';
+import { NODE_TESTED, manifest, nodeCheck, platformKey, release, sha256, verifyBinary } from '../packages/cli/src/binary.mjs';
 import { canonical, inspectProject, launchContext, loadProject, parseOptions } from '../packages/cli/src/options.mjs';
-import { prepareLaunch, requireNode, supervise } from '../packages/cli/src/runtime.mjs';
+import { diagnose, prepareLaunch, supervise } from '../packages/cli/src/runtime.mjs';
 
 function project() {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-cli-test-'));
@@ -49,13 +49,59 @@ test('registry-only exact dependencies; no lifecycle scripts or source-build ins
   for (const version of Object.values({...manifest.dependencies,...manifest.optionalDependencies})) assert.match(version,/^\d+\.\d+\.\d+(?:-[a-z]+\.\d+)?$/);
   assert.equal(manifest.bin.firenook,'bin/firenook.mjs');
 });
-test('npx gets this release on any Node npm runs on; the emulators ask for Node 24 themselves', () => {
+test('npx gets this release on any Node npm runs on; the emulators start on Node 22, 24 and 26', () => {
   // A release whose engines exclude the running Node is skipped for the
   // 0.0.0 placeholder by `npx firenook`, with no word about why.
   assert.equal(manifest.engines.node,'>=20');
-  requireNode('24.20.0');
-  assert.throws(()=>requireNode('26.9.0'),/need Node 24, since your Functions run on it; this is Node 26\.9\.0\. Switch to Node 24 \(with nvm: nvm install 24\)/);
-  assert.throws(()=>requireNode('22.20.0'),/this is Node 22\.20\.0/);
+  assert.deepEqual(NODE_TESTED,[22,24,26]);
+  const major = version => Number(version.split('.')[0]);
+  for (const version of ['22.23.3','24.20.0','26.9.0','22.0.0']) assert.deepEqual(nodeCheck(version),{version,major:major(version),tested:true});
+  // Older than the oldest tested line: refused, with the way to switch.
+  for (const version of ['20.20.2','21.7.3','18.20.8']) {
+    assert.deepEqual(nodeCheck(version),{version,major:major(version),tested:false,
+      problem:`the emulators need Node 22, 24 or 26, since your Functions run on it; this is Node ${version}. Switch to Node 24 (with nvm: nvm install 24) and run it again`});
+  }
+  // An odd or a newer major: started with a warning, as the official
+  // emulator runs on any Node from its floor up.
+  for (const version of ['23.11.1','25.2.1','27.0.0','28.1.0']) {
+    assert.deepEqual(nodeCheck(version),{version,major:major(version),tested:false,
+      note:`Node ${version} is not one the emulators are tested on (22, 24 and 26); they start on it, and your Functions run on it. If something behaves differently, switch to Node 24 (with nvm: nvm install 24)`});
+  }
+  assert.match(nodeCheck('unknown').problem,/this is Node unknown\./);
+});
+test('doctor reports the Node it runs on, a refused one among its problems, instead of stopping at it', async () => {
+  const {dir,options} = project();
+  const quietly = node => diagnose(options,dir,{report:true,quiet:true,node:nodeCheck(node),locate:()=>'/fake/firenook'});
+  for (const version of ['22.23.3','24.20.0','26.9.0']) {
+    const report = await quietly(version);
+    assert.deepEqual(report.node,{version,major:Number(version.split('.')[0]),tested:true,path:process.execPath});
+    assert.deepEqual(report.problems,[]);
+    assert.equal(report.binary,'/fake/firenook');
+  }
+  const refused = await quietly('20.20.2');
+  assert.equal(refused.node.tested,false);
+  assert.deepEqual(refused.problems,[nodeCheck('20.20.2').problem]);
+  assert.equal(refused.project.project,'demo-fixture');
+  const newer = await quietly('27.0.0');
+  assert.deepEqual(newer.problems,[]);
+  assert.equal(newer.node.note,nodeCheck('27.0.0').note);
+  assert.equal(newer.warnings[0],`Firenook: ${nodeCheck('27.0.0').note}`);
+  // A missing engine is a problem of the report too.
+  const missing = await diagnose(options,dir,{report:true,quiet:true,node:nodeCheck('26.9.0'),locate:()=>{ throw new Error('Missing @firenook/cli-darwin-arm64@0.0.0.'); }});
+  assert.equal(missing.binary,undefined);
+  assert.deepEqual(missing.problems,['Missing @firenook/cli-darwin-arm64@0.0.0.']);
+  // A start still stops at a refused Node, and warns on an untested one.
+  await assert.rejects(diagnose(options,dir,{quiet:true,node:nodeCheck('20.20.2'),locate:()=>'/fake/firenook'}),/need Node 22, 24 or 26/);
+  assert.equal((await diagnose(options,dir,{quiet:true,node:nodeCheck('25.2.1'),locate:()=>'/fake/firenook'})).warnings[0],`Firenook: ${nodeCheck('25.2.1').note}`);
+  // The command itself, on the Node running this test: its JSON, whatever
+  // else this checkout lacks (it has no platform package).
+  const cli = fileURLToPath(new URL('../packages/cli/bin/firenook.mjs',import.meta.url));
+  const run = spawnSync(process.execPath,[cli,'doctor'],{cwd:dir,encoding:'utf8'});
+  const printed = JSON.parse(run.stdout);
+  assert.equal(printed.node.version,process.versions.node);
+  assert.equal(printed.node.path,process.execPath);
+  assert.equal(run.status,printed.problems.length ? 1 : 0);
+  if (NODE_TESTED.includes(Number(process.versions.node.split('.')[0]))) assert.ok(printed.problems.every(problem => !problem.includes('Node')),printed.problems.join('\n'));
 });
 test('explicit supported platforms; untested architectures and musl rejected', () => {
   assert.equal(platformKey('linux','x64',{header:{glibcVersionRuntime:'2.39'}}),'linux-x64');

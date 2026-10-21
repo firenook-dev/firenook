@@ -31,8 +31,8 @@ npm install --save-dev firenook
 Same flags, same ports, and your `firebase.json`, rules, Functions code and app
 stay as they are. In a terminal, run it as `npx firenook emulators:start`. To
 keep your data between runs, add `--keep-data`.
-Firenook needs Node 24. Starting a new project? `npx firenook init` sets one
-up on one screen, installs it and starts the emulators.
+Firenook needs Node 22, 24 or 26. Starting a new project? `npx firenook init`
+sets one up on one screen, installs it and starts the emulators.
 
 <p align="center">
   <img alt="firenook emulators:start: the start-up card, the ready summary and a live log of function calls" src="https://raw.githubusercontent.com/firenook-dev/firenook/main/docs/assets/terminal.gif" width="760">
@@ -142,10 +142,12 @@ Every command and option: [CLI reference](https://github.com/firenook-dev/fireno
 
 ## Requirements
 
-Node 24 on macOS (Apple silicon or Intel), Linux (x64 or arm64, glibc) or
-Windows x64. Keep optional dependencies enabled: they carry the native engine
-for your platform. Firenook is in preview (`0.2.0-next` releases): pin an exact
-version (`--save-exact`) and upgrade on purpose.
+Node 22, 24 or 26 on macOS (Apple silicon or Intel), Linux (x64 or arm64,
+glibc) or Windows x64; your Functions run on it, and a codebase whose
+`engines.node` asks for another Node is warned about at start. Keep optional
+dependencies enabled: they carry the native engine for your platform. Firenook
+is in preview (`0.2.0-next` releases): pin an exact version (`--save-exact`)
+and upgrade on purpose.
 
 ## License
 

@@ -163,8 +163,13 @@ test('the set-up pins and installs side by side, builds after the packages, and 
   assert.equal(packages.detail, 'npm install failed (exit code 1)');
   assert.deepEqual(packages.tail, ['npm error code E404', 'npm error 404 Not Found']);
   assert.equal(result.steps.find(step => step.id === 'build').state, 'skipped');
-  assert.deepEqual(nextSteps(everything(), result.steps, {manager: second.manager, node: '26.9.0', platform: 'darwin'}).map(step => step.command),
+  assert.deepEqual(nextSteps(everything(), result.steps, {manager: second.manager, node: '20.20.2', platform: 'darwin'}).map(step => step.command),
     ['nvm use 24', 'npm install --prefix functions', 'npm run emulators']);
+  // Node 22 and 26 start the emulators as 24 does; an untested one starts them with a warning.
+  for (const node of ['22.23.3', '26.9.0', '27.0.0']) {
+    assert.deepEqual(nextSteps(everything(), result.steps, {manager: second.manager, node, platform: 'darwin'}).map(step => step.command),
+      ['npm install --prefix functions', 'npm run emulators'], node);
+  }
   // Without the install, the pin is written and the commands say the rest.
   const unpinned = setUpSteps(everything({install: false}), folder(), {version: '1.0.0', env: {}, platform: 'darwin', spawner: () => assert.fail('nothing runs')});
   const quiet = await unpinned.run();
@@ -281,20 +286,39 @@ test('in a terminal, changed choices are what is written, No prints the next ste
   assert.deepEqual(readdirSync(empty), []);
 });
 
-test('in a terminal on another Node, a taken port is named, and the set-up ends with how to switch', async () => {
+test('in a terminal on an old Node, a taken port is named, and the set-up ends with how to switch', async () => {
   const dir = folder();
   const {out, input, typing, text} = terminal();
   const running = initInTerminal({'no-install': true}, {cwd: dir, out, input, env: screenEnv, platform: 'darwin', version: '9.9.9-next.1', home: '/nowhere',
-    spawner: () => assert.fail('no install was asked for'), node: '26.9.0', probe: async port => port === 8080,
-    holder: port => (port === 8080 ? {pid: 4242, program: 'java', command: 'java -jar cloud-firestore-emulator.jar'} : undefined), start: () => assert.fail('no start on Node 26')});
+    spawner: () => assert.fail('no install was asked for'), node: '20.20.2', probe: async port => port === 8080,
+    holder: port => (port === 8080 ? {pid: 4242, program: 'java', command: 'java -jar cloud-firestore-emulator.jar'} : undefined), start: () => assert.fail('no start on Node 20')});
   await until(() => text().includes('esc cancel'));
-  shows(text(), 'Node 26.9.0: the emulators need Node 24');
+  shows(text(), 'Node 20.20.2: the emulators need Node 22, 24 or 26');
   await typing('\x1b[B');
   await until(() => text().includes('held by'));
   shows(text(), 'Firestore 8080 is held by an official Firebase emulator (PID 4242)');
   await typing('\r');
   assert.equal(await running, 0);
-  for (const expected of ['nvm use 24', 'the emulators need Node 24, and this is 26.9.0', 'npm install', 'npm run emulators']) shows(text(), expected);
+  for (const expected of ['nvm use 24', 'the emulators need Node 22, 24 or 26, and this is 20.20.2', 'npm install', 'npm run emulators']) shows(text(), expected);
+});
+
+test('in a terminal on Node 26, or an untested Node, the set-up offers to start the emulators', async () => {
+  for (const [node, opening] of [['26.9.0', 'Node 26.9.0'], ['27.0.0', 'Node 27.0.0: not tested with the emulators']]) {
+    const dir = folder();
+    const {out, input, typing, text} = terminal();
+    const {spawner} = installer([{match: () => true, code: 0, lines: ['added 3 packages in 1s']}]);
+    let started = false;
+    const running = initInTerminal({}, {cwd: dir, out, input, env: screenEnv, platform: 'darwin', version: '9.9.9-next.1', home: '/nowhere', spawner,
+      node, ...quietPorts, start: async () => { started = true; return 0; }});
+    await until(() => text().includes('esc cancel'));
+    shows(text(), opening);
+    await typing('\r');
+    await until(() => text().includes('Start the emulators now?'));
+    await typing('y');
+    assert.equal(await running, 0);
+    assert.ok(started, node);
+    assert.ok(!text().includes('nvm use'), node);
+  }
 });
 
 test('in a terminal, a folder with a firebase.json is shown what init --adopt adds, and a yes adds it', async () => {

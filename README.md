@@ -45,7 +45,7 @@ Same flags, same ports, and your `firebase.json`, rules, Functions code and app
 stay as they are. In a terminal, run it as `npx firenook emulators:start`. To
 keep your data between runs, with no export at every stop, add `--keep-data`.
 
-Firenook needs Node 24, on macOS, Linux or Windows. Starting a new project?
+Firenook needs Node 22, 24 or 26, on macOS, Linux or Windows. Starting a new project?
 `npx firenook init` sets one up. [Get started](#get-started) covers both.
 
 ## Why Firenook
@@ -252,7 +252,7 @@ connectStorageEmulator(storage, '127.0.0.1', 9199);
 connectFunctionsEmulator(functions, '127.0.0.1', 5001);
 ```
 
-Firenook needs Node 24 on macOS, Linux (glibc) or Windows x64. The
+Firenook needs Node 22, 24 or 26 on macOS, Linux (glibc) or Windows x64. The
 [getting started guide](docs/getting-started.md) covers each step in more
 depth, including tests and keeping data.
 

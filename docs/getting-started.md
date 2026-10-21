@@ -23,9 +23,9 @@ archives. The one exception is an Extension from the registry, fetched once on
 first use; `firenook ext:vendor` copies it into the project so even that is
 offline.
 
-Firenook needs Node 24 (it runs your Functions) on macOS (Apple silicon or
-Intel), Linux (x64 or arm64, glibc) or Windows x64. Firenook is in preview
-(`0.2.0-next` releases): pin an exact version and upgrade on purpose.
+Firenook needs Node 22, 24 or 26 (it runs your Functions) on macOS (Apple
+silicon or Intel), Linux (x64 or arm64, glibc) or Windows x64. Firenook is in
+preview (`0.2.0-next` releases): pin an exact version and upgrade on purpose.
 
 ## Switching from the official emulator
 
@@ -48,7 +48,9 @@ Database, Hosting, App Hosting, Data Connect) and the additions it can make,
 such as a missing `emulators` entry. `npx firenook init --adopt` applies the
 additions by editing the parsed JSON, never rewriting your other keys.
 `npx firenook doctor` runs the same checks plus the package and Node, read-only,
-as JSON.
+as JSON: `node` says which Node it is and whether the emulators are tested on
+it, `problems` lists what stops a start (a Node older than 22, a missing
+engine package), and the exit code is 1 when there is any.
 
 **2. Swap the command.** `firebase emulators:start` becomes
 `firenook emulators:start` and `firebase emulators:exec` becomes

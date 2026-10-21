@@ -9,7 +9,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { PROJECT_AGENTS, planAgents, shown } from './agents.mjs';
-import { manifest } from './binary.mjs';
+import { manifest, nodeCheck } from './binary.mjs';
 import { choiceField, createForm, formKeys, formRows, keyLines, keys, press, textField } from './form.mjs';
 import { INIT_EMULATORS, INIT_PORTS, adopt, agentNames, initChoices, scaffoldPlan, writeScaffold } from './init.mjs';
 import { isDemoProject, parseOptions, validProjectId } from './options.mjs';
@@ -52,7 +52,7 @@ export async function initInTerminal(options, {cwd = process.cwd(), out = proces
   const {cells, inside, section, divider, field, bottom, open} = t;
   const config = resolve(cwd, options.config || 'firebase.json');
   const directory = dirname(config);
-  const node24 = Number(node.split('.')[0]) === 24;
+  const runtime = nodeCheck(node);
   const existing = existsSync(config) && !options.force;
 
   // ── Keys, signals and the end ───────────────────────────────────────
@@ -114,7 +114,7 @@ export async function initInTerminal(options, {cwd = process.cwd(), out = proces
   const words = () => [
     `${bold('firenook')}  ${dim(version)}`,
     `${existing ? 'a project' : 'a new project'} in ${homePath(directory)}`,
-    [node24 ? dim(`Node ${node}`) : yellow(`Node ${node}: the emulators need Node 24`),
+    [runtime.problem ? yellow(`Node ${node}: the emulators need Node 22, 24 or 26`) : runtime.note ? yellow(`Node ${node}: not tested with the emulators`) : dim(`Node ${node}`),
       dim(detected.length ? `${agentNames(detected)} found` : 'no coding agent found')].join(DOT),
   ];
   for (const text of words()) t.claim(`${' '.repeat(BODY - INSET)}${text}`);
@@ -239,7 +239,7 @@ export async function initInTerminal(options, {cwd = process.cwd(), out = proces
     ].map(inside)));
   }
   const pin = work.steps.find(item => item.id === 'firenook');
-  const ready = !stopped && result.ok && node24 && (choices.language === 'none' || work.steps.find(item => item.id === 'packages')?.state === 'done');
+  const ready = !stopped && result.ok && !runtime.problem && (choices.language === 'none' || work.steps.find(item => item.id === 'packages')?.state === 'done');
   if (ready && start) {
     const yes = await ask('Start the emulators now?', {above: [bottom()],
       hint: `${pin?.written ? work.manager.run('emulators') : `npx firenook emulators:start --keep-data${typescript ? ' --build' : ''}`} starts them any time; your data stays between runs`});
