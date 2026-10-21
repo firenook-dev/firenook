@@ -1,6 +1,15 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
-import { connectDialects, connectHosts, connectSnippet, defaultConnectHost } from './connect'
+import {
+  DEMO_TOKEN_PATH,
+  connectDialects,
+  connectHosts,
+  connectSnippet,
+  defaultConnectHost,
+  demoCredentials,
+} from './connect'
 import { CONNECT_TABS, type ConnectTarget } from './connect-tabs'
 
 const PORTS: Record<string, number> = {
@@ -135,42 +144,172 @@ describe('connection snippets', () => {
     expect(json.emulators.auth).toEqual({ host: 'fd00::5', port: 9099 })
   })
 
-  it('writes the environment in a stable order with where each comes from', () => {
+  it('writes the environment emulators:exec sets, in a stable order', () => {
     const env = connectSnippet('env', { services: ALL, status: status() }).split('\n')
+    // The official emulators:exec's variables for the running emulators,
+    // then the demo credentials Firenook adds.
     expect(env.map((line) => line.split('=')[0])).toEqual([
       'GCLOUD_PROJECT',
       'GOOGLE_CLOUD_PROJECT',
       'FIRESTORE_EMULATOR_HOST',
+      'FIREBASE_FIRESTORE_EMULATOR_ADDRESS',
       'FIREBASE_AUTH_EMULATOR_HOST',
       'FIREBASE_STORAGE_EMULATOR_HOST',
       'STORAGE_EMULATOR_HOST',
       'FIREBASE_EMULATOR_HUB',
       'PUBSUB_EMULATOR_HOST',
-      'GOOGLE_APPLICATION_CREDENTIALS',
       'CLOUD_TASKS_EMULATOR_HOST',
       'CLOUD_EVENTARC_EMULATOR_HOST',
+      'GOOGLE_APPLICATION_CREDENTIALS',
     ])
     const comments = env.map((line) => line.indexOf('  # '))
     expect(new Set(comments).size).toBe(1)
     expect(env[0]).toMatch(/^GCLOUD_PROJECT=demo-shop +# set by emulators:exec$/)
-    expect(env.at(-1)).toContain('# for Eventarc clients; Functions get it, exec does not set it')
+    const row = (name: string) => env.find((line) => line.startsWith(`${name}=`))
+    expect(row('CLOUD_TASKS_EMULATOR_HOST')).toMatch(/=127\.0\.0\.1:9499 +# set by emulators:exec$/)
+    expect(row('CLOUD_EVENTARC_EMULATOR_HOST')).toMatch(
+      /=http:\/\/127\.0\.0\.1:9299 +# set by emulators:exec$/,
+    )
+    expect(env.at(-1)).toContain('# emulators:exec writes a demo file and sets this')
   })
 
   it('points the server SDKs at demo credentials, which they look up when they start', () => {
+    const credentials =
+      '{"type":"external_account_authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo","token_url":"http://127.0.0.1:4400/firenook/oauth2/token"}'
+    expect(demoCredentials('127.0.0.1:4400')).toBe(credentials)
     for (const target of ['python', 'go', 'java'] as const) {
       const snippet = connectSnippet(target, { services: ALL, status: status() })
       expect(snippet).toContain('firenook emulators:exec --')
       expect(snippet).toContain('GOOGLE_APPLICATION_CREDENTIALS')
-      expect(snippet).toContain(
-        '{"type":"authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo"}',
-      )
+      // An authorized_user file would get its token from Google.
+      expect(snippet).toContain(credentials)
+      expect(snippet).not.toContain('"authorized_user"')
       expect(snippet).toContain('demo-shop')
     }
+    // The credentials name the hub as the app reaches it.
+    expect(connectSnippet('go', { services: ALL, status: status(), host: '10.0.2.2' })).toContain(
+      '"token_url":"http://10.0.2.2:4400/firenook/oauth2/token"',
+    )
     expect(connectSnippet('python', { services: ALL, status: status() })).toContain(
       'firebase_admin.initialize_app(options={"projectId": "demo-shop", "storageBucket": "demo-shop.appspot.com"})',
     )
     expect(connectSnippet('go', { services: ALL, status: status() })).toContain(
       'firebase.NewApp(ctx, &firebase.Config{ProjectID: "demo-shop", StorageBucket: "demo-shop.appspot.com"})',
+    )
+  })
+
+  it('sends Python to the emulators, Storage and Tasks included', () => {
+    // The Python Admin SDK ignores FIREBASE_STORAGE_EMULATOR_HOST: its
+    // Storage client reads STORAGE_EMULATOR_HOST, a URL, and without it
+    // goes to storage.googleapis.com. Without CLOUD_TASKS_EMULATOR_HOST its
+    // task queue goes to cloudtasks.googleapis.com.
+    expect(connectSnippet('python', { services: ALL, status: status() })).toBe(
+      [
+        "# Easiest: run your script with the emulators' environment set for you:",
+        '#   firenook emulators:exec -- python your_script.py',
+        '# Or set these before initialize_app. The SDK looks up default credentials',
+        '# when it starts, so point it at a demo credentials file holding:',
+        '#   {"type":"external_account_authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo","token_url":"http://127.0.0.1:4400/firenook/oauth2/token"}',
+        "# Its token comes from the emulators' hub, never from Google.",
+        '# Storage reads STORAGE_EMULATOR_HOST, a URL; Python ignores FIREBASE_STORAGE_EMULATOR_HOST.',
+        'import os',
+        'os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "demo-credentials.json"',
+        'os.environ["FIRESTORE_EMULATOR_HOST"] = "127.0.0.1:8080"',
+        'os.environ["FIREBASE_AUTH_EMULATOR_HOST"] = "127.0.0.1:9099"',
+        'os.environ["STORAGE_EMULATOR_HOST"] = "http://127.0.0.1:9199"',
+        'os.environ["PUBSUB_EMULATOR_HOST"] = "127.0.0.1:8085"',
+        'os.environ["CLOUD_TASKS_EMULATOR_HOST"] = "127.0.0.1:9499"',
+        '',
+        'import firebase_admin',
+        'firebase_admin.initialize_app(options={"projectId": "demo-shop", "storageBucket": "demo-shop.appspot.com"})',
+      ].join('\n'),
+    )
+    const firestoreOnly = connectSnippet('python', { services: ['firestore'], status: status() })
+    expect(firestoreOnly).not.toMatch(/STORAGE|TASKS/)
+  })
+
+  it('sends the Node Admin SDK’s task queue and Eventarc channel to the emulators', () => {
+    // Without CLOUD_EVENTARC_EMULATOR_HOST a publish goes to Google, and
+    // with it the SDK still asks for an access token: from your own
+    // default credentials (Google's token endpoint) unless it is given the
+    // demo ones, whose token the hub hands out.
+    expect(connectSnippet('admin-node', { services: ALL, status: status() })).toBe(
+      [
+        "// Easiest: run your script with the emulators' environment set for you:",
+        '//   firenook emulators:exec -- node your-script.js',
+        '// Or set these before initializeApp; the Admin SDK reads them when it starts.',
+        "process.env.GCLOUD_PROJECT = 'demo-shop'",
+        "process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080'",
+        "process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099'",
+        "process.env.FIREBASE_STORAGE_EMULATOR_HOST = '127.0.0.1:9199'",
+        "process.env.PUBSUB_EMULATOR_HOST = '127.0.0.1:8085'",
+        "process.env.CLOUD_TASKS_EMULATOR_HOST = '127.0.0.1:9499'",
+        "process.env.CLOUD_EVENTARC_EMULATOR_HOST = 'http://127.0.0.1:9299'",
+        "// Eventarc's publish asks for an access token: these demo credentials get it",
+        "// from the emulators' hub, never from Google. Set them under emulators:exec too,",
+        '// whose own the Node.js SDK cannot use. The file holds:',
+        '//   {"type":"external_account","audience":"firenook","subject_token_type":"urn:ietf:params:oauth:token-type:access_token","token_url":"http://127.0.0.1:4400/firenook/oauth2/token","credential_source":{"url":"http://127.0.0.1:4400/firenook/oauth2/token","format":{"type":"json","subject_token_field_name":"access_token"}}}',
+        "process.env.GOOGLE_APPLICATION_CREDENTIALS = 'demo-credentials.json'",
+        '',
+        "import { initializeApp } from 'firebase-admin/app'",
+        "initializeApp({ projectId: 'demo-shop', storageBucket: 'demo-shop.appspot.com' })",
+      ].join('\n'),
+    )
+    const withoutFunctions = connectSnippet('admin-node', {
+      services: ['firestore', 'storage'],
+      status: status(),
+    })
+    expect(withoutFunctions).not.toMatch(/TASKS|EVENTARC|Eventarc|CREDENTIALS/)
+  })
+
+  it('turns TLS off for Firestore in the Apple snippet, which useEmulator leaves on', () => {
+    const apple = connectSnippet('apple', { services: ALL, status: status() })
+    expect(apple).not.toContain('Firestore.firestore().useEmulator')
+    expect(apple).toContain(
+      [
+        'let settings = Firestore.firestore().settings',
+        'settings.host = "127.0.0.1:8080"',
+        'settings.isSSLEnabled = false',
+        'Firestore.firestore().settings = settings',
+      ].join('\n'),
+    )
+    // Auth brackets an IPv6 host itself; Firestore's host:port needs them.
+    const v6 = connectSnippet('apple', { services: ALL, status: status('demo-shop', '::1') })
+    expect(v6).toContain('Auth.auth().useEmulator(withHost: "::1", port: 9099)')
+    expect(v6).toContain('settings.host = "[::1]:8080"')
+  })
+
+  it('builds Java’s Storage and Pub/Sub clients on the emulators, which read no variable', () => {
+    const java = connectSnippet('java', { services: ALL, status: status() })
+    expect(java).not.toMatch(/FIREBASE_STORAGE_EMULATOR_HOST|PUBSUB_EMULATOR_HOST|setStorageBucket/)
+    expect(java).toContain('//   FIRESTORE_EMULATOR_HOST=127.0.0.1:8080')
+    expect(java).toContain('//   FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099')
+    expect(java).toContain(
+      [
+        'Storage storage = StorageOptions.newBuilder()',
+        '    .setHost("http://127.0.0.1:9199")',
+        '    .setProjectId("demo-shop")',
+        '    .setCredentials(NoCredentials.getInstance())',
+        '    .build()',
+        '    .getService();',
+      ].join('\n'),
+    )
+    expect(java).toContain(
+      'ManagedChannel channel = ManagedChannelBuilder.forTarget("127.0.0.1:8085").usePlaintext().build();',
+    )
+    expect(java).toContain('    .setCredentialsProvider(NoCredentialsProvider.create())')
+    expect(connectSnippet('java', { services: ['firestore'], status: status() })).not.toMatch(
+      /Storage|Pub\/Sub|ManagedChannel/,
+    )
+  })
+
+  it('names the token endpoint the engine and the CLI serve and write', () => {
+    const root = join(import.meta.dirname, '..', '..', '..')
+    expect(readFileSync(join(root, 'packages/cli/src/runtime.mjs'), 'utf8')).toContain(
+      `export const DEMO_TOKEN_PATH = '${DEMO_TOKEN_PATH}';`,
+    )
+    expect(readFileSync(join(root, 'crates/suite-front/src/lib.rs'), 'utf8')).toContain(
+      `pub const DEMO_TOKEN_PATH: &str = "${DEMO_TOKEN_PATH}";`,
     )
   })
 

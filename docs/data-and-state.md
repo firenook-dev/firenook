@@ -22,6 +22,24 @@ script form or an explicit interpreter (`-- cmd.exe /c npm test`). The
 launcher uses a private control pipe for graceful native export/shutdown rather
 than treating Unix signals as portable. Paths containing spaces are supported.
 
+The command's environment is the official one: `GCLOUD_PROJECT`,
+`FIREBASE_CONFIG` (unless yours sets one) and, for each emulator the hub lists
+as running and for no other, its variables: `FIRESTORE_EMULATOR_HOST` and
+`FIREBASE_FIRESTORE_EMULATOR_ADDRESS`, `FIREBASE_AUTH_EMULATOR_HOST`,
+`FIREBASE_STORAGE_EMULATOR_HOST` and `STORAGE_EMULATOR_HOST` (a URL),
+`PUBSUB_EMULATOR_HOST`, `FIREBASE_EMULATOR_HUB`, and with Functions
+`CLOUD_TASKS_EMULATOR_HOST` and `CLOUD_EVENTARC_EMULATOR_HOST` (a URL).
+Firenook adds `GOOGLE_CLOUD_PROJECT`, a gcloud directory of the run's own
+(`CLOUDSDK_CONFIG`) and `GOOGLE_APPLICATION_CREDENTIALS`, pointing at demo
+credentials it writes in the run directory: the Python, Go and Java Admin
+SDKs look up credentials when they start, and these keep yours out of the
+tests. Their token comes from the hub (`/firenook/oauth2/token` on the hub
+port), so a call that asks for an access token never reaches Google. The
+Node.js Admin SDK takes no token from them, so an Eventarc publish in the
+command fails without calling anyone; set `GOOGLE_APPLICATION_CREDENTIALS` in
+the script to the file the console's Connect dialog shows for Node, or publish
+from a function, where it works.
+
 Disk/WAL is the default. Fresh runs use a new `.firenook/runs/session-*` working
 directory; add `.firenook/` to your own gitignore. These directories are retained
 for recovery, including after errors. They are **data**, not disposable caches.

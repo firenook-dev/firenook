@@ -50,17 +50,38 @@ function jsValue(json: string, indent: string): string {
   }
 }
 
-/** The Admin SDK's `enqueue(data, options)` for the task (§1.4's options, only those it needs). */
-function adminNode(task: TaskForCode, host: string | undefined): string {
-  const { queue } = task
-  const lines: string[] = [
+/**
+ * The lines that point the Admin SDK at the Tasks port (`host`, `host:port`)
+ * and start it: it sets the variable itself, since without it a copied
+ * script enqueues into Cloud Tasks; `??=` keeps one already set.
+ */
+function adminSetup(host: string, project: string): string[] {
+  return [
     "import { initializeApp } from 'firebase-admin/app'",
     "import { getFunctions } from 'firebase-admin/functions'",
     '',
-    '// The Admin SDK enqueues into this emulator when run with',
-    `// CLOUD_TASKS_EMULATOR_HOST=${host ?? '<host:port>'} (functions in it have it already).`,
-    `initializeApp({ projectId: ${quoteJs(queue.project)} })`,
+    '// The Admin SDK enqueues into this emulator while CLOUD_TASKS_EMULATOR_HOST is set',
+    '// (functions in it have it already), and into Cloud Tasks itself without it.',
+    `process.env.CLOUD_TASKS_EMULATOR_HOST ??= ${quoteJs(host)}`,
+    `initializeApp({ projectId: ${quoteJs(project)} })`,
   ]
+}
+
+/** The Admin SDK call that enqueues one task into `target`, for an empty Tasks page. */
+export function enqueueSnippet(target: string, host: string, project: string): string {
+  return [
+    ...adminSetup(host, project),
+    '',
+    'await getFunctions()',
+    `  .taskQueue(${quoteJs(target)})`,
+    "  .enqueue({ orderId: 'o_1' })",
+  ].join('\n')
+}
+
+/** The Admin SDK's `enqueue(data, options)` for the task (§1.4's options, only those it needs). */
+function adminNode(task: TaskForCode, host: string): string {
+  const { queue } = task
+  const lines: string[] = adminSetup(host, queue.project)
   if (task.data === null)
     lines.push(
       '',

@@ -48,8 +48,8 @@ pub const FIREBASE_TOOLS_COMPATIBILITY_VERSION: &str = "15.22.0";
 /// Maximum in-memory log records replayed to a newly connected UI.
 pub const LOG_REPLAY_CAPACITY: usize = 1_024;
 /// The hub's token endpoint: the `token_url` of the demo credentials
-/// `firenook emulators:exec` hands its command (and the console's server
-/// snippets name). It answers every refresh with the emulators' `owner`
+/// `firenook emulators:exec` hands its command and the console's server
+/// snippets name. It answers every request with the emulators' `owner`
 /// token, so an Admin SDK that asks for an access token gets one from this
 /// machine and never calls Google.
 pub const DEMO_TOKEN_PATH: &str = "/firenook/oauth2/token";
@@ -249,7 +249,7 @@ impl HubRuntime {
             .route("/", get(hub_root))
             .route("/emulators", get(emulators))
             .route("/_admin/export", post(export))
-            .route(DEMO_TOKEN_PATH, post(demo_token))
+            .route(DEMO_TOKEN_PATH, get(demo_token).post(demo_token))
             .route(
                 "/functions/disableBackgroundTriggers",
                 put(disable_background),
@@ -343,9 +343,10 @@ async fn export(
 }
 
 /// The demo credentials' token, whatever the request: the
-/// `external_account_authorized_user` refresh the Python, Go and Java Admin
-/// SDKs send and the STS exchange of an `external_account`. The emulators
-/// take `owner` as an administrator's token and check no other.
+/// `external_account_authorized_user` refresh the Admin SDKs send, and both
+/// steps of an `external_account` whose subject token is read from here
+/// (a GET, its `access_token` field) and exchanged here (an STS POST). The
+/// emulators take `owner` as an administrator's token and check no other.
 async fn demo_token() -> Json<JsonValue> {
     Json(json!({
         "access_token": "owner",
@@ -660,23 +661,26 @@ mod tests {
             triggers: TriggerRegistry::default(),
         })
         .expect("Hub");
-        // An external_account_authorized_user refresh and an STS token
-        // exchange, as the Admin SDKs send them: both get the same token.
-        for form in [
-            "grant_type=refresh_token&refresh_token=demo",
-            "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token=demo",
+        // An external_account_authorized_user refresh, an STS token
+        // exchange and an external_account's read of its subject token, as
+        // the Admin SDKs send them: each gets the same token.
+        let post = |form: &'static str| {
+            Request::post(DEMO_TOKEN_PATH)
+                .header(header::AUTHORIZATION, "Basic ZGVtbzpkZW1v")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(form))
+                .expect("request")
+        };
+        for request in [
+            post("grant_type=refresh_token&refresh_token=demo"),
+            post(
+                "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token=owner",
+            ),
+            Request::get(DEMO_TOKEN_PATH)
+                .body(Body::empty())
+                .expect("request"),
         ] {
-            let response = runtime
-                .application()
-                .oneshot(
-                    Request::post(DEMO_TOKEN_PATH)
-                        .header(header::AUTHORIZATION, "Basic ZGVtbzpkZW1v")
-                        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                        .body(Body::from(form))
-                        .expect("request"),
-                )
-                .await
-                .expect("token");
+            let response = runtime.application().oneshot(request).await.expect("token");
             assert_eq!(response.status(), StatusCode::OK);
             assert_eq!(
                 body(response).await,
