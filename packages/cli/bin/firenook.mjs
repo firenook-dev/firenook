@@ -31,7 +31,7 @@ Emulators
   firenook emulators:exec [options] "npm test"            Script through the shell, as the official CLI
   firenook emulators:exec [options] -- CMD [ARGS...]      Argv command, no shell interpretation
   firenook emulators:export DIR [--force] [--only firestore,auth,storage]
-  firenook firestore:delete PATH (-r | --shallow) [-f] [--database ID]
+  firenook firestore:delete PATH [-r | --shallow] [-f] [--database ID]
   firenook firestore:delete --all-collections -f [--database ID]
   firenook functions:invoke NAME [--data JSON] [--region us-central1] [--method POST]
   firenook functions:invoke NAME --event-data JSON [--resource PATH] [--params JSON] [--auth JSON]

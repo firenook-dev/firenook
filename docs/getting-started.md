@@ -46,7 +46,8 @@ $ npx firenook init --adopt --dry-run
 prints a plan: errors Firenook cannot accept, services it skips (Realtime
 Database, Hosting, App Hosting, Data Connect) and the additions it can make,
 such as a missing `emulators` entry. `npx firenook init --adopt` applies the
-additions by editing the parsed JSON, never rewriting your other keys.
+additions as text: what is in your files stays as you wrote it, and each
+addition takes the layout of the object it joins.
 `npx firenook doctor` runs the same checks plus the package and Node, read-only,
 as JSON.
 
@@ -134,8 +135,9 @@ emulator on its usual port, `.firebaserc`, the default Firestore and Storage
 rules and indexes, and the Functions codebase (`functions/src/index.ts`
 compiled to `functions/lib`, with a `predeploy` build in `firebase.json` as a
 deploy needs, or `functions/index.js`). `init` never overwrites an existing
-`firebase.json` unless you pass `--force`; in a folder that already has one,
-it shows what `init --adopt` would add, and adds it on a yes.
+`firebase.json` unless you pass `--force`, and even then keeps the rules,
+indexes and code already there; in a folder that already has one, it shows
+what `init --adopt` would add, and adds it on a yes.
 
 Without a terminal (a script, CI, `--json`), `init` writes the files and
 prints the commands that finish the set-up. `--yes` takes the screen's

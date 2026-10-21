@@ -21,8 +21,8 @@ Everything about running Firenook, from the first start to the details.
   exports, durability, the store's size, and tests.
 - [Model Context Protocol](mcp.md): the running suite as tools for a coding
   agent.
-- [One service on its own](standalone-services.md): Pub/Sub or Auth without the
-  rest.
+- [One service on its own](standalone-services.md): Firestore, Pub/Sub or Auth
+  without the rest.
 - [CLI reference](cli.md): every command and option.
 
 ## Reference
