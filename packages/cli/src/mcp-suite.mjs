@@ -65,7 +65,7 @@ export function projectSource(options, cwd) {
 // running suite whose hub locator answers.
 export async function target(context) {
   if (!needsDiscovery(context.options, context.cwd)) return resolveProject(context.options, context.cwd);
-  try { return await discoverProject(context.cwd, 'firenook mcp'); }
+  try { return await discoverProject(context.cwd, 'firenook mcp', context.options); }
   catch (error) { throw new ToolError(error.message); }
 }
 // The options for code that resolves the project itself (functions:invoke,

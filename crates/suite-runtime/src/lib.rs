@@ -1247,7 +1247,8 @@ async fn prepare_suite(
     let (background_sender, background_receiver) = mpsc::unbounded_channel();
     let hub = HubRuntime::start(HubConfig {
         directory: directory.clone(),
-        locator_file: locator_path(config),
+        locator_file: free_locator(config).await,
+        record: Some(suite_record(config)),
         pid: std::process::id(),
         exporter: export_sender.clone(),
         triggers: triggers.clone(),
@@ -2181,6 +2182,80 @@ fn suite_directory(config: &SuiteConfig) -> Result<SuiteDirectory, SuiteRuntimeE
 
 fn locator_path(config: &SuiteConfig) -> PathBuf {
     std::env::temp_dir().join(format!("hub-{}.json", config.project_id))
+}
+
+/// The Hub locator to write, or `None` when another suite for the project
+/// is running and holds it: the official CLI then warns and writes none,
+/// so the commands of either CLI keep reaching the suite that wrote it,
+/// and that suite's stop still finds its own file to remove. Running means
+/// that one of the file's origins answers with the pid the file records,
+/// as the official CLI checks that pid is alive.
+async fn free_locator(config: &SuiteConfig) -> Option<PathBuf> {
+    let path = locator_path(config);
+    if !locator_answers(&path).await {
+        return Some(path);
+    }
+    let message = format!(
+        "It seems that you are running multiple instances of the emulator suite for project {}. This may result in unexpected behavior. Firenook commands run in this project's folder still reach this suite (elsewhere, pass --hub-port {}); the official CLI reaches the other one.",
+        config.project_id, config.ports.hub
+    );
+    terminal::print(
+        "WARN",
+        "emulators",
+        &message,
+        &format!("firenook: {message}"),
+    );
+    None
+}
+
+async fn locator_answers(path: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    let Ok(locator) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return false;
+    };
+    let Some(pid) = locator["pid"].as_u64() else {
+        return false;
+    };
+    let Ok(client) = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(2))
+        .build()
+    else {
+        return false;
+    };
+    for origin in locator["origins"].as_array().into_iter().flatten() {
+        let Some(origin) = origin.as_str() else {
+            continue;
+        };
+        let Ok(response) = client.get(format!("{origin}/")).send().await else {
+            continue;
+        };
+        if let Ok(status) = response.json::<serde_json::Value>().await
+            && status["pid"].as_u64() == Some(pid)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// This suite's own record beside the locators (`firenook-hubs/hub-
+/// {project}-{pid}.json`): what the npm CLI reads to find the suite started
+/// from a project's folder when two run for one project id.
+fn suite_record(config: &SuiteConfig) -> (PathBuf, serde_json::Value) {
+    let path = std::env::temp_dir().join("firenook-hubs").join(format!(
+        "hub-{}-{}.json",
+        config.project_id,
+        std::process::id()
+    ));
+    let fields = serde_json::json!({
+        "projectId": config.project_id,
+        "projectDir": config.project_dir,
+        "config": config.firebase_json,
+    });
+    (path, fields)
 }
 
 fn startup_log_messages(config: &SuiteConfig) -> Vec<String> {
