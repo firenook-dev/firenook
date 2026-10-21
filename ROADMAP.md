@@ -1525,7 +1525,20 @@ root collections. And the console's code (the Connect dialog's snippets, a
 document as code, a request as code) was plain grey text, with Flutter,
 Swift, Kotlin and Java snippets marked as JavaScript. Built on 2026-10-21.
 
-- [ ] **The tree's first walk reads the collection index, not the
+- [x] Published as `firenook@0.2.0-next.8` with `@firenook/cli-<platform>` ×5
+  on 2026-10-21 (PR #112, release PR #113, tag `npm-v0.2.0-next.8` on
+  cac87ac, engine f7c3c66). Release run 39601161551, dispatched with
+  `latest`, passed every gate and published all six packages in one go: the
+  CLI on `latest` (its `next` stays on 0.2.0-next.7 until it is moved by
+  hand), the native packages on `next`. Registry integrity equals the release
+  assets for all six, and registry signatures and provenance attestations
+  verify on a fresh install. From the registry, `npx firenook init` in an
+  empty folder installed 0.2.0-next.8 on Node 22.23 and 26.9, and
+  `emulators:start` there asked for Node 24; on Node 24.20 the published
+  package started, took a write, served the console and stopped cleanly. A
+  consumer's Extensions, installed-package and integration gates passed on
+  the candidate built from `f33376b`, whose package is the PR head's.
+- [x] **The tree's first walk reads the collection index, not the
   documents.** The tree comes from the schema index, built by one walk of a
   database's document keys the first time a console asks. Walking the keys
   of the documents table still reads every page of every body, which sits
@@ -1535,7 +1548,7 @@ Swift, Kotlin and Java snippets marked as JavaScript. Built on 2026-10-21.
   merged; counting does not need path order. The walk took 37 s instead of
   133 s on clones of that store, and 39.5 s through the console. A test
   checks it lists the key cursor's keys, flushed or not, on both backends.
-- [ ] **A clean stop saves the tree with the data.** The index is saved as a
+- [x] **A clean stop saves the tree with the data.** The index is saved as a
   note of the store (`Store::save_note`, a `metadata_v1` entry with the
   revision it describes) once the services have stopped, and only when no
   document changed since the newest commit the index was told of; the next
@@ -1545,12 +1558,12 @@ Swift, Kotlin and Java snippets marked as JavaScript. Built on 2026-10-21.
   0.9 ms, identical to the walked one; a write before a clean stop was in the
   next start's tree; a write followed by `kill -9` left the older note
   unread, and the walk counted the write. The stop with the save took 0.2 s.
-- [ ] **The tree shows the root collections while it waits.** The roots come
+- [x] **The tree shows the root collections while it waits.** The roots come
   from `ListCollectionIds` (17 ms on that store), each with its own count,
   drawn like the tree's roots and opening their collection on a click, with
   "Finding subcollections…" held at the panel's foot, so no row moves when
   the tree arrives.
-- [ ] **Code in colour wherever the console shows it.** Every code block is
+- [x] **Code in colour wherever the console shows it.** Every code block is
   coloured with the editor's own palette (`code-editor/ink.ts`), keywords
   and keys in the key hue, strings in the string hue, numbers and types in
   the literal hue, comments and punctuation receding. A block now has to say
@@ -1565,7 +1578,7 @@ Swift, Kotlin and Java snippets marked as JavaScript. Built on 2026-10-21.
   first time a block in it is shown (0.8 to 7.7 KB gzipped each; the
   JavaScript and JSON grammars are the editor's), so no route's first load
   grows, and both bundle budgets hold.
-- [ ] **The console answers for any name under `localhost`.** Reached
+- [x] **The console answers for any name under `localhost`.** Reached
   through portless (`https://my-branch.emulator.my-app.localhost/console`),
   it answered "This console does not answer for host …": the host guard
   knew `localhost`, `127.0.0.1`, `::1`, the `--host` address and
@@ -1581,7 +1594,7 @@ Swift, Kotlin and Java snippets marked as JavaScript. Built on 2026-10-21.
   console does not read the `PORT` that `portless run` sets. Checked in a
   browser through portless's HTTPS: every page, the live event stream and
   Storage previews, 248 requests, none failed.
-- [ ] **`npx firenook` gets the release on any Node.** On Node 26,
+- [x] **`npx firenook` gets the release on any Node.** On Node 26,
   `npx firenook init` in an empty folder installed `firenook@0.0.0`, the
   placeholder that held the name before the first release, and printed its
   old advice. Every release declared `engines.node` as `>=24 <25`. npm
