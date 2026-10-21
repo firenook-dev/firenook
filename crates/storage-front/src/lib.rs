@@ -168,7 +168,7 @@ pub use metadata::StorageDurability;
 
 /// What the suite knows about Storage's surroundings that a `firebase.json`
 /// Storage section does not say.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct StorageOptions {
     /// The suite runs the Functions emulator. Without it no Storage event is
     /// queued at all, as the official emulator sends none then.
@@ -183,6 +183,23 @@ pub struct StorageOptions {
     /// Record every rules decision, its re-runnable context and coverage
     /// (the suite's diagnostics, on by default there).
     pub diagnostics: bool,
+    /// Where the log lines go from the opening on, the staged uploads it
+    /// removes included ([`StorageRuntime::set_log_sink`] can change it
+    /// later); printed as they always were when `None`.
+    pub log: Option<LogSink>,
+}
+
+impl fmt::Debug for StorageOptions {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StorageOptions")
+            .field("functions", &self.functions)
+            .field("default_bucket", &self.default_bucket)
+            .field("rules_files", &self.rules_files)
+            .field("diagnostics", &self.diagnostics)
+            .field("log", &self.log.is_some())
+            .finish()
+    }
 }
 
 impl Default for StorageOptions {
@@ -194,6 +211,7 @@ impl Default for StorageOptions {
             default_bucket: None,
             rules_files: None,
             diagnostics: false,
+            log: None,
         }
     }
 }
@@ -259,12 +277,20 @@ impl StorageRuntime {
         sessions::stamp_unknown(&mut data, now_millis());
         // Nothing is uploading yet, so a staged file no session names is
         // what a crash mid-upload left behind.
+        let log = LogHandle::default();
+        if let Some(sink) = options.log.clone() {
+            log.set(sink);
+        }
         let (orphans, orphan_bytes) = staging::remove_orphans(&config.data_dir, &data);
         if orphans > 0 {
-            eprintln!(
-                "firenook storage: removed {orphans} staged upload {} left by an earlier run ({})",
-                if orphans == 1 { "file" } else { "files" },
-                staging::format_bytes(orphan_bytes)
+            log.emit(
+                StorageLogLevel::Warn,
+                log::UPLOADS,
+                format!(
+                    "removed {orphans} staged upload {} left by an earlier run ({})",
+                    if orphans == 1 { "file" } else { "files" },
+                    staging::format_bytes(orphan_bytes)
+                ),
             );
         }
         let rules = config
@@ -287,7 +313,7 @@ impl StorageRuntime {
             queue,
             background,
             staging: Arc::new(StagingGauge::default()),
-            log: LogHandle::default(),
+            log,
             tasks: Arc::new(ConsoleTasks::default()),
             index: Arc::new(IndexControl::default()),
             shapes: Arc::default(),
@@ -348,8 +374,9 @@ impl StorageRuntime {
         self.application.clone()
     }
 
-    /// Where rules runtime errors and failed flushes go from now on, instead
-    /// of standard error.
+    /// Where the log lines (rules runtime errors, failed flushes, removed
+    /// uploads) go from now on, instead of the sink the options gave or
+    /// the plain printing.
     pub fn set_log_sink(&self, sink: LogSink) {
         self.state.log.set(sink);
     }

@@ -14,8 +14,10 @@ In a terminal, `firenook emulators:start` draws its own screen:
 - the ready summary: the console's address, the ports, any start-up
   warnings, and a newer release when one is out;
 - the log below it, one line per call with how long it took and what caused
-  it, the function's own output under it, reloads as you save, and with
-  `--build` each compile's errors, with where they are;
+  it, the function's own output under it, reloads as you save, each
+  service's own lines (Auth's sign-in codes and links, a Storage or Cloud
+  Tasks warning), and with `--build` each compile's errors, with where they
+  are;
 - a footer that stays on the window's last line, with the keys.
 
 | Key | Does |

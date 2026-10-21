@@ -42,12 +42,16 @@ use firenook_functions_runtime::monitor::{FunctionCodebaseKind, LiveSink, Monito
 use serde_json::{Value, json};
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
-/// Set once `ready` is sent: from then on a warning is a line of the log.
-static READY: AtomicBool = AtomicBool::new(false);
+/// What is said before readiness, and whether `ready` was sent. A line is
+/// decided, and the `ready` event sent, under its lock, so no line said
+/// while the suite becomes ready is lost or comes before `ready`.
+static START: Mutex<Start> = Mutex::new(Start {
+    ready: false,
+    warnings: Vec::new(),
+    held: Vec::new(),
+});
 /// The process's start, for the ready time.
 static BEGAN: LazyLock<Instant> = LazyLock::new(Instant::now);
-/// Warnings said before readiness, each once, for the `ready` event.
-static WARNINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// At most this many progress events a second per step.
 const PROGRESS_EVERY: Duration = Duration::from_millis(100);
 
@@ -200,38 +204,91 @@ pub(crate) fn repaired(verb: &str) {
     }));
 }
 
-/// A warning: before readiness kept for the `ready` event (each text once),
-/// after it a line of the log.
-pub(crate) fn warn(source: &str, message: &str) {
-    if !enabled() {
-        return;
+/// Before readiness: the start-up warnings, each text once, for the `ready`
+/// event, and the lines kept for the log (an Auth code), said right after
+/// it. Once ready, nothing waits.
+#[derive(Debug, Default)]
+struct Start {
+    ready: bool,
+    warnings: Vec<String>,
+    held: Vec<Value>,
+}
+
+impl Start {
+    /// A warning: kept for `ready`, or, once ready, the log line to say.
+    fn warn(&mut self, source: &str, message: &str) -> Option<Value> {
+        if self.ready {
+            return Some(log_event("warn", source, message));
+        }
+        if !self.warnings.iter().any(|known| known == message) {
+            self.warnings.push(message.to_owned());
+        }
+        None
     }
-    if READY.load(Ordering::SeqCst) {
-        emit(&json!({"type": "log", "level": "warn", "source": source, "message": message}));
-        return;
+
+    /// A line the log must show: held until `ready`, or said now.
+    fn keep(&mut self, line: Value) -> Option<Value> {
+        if self.ready {
+            return Some(line);
+        }
+        self.held.push(line);
+        None
     }
-    let mut warnings = WARNINGS.lock().unwrap_or_else(PoisonError::into_inner);
-    if !warnings.iter().any(|known| known == message) {
-        warnings.push(message.to_owned());
+
+    /// Readiness: the warnings for `ready` and the lines held for after it.
+    fn open(&mut self) -> (Vec<String>, Vec<Value>) {
+        self.ready = true;
+        (
+            std::mem::take(&mut self.warnings),
+            std::mem::take(&mut self.held),
+        )
     }
+}
+
+fn start() -> std::sync::MutexGuard<'static, Start> {
+    START.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A line of the log, as the terminal draws it.
+fn log_event(level: &str, source: &str, message: &str) -> Value {
+    json!({"type": "log", "level": level, "source": source, "message": message})
 }
 
 /// A line of the log from a service (`auth`, `tasks`, `rules`, `firenook`).
 /// Before readiness the start-up card says what an information line would
 /// (which rules file, which port), so only warnings and errors are kept,
-/// for the `ready` event.
+/// for the `ready` event (each text once); after it every line is a line of
+/// the log.
 pub(crate) fn line(level: &str, source: &str, message: &str) {
+    say(level, source, message, false);
+}
+
+/// [`line`] for a line the log must show even when it comes before
+/// readiness (a sign-in code or link): an information line then waits for
+/// `ready` instead of being left to the start-up card.
+pub(crate) fn kept_line(level: &str, source: &str, message: &str) {
+    say(level, source, message, true);
+}
+
+fn say(level: &str, source: &str, message: &str, keep: bool) {
     if !enabled() {
         return;
     }
     let level = level.to_ascii_lowercase();
-    if !READY.load(Ordering::SeqCst) {
-        if matches!(level.as_str(), "warn" | "warning" | "error") {
-            warn(source, message);
-        }
-        return;
+    let mut start = start();
+    let said = if start.ready {
+        Some(log_event(&level, source, message))
+    } else if matches!(level.as_str(), "warn" | "warning" | "error") {
+        start.warn(source, message)
+    } else if keep {
+        start.keep(log_event(&level, source, message))
+    } else {
+        None
+    };
+    drop(start);
+    if let Some(said) = said {
+        emit(&said);
     }
-    emit(&json!({"type": "log", "level": level, "source": source, "message": message}));
 }
 
 /// Prints `plain` as the engine always has (stdout for information, stderr
@@ -240,7 +297,23 @@ pub(crate) fn line(level: &str, source: &str, message: &str) {
 pub(crate) fn print(level: &str, source: &str, message: &str, plain: &str) {
     if enabled() {
         line(level, source, message);
-    } else if matches!(level, "WARN" | "ERROR") {
+    } else {
+        print_plain(level, plain);
+    }
+}
+
+/// [`print`] for a line the log must show even before readiness
+/// ([`kept_line`]).
+pub(crate) fn print_kept(level: &str, source: &str, message: &str, plain: &str) {
+    if enabled() {
+        kept_line(level, source, message);
+    } else {
+        print_plain(level, plain);
+    }
+}
+
+fn print_plain(level: &str, plain: &str) {
+    if matches!(level, "WARN" | "ERROR") {
         eprintln!("{plain}");
     } else {
         println!("{plain}");
@@ -270,9 +343,12 @@ pub(crate) fn functions_line(event: &LogEvent) {
     {
         return;
     }
-    if level == "warn" && event.execution.is_none() && !READY.load(Ordering::SeqCst) {
-        warn(&event.label, &event.message);
-        return;
+    if level == "warn" && event.execution.is_none() {
+        let mut start = start();
+        if !start.ready {
+            let _ = start.warn(&event.label, &event.message);
+            return;
+        }
     }
     emit(&json!({
         "type": "log",
@@ -291,22 +367,25 @@ pub(crate) fn functions_line(event: &LogEvent) {
     }));
 }
 
-/// The suite is ready: every start-up warning goes with it, and later ones
-/// are lines of the log.
+/// The suite is ready: every start-up warning goes with it, the lines kept
+/// for the log follow it, and later ones are lines of the log.
 pub(crate) fn ready(console: Option<&str>, ports: &[(&str, u16)], functions: usize) {
     if !enabled() {
         return;
     }
-    let warnings = std::mem::take(&mut *WARNINGS.lock().unwrap_or_else(PoisonError::into_inner));
-    READY.store(true, Ordering::SeqCst);
     let ports: serde_json::Map<String, Value> = ports
         .iter()
         .map(|(name, port)| ((*name).to_owned(), json!(port)))
         .collect();
+    let mut start = start();
+    let (warnings, held) = start.open();
     emit(&json!({
         "type": "ready", "ms": millis(BEGAN.elapsed()), "console": console,
         "ports": ports, "functions": functions, "warnings": warnings,
     }));
+    for line in &held {
+        emit(line);
+    }
 }
 
 /// The Functions row's figures: its functions, then its codebases when there
@@ -469,6 +548,29 @@ mod tests {
             ))
         );
         assert_eq!(bind_failure("suite state is locked"), None);
+    }
+
+    #[test]
+    fn before_readiness_warnings_wait_for_ready_and_kept_lines_follow_it() {
+        let mut start = Start::default();
+        assert_eq!(start.warn("auth", "a warning"), None);
+        assert_eq!(start.warn("auth", "a warning"), None, "each text once");
+        let code = log_event(
+            "info",
+            "auth",
+            "To sign in as ada@example.com, follow this link: …",
+        );
+        assert_eq!(start.keep(code.clone()), None, "held until ready");
+        let (warnings, held) = start.open();
+        assert_eq!(warnings, ["a warning"]);
+        assert_eq!(held, std::slice::from_ref(&code));
+        // Once ready, a warning and a kept line are lines of the log at once.
+        assert_eq!(
+            start.warn("auth", "later"),
+            Some(log_event("warn", "auth", "later"))
+        );
+        assert_eq!(start.keep(code.clone()), Some(code));
+        assert_eq!(start.open(), (Vec::new(), Vec::new()));
     }
 
     #[test]

@@ -1210,7 +1210,7 @@ async fn prepare_suite(
     };
     let storage = if config.services.storage {
         Some(Arc::new(
-            start_storage(config, &delivery, &triggers, &store).await?,
+            start_storage(config, &delivery, &triggers, &store, &logging).await?,
         ))
     } else {
         None
@@ -1515,10 +1515,10 @@ async fn stopped_before_ready(prepared: Option<PreparedSuite>) -> SuiteOutcome {
         if let Some(storage) = storage
             && let Err(error) = close_storage(storage).await
         {
-            eprintln!("firenook: {error}");
+            terminal::print("ERROR", "firenook", &error, &format!("firenook: {error}"));
         }
         if let Err(error) = close_store(store).await {
-            eprintln!("firenook: {error}");
+            terminal::print("ERROR", "firenook", &error, &format!("firenook: {error}"));
         }
     }
     outcome
@@ -2025,6 +2025,7 @@ async fn start_storage(
     delivery: &DeliveryRuntime,
     triggers: &TriggerRegistry,
     store: &Store,
+    logging: &LoggingRuntime,
 ) -> Result<StorageRuntime, SuiteRuntimeError> {
     let source = match &config.storage_rules {
         StorageRulesConfig::Single(path) => RulesSource::Single(RulesFile {
@@ -2081,6 +2082,9 @@ async fn start_storage(
         default_bucket: Some(config.default_bucket.clone()),
         rules_files: Some(rules_files),
         diagnostics: config.diagnostics,
+        // From the opening on, so the staged uploads it removes are said
+        // as every later line is.
+        log: Some(console_wiring::storage::log_sink(logging)),
     };
     StorageRuntime::start_with(
         StorageConfig {
@@ -2281,7 +2285,13 @@ fn spawn_static_servers(
 pub fn no_delay(listener: TcpListener) -> TapIo<TcpListener, fn(&mut tokio::net::TcpStream)> {
     listener.tap_io(|stream| {
         if let Err(error) = stream.set_nodelay(true) {
-            eprintln!("firenook: TCP_NODELAY unavailable on an accepted connection: {error}");
+            let message = format!("TCP_NODELAY unavailable on an accepted connection: {error}");
+            terminal::print(
+                "WARN",
+                "firenook",
+                &message,
+                &format!("firenook: {message}"),
+            );
         }
     })
 }

@@ -8,7 +8,7 @@ use firenook_storage_front::{LogSink, StorageLogLevel, StorageLogLine, StorageRu
 use firenook_suite_front::{Audience, LogInput, LogLevel, LoggingRuntime};
 
 use super::{FunctionsConsoleOptions, HookContext};
-use crate::SuiteConfig;
+use crate::{SuiteConfig, terminal};
 
 /// Storage's console: the Storage emulator's own application, the
 /// service's console handle, the suite's log for the `storage.denied`
@@ -24,24 +24,32 @@ pub(crate) fn storage_console(
         .with_monitor(compute.map(|parts| parts.monitor().clone()))
 }
 
-/// Storage's own log lines (rules runtime errors, failed flushes) as suite
-/// log lines: printed to the terminal as they always were, and handed to the
-/// console's log with their kind. The official Logging feed never carried
-/// them, so they stay out of it.
+/// Storage's own log lines (rules runtime errors, failed flushes, the
+/// staged uploads and idle upload sessions it removes) as suite log lines:
+/// printed as they always were (or, with the terminal's events on, said as
+/// lines of its log, a warning before readiness as a start-up warning), and
+/// handed to the console's log with their kind. The official Logging feed
+/// never carried them, so they stay out of it. The suite opens Storage with
+/// this sink, so the lines said while it opens go here too.
 pub(crate) fn log_sink(logging: &LoggingRuntime) -> LogSink {
     let logging = logging.clone();
     Arc::new(move |line: StorageLogLine| {
-        let prefix = if line.kind == "storage.rules" {
-            "firenook Storage rules"
-        } else {
-            "firenook Storage"
+        let prefix = match line.kind {
+            "storage.rules" => "firenook Storage rules",
+            "storage.uploads" => "firenook storage",
+            _ => "firenook Storage",
         };
-        match line.level {
-            StorageLogLevel::Info => println!("{prefix}: {}", line.message),
-            StorageLogLevel::Warn | StorageLogLevel::Error => {
-                eprintln!("{prefix}: {}", line.message);
-            }
-        }
+        let level = match line.level {
+            StorageLogLevel::Info => "INFO",
+            StorageLogLevel::Warn => "WARN",
+            StorageLogLevel::Error => "ERROR",
+        };
+        terminal::print(
+            level,
+            "storage",
+            &line.message,
+            &format!("{prefix}: {}", line.message),
+        );
         logging.emit(LogInput {
             level: match line.level {
                 StorageLogLevel::Info => LogLevel::Info,
@@ -57,13 +65,10 @@ pub(crate) fn log_sink(logging: &LoggingRuntime) -> LogSink {
     })
 }
 
-/// The suite's services are prepared; the console is not built yet. From
-/// here on Storage's log lines reach the suite's log.
-pub(crate) fn prepared(context: &HookContext<'_>) {
-    if let Some(storage) = context.storage {
-        storage.set_log_sink(log_sink(context.logging));
-    }
-}
+/// The suite's services are prepared; the console is not built yet.
+/// Storage's log lines already reach the suite's log: it was opened with
+/// [`log_sink`].
+pub(crate) fn prepared(_context: &HookContext<'_>) {}
 
 /// The Functions runtime is about to start.
 pub(crate) fn functions_options(

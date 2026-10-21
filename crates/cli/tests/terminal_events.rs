@@ -42,11 +42,13 @@ impl Drop for Project {
     }
 }
 
-/// A running engine and the events it sent.
+/// A running engine, the events it sent, and every line it printed (those
+/// on stderr also apart).
 struct Engine {
     child: Child,
     events: Arc<Mutex<Vec<Value>>>,
     output: Arc<Mutex<Vec<String>>>,
+    errors: Arc<Mutex<Vec<String>>>,
 }
 
 impl Engine {
@@ -77,6 +79,63 @@ fn node() -> Option<PathBuf> {
 /// Starts the engine with the terminal's events (picking up its saved data
 /// with `resume`) and waits for `ready`.
 fn start(project: &Project, only: &str, resume: bool, ports: [u16; 11]) -> Engine {
+    launch(project, only, resume, true, ports)
+}
+
+/// Starts the engine as a pipe or CI runs it, and waits for its ready line.
+fn start_plain(project: &Project, only: &str, ports: [u16; 11]) -> Engine {
+    launch(project, only, false, false, ports)
+}
+
+/// The engine `child` is, reading both its streams into its records; the
+/// channel says when it is ready.
+fn read(mut child: Child) -> (Engine, mpsc::Receiver<()>) {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let output = Arc::new(Mutex::new(Vec::new()));
+    let errors = Arc::new(Mutex::new(Vec::new()));
+    let (ready, became_ready) = mpsc::channel();
+    for (stream, stderr) in [
+        (
+            Box::new(child.stdout.take().expect("stdout")) as Box<dyn std::io::Read + Send>,
+            false,
+        ),
+        (Box::new(child.stderr.take().expect("stderr")), true),
+    ] {
+        let (events, output, errors, ready) = (
+            Arc::clone(&events),
+            Arc::clone(&output),
+            Arc::clone(&errors),
+            ready.clone(),
+        );
+        std::thread::spawn(move || {
+            for line in BufReader::new(stream).lines().map_while(Result::ok) {
+                if let Some(event) = line.strip_prefix("FIRENOOK_EVENT ")
+                    && let Ok(event) = serde_json::from_str::<Value>(event)
+                {
+                    if event["type"] == "ready" {
+                        let _ = ready.send(());
+                    }
+                    events.lock().expect("events").push(event);
+                } else if line == "All emulators ready" {
+                    let _ = ready.send(());
+                }
+                if stderr {
+                    errors.lock().expect("errors").push(line.clone());
+                }
+                output.lock().expect("output").push(line);
+            }
+        });
+    }
+    let engine = Engine {
+        child,
+        events,
+        output,
+        errors,
+    };
+    (engine, became_ready)
+}
+
+fn launch(project: &Project, only: &str, resume: bool, events: bool, ports: [u16; 11]) -> Engine {
     let names = [
         "firestore",
         "auth",
@@ -102,7 +161,7 @@ fn start(project: &Project, only: &str, resume: bool, ports: [u16; 11]) -> Engin
             "--state-dir".as_ref(),
             project.path.join("state").as_os_str(),
         ])
-        .args(["--terminal-events", "--no-ui"])
+        .arg("--no-ui")
         .args(["--project-id", &project.id, "--host", "127.0.0.1"])
         .args([
             "--node".as_ref(),
@@ -114,43 +173,20 @@ fn start(project: &Project, only: &str, resume: bool, ports: [u16; 11]) -> Engin
     if resume {
         command.arg("--resume-state");
     }
+    if events {
+        command.arg("--terminal-events");
+    }
     for (name, port) in names.iter().zip(ports) {
         command.args([format!("--{name}-port"), port.to_string()]);
     }
-    let mut child = command
+    let child = command
         .env("FIRENOOK_CONTROL_STDIN", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("engine started");
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let output = Arc::new(Mutex::new(Vec::new()));
-    let (ready, became_ready) = mpsc::channel();
-    for stream in [
-        Box::new(child.stdout.take().expect("stdout")) as Box<dyn std::io::Read + Send>,
-        Box::new(child.stderr.take().expect("stderr")),
-    ] {
-        let (events, output, ready) = (Arc::clone(&events), Arc::clone(&output), ready.clone());
-        std::thread::spawn(move || {
-            for line in BufReader::new(stream).lines().map_while(Result::ok) {
-                if let Some(event) = line.strip_prefix("FIRENOOK_EVENT ")
-                    && let Ok(event) = serde_json::from_str::<Value>(event)
-                {
-                    if event["type"] == "ready" {
-                        let _ = ready.send(());
-                    }
-                    events.lock().expect("events").push(event);
-                }
-                output.lock().expect("output").push(line);
-            }
-        });
-    }
-    let mut engine = Engine {
-        child,
-        events,
-        output,
-    };
+    let (mut engine, became_ready) = read(child);
     let deadline = Instant::now() + Duration::from_secs(120);
     while became_ready
         .recv_timeout(Duration::from_millis(100))
@@ -350,5 +386,141 @@ fn a_cloud_tasks_line_once_running_is_a_line_of_the_log() {
         "nothing is printed raw:\n{}",
         engine.printed()
     );
+    stop(engine);
+}
+
+/// The log line a source said whose message holds `text`, waited for.
+fn said(engine: &Engine, source: &str, text: &str) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let found = engine.events().into_iter().find(|event| {
+            event["type"] == "log"
+                && event["source"] == source
+                && event["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains(text))
+        });
+        if let Some(found) = found {
+            return found;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{source} said no line with {text:?}:\n{}",
+            engine.printed()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn an_auth_link_once_running_is_a_line_of_the_log() {
+    let project = Project::new("auth");
+    project.write("firebase.json", r#"{"emulators":{"auth":{}}}"#);
+    let ports = free_ports::<11>();
+    let engine = start(&project, "auth", false, ports);
+    let status = post(
+        ports[1],
+        "/identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=fake-api-key",
+        r#"{"requestType":"EMAIL_SIGNIN","email":"ada@example.com","continueUrl":"http://127.0.0.1/done","canHandleCodeInApp":true}"#,
+    );
+    assert!(status.contains(" 200"), "{status}\n{}", engine.printed());
+    let line = said(
+        &engine,
+        "auth",
+        "To sign in as ada@example.com, follow this link: ",
+    );
+    assert_eq!(line["level"], "info");
+    assert!(
+        line["message"]
+            .as_str()
+            .is_some_and(|text| text.contains("oobCode=")),
+        "{line}"
+    );
+    assert!(
+        !engine.printed().contains("firenook auth: To sign in"),
+        "nothing is printed raw:\n{}",
+        engine.printed()
+    );
+    stop(engine);
+}
+
+#[test]
+fn a_storage_rules_failure_once_running_is_a_line_of_the_log() {
+    let project = Project::new("storage");
+    project.write("firebase.json", r#"{"storage":{"rules":"storage.rules"}}"#);
+    // Reading a field of a missing auth is an error, not a denial.
+    project.write(
+        "storage.rules",
+        "rules_version = '2';\nservice firebase.storage { match /b/{bucket}/o { match /{path=**} { allow read: if request.auth.token.admin == true; } } }\n",
+    );
+    let ports = free_ports::<11>();
+    let engine = start(&project, "storage", false, ports);
+    let mut stream = TcpStream::connect(("127.0.0.1", ports[2])).expect("Storage");
+    write!(
+        stream,
+        "GET /v0/b/{}.appspot.com/o/report.pdf HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        project.id
+    )
+    .expect("request");
+    let mut response = String::new();
+    stream.read_to_string(&mut response).expect("response");
+    assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+    let line = said(&engine, "storage", "failed in the rules");
+    assert_eq!(line["level"], "warn");
+    assert!(
+        !engine.printed().contains("firenook Storage rules:"),
+        "nothing is printed raw:\n{}",
+        engine.printed()
+    );
+    stop(engine);
+}
+
+#[test]
+fn the_plain_lines_stay_as_they_were() {
+    let project = Project::new("plain");
+    project.write(
+        "firebase.json",
+        r#"{"emulators":{"auth":{}},"storage":{"rules":"storage.rules"}}"#,
+    );
+    project.write(
+        "storage.rules",
+        "rules_version = '2';\nservice firebase.storage { match /b/{bucket}/o { match /{path=**} { allow read: if request.auth.token.admin == true; } } }\n",
+    );
+    let ports = free_ports::<11>();
+    let engine = start_plain(&project, "auth,storage", ports);
+    post(
+        ports[1],
+        "/identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=fake-api-key",
+        r#"{"requestType":"EMAIL_SIGNIN","email":"ada@example.com","continueUrl":"http://127.0.0.1/done"}"#,
+    );
+    let mut stream = TcpStream::connect(("127.0.0.1", ports[2])).expect("Storage");
+    write!(
+        stream,
+        "GET /v0/b/{}.appspot.com/o/report.pdf HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        project.id
+    )
+    .expect("request");
+    let mut response = String::new();
+    stream.read_to_string(&mut response).expect("response");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let rules = "firenook Storage rules: get on gs://";
+    while !engine.printed().contains(rules) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let printed = engine.printed();
+    assert!(
+        printed.contains("firenook auth: To sign in as ada@example.com, follow this link: "),
+        "{printed}"
+    );
+    let errors = engine.errors.lock().expect("errors").join("\n");
+    assert!(
+        errors.contains(rules),
+        "a warning goes to stderr:\n{printed}"
+    );
+    assert!(
+        !errors.contains("firenook auth: To sign in"),
+        "an information line goes to stdout:\n{printed}"
+    );
+    assert!(!printed.contains("FIRENOOK_EVENT"), "{printed}");
     stop(engine);
 }
