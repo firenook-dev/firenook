@@ -920,9 +920,11 @@ The pinned Java REST GET adapter timed out on transaction query parameters and
 returned 400 for a valid readTime, while its gRPC transaction reads and REST JSON
 batch historical reads succeeded. Firenook deliberately provides finite native
 snapshot semantics for these GET selectors instead of reproducing that hang.
-This is a disclosed adapter deviation, not exact HTTP parity. Rolled-back and
-unknown transactions return a finite INVALID_ARGUMENT response; the official
-gRPC observation uses ABORTED. Tests compare projected payloads/status codes
+This is a disclosed adapter deviation, not exact HTTP parity. A transaction
+that has ended (committed, rolled back or expired) is ABORTED, "The referenced
+transaction has expired or is no longer valid.", as the official gRPC and REST
+answers are; a token never issued is INVALID_ARGUMENT, "Invalid transaction.",
+and rolling back an ended transaction succeeds. Tests compare projected payloads/status codes
 where directly observable, not exact human-readable error strings or dynamic
 timestamps. Replay covers both memory and disk/WAL, including anonymous denial.
 
