@@ -2163,9 +2163,9 @@ async fn start_storage(
             // information before readiness, so there it is a start-up
             // warning: rules a project configured are being ignored.
             if terminal::enabled() {
-                terminal::warn("storage", &message);
+                terminal::line("WARN", "storage", &message);
             } else {
-                println!("firenook storage: {message}");
+                terminal::out(&format!("firenook storage: {message}"));
             }
             open_default_rules()
         }
