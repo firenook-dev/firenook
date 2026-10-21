@@ -1,6 +1,6 @@
 {
   "name": "firenook",
-  "version": "0.2.0-next.7",
+  "version": "0.2.0-next.8",
   "description": "A drop-in replacement for the Firebase Local Emulator Suite: keep your firebase.json, SDKs and ports, and get 38× faster writes, 9× less memory, no Java, and data that survives restarts",
   "keywords": ["firebase", "firebase-emulator", "emulator", "firestore", "firebase-auth", "cloud-functions", "cloud-storage", "pubsub", "cloud-tasks", "local-development", "testing", "rust"],
   "homepage": "https://github.com/firenook-dev/firenook#readme",
@@ -14,10 +14,10 @@
   "bugs": {"url": "https://github.com/firenook-dev/firenook/issues"},
   "publishConfig": {"access": "public", "registry": "https://registry.npmjs.org/"},
   "optionalDependencies": {
-    "@firenook/cli-darwin-arm64": "0.2.0-next.7",
-    "@firenook/cli-darwin-x64": "0.2.0-next.7",
-    "@firenook/cli-linux-x64": "0.2.0-next.7",
-    "@firenook/cli-linux-arm64": "0.2.0-next.7",
-    "@firenook/cli-win32-x64": "0.2.0-next.7"
+    "@firenook/cli-darwin-arm64": "0.2.0-next.8",
+    "@firenook/cli-darwin-x64": "0.2.0-next.8",
+    "@firenook/cli-linux-x64": "0.2.0-next.8",
+    "@firenook/cli-linux-arm64": "0.2.0-next.8",
+    "@firenook/cli-win32-x64": "0.2.0-next.8"
   }
 }
