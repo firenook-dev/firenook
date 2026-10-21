@@ -182,6 +182,8 @@ test('a build\'s lines are read as TypeScript writes them, in watch mode and onc
     {kind: 'error', file: 'src/index.ts', line: 1, column: 14, code: 'TS2322', message: "Type 'string' is not assignable to type 'number'."});
   assert.deepEqual(buildLine('Found 2 errors in the same file, starting at: src/index.ts:3'), {kind: 'quiet'});
   assert.deepEqual(buildLine('> functions@1.0.0 build:watch'), {kind: 'quiet'});
+  assert.deepEqual(buildLine('npm notice run tsc --watch'), {kind: 'quiet'}, 'npm 12 announces the script this way');
+  assert.equal(buildLine('npm warn config production Use `--omit=dev` instead.').kind, 'text', 'a warning is still said');
   assert.deepEqual(buildLine('esbuild: something broke, error here'), {kind: 'text', text: 'esbuild: something broke, error here', error: true});
 
   const directory = folder();

@@ -224,6 +224,10 @@ export.
 npx firenook init
 ```
 
+<p align="center">
+  <img alt="firenook init: a screen of choices already made, the set-up as it runs, and the emulators started in the same terminal" src="docs/assets/init.gif" width="760">
+</p>
+
 In a terminal, `init` opens on one screen with every choice already made:
 a `demo-<folder>` project, so nothing can reach a real Firebase project,
 every emulator on its usual port (one already in use is named, with what

@@ -30,7 +30,9 @@ export function buildPlan(project, mode = 'start') {
 // count that ends a compile in watch mode. Anything else is shown as it is.
 export function buildLine(text) {
   const line = String(text).replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1bc/g, '').trimEnd();
-  if (!line.trim() || /^> /.test(line)) return {kind: 'quiet'};
+  // npm's own announcement of the script: `> name@1.0.0 build` until npm 11,
+  // `npm notice run build` from npm 12.
+  if (!line.trim() || /^> /.test(line) || /^npm notice run /.test(line)) return {kind: 'quiet'};
   if (/Starting compilation in watch mode|File change detected\. Starting incremental compilation/.test(line)) return {kind: 'compiling'};
   const found = /Found (\d+) errors?\b.*Watching for file changes/.exec(line);
   if (found) return {kind: 'compiled', count: Number(found[1])};

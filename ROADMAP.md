@@ -1678,4 +1678,7 @@ emulators running. Built on 2026-10-21.
   keeping the rest of the file. The printed start commands say `npx
   firenook` or the package script, never a bare `firenook` that the folder
   does not have.
-- [ ] A recording of the screen for the README, beside the start screen's.
+- [x] **A recording for the README** (`docs/assets/init.gif`, 289 KB):
+  Enter on the choices, the set-up, a yes, and a call, from a folder named
+  `~/shop`.
+- [ ] Record it again on the published release, whose banner says next.9.

@@ -38,6 +38,8 @@ functions do not load, everything else keeps running: the
 card shows the error and the code around it, and the next save loads them
 again.
 
+![firenook init: the choices, the set-up and the start in one terminal](assets/init.gif)
+
 `firenook init` draws the same card: the mark, then the new project's
 choices as rows, each already made. `↑` `↓` (or Tab) move between rows,
 `←` `→` change a choice, Space turns one of several on or off, letters edit
