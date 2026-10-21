@@ -25,9 +25,9 @@ pub use error::PubsubError;
 pub use functions::ScheduleDefinition;
 pub use functions::{FunctionTarget, TargetKind};
 pub use runtime::{
-    DispatchPreview, FanoutSummary, LOG_PUSH, LOG_SCHEDULE, LogSink, Managed, OutgoingMessage,
-    PublishOutcome, PubsubLogLine, PubsubResetCount, PubsubRuntime, PushSink, PushStreakRecord,
-    RedeliverError, RejectedList, Rejection,
+    DispatchPreview, FanoutSummary, LOG_PUSH, LOG_SCHEDULE, LinePrinter, LogSink, Managed,
+    OutgoingMessage, PublishOutcome, PubsubLogLine, PubsubResetCount, PubsubRuntime, PushSink,
+    PushStreakRecord, RedeliverError, RejectedList, Rejection,
 };
 pub use schedule_control::{
     RunOutcome, RunScheduleError, RunTrigger, ScheduleControl, ScheduleRun, ScheduleView,
@@ -79,6 +79,19 @@ pub fn router(
     background: TriggerRegistry,
 ) -> PubsubRuntime {
     PubsubRuntime::new(project, inventory, queue, background)
+}
+
+/// [`router`] with `printer` saying a schedule's line until a log sink is
+/// set (see [`PubsubRuntime::with_printer`]).
+#[must_use]
+pub fn router_with_printer(
+    project: &str,
+    inventory: &FunctionsInventory,
+    queue: DispatchQueue,
+    background: TriggerRegistry,
+    printer: LinePrinter,
+) -> PubsubRuntime {
+    PubsubRuntime::with_printer(project, inventory, queue, background, printer)
 }
 
 #[cfg(test)]

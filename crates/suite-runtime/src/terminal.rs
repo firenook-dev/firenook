@@ -321,21 +321,28 @@ pub(crate) fn functions_figures(
         .filter(|codebase| codebase.kind == FunctionCodebaseKind::User)
         .count();
     let extensions = codebases.len() - user;
-    let mut figures = vec![(count(functions), plural(functions, "function", "functions"))];
+    let mut figures = vec![counted(count(functions), "function", "functions")];
     if user > 1 {
         figures.push((count(user), "codebases"));
     }
     if extensions > 0 {
-        figures.push((
-            count(extensions),
-            plural(extensions, "extension", "extensions"),
-        ));
+        figures.push(counted(count(extensions), "extension", "extensions"));
     }
     figures
 }
 
-fn plural(count: usize, one: &'static str, many: &'static str) -> &'static str {
-    if count == 1 { one } else { many }
+/// A figure, `[count, words]`, with its noun in the singular for one.
+pub(crate) fn counted(count: u64, one: &'static str, many: &'static str) -> (u64, &'static str) {
+    (count, plural(count, one, many))
+}
+
+/// `one` for a count of one, `many` for any other.
+pub(crate) fn plural<'a, N: Copy + PartialEq + From<u8>>(
+    count: N,
+    one: &'a str,
+    many: &'a str,
+) -> &'a str {
+    if count == N::from(1) { one } else { many }
 }
 
 fn count(value: usize) -> u64 {
@@ -462,5 +469,16 @@ mod tests {
             ))
         );
         assert_eq!(bind_failure("suite state is locked"), None);
+    }
+
+    #[test]
+    fn a_figure_says_its_noun_in_the_singular_for_one() {
+        assert_eq!(counted(1, "document", "documents"), (1, "document"));
+        assert_eq!(counted(0, "document", "documents"), (0, "documents"));
+        assert_eq!(
+            counted(2, "user imported", "users imported"),
+            (2, "users imported")
+        );
+        assert_eq!(plural(1, "file", "files"), "file");
     }
 }

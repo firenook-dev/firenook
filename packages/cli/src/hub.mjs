@@ -199,7 +199,7 @@ export async function firestoreDelete(path, options, argv = [], cwd = process.cw
     if (!response.ok) throw new Error(`Firestore delete failed (HTTP ${response.status}): ${body?.error?.message || body?.message || text || 'no details'}`);
     const deleted = typeof body?.deleted === 'number' ? body.deleted : undefined;
     if (options.json) log.log(JSON.stringify({...result, deleted:deleted ?? null}));
-    else log.log(deleted === undefined ? `Deleted ${result.mode === 'all-collections' ? `the ${database} database` : result.path}` : `Deleted ${deleted} documents`);
+    else log.log(deleted === undefined ? `Deleted ${result.mode === 'all-collections' ? `the ${database} database` : result.path}` : `Deleted ${deleted} ${deleted === 1 ? 'document' : 'documents'}`);
     return 0;
   };
   if (options['all-collections']) {

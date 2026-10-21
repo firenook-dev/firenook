@@ -12,7 +12,42 @@ Source review and actual-package allowlists reduce accidental publication risk;
 neither proves that formerly accessible material was never copied. Updating a
 package does not erase older immutable package versions.
 
-## Dependency review during source preparation
+## What the package installs and runs
+
+The `firenook` npm package has no dependencies of its own and no install
+script. Its only other packages are the five optional platform packages
+(`@firenook/cli-darwin-arm64`, `-darwin-x64`, `-linux-x64`, `-linux-arm64`,
+`-win32-x64`), of which npm installs the one for the host: each holds the
+native engine and a receipt with its SHA-256, which the launcher checks
+before it runs the binary (a mismatch refuses to run). The launcher itself
+is plain Node with no third-party modules.
+
+Nothing is fetched at run time. Since `0.1.0-next.7` neither firebase-tools
+nor Java is installed or run: Functions, Extensions and Storage rules run in
+Firenook's own runtime. Since `0.2.0-next.3` the console is part of the
+binary, and `firenook setup` downloads nothing. The CLI reaches the network
+in two places only: the update check asks the npm registry for `firenook`'s
+version tags at most once a day (off in CI, in the plain output and with
+`FIRENOOK_NO_UPDATE_CHECK=1` or `NO_UPDATE_NOTIFIER=1`), and an Extension instance that is neither a
+local path nor vendored is resolved from the Extensions registry with the
+Firebase CLI's stored login or `FIREBASE_TOKEN` (`firenook ext:vendor`
+copies it into the project, and `--offline` or `FIRENOOK_OFFLINE=1` turns
+any remaining registry access into a start-up error).
+
+Your Functions run on your Node 24 with the packages of your own codebase
+(`firebase-functions`, `firebase-admin` and what they bring); their
+advisories are your project's, as they are in production, and the emulator
+does not sandbox them. The conformance tooling in this repository pins
+firebase-tools 15.28.1 to record the official emulator's behaviour; it is
+development tooling and is not part of any package.
+
+## Earlier reviews
+
+The reviews below describe the `0.1.0-next.2` era, when the CLI installed a
+Functions compatibility host built on firebase-tools 15.22.0. They are kept
+as they were recorded; none of those dependencies ships today.
+
+### Dependency review during source preparation
 
 On 2026-09-09 MYT, `npm audit --json` reported the following dependency entries
 (including transitive propagation, not distinct vulnerabilities):
@@ -40,7 +75,7 @@ Relevant advisories:
 [stream-json](https://github.com/advisories/GHSA-528h-pc64-c93x),
 [uuid](https://github.com/advisories/GHSA-w5hq-g745-h8pq).
 
-## Prerelease publication review
+### Prerelease publication review
 
 The release preparation refresh on 2026-09-09 MYT found **11 moderate** entries
 in the conformance lockfile, **10 moderate** entries in a new production-only

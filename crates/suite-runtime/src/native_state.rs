@@ -241,7 +241,14 @@ impl NativeState {
         )?;
         self.first_start = false;
         if let Some(step) = waiting {
-            step.done(&[(record.files() as u64, "seed files")], None);
+            step.done(
+                &[terminal::counted(
+                    record.files() as u64,
+                    "seed file",
+                    "seed files",
+                )],
+                None,
+            );
         }
         Ok(())
     }

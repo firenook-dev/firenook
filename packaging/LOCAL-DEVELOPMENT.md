@@ -9,8 +9,10 @@ node packaging/smoke-packed.mjs /absolute/path/to/new-artifact-directory bun
 ```
 
 This builds the current clean commit and produces **private**, host-only CLI and
-native tarballs with a distinct `0.1.0-local.g<commit>` version. Both identify the
-same engine commit and retain normal checksum verification. The public release
+native tarballs with a distinct `<version>-local.g<commit>` version: the
+package's version without its preview tag and the commit's first twelve hex
+digits, such as `0.2.0-local.g1a2b3c4d5e6f` for any 0.2.0 preview. Both
+identify the same engine commit and retain normal checksum verification. The public release
 manifest and its acceptance claims are not changed. No npm publication occurs.
 
 After safely exporting/stopping the consumer's emulator, temporarily set its

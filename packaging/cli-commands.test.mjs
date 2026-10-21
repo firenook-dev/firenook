@@ -15,6 +15,7 @@ import { canonical, loadProject } from '../packages/cli/src/options.mjs';
 import { exportEmulators, firestoreDelete, locatorPath } from '../packages/cli/src/hub.mjs';
 import { applyTarget, clearTarget, targetApply, targetClear, use } from '../packages/cli/src/rc.mjs';
 import { INIT_PORTS, adopt, firestoreRules, scaffold } from '../packages/cli/src/init.mjs';
+import { setMember } from '../packages/cli/src/json-text.mjs';
 import { buildPlan } from '../packages/cli/src/build.mjs';
 import { EMULATED_SERVICE_ACCOUNT, invokeFunction, matchParams, runInvoke, substituteParams } from '../packages/cli/src/invoke.mjs';
 import { PROTOCOL_VERSIONS, TOOLS, TOOL_GROUPS, createMcpServer, validateArguments } from '../packages/cli/src/mcp.mjs';
@@ -365,6 +366,11 @@ test('firestore:delete sends the official flag contract to the emulator routes',
   assert.equal(request.url, '/emulator/v1/projects/demo-fixture/databases/(default)/documents/users/alice?mode=shallow');
   assert.equal(request.headers.authorization, 'Bearer owner');
   assert.deepEqual(output.out, ['Deleted 3 documents']);
+  fake.deleted = 1;
+  const one = log();
+  await firestoreDelete('users/bob', options, [], dir, one);
+  fake.deleted = 3;
+  assert.deepEqual(one.out, ['Deleted 1 document']);
   await firestoreDelete('users/alice', {...options, recursive:true, json:true, database:'other'}, [], dir, output);
   request = lastRequest();
   assert.equal(request.url, '/emulator/v1/projects/demo-fixture/databases/other/documents/users/alice?mode=recursive');
@@ -495,9 +501,21 @@ test('init scaffolds a runnable demo project with the official defaults and neve
   assert.match(output.err.join('\n'), /Next steps:\n {2}npm install --prefix functions\n {2}npx firenook emulators:start --keep-data$/);
   assert.equal(firestoreRules(new Date(Date.UTC(2026, 0, 15, 12))).includes('timestamp.date(2026, 2, 14)'), true);
   assert.throws(() => scaffold(options, dir, log(), hermetic), /exists; use firenook init --adopt/);
-  writeFileSync(join(dir, 'storage.rules'), 'custom');
-  scaffold({...options, force:true, project:'demo-forced', language:'javascript'}, dir, log(), hermetic);
-  assert.equal(readFileSync(join(dir, 'storage.rules'), 'utf8').startsWith("rules_version = '2';"), true, '--force rewrites every scaffold file');
+  // --force writes firebase.json again; the rules, indexes and code there
+  // are the developer's, and stay as they are.
+  writeFileSync(join(dir, 'firebase.json'), '{"custom":true}\n');
+  writeFileSync(join(dir, 'storage.rules'), 'custom storage rules');
+  writeFileSync(join(dir, 'firestore.rules'), 'custom firestore rules');
+  writeFileSync(join(dir, 'firestore.indexes.json'), '{"indexes":[{"collectionGroup":"orders"}],"fieldOverrides":[]}');
+  writeFileSync(join(dir, 'functions/index.js'), '// my functions\n');
+  const forced = log();
+  scaffold({...options, force:true, project:'demo-forced', language:'javascript'}, dir, forced, hermetic);
+  assert.deepEqual(Object.keys(readJson(join(dir, 'firebase.json'))), ['firestore', 'storage', 'functions', 'emulators'], '--force writes firebase.json');
+  assert.equal(readFileSync(join(dir, 'storage.rules'), 'utf8'), 'custom storage rules', '--force keeps the Storage rules');
+  assert.equal(readFileSync(join(dir, 'firestore.rules'), 'utf8'), 'custom firestore rules', '--force keeps the Firestore rules');
+  assert.equal(readJson(join(dir, 'firestore.indexes.json')).indexes.length, 1, '--force keeps the indexes');
+  assert.equal(readFileSync(join(dir, 'functions/index.js'), 'utf8'), '// my functions\n', '--force keeps the code');
+  assert.match(forced.err.join('\n'), /keep {4}.+[\\/]storage\.rules \(exists\)/);
   assert.equal(readJson(join(dir, '.firebaserc')).projects.default, 'demo-forced');
   assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), 'node_modules/\n.firenook/\n*-debug.log\n', 'gitignore lines are never duplicated');
   // The scaffold passes the launcher's own checks.
@@ -608,6 +626,44 @@ test('init --adopt lists skips, errors and additions, then applies only the addi
   writeFileSync(join(dir, 'firebase.json'), '{not json');
   assert.throws(() => adopt(options, dir, log(), hermetic), /not valid JSON/);
   assert.throws(() => adopt(options, mkdtempSync(join(tmpdir(), 'firenook-adopt-none-')), log(), hermetic), /does not exist; run firenook init without --adopt/);
+});
+test('a JSON member is set as text, everything else as it was written', () => {
+  assert.equal(setMember('{}', ['projects', 'default'], 'demo-a'), '{"projects": {"default": "demo-a"}}');
+  assert.equal(setMember('{"projects": {"default": ""}}', ['projects', 'default'], 'demo-b'), '{"projects": {"default": "demo-b"}}');
+  assert.equal(setMember('{\n  "projects": []\n}\n', ['projects', 'default'], 'demo-c'), '{\n  "projects": {"default": "demo-c"}\n}\n', 'a value that is not an object is replaced');
+  assert.equal(setMember('{\n  "a": 1\n}', ['emulators', 'auth'], {port:9099}), '{\n  "a": 1,\n  "emulators": {\n    "auth": {\n      "port": 9099\n    }\n  }\n}');
+  assert.equal(setMember('{\n  "a": "x\\"}"\n}', ['b'], 1), '{\n  "a": "x\\"}",\n  "b": 1\n}', 'a brace in a string is text');
+});
+test('init --adopt writes only what it adds, in the file\'s own layout, and says a warning is one', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-adopt-layout-'));
+  writeFileSync(join(dir, 'firestore.rules'), 'rules');
+  // Tabs, members on one line each and no newline at the end: what is there
+  // stays byte for byte, and the additions take the same layout.
+  writeFileSync(join(dir, 'firebase.json'), '{\n\t"firestore": {"rules": "firestore.rules"},\n\t"functions": {"source": "functions", "ignore": ["node_modules", ".git"]}\n}');
+  writeFileSync(join(dir, '.firebaserc'), '{\n    "projects": {},\n    "targets": {}\n}\n');
+  let output = log();
+  assert.equal(adopt({...options, project:'demo-shop', host:'0.0.0.0'}, dir, output, hermetic), 0);
+  assert.equal(readFileSync(join(dir, 'firebase.json'), 'utf8'),
+    '{\n\t"firestore": {"rules": "firestore.rules"},\n\t"functions": {"source": "functions", "ignore": ["node_modules", ".git"]},\n\t"emulators": {"firestore": {"port": 8080}, "functions": {"port": 5001}}\n}');
+  assert.equal(readFileSync(join(dir, '.firebaserc'), 'utf8'), '{\n    "projects": {\n        "default": "demo-shop"\n    },\n    "targets": {}\n}\n');
+  const text = output.err.join('\n');
+  assert.match(text, /\n {2}warn {4}Firenook: binding 0\.0\.0\.0/, 'a warning is labelled a warning');
+  assert.doesNotMatch(text, /skip/, 'nothing is skipped');
+  // The official layout (two spaces, a member a line, CRLF) gets entries in
+  // that layout, at the end of the object they belong to.
+  const official = '{\r\n  "storage": {\r\n    "rules": "storage.rules"\r\n  },\r\n  "emulators": {\r\n    "storage": {\r\n      "port": 9199\r\n    },\r\n    "ui": {\r\n      "enabled": true\r\n    }\r\n  }\r\n}\r\n';
+  writeFileSync(join(dir, 'storage.rules'), 'rules');
+  writeFileSync(join(dir, 'firebase.json'), official.replace('"storage": {\r\n    "rules"', '"firestore": {"rules": "firestore.rules"},\r\n  "storage": {\r\n    "rules"'));
+  assert.equal(adopt({...options, project:'demo-shop'}, dir, log(), hermetic), 0);
+  assert.equal(readFileSync(join(dir, 'firebase.json'), 'utf8'), official
+    .replace('"storage": {\r\n    "rules"', '"firestore": {"rules": "firestore.rules"},\r\n  "storage": {\r\n    "rules"')
+    .replace('"enabled": true\r\n    }\r\n', '"enabled": true\r\n    },\r\n    "firestore": {\r\n      "port": 8080\r\n    }\r\n'));
+  assert.deepEqual(Object.keys(readJson(join(dir, '.firebaserc')).projects), ['default'], 'a default already there is kept');
+  // An official service Firenook skips still says so.
+  writeFileSync(join(dir, 'firebase.json'), '{"firestore": {"rules": "firestore.rules"}, "emulators": {"firestore": {"port": 8080}, "hosting": {"port": 5000}}}');
+  output = log();
+  assert.equal(adopt({...options, project:'demo-shop'}, dir, output, hermetic), 0);
+  assert.match(output.err.join('\n'), /\n {2}skip {4}Firenook: firebase\.json configures the hosting emulator/);
 });
 // The fake hub lives in this process, so subprocesses that talk to it must
 // not block the event loop: spawn asynchronously.
@@ -1398,7 +1454,7 @@ test('MCP console tools name the cause when the suite runs without the UI', asyn
   const {ui: _, ...withoutUi} = fake.full;
   await withSuite(withoutUi, async () => {
     for (const [name, args] of [['logs_search', {}], ['rules_get', {service:'firestore'}], ['auth_mint_token', {uid:'alice'}], ['emulators_clear', {sections:['auth']}], ['storage_read', {path:'a'}]]) {
-      assert.match((await callTool(name, args, true)).error, /uses the console API, which the suite serves on the Emulator UI port, and the running suite for demo-fixture was started without the UI .*emulators\.ui\.enabled in firebase\.json, or firenook emulators:start --ui/, name);
+      assert.match((await callTool(name, args, true)).error, /uses the console API, which the suite serves on the Emulator UI port, and the running suite for demo-fixture was started without the UI .*Restart it with --ui \(firenook emulators:start --ui, or emulators:exec --ui\), which starts the UI even where firebase\.json sets emulators\.ui\.enabled to false; or set that to true/, name);
     }
     assert.equal((await callTool('firestore_get', {path:'users/alice'})).exists, true, 'the emulator tools need no UI');
   });

@@ -149,6 +149,12 @@ test('the set-up pins and installs side by side, builds after the packages, and 
   assert.equal(readJson(join(dir, 'package.json')).devDependencies.firenook, '0.2.0-next.9');
   assert.ok(!('npm_config_user_agent' in calls[0].env), 'the installs see the project\'s settings, not npx\'s');
   assert.deepEqual(nextSteps(everything(), steps, {manager: work.manager, node: '24.20.0'}).map(step => step.command), ['npm run emulators']);
+  // npm's own count, said in the singular for one.
+  const single = folder();
+  mkdirSync(join(single, 'functions'));
+  const one = installer([{match: call => call.cwd.endsWith('functions'), code: 0, lines: ['added 1 package in 1s']}]);
+  const counted = await setUpSteps(everything({language: 'javascript', pin: false}), single, {version: '0.2.0-next.9', env: {}, platform: 'darwin', spawner: one.spawner}).run();
+  assert.equal(counted.steps.find(step => step.id === 'packages').detail, 'npm install in functions/, 1 package');
 
   // A failed install: its last lines are kept, the build does not run, and
   // the next steps finish the rest.
@@ -256,6 +262,28 @@ test('in a terminal, Enter takes every choice, the set-up runs on the card, and 
   assert.ok(existsSync(join(dir, 'functions/src/index.ts')));
 });
 
+test('in a terminal, --force writes firebase.json again and keeps the rules there are, and says how many', async () => {
+  const kept = async files => {
+    const dir = folder();
+    writeFileSync(join(dir, 'firebase.json'), '{}');
+    for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content);
+    const {out, input, typing, text} = terminal(140);
+    const {spawner} = installer([]);
+    const running = initInTerminal({force: true}, {cwd: dir, out, input, env: screenEnv, platform: 'darwin', version: '9.9.9-next.1', home: '/nowhere', spawner, node: '24.20.0', ...quietPorts});
+    await until(() => text().includes('esc cancel'));
+    shows(text(), 'a new project in');
+    await typing('\r');
+    await until(() => text().includes('Start the emulators now?') || text().includes('Next'));
+    await typing('n');
+    await running;
+    for (const [name, content] of Object.entries(files)) assert.equal(readFileSync(join(dir, name), 'utf8'), content, name);
+    assert.ok(readJson(join(dir, 'firebase.json')).emulators, 'firebase.json is written');
+    return text();
+  };
+  shows(await kept({'firestore.rules': 'mine'}), '1 kept as it was');
+  shows(await kept({'firestore.rules': 'mine', 'storage.rules': 'mine too'}), '2 kept as they were');
+});
+
 test('in a terminal, changed choices are what is written, No prints the next steps, and Esc writes nothing', async () => {
   const dir = folder();
   const {out, input, typing, text} = terminal();
@@ -323,11 +351,12 @@ test('in a terminal on Node 26, or an untested Node, the set-up offers to start 
 
 test('in a terminal, a folder with a firebase.json is shown what init --adopt adds, and a yes adds it', async () => {
   const dir = folder();
-  writeFileSync(join(dir, 'firebase.json'), JSON.stringify({firestore: {rules: 'firestore.rules'}, emulators: {firestore: {port: 8080}}}));
+  writeFileSync(join(dir, 'firebase.json'), JSON.stringify({firestore: {rules: 'firestore.rules'}, emulators: {firestore: {port: 8080, host: '0.0.0.0'}}}));
   const {out, input, typing, text} = terminal();
   const running = initInTerminal({}, {cwd: dir, out, input, env: screenEnv, platform: 'darwin', version: '9.9.9-next.1', home: '/nowhere', node: '24.20.0', ...quietPorts});
   await until(() => text().includes('Add these'));
-  for (const expected of ['This folder has a firebase.json', 'set .firebaserc projects.default', 'write Firestore rules (official init template): firestore.rules']) shows(text(), expected);
+  for (const expected of ['This folder has a firebase.json', 'set .firebaserc projects.default', 'write Firestore rules (official init template): firestore.rules',
+    '! binding 0.0.0.0; the emulators have no authentication']) shows(text(), expected);
   await typing('y');
   assert.equal(await running, 0);
   for (const expected of ['Added', '.firebaserc', 'npx firenook emulators:start']) shows(text(), expected);

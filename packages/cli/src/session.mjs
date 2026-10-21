@@ -20,8 +20,10 @@ const RELEASES = 'https://github.com/firenook-dev/firenook/releases';
 
 const LABELS = {data: 'Saved data', build: 'Build', firestore: 'Firestore', auth: 'Auth', storage: 'Storage', functions: 'Functions', pubsub: 'Pub/Sub'};
 const ROWS = ['data', 'build', 'firestore', 'auth', 'storage', 'functions', 'pubsub'];
-// What a running row counts, when it says how far it has got.
-const UNITS = {firestore: 'documents', auth: 'users', storage: 'objects', functions: 'codebases'};
+// What a running row counts, when it says how far it has got: one, many.
+const UNITS = {firestore: ['document', 'documents'], auth: ['user', 'users'], storage: ['object', 'objects'], functions: ['codebase', 'codebases']};
+// A count with its noun: `1 line`, `2 lines`.
+const counted = (n, one, many) => `${count(n)} ${n === 1 ? one : many}`;
 const PORTS = [['firestore', 'Firestore'], ['auth', 'Auth'], ['storage', 'Storage'], ['functions', 'Functions'], ['pubsub', 'Pub/Sub'], ['hub', 'Hub']];
 // The service a listener belongs to, for its row and its firebase.json key.
 const LISTENERS = {
@@ -291,7 +293,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     // A step that finishes quickly shows only its spinner: a bar appears
     // once it has run for 400 ms, so a resumed start never flashes one.
     if (spent < 400 || done == null) return row(spinner(), spent, `${verb}${detail ? `  ${dim(detail)}` : ''}`);
-    if (!total) return row(spinner(), spent, `${verb}  ${count(done)} ${dim(UNITS[step.id] ?? '')}`);
+    if (!total) return row(spinner(), spent, `${verb}  ${count(done)} ${dim(UNITS[step.id]?.[done === 1 ? 0 : 1] ?? '')}`);
     const figure = step.unit === 'percent' ? `${step.verb}  ${Math.floor((done / total) * 100)}%` : `${count(done)} / ${count(total)}`;
     // A narrow window drops the step's name before the bar shrinks too far.
     const room = t.bodyRoom() - 6 - 4 - figure.length;
@@ -316,7 +318,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     if (ports.length) rows.push(...flow(dim('Ports'), ports, room));
     const warned = model.warnings.length;
     if (warned === 1 && width(model.warnings[0]) <= room) rows.push(cells(yellow('Warning'), '', model.warnings[0]));
-    else if (warned) rows.push(cells(yellow('Warnings'), '', `${count(warned)} start-up warnings${DOT}${dim('press')} ${bold('w')} ${dim('to list them')}`));
+    else if (warned) rows.push(cells(yellow(warned === 1 ? 'Warning' : 'Warnings'), '', `${counted(warned, 'start-up warning', 'start-up warnings')}${DOT}${dim('press')} ${bold('w')} ${dim(warned === 1 ? 'to show it' : 'to list them')}`));
     // Magenta is the update's own colour: nothing else on the page uses it.
     if (update) rows.push(cells(magenta('Update'), '', `${bold(magenta(update.version))} is out${DOT}${bold(update.command)}${DOT}${link(RELEASES, "what's new")}`));
     return rows;
@@ -361,7 +363,8 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
       cells(dim('Where'), '', error.where ?? codebase.directory),
       ...(error.frame.length ? [...space(), ...frameLines(error.frame).map(line => cells('', '', line))] : []),
       ...space(),
-      ...field(dim('Next'), `fix it and save: Firenook loads it again by itself.${codebaseCount('extension') ? ` The ${codebaseCount('extension')} extension codebase${codebaseCount('extension') === 1 ? '' : 's'} and` : ''} every emulator keep running`, dim),
+      ...field(dim('Next'), `fix it and save: Firenook loads it again by itself. ${{0: 'Every emulator keeps running', 1: 'The extension codebase and every emulator keep running'}[codebaseCount('extension')]
+        ?? `The ${codebaseCount('extension')} extension codebases and every emulator keep running`}`, dim),
       ].map(inside));
     });
   }
@@ -481,7 +484,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     const room = t.streamRoom();
     const paint = LEVELS[level] ?? LEVELS.info;
     let parts = wrap(text, room);
-    if (parts.length > LONGEST) parts = [...parts.slice(0, LONGEST), dim(`+ ${count(parts.length - LONGEST)} more lines`)];
+    if (parts.length > LONGEST) parts = [...parts.slice(0, LONGEST), dim(`+ ${counted(parts.length - LONGEST, 'more line', 'more lines')}`)];
     const lines = parts.map(part => paint(part));
     if (fields) {
       const listed = Object.entries(fields).map(([key, field]) => `${dim(key)} ${typeof field === 'string' ? field : JSON.stringify(field)}`).join(DOT);
@@ -503,7 +506,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     return [
       ...wrap(message, t.streamRoom()).map(part => under(red(G.thread), red(part))),
       ...own.map(frame => under(red(G.thread), dim(`  ${frame.trim()}`))),
-      ...(hidden > 0 || consoleLink ? [under(red(G.thread), `${hidden > 0 ? `${dim(`+ ${hidden} more lines`)}${consoleLink ? DOT : ''}` : ''}${consoleLink ? link(consoleLink, 'open in console') : ''}`)] : []),
+      ...(hidden > 0 || consoleLink ? [under(red(G.thread), `${hidden > 0 ? `${dim(`+ ${counted(hidden, 'more line', 'more lines')}`)}${consoleLink ? DOT : ''}` : ''}${consoleLink ? link(consoleLink, 'open in console') : ''}`)] : []),
     ];
   }
   const lineOf = event => {

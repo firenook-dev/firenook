@@ -196,7 +196,7 @@ export function setUpSteps(choices, directory, {version, config, env = process.e
     if (packages) {
       work.push(command(packages, npm.install, functionsDir, packages.detail).then(async outcome => {
         if (outcome.failed || packages.state === 'skipped') { if (build) update(build, {state: 'skipped', detail: stopped ? 'stopped' : 'not run, as the packages did not install'}); return; }
-        update(packages, {state: 'done', ms: outcome.ms, detail: `${packages.detail}${outcome.added ? `, ${outcome.added} packages` : ''}`});
+        update(packages, {state: 'done', ms: outcome.ms, detail: `${packages.detail}${outcome.added ? `, ${outcome.added} ${outcome.added === '1' ? 'package' : 'packages'}` : ''}`});
         if (!build) return;
         const built = await command(build, ['npm', ['run', 'build']], functionsDir, 'npm run build');
         if (!built.failed && build.state !== 'skipped') update(build, {state: 'done', ms: built.ms, detail: 'tsc, into functions/lib'});

@@ -92,7 +92,7 @@ export async function suite(context, name) {
 // Emulator UI port.
 export function consoleBase(project, listing, options = {}) {
   if (listing && !listing.ui) {
-    throw new ToolError(`This tool uses the console API, which the suite serves on the Emulator UI port, and the running suite for ${project.project} was started without the UI (no ui in the hub's /emulators listing). Restart it with the UI on: emulators.ui.enabled in firebase.json, or firenook emulators:start --ui.`);
+    throw new ToolError(`This tool uses the console API, which the suite serves on the Emulator UI port, and the running suite for ${project.project} was started without the UI (no ui in the hub's /emulators listing). Restart it with --ui (firenook emulators:start --ui, or emulators:exec --ui), which starts the UI even where firebase.json sets emulators.ui.enabled to false; or set that to true.`);
   }
   return `${serviceOrigin(project, 'ui', listing, options)}/console/api/v1`;
 }

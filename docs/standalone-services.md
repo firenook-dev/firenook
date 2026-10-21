@@ -2,7 +2,31 @@
 
 [Docs](README.md) · One service on its own
 
-Pub/Sub and Auth can run without the rest of the suite, for tests that need only one of them.
+Firestore, Pub/Sub and Auth can run without the rest of the suite, for tests that need only one of them.
+
+## Firestore
+
+```sh
+firenook native firestore --project_id demo-my-app --port 8080                          # in memory
+firenook native firestore --project_id demo-my-app --rules firestore.rules --data-dir ./data   # rules, data kept on disk
+FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node ./app.mjs
+```
+
+`firenook native firestore` serves the same Firestore implementation the
+suite runs — gRPC for the server SDKs, REST, and the WebChannel the web SDK
+uses, on one port — without Auth, Storage or Functions. It takes the flags of
+the official Firestore emulator: `--host`, `--port`, `--project_id`,
+`--rules`, `--seed_from_export DIR` (an official export, imported at
+start), `--single_project_mode`, `--websocket_port` (the rules' request
+stream) and `--functions_emulator HOST:PORT` (Firestore triggers delivered
+to a Functions host). The data is in memory unless `--data-dir DIR` keeps it
+on disk (with a write-ahead journal; `--no-wal`, `--durability
+write-behind|per-commit` and `--redb-cache-size BYTES` tune it).
+`--database-edition enterprise` serves an Enterprise-edition database,
+`--strict-indexes` refuses, as production does, a query that needs an index
+the current directory's `firestore.indexes.json` does not declare, and
+`--worker-threads N` (four at most by default) sizes the runtime. The
+conformance replay drives this command.
 
 ## Pub/Sub
 

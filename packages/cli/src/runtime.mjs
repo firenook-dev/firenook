@@ -78,8 +78,9 @@ export function inspectState(binary, stateDir) {
 }
 
 // Builds the native suite invocation. `mode` is 'start' or 'exec': like the
-// official CLI, exec keeps the console off unless --ui is given or
-// firebase.json enables it explicitly. `typed` is the command's arguments as
+// official CLI, --ui starts the console whatever firebase.json says, and
+// exec keeps it off unless --ui is given or firebase.json enables it
+// explicitly. `typed` is the command's arguments as
 // the developer typed them, which the console reprints in its fixes.
 // `quiet`: the terminal UI draws its own banner instead of these lines.
 export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {quiet = false} = {}) {
@@ -93,10 +94,9 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {
   if (!existsSync(rc)) writeFileSync(rc, '{}\n', {flag:'wx', mode:0o600});
   const credentials = join(run, 'demo-adc.json');
   writeFileSync(credentials, JSON.stringify({type:'authorized_user', client_id:'demo', client_secret:'demo', refresh_token:'demo'}), {flag:'wx', mode:0o600});
-  // The engine reads emulators.ui.enabled itself, so --ui cannot re-enable a
-  // console the configuration disables; it only keeps it on for exec.
-  const ui = p.ui && (mode !== 'exec' || Boolean(options.ui) || p.uiExplicit);
-  if (options.ui && !p.ui) say('note: --ui cannot enable the console while firebase.json sets emulators.ui.enabled to false');
+  // The engine reads emulators.ui.enabled itself; --ui tells it to start
+  // the console anyway, as the official --ui comes before that setting.
+  const ui = Boolean(options.ui) || (p.ui && (mode !== 'exec' || p.uiExplicit));
   const debug = Boolean(options.debug) || options['log-verbosity'] === 'DEBUG';
   const debugLog = debug ? join(run, 'firenook-debug.log') : undefined;
   const args = ['suite', '--project-dir', p.directory, '--config', p.config, '--firebase-rc', rc,
@@ -105,6 +105,7 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {
   // Absent --only means every service; the engine binds only the selected ones.
   if (p.services.length < SERVICES.length) args.push('--only', p.services.join(','));
   if (!ui) args.push('--no-ui');
+  else if (!p.ui) args.push('--ui');
   if (!p.singleProjectMode) args.push('--single-project-mode', 'false');
   if (debugLog) args.push('--debug-log', debugLog);
   if (options['inspect-functions'] !== undefined) args.push(options['inspect-functions'] === true ? '--inspect-functions' : `--inspect-functions=${options['inspect-functions']}`);

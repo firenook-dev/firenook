@@ -36,7 +36,7 @@ use firenook_functions_runtime::{
     RuntimeConfig as FunctionsRuntimeConfig, codebases_from_config,
 };
 use firenook_grpc_front::FirestoreService;
-use firenook_pubsub_front::{SchedulerRuntime, router as pubsub_router};
+use firenook_pubsub_front::{SchedulerRuntime, router_with_printer as pubsub_router};
 use firenook_query_engine::{DatabaseEdition, IndexCatalog, QueryPolicy};
 use firenook_rest_front::router_with_shared_service as rest_router;
 use firenook_rules_engine::{DocumentAccess as _, DocumentAccessError, Resource};
@@ -552,7 +552,8 @@ async fn verify_functions_readiness(
     let function_count = inventory.functions().count();
     if function_count < config.minimum_functions {
         return Err(failure(format!(
-            "Functions runtime discovered {function_count} functions; at least {} required",
+            "Functions runtime discovered {function_count} {}; at least {} required",
+            terminal::plural(function_count, "function", "functions"),
             config.minimum_functions
         )));
     }
@@ -863,6 +864,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             &inventory,
             delivery.queue(),
             triggers.clone(),
+            Arc::new(console_wiring::messaging::print_schedule_line),
         );
         schedule_count = runtime.schedules().len();
         scheduler = Some(
@@ -871,13 +873,10 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                 .map_err(|error| failure(format!("scheduler failed to start: {error}")))?,
         );
         pubsub_step.done(
-            &[(
+            &[terminal::counted(
                 u64::try_from(schedule_count).unwrap_or(u64::MAX),
-                if schedule_count == 1 {
-                    "schedule"
-                } else {
-                    "schedules"
-                },
+                "schedule",
+                "schedules",
             )],
             None,
         );
@@ -960,7 +959,10 @@ fn announce_ready(config: &SuiteConfig, logging: &LoggingRuntime, function_count
     logging.record(
         "INFO",
         Some("hub"),
-        format!("All emulators ready; {function_count} functions discovered"),
+        format!(
+            "All emulators ready; {function_count} {} discovered",
+            terminal::plural(function_count, "function", "functions")
+        ),
     );
     if terminal::enabled() {
         let console = config
@@ -1042,10 +1044,14 @@ async fn follow_functions_inventory(
         logging.record(
             "INFO",
             Some("functions"),
-            format!("Functions routing refreshed; {count} registered functions"),
+            format!(
+                "Functions routing refreshed; {count} registered {}",
+                terminal::plural(count, "function", "functions")
+            ),
         );
         // Announce completion on stdout so a supervisor or harness can wait
-        // for native delivery readiness after a reload.
+        // for native delivery readiness after a reload. The line is their
+        // contract (DESIGN.md), so its words stay as they are for any count.
         if !terminal::enabled() {
             println!("firenook functions routing refreshed: {count} registered functions");
         }
@@ -2526,13 +2532,9 @@ async fn load_extensions(
 pub fn extensions_config(
     config: &SuiteConfig,
 ) -> Result<firenook_extensions::ExtensionsConfig, SuiteRuntimeError> {
-    // The official emulator rewrites POSTINSTALL console links to the UI only
-    // when the UI is enabled in firebase.json (`unknown` otherwise).
-    let ui_enabled = std::fs::read_to_string(&config.firebase_json)
-        .ok()
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .and_then(|json| json.get("emulators")?.get("ui")?.get("enabled")?.as_bool())
-        .unwrap_or(true);
+    // The official emulator rewrites POSTINSTALL console links to the UI
+    // when the UI runs (`unknown` otherwise): firebase.json's
+    // `emulators.ui.enabled`, unless `--ui` started it anyway.
     extensions_config_from(&ExtensionsInputs {
         project_id: config.project_id.clone(),
         project_dir: config.project_dir.clone(),
@@ -2540,7 +2542,8 @@ pub fn extensions_config(
         default_bucket: config.default_bucket.clone(),
         node: config.node.clone(),
         offline: config.offline,
-        ui_origin: (ui_enabled && config.ui_enabled)
+        ui_origin: config
+            .ui_enabled
             .then(|| format!("{}/", config.origin(config.ports.ui))),
     })
 }
@@ -2684,27 +2687,45 @@ fn finish_data_steps(
     storage: Option<&StorageRuntime>,
 ) {
     let held = |count: usize| u64::try_from(count).unwrap_or(u64::MAX);
-    let words = |imported: Option<u64>, held: &'static str, brought: &'static str| {
-        if imported.is_some() { brought } else { held }
+    // What the service holds, or what the import brought in: one noun each
+    // for one and for many.
+    let figure = |imported: Option<u64>,
+                  held: u64,
+                  [one, many, one_brought, many_brought]: [&'static str; 4]| {
+        imported.map_or_else(
+            || terminal::counted(held, one, many),
+            |count| terminal::counted(count, one_brought, many_brought),
+        )
     };
     if let Some(step) = firestore_step {
-        let count = imported.firestore.unwrap_or_else(|| store.document_total());
-        let words = words(imported.firestore, "documents", "documents imported");
-        step.done(&[(count, words)], None);
+        let nouns = [
+            "document",
+            "documents",
+            "document imported",
+            "documents imported",
+        ];
+        step.done(
+            &[figure(imported.firestore, store.document_total(), nouns)],
+            None,
+        );
     }
     if let (Some(step), Some(auth)) = (auth_step, auth) {
-        let count = imported.auth.unwrap_or_else(|| held(auth.user_count()));
+        let nouns = ["user", "users", "user imported", "users imported"];
         step.done(
-            &[(count, words(imported.auth, "users", "users imported"))],
+            &[figure(imported.auth, held(auth.user_count()), nouns)],
             None,
         );
     }
     if let (Some(step), Some(storage)) = (storage_step, storage) {
-        let count = imported
-            .storage
-            .unwrap_or_else(|| held(storage.object_count()));
-        let words = words(imported.storage, "objects", "objects imported");
-        step.done(&[(count, words)], None);
+        let nouns = ["object", "objects", "object imported", "objects imported"];
+        step.done(
+            &[figure(
+                imported.storage,
+                held(storage.object_count()),
+                nouns,
+            )],
+            None,
+        );
     }
 }
 
@@ -2742,7 +2763,8 @@ async fn import_suite(
             )?;
             imported.firestore = Some(count);
             if !terminal::enabled() {
-                eprintln!("firenook imported {count} Firestore documents");
+                let documents = terminal::plural(count, "document", "documents");
+                eprintln!("firenook imported {count} Firestore {documents}");
             }
         } else if !terminal::enabled() {
             eprintln!("firenook: firestore export not imported (service not started)");
@@ -2755,7 +2777,8 @@ async fn import_suite(
                 .map_err(|error| failure(format!("Auth import failed: {error}")))?;
             imported.auth = Some(u64::try_from(count).unwrap_or(u64::MAX));
             if !terminal::enabled() {
-                eprintln!("firenook imported {count} Auth users");
+                let users = terminal::plural(count, "user", "users");
+                eprintln!("firenook imported {count} Auth {users}");
             }
         } else if !terminal::enabled() {
             eprintln!("firenook: auth export not imported (service not started)");
@@ -2769,7 +2792,8 @@ async fn import_suite(
                 .map_err(|error| failure(format!("Storage import failed: {error}")))?;
             imported.storage = Some(u64::try_from(count).unwrap_or(u64::MAX));
             if !terminal::enabled() {
-                eprintln!("firenook imported {count} Storage objects");
+                let objects = terminal::plural(count, "object", "objects");
+                eprintln!("firenook imported {count} Storage {objects}");
             }
         } else if !terminal::enabled() {
             eprintln!("firenook: storage export not imported (service not started)");

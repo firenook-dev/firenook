@@ -33,10 +33,19 @@ else holds names the program and its process id, with the command that
 stops it and a free port for `firebase.json`. Saved data refused because its
 seed changed names the files that changed, with the command that keeps the
 data. A repair after an unclean stop shows how far it has got, and a stop
-while Firenook is still starting closes the data before it exits. When your
-functions do not load, everything else keeps running: the
-card shows the error and the code around it, and the next save loads them
-again.
+while Firenook is still starting closes the data before it exits.
+
+When your functions do not load, what happens depends on when. At the
+start, a project whose `firebase.json` has a Functions codebase asks for at
+least one function (the launcher passes `--minimum-functions 1`): when no codebase
+loads any, Firenook does not start, and the card says the runtime found
+none, with the load error under it. Fix it and start again, or start with
+`--minimum-functions 0` to run the rest without them. When some do load
+(another codebase, an Extension), a codebase that does not is shown on the
+card with its error and the code around it, every emulator runs, and the
+next save loads it again. Once the emulators are running, a save that does
+not load is a line of the log with its error, and the version loaded before
+it, if there is one, keeps answering; nothing stops.
 
 ![firenook init: the choices, the set-up and the start in one terminal](assets/init.gif)
 
@@ -63,4 +72,5 @@ most once a day, in the background. The answer shows on the next start, so
 the check never slows a start down. It follows the channel of the version
 you have (`next` or `latest`) and writes the install command for your
 project's package manager. It is off in CI, in the plain output, and with
-`FIRENOOK_NO_UPDATE_CHECK=1` or `NO_UPDATE_NOTIFIER=1`.
+`FIRENOOK_NO_UPDATE_CHECK=1` or `NO_UPDATE_NOTIFIER=1`. As elsewhere, a
+variable set to nothing, `0` or `false` is not set: `CI=false` is no CI.

@@ -16,7 +16,9 @@ export function interactive({stdout = process.stdout, stdin = process.stdin, env
   if (env.TERM === 'dumb' || truthy(env.CI) || truthy(env.FIRENOOK_PLAIN)) return false;
   return true;
 }
-const truthy = value => value !== undefined && value !== '' && value !== '0' && value.toLowerCase?.() !== 'false';
+// A switch in the environment is on unless unset, empty, `0` or `false`, as
+// the ecosystem reads CI.
+export const truthy = value => value !== undefined && value !== '' && value !== '0' && value.toLowerCase?.() !== 'false';
 
 // Colours, symbols and links, from the terminal's own variables. NO_COLOR
 // keeps the layout and drops the colour. Terminals that cannot draw the

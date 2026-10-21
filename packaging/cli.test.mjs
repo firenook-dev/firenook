@@ -260,9 +260,11 @@ test('ui.enabled, --ui, exec mode and singleProjectMode map to engine flags', ()
   const launch = launchFor(dir,options);
   assert.ok(launch.args.includes('--no-ui'));
   assert.equal(flagValue(launch.args,'--single-project-mode'),'false');
+  // --ui comes before emulators.ui.enabled, as the official CLI decides.
   const forced = launchFor(dir,{...options,ui:true});
-  assert.ok(forced.args.includes('--no-ui'), 'the engine reads ui.enabled itself, so --ui cannot re-enable a disabled UI');
-  assert.match(forced.stderr,/--ui cannot enable the console/);
+  assert.ok(forced.args.includes('--ui') && !forced.args.includes('--no-ui'), '--ui starts a console firebase.json turns off');
+  assert.doesNotMatch(forced.stderr,/--ui cannot/);
+  assert.ok(launchFor(dir,{...options,ui:true},'exec').args.includes('--ui'), 'in exec too');
   const receipt = JSON.parse(readFileSync(join(launch.run,'launch.json'),'utf8'));
   assert.deepEqual(receipt.services,['firestore','auth','storage','functions','pubsub']);
   assert.deepEqual(receipt.project,{id:'demo-fixture',demo:true});

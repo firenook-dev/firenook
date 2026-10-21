@@ -19,7 +19,7 @@ use firenook_suite_front::{Audience, EntityRef, LogInput, LogLevel, LoggingRunti
 use firenook_tasks_front::{LOG_FAILED, LogSink, TasksLogLine, TasksRuntime};
 
 use super::{FunctionsConsoleOptions, HookContext};
-use crate::SuiteConfig;
+use crate::{SuiteConfig, terminal};
 
 /// Compute's invocation record, which joins each delivery, schedule run
 /// and task attempt to the invocation it caused: the monitor the Functions
@@ -63,8 +63,23 @@ fn pubsub_input(line: PubsubLogLine) -> LogInput {
     }
 }
 
-/// The Pub/Sub runtime's log sink: a schedule's line is printed to stderr
-/// exactly as before, and every line reaches the console's log.
+/// Says a schedule's line as the suite prints it: on stderr, exactly as
+/// before; with the terminal's events on, a start-up warning (the terminal
+/// lists them under `w`) before readiness and a line of the log after it.
+/// The Pub/Sub runtime is built with it, so the problems found then are
+/// said this way too.
+pub(crate) fn print_schedule_line(line: &PubsubLogLine) {
+    terminal::print(
+        line.level,
+        "pubsub",
+        &line.text,
+        &format!("firenook pubsub: {}", line.text),
+    );
+}
+
+/// The Pub/Sub runtime's log sink: a schedule's line is printed as
+/// [`print_schedule_line`] says it, and every line reaches the console's
+/// log.
 ///
 /// Setting a sink replays the schedule problems found when the runtime was
 /// built, which it printed then; `printing` stays off during that replay
@@ -76,7 +91,7 @@ fn pubsub_log_sink(
     let logging = logging.clone();
     Arc::new(move |line: PubsubLogLine| {
         if line.kind == LOG_SCHEDULE && printing.load(Ordering::Acquire) {
-            eprintln!("firenook pubsub: {}", line.text);
+            print_schedule_line(&line);
         }
         logging.emit(pubsub_input(line));
     })
