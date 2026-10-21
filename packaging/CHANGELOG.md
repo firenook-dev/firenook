@@ -1,3 +1,49 @@
+# 0.2.0-next.8 — the Firestore tree at once, code in colour, npx on any Node
+
+- Pin the engine to `f7c3c663427fd181b0e67b31f960f6e5751b7d12`, the merge of
+  [PR #112](https://github.com/firenook-dev/firenook/pull/112) on
+  0.2.0-next.7. Its tree is the PR head's, `00eb599`, which passed CI
+  ([run 39587506798](https://github.com/firenook-dev/firenook/actions/runs/39587506798))
+  and the five-platform packed-install matrix
+  ([run 39587506927](https://github.com/firenook-dev/firenook/actions/runs/39587506927)).
+- **`npx firenook` gets this release on any Node from 20 up.** On any Node
+  but 24, `npx firenook init` installed `firenook@0.0.0`, the placeholder
+  that held the name before the first release, with its old advice: every
+  release declared `engines.node` as `>=24 <25`, and for a bare name npm
+  takes `latest` only when its engines admit the running Node, and otherwise
+  the highest version that is not a preview. `engines.node` is now `>=20`,
+  npm's own floor. The emulators still need Node 24, and now say so with the
+  way to switch: "the emulators need Node 24, since your Functions run on
+  it; this is Node 26.9.0. Switch to Node 24 (with nvm: nvm install 24) and
+  run it again". `init` and the other commands run on any Node.
+- **The Firestore tree at once.** The console's tree said "Mapping the
+  database…" for minutes on a large store. Its first walk now reads the
+  collection index instead of the documents (37 s instead of 133 s on 2.7
+  million documents), a clean stop saves the tree with the data so the next
+  start shows it in under a millisecond, and while a walk runs the root
+  collections are listed with their counts. After a crash, or any change to
+  the data since the stop, the tree is mapped again on first use.
+- **Code in colour.** Every code block in the console (the Connect dialog,
+  a document as code, a request as code) is coloured with the editor's
+  palette, in the language it is: the Flutter, Swift, Kotlin and Java
+  snippets are no longer marked as JavaScript, and environment variables
+  read as `.env` lines.
+- **The console behind local proxies.** Any name under `localhost`, such as
+  portless's `my-app.localhost`, is answered like `localhost`;
+  `docs/console.md` says how to reach the console through portless. `.local`
+  and custom domains still need `--allowed-hosts`.
+- Data next.8 saves opens in 0.2.0-next.7, which leaves the saved tree
+  alone, and next.8 maps the tree again after next.7 changed the data
+  (checked with a round trip). No emulator protocol or port changed.
+- A consumer's gates passed on the candidate built from `f33376b`
+  (`0.2.0-local.gf33376b3cb3f`), whose package is the PR head's (only a
+  console journey changed after it): Extensions admission (24 admitted, 2 ignored
+  upstream; ready in 2.4 s), the installed package smoke and its 26
+  integration tests. The acceptance-host benchmark was not run: no write,
+  query or import path changed.
+- Published straight to `latest`: the CLI's `next` stays on 0.2.0-next.7
+  until it is moved by hand.
+
 # 0.2.0-next.7 — data kept without a seed, coding agents set up in one command, 54 MCP tools
 
 - Pin the engine to `37fdd0387ea81f3131c20b594159113c86084a3a`, the merge of
