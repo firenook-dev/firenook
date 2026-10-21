@@ -464,7 +464,11 @@ mod tests {
             .install_database(&named, &rules("true"))
             .expect("named");
         assert_eq!(in_force(&unlisted), None, "without a stand-in it is open");
+        assert_eq!(runtime.stand_in_for(&unlisted), None);
         runtime.govern_unlisted_with(&default);
+        assert_eq!(runtime.stand_in_for(&unlisted), Some(default.clone()));
+        assert_eq!(runtime.stand_in_for(&named), None, "it has its own");
+        assert_eq!(runtime.stand_in_for(&default), None, "it is the stand-in");
         assert_eq!(in_force(&unlisted), Some(source_hash(&rules("false"))));
         assert_eq!(in_force(&named), Some(source_hash(&rules("true"))));
         assert_eq!(
@@ -488,6 +492,11 @@ mod tests {
         runtime
             .install_project(PROJECT, &rules("2 == 2"))
             .expect("reload");
+        assert_eq!(
+            runtime.stand_in_for(&unlisted),
+            None,
+            "the reload governs it"
+        );
         for database in [&default, &named, &unlisted] {
             assert_eq!(
                 in_force(database),
