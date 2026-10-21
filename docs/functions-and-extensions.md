@@ -94,3 +94,16 @@ a startup error. `firenook doctor` lists every instance with its source and
 whether it starts offline. Dynamic (in-code) extensions, Python/Dart runtimes
 and the registry's `latest-approved` listing rules beyond version resolution
 are not supported.
+
+## Credentials
+
+Every Functions worker holds synthetic credentials, never yours: an
+`authorized_user` file with a `demo` client and refresh token, as its
+`GOOGLE_APPLICATION_CREDENTIALS` and in the gcloud directory it sees
+(`CLOUDSDK_CONFIG`). Your own `GOOGLE_APPLICATION_CREDENTIALS` and gcloud login
+never reach your Functions, whatever their firebase-admin release. A call that
+asks for an access token first (an Eventarc publish, a task enqueue) sends the
+demo refresh to Google's token endpoint, and the worker answers it in its own
+process with the emulators' token, so it never leaves the machine. A codebase's
+own `.env` may still set `GOOGLE_APPLICATION_CREDENTIALS`, and a request with
+those credentials goes to Google.

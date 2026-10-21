@@ -562,7 +562,8 @@ impl WorkerSlot {
     }
 }
 
-/// Where the runtime materializes the embedded worker script.
+/// Where the runtime materializes the embedded worker script, with the
+/// token answerer it loads from beside itself.
 pub fn materialize_script(state_dir: &Path, source: &str) -> Result<PathBuf, RuntimeError> {
     let path = state_dir.join("functions-worker.mjs");
     std::fs::create_dir_all(state_dir).map_err(|error| {
@@ -570,11 +571,20 @@ pub fn materialize_script(state_dir: &Path, source: &str) -> Result<PathBuf, Run
             "failed to create the functions state directory: {error}"
         ))
     })?;
-    std::fs::write(&path, source).map_err(|error| {
-        RuntimeError(format!(
-            "failed to materialize the functions worker: {error}"
-        ))
-    })?;
+    for (file, content) in [
+        (
+            state_dir.join("exec-token.cjs"),
+            crate::TOKEN_ANSWERER_SOURCE,
+        ),
+        (path.clone(), source),
+    ] {
+        std::fs::write(&file, content).map_err(|error| {
+            RuntimeError(format!(
+                "failed to materialize the functions worker ({}): {error}",
+                file.display()
+            ))
+        })?;
+    }
     Ok(path)
 }
 

@@ -76,12 +76,17 @@ fn demo_gcloud_dir(state_dir: &Path) -> PathBuf {
     state_dir.join("gcloud")
 }
 
+/// The synthetic credential every worker holds.
+fn demo_credentials_file(state_dir: &Path) -> PathBuf {
+    demo_gcloud_dir(state_dir).join("application_default_credentials.json")
+}
+
 /// Writes the synthetic `application_default_credentials.json` (no real
 /// client id, secret or refresh token) that keeps the Admin SDK off the
 /// metadata server.
 fn materialize_demo_credentials(state_dir: &Path) -> Result<(), RuntimeError> {
     let directory = demo_gcloud_dir(state_dir);
-    let path = directory.join("application_default_credentials.json");
+    let path = demo_credentials_file(state_dir);
     if path.is_file() {
         return Ok(());
     }
@@ -104,6 +109,11 @@ fn materialize_demo_credentials(state_dir: &Path) -> Result<(), RuntimeError> {
 
 /// The embedded worker script.
 pub const WORKER_SOURCE: &str = include_str!("../../../support/functions-worker.mjs");
+/// The CLI's `emulators:exec` preload, which the worker loads from beside
+/// itself: it answers the synthetic credential's refresh at both of Google's
+/// token endpoints in the worker's process. One source for the npm package
+/// and the engine.
+pub const TOKEN_ANSWERER_SOURCE: &str = include_str!("../../../packages/cli/src/exec-token.cjs");
 /// Compatibility label reported in readiness receipts.
 pub const ORACLE_COMPATIBILITY: &str = "firebase-tools-15.22.0";
 const WORKER_READY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -960,17 +970,27 @@ impl RuntimeState {
             .collect();
         env.insert("node".to_owned(), self.config.node.display().to_string());
         env.insert("METADATA_SERVER_DETECTION".to_owned(), "none".to_owned());
-        // The gcloud configuration directory the worker sees holds a
-        // synthetic authorized-user credential: the Admin SDK and the Google
-        // auth library then hold a refresh-token credential that fails fast
-        // against the real OAuth endpoint instead of falling back to the
-        // Compute Engine metadata server (169.254.169.254), which the
-        // task-queue client probes for a service-account email and which
-        // hangs for a minute off Google Cloud. The developer's own gcloud
-        // directory is never read.
+        // The worker holds a synthetic authorized-user credential, as its
+        // GOOGLE_APPLICATION_CREDENTIALS and in the gcloud configuration
+        // directory it sees: the Admin SDK and the Google auth library then
+        // hold a refresh-token credential, whose refresh the worker answers
+        // in its process, instead of falling back to the Compute Engine
+        // metadata server (169.254.169.254), which the task-queue client
+        // probes for a service-account email and which hangs for a minute
+        // off Google Cloud. The variable is what firebase-admin 12 and
+        // earlier read first: they never read CLOUDSDK_CONFIG, and without
+        // it they would find the developer's own gcloud login in
+        // $HOME/.config/gcloud (%APPDATA%\gcloud on Windows). A codebase's
+        // own .env may still set it.
         env.insert(
             "CLOUDSDK_CONFIG".to_owned(),
             demo_gcloud_dir(&self.config.state_dir)
+                .display()
+                .to_string(),
+        );
+        env.insert(
+            "GOOGLE_APPLICATION_CREDENTIALS".to_owned(),
+            demo_credentials_file(&self.config.state_dir)
                 .display()
                 .to_string(),
         );

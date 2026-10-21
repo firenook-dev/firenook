@@ -1,7 +1,9 @@
 'use strict';
 // emulators:exec loads this into every Node.js process its command starts
-// (NODE_OPTIONS --require), while the command holds the demo credentials.
-// Those are an authorized_user file, the one kind every Admin SDK reads, and
+// (NODE_OPTIONS --require), while the command holds the demo credentials,
+// and every Functions worker loads it before the Functions' code (the engine
+// embeds this file and writes it beside support/functions-worker.mjs). Both
+// hold an authorized_user file with the demo client and refresh token, and
 // the Node.js SDKs send its refresh to Google's token endpoint whatever the
 // file's token_uri says: firebase-admin 12 and earlier to
 // www.googleapis.com/oauth2/v4/token, the Google auth library (firebase-admin
@@ -84,6 +86,7 @@ function install() {
     else {
       // A Unix socket's path has room for about a hundred bytes.
       const directory = os.tmpdir().length < 60 ? os.tmpdir() : '/tmp';
+      removeAbandoned(directory);
       socket = path.join(directory, name + '.sock');
       process.once('exit', () => {
         try {
@@ -126,6 +129,32 @@ function install() {
     server.listen(socket);
     server.unref();
     return socket;
+  }
+
+  // A process that was killed (a Functions worker past its stop grace, a
+  // crash) left its socket behind: removed here when that process is gone.
+  function removeAbandoned(directory) {
+    const fs = require('fs');
+    let entries;
+    try {
+      entries = fs.readdirSync(directory);
+    } catch (_) {
+      return;
+    }
+    for (const entry of entries) {
+      const match = /^firenook-token-(\d+)-[a-z0-9]+\.sock$/.exec(entry);
+      if (!match || Number(match[1]) === process.pid) continue;
+      try {
+        process.kill(Number(match[1]), 0);
+      } catch (error) {
+        if (!error || error.code !== 'ESRCH') continue;
+        try {
+          fs.unlinkSync(path.join(directory, entry));
+        } catch (_) {
+          // Another process removed it first.
+        }
+      }
+    }
   }
 
   function toAnswerer(found) {
