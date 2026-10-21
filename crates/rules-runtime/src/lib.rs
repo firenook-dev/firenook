@@ -66,7 +66,11 @@ const TOKEN_STANDARD: GeneralPurpose = GeneralPurpose::new(&alphabet::STANDARD, 
 ///    outright: it drops the database-specific rulesets installed at startup,
 ///    so a client reloading rules (rules unit testing) governs every database
 ///    of the project from then on, as on the official emulator;
-/// 3. the startup default ([`install_default`](Self::install_default)).
+/// 3. the ruleset of the project's stand-in database
+///    ([`govern_unlisted_with`](Self::govern_unlisted_with)), for a database
+///    `firebase.json` does not list: the official emulator applies its one
+///    rules file to every database (`conformance/fixtures/request-identity-v1`);
+/// 4. the startup default ([`install_default`](Self::install_default)).
 ///
 /// No ruleset at any level is the emulator's explicit open-with-warning
 /// mode.
@@ -95,8 +99,26 @@ struct RuntimeState {
     default: Option<Arc<InstalledRules>>,
     projects: BTreeMap<String, Arc<InstalledRules>>,
     databases: BTreeMap<DatabaseName, Arc<InstalledRules>>,
+    /// Per project, the database whose own ruleset governs the project's
+    /// databases that have none.
+    stand_ins: BTreeMap<String, DatabaseName>,
     /// What governed each database over time, and its rules file's problems.
     versions: versions::Versions,
+}
+
+impl RuntimeState {
+    /// The level that governs `database`, as a database whose own entry to
+    /// read: the database itself, or its project's stand-in when the
+    /// database has no ruleset of its own.
+    fn governed_as<'a>(&'a self, database: &'a DatabaseName) -> &'a DatabaseName {
+        if self.databases.contains_key(database) {
+            return database;
+        }
+        self.stand_ins
+            .get(database.project_id())
+            .filter(|stand_in| self.databases.contains_key(*stand_in))
+            .unwrap_or(database)
+    }
 }
 
 struct InstalledRules {
@@ -228,8 +250,21 @@ impl RulesRuntime {
             .databases
             .get(database)
             .or_else(|| state.projects.get(database.project_id()))
+            .or_else(|| state.databases.get(state.governed_as(database)))
             .or(state.default.as_ref())
             .cloned()
+    }
+
+    /// Makes `database`'s own ruleset govern every database of its project
+    /// that has none, as the rules of a database `firebase.json` does not
+    /// list. The stand-in follows that ruleset as it changes (a file reload,
+    /// the console's editor); a project-wide reload still governs every
+    /// database.
+    pub fn govern_unlisted_with(&self, database: &DatabaseName) {
+        write_lock(&self.state)
+            .stand_ins
+            .insert(database.project_id().to_owned(), database.clone());
+        self.events.installed(RulesOrigin::Startup);
     }
 
     /// Serializes policy evaluation and installation of a store write across

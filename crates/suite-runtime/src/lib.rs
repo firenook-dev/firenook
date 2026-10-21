@@ -1928,8 +1928,10 @@ fn suite_query_policy(indexes: Option<&str>) -> Result<QueryPolicy, SuiteRuntime
 }
 
 /// Installs each configured database's rules under its own database id, so
-/// `projects/{p}/databases/{id}` evaluates its own ruleset; the project-wide
-/// hot-reload route then governs only databases without an entry.
+/// `projects/{p}/databases/{id}` evaluates its own ruleset, and makes one of
+/// them govern every database firebase.json does not list
+/// ([`stand_in`]); the project-wide hot-reload route then governs every
+/// database of the project.
 fn firestore_rules(config: &SuiteConfig) -> Result<RulesRuntime, SuiteRuntimeError> {
     let runtime = if config.diagnostics {
         if !terminal::enabled() {
@@ -1990,7 +1992,27 @@ fn install_firestore_rules(
             );
         }
     }
+    if let Some(entry) = stand_in(databases) {
+        let database = DatabaseName::new(project, entry.database_id.as_str()).map_err(|error| {
+            failure(format!(
+                "firebase.json names an invalid Firestore database: {error}"
+            ))
+        })?;
+        runtime.govern_unlisted_with(&database);
+    }
     Ok(())
+}
+
+/// The entry whose rules govern a database `firebase.json` does not list:
+/// the `(default)` entry, or the first entry when there is none. The
+/// official emulator loads one rules file and applies it to every database
+/// (`conformance/fixtures/request-identity-v1`), so an unlisted database is
+/// never left open while rules are configured.
+fn stand_in(databases: &[FirestoreDatabaseConfig]) -> Option<&FirestoreDatabaseConfig> {
+    let ruled = || databases.iter().filter(|entry| entry.rules.is_some());
+    ruled()
+        .find(|entry| entry.database_id == "(default)")
+        .or_else(|| ruled().next())
 }
 
 /// Latest committed Cloud Firestore state for `firestore.get` /
@@ -3212,33 +3234,49 @@ mod tests {
             indexes: None,
         };
 
-        let runtime = RulesRuntime::default();
-        install_firestore_rules(
-            &runtime,
-            project,
-            &[entry("(default)", &deny), entry("other", &allow)],
-        )
-        .expect("two databases");
         let access = SnapshotAccess::current(Store::default().snapshot(), project);
-        for (id, allowed) in [("(default)", false), ("other", true), ("third", true)] {
+        let allowed = |runtime: &RulesRuntime, id: &str| {
             let database = DatabaseName::new(project, id).expect("database");
             let request = firenook_rules_engine::EvaluationRequest::new(
                 firenook_rules_runtime::RequestOperation::Get,
                 format!("/databases/{id}/documents/items/one"),
                 firenook_rules_engine::Timestamp::new(0, 0),
             );
-            assert_eq!(
-                runtime
-                    .evaluate(
-                        &database,
-                        &firenook_rules_runtime::Authorization::Client(None),
-                        &request,
-                        &access,
-                    )
-                    .allowed,
-                allowed,
-                "{id}"
-            );
+            runtime
+                .evaluate(
+                    &database,
+                    &firenook_rules_runtime::Authorization::Client(None),
+                    &request,
+                    &access,
+                )
+                .allowed
+        };
+        // A database firebase.json does not list ("third") is never open: the
+        // official emulator's one rules file governs every database, so here
+        // the `(default)` entry's rules do, or the first entry's without one.
+        for (databases, expected) in [
+            (
+                vec![entry("(default)", &deny), entry("other", &allow)],
+                [("(default)", false), ("other", true), ("third", false)],
+            ),
+            (
+                vec![entry("other", &allow), entry("(default)", &deny)],
+                [("(default)", false), ("other", true), ("third", false)],
+            ),
+            (
+                vec![entry("orders", &deny)],
+                [("(default)", false), ("orders", false), ("third", false)],
+            ),
+            (
+                vec![entry("other", &allow), entry("audit", &deny)],
+                [("(default)", true), ("audit", false), ("third", true)],
+            ),
+        ] {
+            let runtime = RulesRuntime::default();
+            install_firestore_rules(&runtime, project, &databases).expect("databases");
+            for (id, verdict) in expected {
+                assert_eq!(allowed(&runtime, id), verdict, "{id} in {databases:?}");
+            }
         }
 
         // Only named databases is a valid configuration; a repeated one is not.
