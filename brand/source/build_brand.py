@@ -46,7 +46,7 @@ NIGHT = '#141416'      # social-image background, a shade under charcoal
 MUTED_ON_DARK = '#A8A29E'
 
 # The social card. Figures are from benchmarks/next6-paired-acceptance.json.
-HEADLINE = ('A drop-in replacement for the', 'Firebase Local Emulator Suite')
+HEADLINE = ('A faster drop-in replacement for', 'the Firebase Local Emulator Suite')
 STATS = (('38×', 'faster writes'), ('9×', 'less memory'))
 POINTS = ('No Java', 'Data survives restarts', 'Same firebase.json, SDKs and ports')
 LABEL_ON_DARK = '#D6D3D1'
@@ -253,7 +253,7 @@ def social(width, height):
 
     parts, widths = [], []
     for i, line in enumerate(HEADLINE):
-        g, w = text(BOLD, line, pad, (250 + 76 * i) * u, 50 * u, WHITE, tracking=-0.012)
+        g, w = text(BOLD, line, pad, (250 + 76 * i) * u, 48 * u, WHITE, tracking=-0.012)
         parts.append(g)
         widths.append(w)
     x = pad
