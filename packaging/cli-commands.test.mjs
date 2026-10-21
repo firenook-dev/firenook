@@ -776,6 +776,23 @@ test('functions:invoke without --event-data calls the HTTPS route through the hu
   writeFileSync(join(dir, '.firebaserc'), JSON.stringify({projects:{default:'demo-nohub'}}));
   await assert.rejects(invokeFunction('helloWorld', options, dir, log()), new RegExp(`no Functions emulator answered at http://127\\.0\\.0\\.1:${fake.deadPort}/demo-nohub/us-central1/helloWorld`));
 });
+test('functions:invoke --help prints the help and calls nothing', async () => {
+  const {dir} = project();
+  await withSuite(fake.full, async () => {
+    // Without --help the command line reaches the suite's HTTPS route.
+    let mark = fake.requests.length;
+    const called = await runCli(['functions:invoke', 'helloWorld'], dir);
+    assert.equal(called.status, 0, called.stderr);
+    assert.ok(since(mark).some(request => request.path === '/demo-fixture/us-central1/helloWorld'));
+    for (const args of [['helloWorld', '--help'], ['--help'], ['addMessage', '--data', '{"text":"hi"}', '-h']]) {
+      mark = fake.requests.length;
+      const help = await runCli(['functions:invoke', ...args], dir);
+      assert.equal(help.status, 0, help.stderr);
+      assert.match(help.stdout, /firenook functions:invoke NAME \[--data JSON\]/);
+      assert.deepEqual(since(mark).filter(request => !request.path.startsWith('/emulators') && request.path !== '/'), [], `${args.join(' ')} called nothing`);
+    }
+  });
+});
 test('functions:invoke --event-data resolves the trigger key from the route listing and refuses non-background functions', async () => {
   const {dir} = project();
   await withSuite(fake.full, async () => {

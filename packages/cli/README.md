@@ -132,7 +132,7 @@ firenook emulators:start --build              # compile TypeScript first and on 
 firenook emulators:exec "npm test"            # start, run your tests, stop
 firenook emulators:export ./export            # snapshot a running suite
 firenook functions:invoke NAME [--data JSON | --event-data JSON]   # call any function, any trigger
-firenook ext:vendor                           # copy registry Extensions into the project
+firenook ext:vendor [--offline]               # copy registry Extensions into the project
 firenook mcp                                  # the running suite as tools for a coding agent
 firenook mcp add                              # give Claude Code, Cursor and VS Code that server
 firenook state:inspect | state:compact --state-dir DIR

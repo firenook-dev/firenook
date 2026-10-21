@@ -12,8 +12,65 @@ firenook functions:invoke addMessage --project demo-my-app --data '{"text":"hi"}
 firenook functions:invoke onUserWritten --project demo-my-app --resource users/alice \
   --event-data '{"before":{"plan":"free"},"after":{"plan":"pro"}}'        # a Firestore document event
 firenook ext:vendor --project demo-my-app                                 # copy registry Extensions into the project
+firenook ext:vendor --project demo-my-app --offline                       # copy only what the shared cache holds
 firenook emulators:start --project demo-my-app --offline                  # never contact the Extensions registry
 ```
+
+## Params and env files
+
+Each codebase reads the official dotenv chain, later files winning: `.env`,
+`.env.<projectId>`, `.env.<alias>` and `.env.local`. The alias is the
+`.firebaserc` alias the project was selected by: `--project staging` when
+`staging` is an alias, else (no `--project`) the file's only alias, else
+`default`. A project named by its id has no alias. Having both
+`.env.<projectId>` and `.env.<alias>` is refused, as officially.
+`.secret.local` holds the secrets a function declares.
+
+Params (`defineString`, `defineInt`, `defineBoolean`, `defineList`,
+`defineSecret` ...) resolve as the official emulator resolves them when no
+terminal is attached, since Firenook never prompts:
+
+- A value in an env file wins.
+- Otherwise the param takes its default, in the function's options (`region`,
+  `memory`, `timeoutSeconds`, `minInstances` ...) and in `.value()`. A default
+  that is an expression (`{{ params.PROJECT_ID }}-shop`) is resolved first; a
+  default of the wrong type is refused.
+- A param with no value and no default stops its codebase loading, with the
+  official question and where to put the answer:
+  `Question "Enter a string value for API_URL:" does not have a default and
+  cannot be answered in non-interactive mode. Firenook never prompts: set the
+  value in .env, .env.demo-my-app or .env.local, or give the param a default.`
+  When it is the only codebase, the start then stops, as it does for any
+  codebase that does not load (see `--minimum-functions`).
+- A secret is never asked for: its value comes from `.secret.local` when the
+  function runs.
+
+Two deliberate differences: the official emulator writes the answers it
+took, defaults included, to `.env.local`; Firenook writes nothing and takes
+the default again at every load, so a changed default applies on the next
+reload (the console's Environment tab still offers to write a value to
+`.env.local`). And a list param reaches `process.env` as the JSON array the
+SDK's `.value()` parses, as a deployed function gets it; the official
+emulator passes the text it wrote (`red,green`), which `.value()` cannot
+parse.
+
+## Triggers on a service that is not running
+
+A trigger on a service the suite does not run (Storage left out of `--only`,
+or the Realtime Database, which Firenook does not emulate) is loaded and
+listed but receives nothing, and the load says so with the official line,
+as a warning on the terminal screen and in the plain log:
+
+```text
+functions[us-central1-onUpload]: function ignored because the storage emulator does not exist or is not running.
+```
+
+Firestore, Pub/Sub (and schedules), Storage, Auth (and blocking functions,
+which stay callable on their URL) are covered. The official emulator says
+this for Firestore, Pub/Sub and the Realtime Database only, and silently
+registers Storage and Auth triggers it cannot deliver. An Extension
+instance with such a trigger is left out whole, with the official
+`extensions[<instance>]` warning that names the service.
 
 ## TypeScript
 
@@ -111,14 +168,22 @@ official precedence, defaults and `${param:X}` substitution.
 
 The registry (metadata and, on first use, the source archive) is contacted
 with the Firebase CLI's stored login or a `FIREBASE_TOKEN` refresh token, the
-same credential the official emulator uses; Firenook stores the registry
-objects next to the source (`firenook-registry.json`) so every later start is
-offline. Secret Manager is never contacted: provide secret parameters in
+same credential the official emulator uses. The login is read where the
+Firebase CLI's configstore writes it: `$XDG_CONFIG_HOME/configstore/firebase-tools.json`,
+else `<home>/.config/configstore/firebase-tools.json`, with `<home>` as Node
+sees it (`%USERPROFILE%` on Windows, even where a shell sets `HOME`; `$HOME`
+elsewhere); the shared cache is under the same home. Firenook stores the
+registry objects next to the source (`firenook-registry.json`) so every later
+start is offline; a source cached or vendored by a release published under
+the former name keeps its old sidecar name and still starts offline.
+Secret Manager is never contacted: provide secret parameters in
 `extensions/<instance>.secret.local`. `firenook ext:vendor` copies each
-resolved source into the project and records how unpinned refs resolved, which
-is the recommended path for CI and for teammates without a Firebase login;
-`--offline` (or `FIRENOOK_OFFLINE=1`) turns any remaining registry access into
-a startup error. `firenook doctor` lists every instance with its source and
+resolved source into the project with its `firenook-registry.json` and records
+how unpinned refs resolved, which is the recommended path for CI and for
+teammates without a Firebase login; `ext:vendor --offline` copies only what is
+already in the shared cache with its sidecar and never contacts the registry.
+`--offline` (or `FIRENOOK_OFFLINE=1`) on a start turns any remaining registry
+access into a startup error. `firenook doctor` lists every instance with its source and
 whether it starts offline. Dynamic (in-code) extensions, Python/Dart runtimes
 and the registry's `latest-approved` listing rules beyond version resolution
 are not supported.

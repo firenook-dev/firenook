@@ -254,6 +254,10 @@ struct ExtensionsVendorArgs {
     /// Vendor only these instance ids (default: every registry instance).
     #[arg(long = "instance")]
     instances: Vec<String>,
+    /// Never contact the Extensions registry (as `FIRENOOK_OFFLINE=1` does):
+    /// vendor only what the shared cache holds with its registry sidecar.
+    #[arg(long)]
+    offline: bool,
 }
 
 /// When acknowledged writes reach stable storage in disk mode.
@@ -440,6 +444,10 @@ struct SuiteArgs {
     storage_buckets: Vec<String>,
     #[arg(long = "project-id")]
     project_id: String,
+    /// The `.firebaserc` alias the project was selected by (`--project
+    /// staging`): each Functions codebase also reads `.env.<alias>`.
+    #[arg(long = "project-alias")]
+    project_alias: Option<String>,
     /// Accepted for compatibility with earlier launchers; the owned Functions
     /// runtime no longer loads firebase-tools.
     #[arg(long = "firebase-tools-root", hide = true)]
@@ -683,7 +691,22 @@ fn extensions_inputs(
         node,
         offline,
         ui_origin: None,
+        services: firenook_functions_runtime::RunningServices::ALL,
     })
+}
+
+/// What `extensions vendor` loads with: offline when asked, so nothing
+/// absent from the shared cache is fetched.
+fn vendor_inputs(
+    vendor: &ExtensionsVendorArgs,
+) -> Result<firenook_suite_runtime::ExtensionsInputs, String> {
+    extensions_inputs(&vendor.project, offline_requested(vendor.offline))
+}
+
+/// `--offline`, or `FIRENOOK_OFFLINE=1` (or `true`) in the environment.
+fn offline_requested(flag: bool) -> bool {
+    flag || std::env::var("FIRENOOK_OFFLINE")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true"))
 }
 
 /// Resolves a bare command name through `PATH`.
@@ -735,7 +758,7 @@ fn run_extensions_command(arguments: &ExtensionsArgs) -> ExitCode {
             }
         }
         ExtensionsAction::Vendor(vendor) => {
-            let inputs = match extensions_inputs(&vendor.project, false) {
+            let inputs = match vendor_inputs(vendor) {
                 Ok(inputs) => inputs,
                 Err(error) => {
                     eprintln!("extensions vendor failed: {error}");
@@ -1000,6 +1023,10 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
             .filter(|name| !name.is_empty())
             .collect(),
         project_id: arguments.project_id.clone(),
+        project_alias: arguments
+            .project_alias
+            .clone()
+            .filter(|alias| !alias.is_empty()),
         services,
         ui_enabled,
         single_project_mode: arguments
@@ -1022,9 +1049,7 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
                 })?),
             }),
         },
-        offline: arguments.offline
-            || std::env::var("FIRENOOK_OFFLINE")
-                .is_ok_and(|value| matches!(value.as_str(), "1" | "true")),
+        offline: offline_requested(arguments.offline),
         node: absolute_path(&arguments.node)?,
         state_dir: absolute_path(&arguments.state_dir)?,
         resume_state: arguments.resume_state,
@@ -2208,6 +2233,77 @@ mod tests {
         let error = resolve("{oops").expect_err("refused");
         assert!(error.starts_with("--launch-context "), "{error}");
         let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn the_project_alias_reaches_the_functions_runtime() {
+        let project = std::env::temp_dir().join(format!(
+            "firenook-cli-alias-{}-{}",
+            std::process::id(),
+            TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&project).expect("project");
+        fs::write(project.join("firebase.json"), "{}").expect("firebase.json");
+        let project_dir = project.display().to_string();
+        let state = project.join("state").display().to_string();
+        let base = [
+            "firenook",
+            "suite",
+            "--project-dir",
+            &project_dir,
+            "--project-id",
+            "demo-alias",
+            "--node",
+            "node",
+            "--state-dir",
+            &state,
+        ];
+        let resolve = |extra: &[&str]| {
+            let cli = Cli::try_parse_from(base.iter().copied().chain(extra.iter().copied()))
+                .expect("suite command should parse");
+            let Command::Suite(arguments) = cli.command else {
+                panic!("expected suite command");
+            };
+            resolve_suite_config(&arguments).expect("resolved")
+        };
+        assert_eq!(
+            resolve(&["--project-alias", "staging"])
+                .project_alias
+                .as_deref(),
+            Some("staging")
+        );
+        assert_eq!(resolve(&[]).project_alias, None);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn extensions_vendor_takes_offline() {
+        let parse = |extra: &[&str]| {
+            let cli = Cli::try_parse_from(
+                [
+                    "firenook",
+                    "extensions",
+                    "vendor",
+                    "--project-id",
+                    "demo-shop",
+                ]
+                .into_iter()
+                .chain(extra.iter().copied()),
+            )
+            .expect("vendor should parse");
+            let Command::Extensions(ExtensionsArgs {
+                action: ExtensionsAction::Vendor(vendor),
+            }) = cli.command
+            else {
+                panic!("expected extensions vendor");
+            };
+            vendor
+        };
+        let offline = parse(&["--offline"]);
+        assert!(offline.offline);
+        assert!(vendor_inputs(&offline).expect("inputs").offline);
+        assert!(!parse(&[]).offline);
+        assert_eq!(parse(&["--instance", "stripe"]).instances, ["stripe"]);
     }
 
     #[test]

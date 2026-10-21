@@ -35,6 +35,7 @@ async fn a_stop_before_ready_closes_firestore_and_storage() {
     .expect("rules");
     let config = SuiteConfig {
         project_id: "demo-close".into(),
+        project_alias: None,
         project_dir: root.clone(),
         firebase_json: root.join("firebase.json"),
         state_dir: root.join("state"),

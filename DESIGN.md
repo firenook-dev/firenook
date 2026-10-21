@@ -662,7 +662,13 @@ emulator), replayed by `npm run replay:functions:runtime`:
   grouping (`REGION_TBD` bucket first, then regions in first-appearance
   order), `secretEnvironmentVariables` and the shared-label rule for
   multi-region endpoints. dotenv files follow the official chain
-  (`.env`, `.env.<projectId>`, `.env.local`, every `.secret.local` key).
+  (`.env`, `.env.<projectId>`, `.env.<alias>` for the `.firebaserc` alias the
+  project was selected by, `.env.local`, every `.secret.local` key). Params
+  resolve before the options that reference them, as the official CLI
+  answers its prompts without a terminal: an env file value, else the
+  default, else the codebase does not load; nothing is written to
+  `.env.local`. A trigger on a service the suite does not run is listed,
+  ignored and warned about.
   The discovery client keeps no connection open: the SDK's
   `/__/quitquitquit` calls `server.close()`, which waits for every
   connection, so a kept one held the process (and the codebase's load) for

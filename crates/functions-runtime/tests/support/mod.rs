@@ -77,6 +77,19 @@ impl Harness {
         files: &[(&str, &str)],
         prepare: impl FnOnce(&Path),
     ) -> Result<Self, String> {
+        Self::start_configured(index, manifest, delivery, files, prepare, |_| {}).await
+    }
+
+    /// [`Harness::start_with_files`] with a last change to the runtime's
+    /// configuration (the project alias, the running services).
+    pub async fn start_configured(
+        index: &str,
+        manifest: &str,
+        delivery: LogDelivery,
+        files: &[(&str, &str)],
+        prepare: impl FnOnce(&Path),
+        configure: impl FnOnce(&mut RuntimeConfig),
+    ) -> Result<Self, String> {
         let (node, sdk) = requirements()?;
         Self::launch(
             index,
@@ -84,6 +97,7 @@ impl Harness {
             delivery,
             files,
             prepare,
+            configure,
             node,
             Some(sdk),
             Some("nodejs22"),
@@ -106,6 +120,7 @@ impl Harness {
             LogDelivery::Attributed,
             files,
             |_| {},
+            |_| {},
             node,
             Some(sdk),
             runtime,
@@ -116,12 +131,23 @@ impl Harness {
     /// A runtime whose worker can never start (no Node, no SDK needed):
     /// loads, registrations, environments and env edits work without one.
     pub async fn start_without_worker(manifest: &str, files: &[(&str, &str)]) -> Self {
+        Self::start_without_worker_configured(manifest, files, |_| {}).await
+    }
+
+    /// A runtime without a worker over a configuration changed by
+    /// `configure`.
+    pub async fn start_without_worker_configured(
+        manifest: &str,
+        files: &[(&str, &str)],
+        configure: impl FnOnce(&mut RuntimeConfig),
+    ) -> Self {
         Self::launch(
             "",
             manifest,
             LogDelivery::Attributed,
             files,
             |_| {},
+            configure,
             PathBuf::from("/nonexistent/firenook-test-node"),
             None,
             Some("nodejs22"),
@@ -137,6 +163,7 @@ impl Harness {
         delivery: LogDelivery,
         files: &[(&str, &str)],
         prepare: impl FnOnce(&Path),
+        configure: impl FnOnce(&mut RuntimeConfig),
         node: PathBuf,
         sdk: Option<PathBuf>,
         runtime: Option<&str>,
@@ -173,9 +200,10 @@ impl Harness {
         let monitor = Monitor::new(MonitorLimits::default());
         let (log, events) = LogSink::recording();
         let host = "127.0.0.1:1".to_owned();
-        let config = RuntimeConfig {
+        let mut config = RuntimeConfig {
             project_id: PROJECT.to_owned(),
             project_alias: None,
+            services: firenook_functions_runtime::RunningServices::ALL,
             host: "127.0.0.1".to_owned(),
             functions_port: 5001,
             project_dir: root.clone(),
@@ -201,6 +229,7 @@ impl Harness {
             extensions: Vec::new(),
             inspect: None,
         };
+        configure(&mut config);
         let runtime = FunctionsRuntime::start_with(
             config,
             TriggerRegistry::default(),

@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { NODE_TESTED, manifest, nodeCheck, platformKey, release, sha256, verifyBinary } from '../packages/cli/src/binary.mjs';
-import { canonical, inspectProject, launchContext, loadProject, parseOptions } from '../packages/cli/src/options.mjs';
-import { diagnose, prepareLaunch, supervise } from '../packages/cli/src/runtime.mjs';
+import { canonical, inspectProject, launchContext, loadProject, parseOptions, selectProject } from '../packages/cli/src/options.mjs';
+import { diagnose, prepareLaunch, supervise, vendorExtensions } from '../packages/cli/src/runtime.mjs';
 
 function project() {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-cli-test-'));
@@ -172,6 +172,41 @@ test('existing config, project aliases and full or partial --only selection', ()
   save({firestore:{rules:'firestore.rules'}});
   assert.throws(()=>loadProject({...options,only:'auth'},bare),/No emulators to start, run firenook init/);
   assert.match(inspectProject({...options,only:'auth'},bare).warnings.join('\n'),/not starting the auth emulator/);
+});
+test('the project alias is chosen like the official applyRC and handed to the engine', () => {
+  const {dir,options} = project();
+  // The fixture's .firebaserc: {default: demo-fixture, local: demo-local}.
+  assert.equal(loadProject(options,dir).alias,'default');
+  const local = loadProject({...options,project:'local'},dir);
+  assert.deepEqual([local.project,local.alias],['demo-local','local']);
+  const byId = loadProject({...options,project:'demo-local'},dir);
+  assert.deepEqual([byId.project,byId.alias],['demo-local',undefined]);
+  assert.equal(flagValue(launchFor(dir,{...options,project:'local'}).args,'--project-alias'),'local');
+  assert.ok(!launchFor(dir,{...options,project:'demo-local'}).args.includes('--project-alias'));
+  // Without --project, the only alias the file holds, else its default one.
+  writeFileSync(join(dir,'.firebaserc'),JSON.stringify({projects:{staging:'demo-staging'}}));
+  const only = loadProject(options,dir);
+  assert.deepEqual([only.project,only.alias],['demo-staging','staging']);
+  assert.deepEqual(selectProject(undefined,{staging:'demo-staging',prod:'demo-prod'}),{project:undefined});
+  assert.deepEqual(selectProject(undefined,{default:'demo-a',prod:'demo-p'}),{project:'demo-a',alias:'default'});
+  // A default naming another alias still names that alias's project.
+  assert.deepEqual(selectProject(undefined,{default:'prod',prod:'demo-p'}),{project:'demo-p',alias:'default'});
+  assert.deepEqual(selectProject('prod',{default:'demo-a',prod:'demo-p'}),{project:'demo-p',alias:'prod'});
+  assert.deepEqual(selectProject('demo-x',{}),{project:'demo-x'});
+});
+test('ext:vendor --offline reaches the engine', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-vendor-test-'));
+  const record = join(dir,'args.txt');
+  const binary = join(dir,'firenook');
+  writeFileSync(binary,`#!/bin/sh\nprintf '%s\\n' "$@" > '${record}'\n`,{mode:0o755});
+  const project = {config:join(dir,'firebase.json'),project:'demo-shop',directory:dir};
+  const args = () => readFileSync(record,'utf8').trim().split('\n');
+  assert.equal(vendorExtensions(binary,project,['stripe'],{offline:true}),0);
+  assert.deepEqual(args().slice(0,2),['extensions','vendor']);
+  assert.ok(args().includes('--offline'));
+  assert.deepEqual(args().slice(args().indexOf('--instance'),args().indexOf('--instance')+2),['--instance','stripe']);
+  assert.equal(vendorExtensions(binary,project),0);
+  assert.ok(!args().includes('--offline'));
 });
 test('services are derived from top-level sections and emulators entries like the official CLI', () => {
   const {dir,options,save} = project();

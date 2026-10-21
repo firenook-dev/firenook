@@ -72,6 +72,7 @@ fn config(project: &Path, extensions: Vec<(String, String)>) -> ExtensionsConfig
         credential: None,
         offline: true,
         ui_origin: None,
+        services: firenook_functions_runtime::RunningServices::ALL,
     }
 }
 
@@ -110,6 +111,7 @@ async fn start(
         RuntimeConfig {
             project_id: config.project_id.clone(),
             project_alias: None,
+            services: firenook_functions_runtime::RunningServices::ALL,
             host: "127.0.0.1".to_owned(),
             functions_port: 5001,
             project_dir: project.to_path_buf(),

@@ -37,7 +37,7 @@ Emulators
   firenook functions:invoke NAME --event-data JSON [--resource PATH] [--params JSON] [--auth JSON]
                                                           Inject a background event (Firestore, Storage,
                                                           Pub/Sub, Auth, schedule, Eventarc, task queue)
-  firenook ext:vendor [--instance ID]...                  Copy registry Extensions into the project
+  firenook ext:vendor [--instance ID]... [--offline]      Copy registry Extensions into the project
   firenook mcp [--project ID] [--only firestore,auth,...] Model Context Protocol server over stdio for coding
                                                           agents; outside a project, the one running suite
   firenook mcp add [--agent claude,cursor,vscode] [--dry-run] [--force]   Give the project's coding agents
@@ -134,6 +134,8 @@ async function main() {
     finally { process.off('SIGINT', onInt); process.off('SIGTERM', onTerm); }
   }
   if (action === 'functions:invoke') {
+    // --help (anywhere) prints the help and calls nothing.
+    if (args.some(arg => arg === '--help' || arg === '-h')) { console.log(help); return 0; }
     const [name, ...rest] = args;
     if (!name || name.startsWith('-')) throw new Error('functions:invoke requires a function name');
     const {options, command, positionals} = parseOptions(rest);
@@ -188,7 +190,7 @@ async function run(action, args) {
   // them, and exits 1 when any check found a problem.
   const diagnostic = await diagnose(options, process.cwd(), {quiet:drawn, report:action === 'doctor'});
   if (action === 'doctor') { console.log(JSON.stringify(diagnostic, null, 2)); return diagnostic.problems.length ? 1 : 0; }
-  if (action === 'ext:vendor') return vendorExtensions(diagnostic.binary, diagnostic.project, options.instance);
+  if (action === 'ext:vendor') return vendorExtensions(diagnostic.binary, diagnostic.project, options.instance, {offline:Boolean(options.offline)});
   if (drawn) {
     const project = diagnostic.project;
     return runInteractive(prepareLaunch(diagnostic, options, 'start', args, {quiet:true}),

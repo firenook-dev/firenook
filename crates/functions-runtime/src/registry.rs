@@ -19,6 +19,50 @@ const DELIVERED_SERVICES: [&str; 5] = [
     "storage.googleapis.com",
 ];
 
+/// The suite's services an event trigger can need, and whether each runs
+/// beside this runtime (Eventarc and Cloud Tasks always run with it, the
+/// Realtime Database never does).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// One switch per service.
+#[allow(clippy::struct_excessive_bools)]
+pub struct RunningServices {
+    pub firestore: bool,
+    pub auth: bool,
+    pub storage: bool,
+    pub pubsub: bool,
+}
+
+impl RunningServices {
+    /// Every service.
+    pub const ALL: Self = Self {
+        firestore: true,
+        auth: true,
+        storage: true,
+        pubsub: true,
+    };
+
+    /// The official name of the service a trigger on `service`
+    /// (`storage.googleapis.com`) needs, when the suite does not run it.
+    #[must_use]
+    pub fn missing(self, service: &str) -> Option<&'static str> {
+        let running = match service {
+            "firestore.googleapis.com" => self.firestore,
+            "firebaseauth.googleapis.com" => self.auth,
+            "storage.googleapis.com" => self.storage,
+            "pubsub.googleapis.com" => self.pubsub,
+            "firebasedatabase.googleapis.com" | "firebaseio.com" => false,
+            _ => return None,
+        };
+        (!running).then(|| short_service_name(service))
+    }
+}
+
+impl Default for RunningServices {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
 /// One registered definition.
 #[derive(Debug, Clone)]
 pub struct Record {
@@ -82,6 +126,9 @@ impl BlockingConfig {
 #[derive(Debug)]
 pub struct Registry {
     project: String,
+    /// The services running beside the runtime; a trigger on another is
+    /// ignored with a warning.
+    services: RunningServices,
     records: Vec<Record>,
     index: HashMap<String, usize>,
     generation: u32,
@@ -102,10 +149,19 @@ pub struct Admission {
 }
 
 impl Registry {
+    /// A table for a suite that runs every service.
     #[must_use]
     pub fn new(project: &str) -> Self {
+        Self::with_services(project, RunningServices::ALL)
+    }
+
+    /// A table whose event triggers on a service the suite does not run
+    /// are ignored, with the official warning.
+    #[must_use]
+    pub fn with_services(project: &str, services: RunningServices) -> Self {
         Self {
             project: project.to_owned(),
+            services,
             records: Vec::new(),
             index: HashMap::new(),
             generation: 0,
@@ -414,14 +470,22 @@ impl Registry {
         let mut admissions = Vec::with_capacity(definitions.len());
         for definition in definitions {
             let key = self.key_for(definition);
+            let mut previously_ignored = None;
             if let Some(index) = self.index.get(&key).copied() {
                 // Re-registering an existing key replaces the record in place;
                 // its earlier side effects are released before admission.
                 let previous = self.records[index].clone();
                 Self::unregister_side_effects(&previous, project, triggers);
+                previously_ignored = previous.ignored;
             }
-            let (ignored, url) =
-                Self::admit(definition, &key, project, functions_origin, triggers, log);
+            let admission = Admit {
+                key: &key,
+                project,
+                functions_origin,
+                services: self.services,
+                previously_ignored: previously_ignored.as_deref(),
+            };
+            let (ignored, url) = admission.admit(definition, triggers, log);
             let record = Record {
                 key: key.clone(),
                 definition: definition.clone(),
@@ -441,141 +505,6 @@ impl Registry {
         }
         self.rebuild_index();
         admissions
-    }
-
-    fn admit(
-        definition: &Definition,
-        key: &str,
-        project: &str,
-        functions_origin: &str,
-        triggers: &TriggerRegistry,
-        log: &LogSink,
-    ) -> (Option<String>, Option<String>) {
-        let id = definition.id();
-        if definition.https_trigger().is_some() {
-            let url = format!(
-                "{functions_origin}/{project}/{}/{}",
-                definition.region(),
-                definition.name()
-            );
-            log.record(LogEvent::new(
-                "INFO",
-                &format!("functions[{id}]"),
-                format!("http function initialized ({url})."),
-            ));
-            return (None, Some(url));
-        }
-        if let Some(event) = definition.event_trigger() {
-            let service = definition.service();
-            let service_name = short_service_name(&service);
-            match service.as_str() {
-                "firestore.googleapis.com" => {
-                    let registered = if definition.platform() == "gcfv2" {
-                        let bundle = v2_firestore_bundle(event);
-                        bundle.and_then(|bundle| {
-                            triggers
-                                .register_v2(project, key, &bundle)
-                                .map_err(|error| error.to_string())
-                        })
-                    } else {
-                        let mut bundle = Map::new();
-                        let mut trigger = event.clone();
-                        trigger.insert("service".to_owned(), Value::String(service.clone()));
-                        bundle.insert("eventTrigger".to_owned(), Value::Object(trigger));
-                        triggers
-                            .register_v1(project, key, &Value::Object(bundle))
-                            .map_err(|error| error.to_string())
-                    };
-                    match registered {
-                        Ok(()) => {
-                            log.record(LogEvent::new(
-                                "INFO",
-                                &format!("functions[{id}]"),
-                                "firestore function initialized.".to_owned(),
-                            ));
-                            (None, None)
-                        }
-                        Err(error) => {
-                            log.warn(format!("Error adding firestore function: {error}"));
-                            (
-                                Some(format!("firestore trigger registration failed: {error}")),
-                                None,
-                            )
-                        }
-                    }
-                }
-                "pubsub.googleapis.com"
-                | "firebaseauth.googleapis.com"
-                | "storage.googleapis.com"
-                | "eventarc.googleapis.com" => {
-                    log.record(LogEvent::new(
-                        "INFO",
-                        &format!("functions[{id}]"),
-                        format!("{service_name} function initialized."),
-                    ));
-                    (None, None)
-                }
-                other => {
-                    let reason = format!(
-                        "function ignored because the {service_name} emulator does not exist or is not running."
-                    );
-                    log.record(LogEvent::new(
-                        "INFO",
-                        &format!("functions[{id}]"),
-                        reason.clone(),
-                    ));
-                    let _ = other;
-                    (Some(reason), None)
-                }
-            }
-        } else if definition.blocking_trigger().is_some() {
-            let event_type = definition
-                .blocking_trigger()
-                .and_then(|blocking| blocking.get("eventType"))
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let url = format!(
-                "{functions_origin}/{project}/{}/{}",
-                definition.region(),
-                definition.name()
-            );
-            if matches!(
-                event_type,
-                "providers/cloud.auth/eventTypes/user.beforeCreate"
-                    | "providers/cloud.auth/eventTypes/user.beforeSignIn"
-            ) {
-                log.record(LogEvent::new(
-                    "INFO",
-                    &format!("functions[{id}]"),
-                    format!("{event_type} function initialized ({url})."),
-                ));
-                (None, Some(url))
-            } else {
-                let reason = format!(
-                    "function ignored because the {event_type} emulator does not exist or is not running."
-                );
-                log.record(LogEvent::new(
-                    "INFO",
-                    &format!("functions[{id}]"),
-                    reason.clone(),
-                ));
-                (Some(reason), Some(url))
-            }
-        } else {
-            log.warn(format!(
-                "Unsupported function type on {}. Expected either an httpsTrigger, eventTrigger, or blockingTrigger.",
-                definition.name()
-            ));
-            let reason =
-                "function ignored because the unknown emulator does not exist or is not running."
-                    .to_owned();
-            log.record(LogEvent::new(
-                "INFO",
-                &format!("functions[{id}]"),
-                reason.clone(),
-            ));
-            (Some(reason), None)
-        }
     }
 
     /// `disableBackgroundTriggers`: every enabled event record is disabled.
@@ -656,6 +585,189 @@ impl Registry {
     #[must_use]
     pub fn is_enabled(&self, key: &str) -> Option<bool> {
         self.get(key).map(|record| record.enabled)
+    }
+}
+
+/// One definition's admission into the table (`loadTriggers`' per-definition
+/// set-up): what it registers with the bridge, and why it receives nothing
+/// when it does not.
+struct Admit<'a> {
+    key: &'a str,
+    project: &'a str,
+    functions_origin: &'a str,
+    services: RunningServices,
+    /// The reason the record this one replaces was ignored for: the same
+    /// reason again is not warned about a second time.
+    previously_ignored: Option<&'a str>,
+}
+
+impl Admit<'_> {
+    fn admit(
+        &self,
+        definition: &Definition,
+        triggers: &TriggerRegistry,
+        log: &LogSink,
+    ) -> (Option<String>, Option<String>) {
+        let Self {
+            key,
+            project,
+            functions_origin,
+            ..
+        } = *self;
+        let id = definition.id();
+        if definition.https_trigger().is_some() {
+            let url = format!(
+                "{functions_origin}/{project}/{}/{}",
+                definition.region(),
+                definition.name()
+            );
+            log.record(LogEvent::new(
+                "INFO",
+                &format!("functions[{id}]"),
+                format!("http function initialized ({url})."),
+            ));
+            return (None, Some(url));
+        }
+        if let Some(event) = definition.event_trigger() {
+            let service = definition.service();
+            let service_name = short_service_name(&service);
+            if let Some(missing) = self.services.missing(&service) {
+                return (Some(self.not_running(&id, missing, log)), None);
+            }
+            match service.as_str() {
+                "firestore.googleapis.com" => {
+                    let registered = if definition.platform() == "gcfv2" {
+                        let bundle = v2_firestore_bundle(event);
+                        bundle.and_then(|bundle| {
+                            triggers
+                                .register_v2(project, key, &bundle)
+                                .map_err(|error| error.to_string())
+                        })
+                    } else {
+                        let mut bundle = Map::new();
+                        let mut trigger = event.clone();
+                        trigger.insert("service".to_owned(), Value::String(service.clone()));
+                        bundle.insert("eventTrigger".to_owned(), Value::Object(trigger));
+                        triggers
+                            .register_v1(project, key, &Value::Object(bundle))
+                            .map_err(|error| error.to_string())
+                    };
+                    match registered {
+                        Ok(()) => {
+                            log.record(LogEvent::new(
+                                "INFO",
+                                &format!("functions[{id}]"),
+                                "firestore function initialized.".to_owned(),
+                            ));
+                            (None, None)
+                        }
+                        Err(error) => {
+                            log.warn(format!("Error adding firestore function: {error}"));
+                            (
+                                Some(format!("firestore trigger registration failed: {error}")),
+                                None,
+                            )
+                        }
+                    }
+                }
+                "pubsub.googleapis.com"
+                | "firebaseauth.googleapis.com"
+                | "storage.googleapis.com"
+                | "eventarc.googleapis.com" => {
+                    log.record(LogEvent::new(
+                        "INFO",
+                        &format!("functions[{id}]"),
+                        format!("{service_name} function initialized."),
+                    ));
+                    (None, None)
+                }
+                _ => {
+                    let reason = format!(
+                        "function ignored because the {service_name} emulator does not exist or is not running."
+                    );
+                    log.record(LogEvent::new(
+                        "INFO",
+                        &format!("functions[{id}]"),
+                        reason.clone(),
+                    ));
+                    (Some(reason), None)
+                }
+            }
+        } else if definition.blocking_trigger().is_some() {
+            let event_type = definition
+                .blocking_trigger()
+                .and_then(|blocking| blocking.get("eventType"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let url = format!(
+                "{functions_origin}/{project}/{}/{}",
+                definition.region(),
+                definition.name()
+            );
+            if matches!(
+                event_type,
+                "providers/cloud.auth/eventTypes/user.beforeCreate"
+                    | "providers/cloud.auth/eventTypes/user.beforeSignIn"
+            ) {
+                if let Some(missing) = self.services.missing("firebaseauth.googleapis.com") {
+                    // Still served on its URL; the Auth emulator that would
+                    // call it is not running.
+                    return (Some(self.not_running(&id, missing, log)), Some(url));
+                }
+                log.record(LogEvent::new(
+                    "INFO",
+                    &format!("functions[{id}]"),
+                    format!("{event_type} function initialized ({url})."),
+                ));
+                (None, Some(url))
+            } else {
+                let reason = format!(
+                    "function ignored because the {event_type} emulator does not exist or is not running."
+                );
+                log.record(LogEvent::new(
+                    "INFO",
+                    &format!("functions[{id}]"),
+                    reason.clone(),
+                ));
+                (Some(reason), Some(url))
+            }
+        } else {
+            log.warn(format!(
+                "Unsupported function type on {}. Expected either an httpsTrigger, eventTrigger, or blockingTrigger.",
+                definition.name()
+            ));
+            let reason =
+                "function ignored because the unknown emulator does not exist or is not running."
+                    .to_owned();
+            log.record(LogEvent::new(
+                "INFO",
+                &format!("functions[{id}]"),
+                reason.clone(),
+            ));
+            (Some(reason), None)
+        }
+    }
+
+    /// The official line for a trigger whose service the suite does not run
+    /// (`function ignored because the <service> emulator does not exist or
+    /// is not running.`), said as a warning so the terminal shows it, once
+    /// per record: a reload that ignores it for the same reason says it at
+    /// the information level.
+    fn not_running(&self, id: &str, service: &str, log: &LogSink) -> String {
+        let reason = format!(
+            "function ignored because the {service} emulator does not exist or is not running."
+        );
+        let level = if self.previously_ignored == Some(reason.as_str()) {
+            "INFO"
+        } else {
+            "WARN"
+        };
+        log.record(LogEvent::new(
+            level,
+            &format!("functions[{id}]"),
+            reason.clone(),
+        ));
+        reason
     }
 }
 

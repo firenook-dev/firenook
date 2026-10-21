@@ -122,6 +122,17 @@ pub struct ServiceSelection {
 }
 
 impl ServiceSelection {
+    /// The services a Functions trigger can need, as the runtime reads them.
+    #[must_use]
+    pub const fn running(self) -> firenook_functions_runtime::RunningServices {
+        firenook_functions_runtime::RunningServices {
+            firestore: self.firestore,
+            auth: self.auth,
+            storage: self.storage,
+            pubsub: self.pubsub,
+        }
+    }
+
     /// Every service.
     pub const ALL: Self = Self {
         firestore: true,
@@ -278,6 +289,9 @@ pub struct SuiteConfig {
     /// Bound to a wildcard with none given, the console answers any host.
     pub allowed_hosts: Vec<String>,
     pub project_id: String,
+    /// `--project-alias`: the `.firebaserc` alias the project was selected
+    /// by, whose `.env.<alias>` file each Functions codebase reads.
+    pub project_alias: Option<String>,
     /// `--only` selection; `ServiceSelection::ALL` by default.
     pub services: ServiceSelection,
     /// `emulators.ui.enabled` / `--no-ui`: without the UI the logging
@@ -2446,7 +2460,8 @@ async fn start_functions_runtime(
     let host = |port: u16| config.endpoint(port);
     let runtime_config = FunctionsRuntimeConfig {
         project_id: config.project_id.clone(),
-        project_alias: None,
+        project_alias: config.project_alias.clone(),
+        services: config.services.running(),
         host: config.host.clone(),
         functions_port: config.ports.functions,
         project_dir: config.project_dir.clone(),
@@ -2545,6 +2560,7 @@ pub fn extensions_config(
         ui_origin: config
             .ui_enabled
             .then(|| format!("{}/", config.origin(config.ports.ui))),
+        services: config.services.running(),
     })
 }
 
@@ -2559,6 +2575,9 @@ pub struct ExtensionsInputs {
     pub node: PathBuf,
     pub offline: bool,
     pub ui_origin: Option<String>,
+    /// The services the suite starts (`--only`); every one for a command
+    /// that starts none.
+    pub services: firenook_functions_runtime::RunningServices,
 }
 
 /// Builds the loader configuration from project inputs.
@@ -2605,6 +2624,7 @@ pub fn extensions_config_from(
         },
         offline: config.offline,
         ui_origin: config.ui_origin.clone(),
+        services: config.services,
     })
 }
 

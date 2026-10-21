@@ -295,17 +295,39 @@ pub fn service_from_event_type(event_type: &str) -> &'static str {
 }
 
 /// Resolves `{{ params.NAME }}` references (standalone or embedded in a
-/// string) against the user's dotenv values and the built-in project
+/// string) against the codebase's param values (the dotenv values and the
+/// defaults [`crate::params::resolve`] took) and the built-in project
 /// parameters (`PROJECT_ID`, `GCLOUD_PROJECT`, `STORAGE_BUCKET`,
 /// `DATABASE_URL`); anything the official CEL resolver would evaluate beyond
 /// a plain reference is reported.
-struct Resolver<'a> {
+pub(crate) struct Resolver<'a> {
     values: &'a BTreeMap<String, String>,
     builtins: BTreeMap<String, String>,
 }
 
-impl Resolver<'_> {
-    fn is_cel(value: &Value) -> bool {
+/// The params every codebase can reference without declaring them
+/// (`populateDefaultParams`).
+pub(crate) fn builtin_params(project: &str, default_bucket: &str) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("PROJECT_ID".to_owned(), project.to_owned()),
+        ("GCLOUD_PROJECT".to_owned(), project.to_owned()),
+        ("STORAGE_BUCKET".to_owned(), default_bucket.to_owned()),
+        (
+            "DATABASE_URL".to_owned(),
+            format!("https://{project}.firebaseio.com"),
+        ),
+    ])
+}
+
+impl<'a> Resolver<'a> {
+    pub(crate) fn new(
+        values: &'a BTreeMap<String, String>,
+        builtins: BTreeMap<String, String>,
+    ) -> Self {
+        Self { values, builtins }
+    }
+
+    pub(crate) fn is_cel(value: &Value) -> bool {
         value
             .as_str()
             .is_some_and(|text| text.contains("{{") && text.contains("}}"))
@@ -319,7 +341,7 @@ impl Resolver<'_> {
             .ok_or_else(|| ManifestError(format!("No value found for parameter {name}. Provide it in .env, .env.<project>, .env.local or .secret.local before starting the emulator.")))
     }
 
-    fn interpolate(&self, text: &str) -> Result<String, ManifestError> {
+    pub(crate) fn interpolate(&self, text: &str) -> Result<String, ManifestError> {
         let mut out = String::with_capacity(text.len());
         let mut rest = text;
         while let Some(start) = rest.find("{{") {
@@ -360,7 +382,7 @@ impl Resolver<'_> {
         ))
     }
 
-    fn resolve_int(&self, value: &Value) -> Result<Value, ManifestError> {
+    pub(crate) fn resolve_int(&self, value: &Value) -> Result<Value, ManifestError> {
         if !Self::is_cel(value) {
             return Ok(value.clone());
         }
@@ -371,7 +393,7 @@ impl Resolver<'_> {
             .map_err(|_| ManifestError(format!("Parameter value {text} is not an integer")))
     }
 
-    fn resolve_boolean(&self, value: &Value) -> Result<Value, ManifestError> {
+    pub(crate) fn resolve_boolean(&self, value: &Value) -> Result<Value, ManifestError> {
         if !Self::is_cel(value) {
             return Ok(value.clone());
         }
@@ -410,6 +432,11 @@ pub struct DeclaredParam {
     pub default: Option<Value>,
     pub label: Option<String>,
     pub description: Option<String>,
+    /// The prompt the CLI would show (`{"text": …}`, `{"select": …}`,
+    /// `{"multiSelect": …}`, `{"resource": …}`); `None` is a text prompt.
+    pub input: Option<Value>,
+    /// A list param's delimiter (`,` when absent).
+    pub delimiter: Option<String>,
 }
 
 /// An endpoint the manifest declares that the emulator dropped at load.
@@ -436,8 +463,8 @@ pub struct Conversion {
 
 /// Converts a `v1alpha1` manifest into emulated definitions for one codebase.
 ///
-/// `values` are the user dotenv values (parameters resolve from them) and
-/// `secret_values` the `.secret.local` keys; the returned definitions carry
+/// `values` are the codebase's param values (the dotenv values and the
+/// defaults [`crate::params::resolve`] took); the returned definitions carry
 /// the codebase id and are ordered as the manifest lists its endpoints, with
 /// one entry per region.
 pub fn definitions_from_manifest(
@@ -452,7 +479,7 @@ pub fn definitions_from_manifest(
 }
 
 /// The manifest's declared params.
-fn declared_params(manifest: &serde_norway::Value) -> Vec<DeclaredParam> {
+pub(crate) fn declared_params(manifest: &serde_norway::Value) -> Vec<DeclaredParam> {
     let Some(params) = manifest
         .get("params")
         .and_then(|params| serde_json::to_value(params).ok())
@@ -477,6 +504,8 @@ fn declared_params(manifest: &serde_norway::Value) -> Vec<DeclaredParam> {
                             .cloned(),
                         label: text("label"),
                         description: text("description"),
+                        input: entry.get("input").filter(|value| !value.is_null()).cloned(),
+                        delimiter: text("delimiter"),
                     })
                 })
                 .collect()
@@ -518,18 +547,7 @@ pub fn convert_manifest(
         .get("endpoints")
         .and_then(serde_norway::Value::as_mapping)
         .ok_or_else(|| ManifestError("Expected key endpoints".to_owned()))?;
-    let resolver = Resolver {
-        values,
-        builtins: BTreeMap::from([
-            ("PROJECT_ID".to_owned(), project.to_owned()),
-            ("GCLOUD_PROJECT".to_owned(), project.to_owned()),
-            ("STORAGE_BUCKET".to_owned(), default_bucket.to_owned()),
-            (
-                "DATABASE_URL".to_owned(),
-                format!("https://{project}.firebaseio.com"),
-            ),
-        ]),
-    };
+    let resolver = Resolver::new(values, builtin_params(project, default_bucket));
     let mut grouped: Vec<(String, Definition)> = Vec::new();
     for (id, endpoint) in endpoints {
         let id = id

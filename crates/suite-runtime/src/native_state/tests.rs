@@ -26,6 +26,7 @@ impl Case {
             host: "127.0.0.1".into(),
             allowed_hosts: Vec::new(),
             project_id: "demo-native-resume".into(),
+            project_alias: None,
             services: crate::ServiceSelection::ALL,
             ui_enabled: true,
             single_project_mode: true,

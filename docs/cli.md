@@ -25,7 +25,7 @@ firenook firestore:delete PATH [-r | --shallow] [-f] [--database ID]
 firenook firestore:delete --all-collections -f [--database ID]
 firenook functions:invoke NAME [--data JSON] [--region R] [--method M]
 firenook functions:invoke NAME --event-data JSON [--resource PATH] [--params JSON] [--auth JSON] [--event-type T]
-firenook ext:vendor [--instance ID]...
+firenook ext:vendor [--instance ID]... [--offline]
 firenook state:inspect --state-dir DIR              # what the saved Firestore file holds and how much is free
 firenook state:compact --state-dir DIR [--no-copy]  # return the free pages to the disk (emulator stopped)
 firenook state:adopt-seed --state-dir DIR --import SEED   # keep saved data after its seed changed
