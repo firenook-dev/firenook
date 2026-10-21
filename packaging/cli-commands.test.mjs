@@ -366,6 +366,11 @@ test('firestore:delete sends the official flag contract to the emulator routes',
   assert.equal(request.url, '/emulator/v1/projects/demo-fixture/databases/(default)/documents/users/alice?mode=shallow');
   assert.equal(request.headers.authorization, 'Bearer owner');
   assert.deepEqual(output.out, ['Deleted 3 documents']);
+  fake.deleted = 1;
+  const one = log();
+  await firestoreDelete('users/bob', options, [], dir, one);
+  fake.deleted = 3;
+  assert.deepEqual(one.out, ['Deleted 1 document']);
   await firestoreDelete('users/alice', {...options, recursive:true, json:true, database:'other'}, [], dir, output);
   request = lastRequest();
   assert.equal(request.url, '/emulator/v1/projects/demo-fixture/databases/other/documents/users/alice?mode=recursive');

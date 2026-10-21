@@ -149,6 +149,12 @@ test('the set-up pins and installs side by side, builds after the packages, and 
   assert.equal(readJson(join(dir, 'package.json')).devDependencies.firenook, '0.2.0-next.9');
   assert.ok(!('npm_config_user_agent' in calls[0].env), 'the installs see the project\'s settings, not npx\'s');
   assert.deepEqual(nextSteps(everything(), steps, {manager: work.manager, node: '24.20.0'}).map(step => step.command), ['npm run emulators']);
+  // npm's own count, said in the singular for one.
+  const single = folder();
+  mkdirSync(join(single, 'functions'));
+  const one = installer([{match: call => call.cwd.endsWith('functions'), code: 0, lines: ['added 1 package in 1s']}]);
+  const counted = await setUpSteps(everything({language: 'javascript', pin: false}), single, {version: '0.2.0-next.9', env: {}, platform: 'darwin', spawner: one.spawner}).run();
+  assert.equal(counted.steps.find(step => step.id === 'packages').detail, 'npm install in functions/, 1 package');
 
   // A failed install: its last lines are kept, the build does not run, and
   // the next steps finish the rest.

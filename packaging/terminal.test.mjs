@@ -242,6 +242,57 @@ test('a start whose functions do not load still runs, and says so', async () => 
   for (const expected of ['Your functions did not load', 'functions/index.js:3', '}}', 'except your functions', 'functions not loaded']) shows(shown, expected);
 });
 
+test('a count on the screen agrees with its noun, for one and for many', async () => {
+  const long = 'a start-up warning long enough that its row cannot hold it, so the summary counts it instead of showing it whole, '.repeat(2);
+  const run = async n => {
+    const {out, text} = screen(110, 60);
+    const input = keyboard();
+    const {spawner} = engine(async ({send, stopping}) => {
+      send({type: 'step', id: 'firestore', state: 'running', verb: 'resuming', done: n});
+      await tick(500);
+      send({type: 'step', id: 'firestore', state: 'done', ms: 520, figures: [[n, n === 1 ? 'document' : 'documents']]});
+      for (let i = 0; i < n; i += 1) send({type: 'codebase', codebase: {id: `ext-${i}`, kind: 'extension', state: 'ready', loads: 1, functionCount: 1, servingPrevious: false}});
+      send({type: 'codebase', codebase: {id: 'default', kind: 'user', state: 'failed', loads: 1, functionCount: 0, servingPrevious: false, directory: 'functions',
+        error: {message: 'Error: boom', detail: './functions/index.js:3\n  boom()\n  ^\n'}}});
+      send({type: 'ready', ms: 600, console: 'http://127.0.0.1:4000/console', ports: {}, functions: n, warnings: Array.from({length: n}, (_, i) => `${long}${i}`)});
+      await tick(30);
+      const frames = Array.from({length: n}, (_, i) => `    at node:internal/frame:${i}:1`).join('\n');
+      const call = {id: 'c-1', functionId: 'us-central1-api', codebase: 'default', kind: 'http', durationMs: 3, outcomeClass: 'failed', error: `Error: boom\n    at api (index.js:3:9)\n${frames}`};
+      send({type: 'call', state: 'started', call});
+      send({type: 'call', state: 'finished', call});
+      await stopping;
+      send({type: 'stopped', outcome: {}});
+      return 0;
+    });
+    const running = runInteractive(launch(), {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input, env, platform: 'darwin', spawner});
+    for (let i = 0; i < 100 && !text().includes('more line'); i += 1) await tick(20);
+    input.emit('data', Buffer.from('q'));
+    assert.equal(await running, 0);
+    return text();
+  };
+  let shown = await run(1);
+  for (const expected of ['resuming  1 document', '1 start-up warning ·', 'The extension codebase and every emulator keep running', '+ 1 more line ·']) shows(shown, expected);
+  for (const wrong of ['1 documents', '1 start-up warnings', '1 more lines']) assert.ok(!flat(shown).includes(wrong), wrong);
+  shown = await run(2);
+  for (const expected of ['resuming  2 documents', '2 start-up warnings', 'The 2 extension codebases and every emulator keep running', '+ 2 more lines']) shows(shown, expected);
+  // Without an extension, the emulators alone keep running.
+  const {out, text} = screen(110, 60);
+  const input = keyboard();
+  const {spawner} = engine(async ({send, stopping}) => {
+    send({type: 'codebase', codebase: {id: 'default', kind: 'user', state: 'failed', loads: 1, functionCount: 0, servingPrevious: false, directory: 'functions',
+      error: {message: 'Error: boom', detail: null}}});
+    send({type: 'ready', ms: 60, console: null, ports: {}, functions: 0, warnings: []});
+    await stopping;
+    send({type: 'stopped', outcome: {}});
+    return 0;
+  });
+  const running = runInteractive(launch(), {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input, env, platform: 'darwin', spawner});
+  for (let i = 0; i < 100 && !text().includes('except your functions'); i += 1) await tick(20);
+  input.emit('data', Buffer.from('q'));
+  assert.equal(await running, 0);
+  shows(text(), 'fix it and save: Firenook loads it again by itself. Every emulator keeps running');
+});
+
 test('a service that fails after readiness stops the session with a card that says so', async () => {
   const {out, text} = screen();
   const {spawner} = engine(async ({send}) => {

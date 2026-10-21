@@ -2092,8 +2092,13 @@ fn rebuild_field_index(database: &Database) -> Result<LogicalMemoryUsage, DiskEr
     transaction.commit().map_err(DiskError::redb)?;
     if counted.entries > 0 {
         eprintln!(
-            "firenook: indexed the top-level fields of {} Firestore documents in {:.1} s",
+            "firenook: indexed the top-level fields of {} Firestore {} in {:.1} s",
             counted.entries,
+            if counted.entries == 1 {
+                "document"
+            } else {
+                "documents"
+            },
             started.elapsed().as_secs_f64()
         );
     }

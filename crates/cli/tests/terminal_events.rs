@@ -1,9 +1,9 @@
-//! What the engine tells the terminal UI (`--terminal-events`): a start-up
-//! warning from any service reaches the `ready` event, which the
-//! terminal's `w` key lists.
+//! What the engine tells the terminal UI (`--terminal-events`): a count
+//! says its noun in the singular for one, and a start-up warning from any
+//! service reaches the `ready` event, which the terminal's `w` key lists.
 
-use std::io::{BufRead as _, BufReader, Write as _};
-use std::net::TcpListener;
+use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
@@ -193,6 +193,21 @@ fn stop(mut engine: Engine) {
     }
 }
 
+/// One document, written the way a client writes it.
+fn write_document(project: &str, port: u16) {
+    let body = r#"{"fields":{"n":{"integerValue":"1"}}}"#;
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("Firestore");
+    write!(
+        stream,
+        "PATCH /v1/projects/{project}/databases/(default)/documents/orders/o_1 HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer owner\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .expect("request");
+    let mut response = String::new();
+    stream.read_to_string(&mut response).expect("response");
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+}
+
 /// The figures a start-up row ended with.
 fn figures(engine: &Engine, id: &str) -> Value {
     engine
@@ -201,6 +216,28 @@ fn figures(engine: &Engine, id: &str) -> Value {
         .find(|event| event["type"] == "step" && event["id"] == id && event["state"] == "done")
         .unwrap_or_else(|| panic!("no {id} row ended:\n{}", engine.printed()))["figures"]
         .clone()
+}
+
+#[test]
+fn one_document_is_one_document() {
+    let project = Project::new("count");
+    project.write("firebase.json", r#"{"firestore":{}}"#);
+    let ports = free_ports::<11>();
+    let engine = start(&project, "firestore,auth,storage", true, ports);
+    assert_eq!(
+        figures(&engine, "firestore"),
+        serde_json::json!([[0, "documents"]])
+    );
+    write_document(&project.id, ports[0]);
+    stop(engine);
+    let engine = start(&project, "firestore,auth,storage", true, ports);
+    assert_eq!(
+        figures(&engine, "firestore"),
+        serde_json::json!([[1, "document"]]),
+        "{}",
+        engine.printed()
+    );
+    stop(engine);
 }
 
 #[test]

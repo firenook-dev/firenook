@@ -528,10 +528,11 @@ fn run_state_command(arguments: &StateArgs) -> ExitCode {
     match firenook_suite_runtime::adopt_seed(&adopt.state_dir, &adopt.import) {
         Ok(adopted) => {
             println!(
-                "Recorded {} as the seed of {} ({} files).",
+                "Recorded {} as the seed of {} ({} {}).",
                 adopted.seed.display(),
                 adopt.state_dir.display(),
-                adopted.files
+                adopted.files,
+                if adopted.files == 1 { "file" } else { "files" }
             );
             if adopted.previous_seed != adopted.seed {
                 println!("It was imported from {}.", adopted.previous_seed.display());
@@ -1681,7 +1682,8 @@ fn open_seeded_store(arguments: &FirestoreArgs) -> Result<Store, String> {
         let count = seed_store_from_export(&store, path, arguments.project_id.as_deref())
             .map_err(|error| format!("Firestore import failed: {error}"))?;
         eprintln!(
-            "firenook imported {count} documents from {}",
+            "firenook imported {count} {} from {}",
+            if count == 1 { "document" } else { "documents" },
             path.display()
         );
     }
