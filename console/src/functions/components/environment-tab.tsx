@@ -1,11 +1,11 @@
 // The Environment tab: what `process.env` holds for this function, without
 // leaking the host. The env files the last load read, in precedence order;
 // every variable with the file that set it (`.secret.local` values masked
-// until revealed, read from the file when asked); the secrets the function
+// until revealed, read from the file when asked), and the defaults the
+// params no file sets take, marked as defaults; the secrets the function
 // declares, provided or missing; the params the manifest declares and where
-// each value came from, unresolved ones flagged; the emulator's own
-// variables; and only a count of what the worker inherits from the
-// engine's environment.
+// each value came from; the emulator's own variables; and only a count of
+// what the worker inherits from the engine's environment.
 //
 // It writes what the official CLI would ask for: a missing secret (in
 // `.secret.local`) and an unresolved param (in `.env.local`, what its
@@ -18,7 +18,9 @@ import { Button, Input, Text } from '@cloudflare/kumo'
 import { useQuery } from '@tanstack/react-query'
 import { type KeyboardEvent, useState } from 'react'
 import type { FunctionDetail } from '@/api/generated/compute/FunctionDetail'
+import type { FunctionEnvironment } from '@/api/generated/compute/FunctionEnvironment'
 import type { FunctionEnvVariable } from '@/api/generated/compute/FunctionEnvVariable'
+import type { FunctionParam } from '@/api/generated/compute/FunctionParam'
 import { EntityLink } from '@/components/console/entity-link'
 import { InspectorSection } from '@/components/console/inspector'
 import { KeyValueList } from '@/components/console/key-value-list'
@@ -33,6 +35,35 @@ import { type EnvChangeLine, EnvChangeDialog } from './env-change-dialog'
 type Editing =
   | { kind: 'secret'; key: string; value: string }
   | { kind: 'param'; key: string; value: string; secret: boolean }
+
+/**
+ * What the codebase's own files and declared params put in `process.env`:
+ * env file and `.secret.local` values, and the defaults of the params no
+ * file sets.
+ */
+export function userVariables(environment: FunctionEnvironment): FunctionEnvVariable[] {
+  return environment.variables.filter(
+    (variable) =>
+      variable.source === 'dotEnv' ||
+      variable.source === 'secretLocal' ||
+      variable.source === 'paramDefault',
+  )
+}
+
+/** Where a listed variable's value comes from: its file, or `default`. */
+export function variableOrigin(variable: FunctionEnvVariable): string {
+  return variable.source === 'paramDefault' ? 'default' : (variable.fileName ?? '')
+}
+
+/**
+ * A param's value and where it comes from (its file, or `default` when no
+ * file sets it), or null when nothing gives it one (a secret is shown in
+ * Declared secrets).
+ */
+export function paramValue(param: FunctionParam): { value: string; from: string } | null {
+  if (param.secret || param.value === null) return null
+  return { value: param.value, from: param.file ?? 'default' }
+}
 
 /** Enter or ⌘S stages the edit; Escape gives it up. */
 function editKeys(event: KeyboardEvent, stage: () => void, cancel: () => void) {
@@ -52,9 +83,7 @@ export function EnvironmentTab({ detail, project }: { detail: FunctionDetail; pr
   const codebase = summary.codebase
   const [editing, setEditing] = useState<Editing | null>(null)
   const [staged, setStaged] = useState<readonly EnvChangeLine[] | null>(null)
-  const user = environment.variables.filter(
-    (variable) => variable.source === 'dotEnv' || variable.source === 'secretLocal',
-  )
+  const user = userVariables(environment)
   const emulator = environment.variables.filter((variable) => variable.source === 'emulator')
   const extension = environment.variables.filter((variable) => variable.source === 'extensionParam')
   const params = detail.params.filter((param) => !param.secret)
@@ -133,7 +162,7 @@ export function EnvironmentTab({ detail, project }: { detail: FunctionDetail; pr
                 )}
               </span>
               <span className="font-mono text-[11px] leading-5 text-kumo-subtle">
-                {variable.fileName}
+                {variableOrigin(variable)}
               </span>
             </li>
           ))}
@@ -245,9 +274,18 @@ export function EnvironmentTab({ detail, project }: { detail: FunctionDetail; pr
                       default {param.default}
                     </span>
                   )}
-                  {param.unresolved ? (
+                  {paramValue(param) && (
+                    <span className="font-mono text-[12px] text-kumo-default">
+                      {paramValue(param)?.value}
+                      <span className="text-[11px] text-kumo-subtle">
+                        {' '}
+                        · {paramValue(param)?.from}
+                      </span>
+                    </span>
+                  )}
+                  {param.unresolved && (
                     <>
-                      <StatusDot tone="warning" label="unresolved" />
+                      {!paramValue(param) && <StatusDot tone="warning" label="unresolved" />}
                       {editable && (
                         <Button
                           variant="secondary"
@@ -267,19 +305,13 @@ export function EnvironmentTab({ detail, project }: { detail: FunctionDetail; pr
                         </Button>
                       )}
                     </>
-                  ) : (
-                    <span className="font-mono text-[12px] text-kumo-default">
-                      {param.value}
-                      {param.file && (
-                        <span className="text-[11px] text-kumo-subtle"> · {param.file}</span>
-                      )}
-                    </span>
                   )}
                 </span>
                 {param.unresolved && (
                   <span className="text-[12px] text-kumo-subtle">
-                    No env file sets it; the official emulator would ask for it and write
-                    .env.local.
+                    {paramValue(param)
+                      ? 'No env file sets it, so it takes its default; the official emulator would ask for it, with the default filled in, and write .env.local.'
+                      : 'No env file sets it; the official emulator would ask for it and write .env.local.'}
                   </span>
                 )}
                 {param.description && (

@@ -769,9 +769,14 @@ test('the environment says where each value comes from, and saves secrets and pa
     expect(await loadsOf(engine, 'default')).toBeGreaterThan(before)
     expect(secrets.read()).toContain('MISSING_KEY=m1')
 
-    // An unresolved param, set as the official CLI's prompt does: in .env.local.
+    // A param no env file sets takes its default: listed with the variables
+    // as a default, and set as the official CLI's prompt does, in .env.local.
+    const batchVariable = tab.locator('[data-testid="env-variable"][data-key="BATCH"]')
+    await expect(batchVariable).toContainText('50')
+    await expect(batchVariable).toContainText('default')
     const batch = tab.locator('[data-testid="env-param"][data-key="BATCH"]')
-    await expect(batch).toContainText('unresolved')
+    await expect(batch).toContainText('50 · default')
+    await expect(batch).toContainText('so it takes its default')
     await page.getByTestId('env-set-param-BATCH').click()
     await page.getByTestId('env-edit-value').fill('25')
     await page.getByTestId('env-edit-review').click()
@@ -781,6 +786,7 @@ test('the environment says where each value comes from, and saves secrets and pa
     await page.getByTestId('env-change-dialog-confirm').click()
     await expect(dialog).toBeHidden({ timeout: 20_000 })
     await expect(batch).toContainText('25 · .env.local')
+    await expect(batchVariable).toContainText('.env.local')
     expect(readFileSync(local, 'utf8')).toMatch(/^BATCH=25$/m)
 
     // What the worker inherits from the host is counted, never shown.

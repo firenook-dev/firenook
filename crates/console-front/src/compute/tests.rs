@@ -92,6 +92,9 @@ params:
     default: hi
   - name: API_KEY
     type: secret
+  - name: BATCH
+    type: int
+    default: 50
 endpoints:
   api:
     entryPoint: api

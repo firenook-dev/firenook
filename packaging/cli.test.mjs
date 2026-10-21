@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import { NODE_TESTED, manifest, nodeCheck, platformKey, release, sha256, verifyBinary } from '../packages/cli/src/binary.mjs';
 import { canonical, inspectProject, launchContext, loadProject, parseOptions, selectProject } from '../packages/cli/src/options.mjs';
 import { DEMO_TOKEN_PATH, diagnose, execEnvironment, prepareLaunch, supervise, vendorExtensions } from '../packages/cli/src/runtime.mjs';
+import { activeProjects, configstorePath } from '../packages/cli/src/configstore.mjs';
 
 function project() {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-cli-test-'));
@@ -197,11 +198,56 @@ test('the project alias is chosen like the official applyRC and handed to the en
   const only = loadProject(options,dir);
   assert.deepEqual([only.project,only.alias],['demo-staging','staging']);
   assert.deepEqual(selectProject(undefined,{staging:'demo-staging',prod:'demo-prod'}),{project:undefined});
-  assert.deepEqual(selectProject(undefined,{default:'demo-a',prod:'demo-p'}),{project:'demo-a',alias:'default'});
+  assert.deepEqual(selectProject(undefined,{default:'demo-a',prod:'demo-p'}),{project:'demo-a',alias:'default',from:'.firebaserc'});
   // A default naming another alias still names that alias's project.
-  assert.deepEqual(selectProject(undefined,{default:'prod',prod:'demo-p'}),{project:'demo-p',alias:'default'});
-  assert.deepEqual(selectProject('prod',{default:'demo-a',prod:'demo-p'}),{project:'demo-p',alias:'prod'});
-  assert.deepEqual(selectProject('demo-x',{}),{project:'demo-x'});
+  assert.deepEqual(selectProject(undefined,{default:'prod',prod:'demo-p'}),{project:'demo-p',alias:'default',from:'.firebaserc'});
+  assert.deepEqual(selectProject('prod',{default:'demo-a',prod:'demo-p'}),{project:'demo-p',alias:'prod',from:'--project'});
+  assert.deepEqual(selectProject('demo-x',{}),{project:'demo-x',from:'--project'});
+});
+// Runs `body` with the Firebase CLI's configstore under a fresh XDG_CONFIG_HOME
+// holding `activeProjects`, as `firebase use` writes them.
+function withActiveProjects(activeProjects, body) {
+  const home = mkdtempSync(join(tmpdir(), 'firenook-configstore-'));
+  mkdirSync(join(home, 'configstore'));
+  writeFileSync(join(home, 'configstore', 'firebase-tools.json'), JSON.stringify({activeProjects, tokens:{refresh_token:'never-read'}}));
+  const previous = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = home;
+  try { return body(); } finally { if (previous === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = previous; }
+}
+test('the Firebase CLI configstore is read where configstore 5 keeps it, and only its active projects', () => {
+  assert.equal(configstorePath({XDG_CONFIG_HOME:'/xdg'},'/u/shop'),join('/xdg','configstore','firebase-tools.json'));
+  assert.equal(configstorePath({XDG_CONFIG_HOME:''},'/u/shop'),join('/u/shop','.config','configstore','firebase-tools.json'));
+  assert.equal(configstorePath({},''),undefined);
+  const dir = mkdtempSync(join(tmpdir(),'firenook-configstore-read-'));
+  const file = join(dir,'firebase-tools.json');
+  assert.deepEqual(activeProjects(file),{});
+  writeFileSync(file,'{not json');
+  assert.deepEqual(activeProjects(file),{});
+  writeFileSync(file,JSON.stringify({activeProjects:['x']}));
+  assert.deepEqual(activeProjects(file),{});
+  writeFileSync(file,JSON.stringify({activeProjects:{'/p':'staging'}}));
+  assert.deepEqual(activeProjects(file),{'/p':'staging'});
+});
+test('the Firebase CLI active project comes after --project and before .firebaserc, as officially', () => {
+  const {dir,options} = project();
+  // The fixture's .firebaserc: {default: demo-fixture, local: demo-local}.
+  const chosen = extra => { const p = loadProject({...options,...extra},dir); return [p.project,p.alias,p.projectFrom]; };
+  withActiveProjects({[dir]:'local'}, () => {
+    assert.deepEqual(chosen({}),['demo-local','local','firebase use']);
+    assert.equal(flagValue(launchFor(dir,options).args,'--project-alias'),'local');
+    assert.deepEqual(chosen({project:'default'}),['demo-fixture','default','--project']);
+  });
+  // Recorded for a parent directory, it still applies; an id is no alias.
+  withActiveProjects({[join(dir,'..')]:'demo-other'}, () => assert.deepEqual(chosen({}),['demo-other',undefined,'firebase use']));
+  // Keys match exactly as recorded: another spelling of the directory, or a
+  // child of it, does not.
+  withActiveProjects({[`${dir}/`]:'local', [join(dir,'nested')]:'local'}, () => assert.deepEqual(chosen({}),['demo-fixture','default','.firebaserc']));
+  withActiveProjects({}, () => assert.deepEqual(chosen({}),['demo-fixture','default','.firebaserc']));
+  // firebase.json's legacy `firebase` key comes after the active project.
+  const {dir:legacy,save} = project();
+  save({functions:{source:'functions'}, firebase:'demo-legacy', emulators:{functions:{}}});
+  withActiveProjects({}, () => assert.equal(loadProject(options,legacy).project,'demo-legacy'));
+  withActiveProjects({[legacy]:'local'}, () => assert.equal(loadProject(options,legacy).project,'demo-local'));
 });
 test('ext:vendor --offline reaches the engine', () => {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-vendor-test-'));

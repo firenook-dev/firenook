@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { activeProject } from './configstore.mjs';
 
 // The five data services Firenook emulates.
 export const SERVICES = ['firestore', 'auth', 'storage', 'functions', 'pubsub'];
@@ -121,18 +122,22 @@ export const contains = (parent, child) => {
 };
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-// The project and the .firebaserc alias it was selected by, as the official
-// CLI's applyRC picks them: --project naming an alias, else (no --project)
-// the only alias the file holds, else its default one. A Functions codebase
-// reads .env.<alias> for that alias. `projects.default` may hold another
-// alias's name, which then names the project.
-export function selectProject(selection, aliases) {
+// The project, the .firebaserc alias it was selected by and where the choice
+// came from, as the official CLI's applyRC picks them: --project, else the
+// active project `firebase use` recorded for this directory (`active`), else
+// firebase.json's legacy `firebase` key (`configured`); a choice naming an
+// alias selects it. With none of them, the only alias the file holds, else
+// its default one. A Functions codebase reads .env.<alias> for that alias.
+// `projects.default` may hold another alias's name, which then names the
+// project.
+export function selectProject(selection, aliases, {active, configured} = {}) {
   const entries = Object.entries(aliases).filter(([, id]) => typeof id === 'string' && id);
   const named = name => entries.find(([alias]) => alias === name)?.[1];
-  if (selection) return named(selection) ? {project:named(selection), alias:selection} : {project:selection};
-  if (entries.length === 1) return {project:entries[0][1], alias:entries[0][0]};
+  const [chosen, from] = selection ? [selection, '--project'] : active ? [active, 'firebase use'] : configured ? [configured, 'firebase.json'] : [];
+  if (chosen) return named(chosen) ? {project:named(chosen), alias:chosen, from} : {project:chosen, from};
+  if (entries.length === 1) return {project:entries[0][1], alias:entries[0][0], from:'.firebaserc'};
   const fallback = named('default');
-  if (fallback) return {project:named(fallback) || fallback, alias:'default'};
+  if (fallback) return {project:named(fallback) || fallback, alias:'default', from:'.firebaserc'};
   return {project:undefined};
 }
 
@@ -158,7 +163,8 @@ export function inspectProject(options, cwd = process.cwd()) {
     try { rcData = readJson(rc); } catch (error) { throw new Error(`${rc} is not valid JSON: ${error.message}`); }
   }
   const aliases = isObject(rcData?.projects) ? rcData.projects : {};
-  const {project, alias} = selectProject(options.project, aliases);
+  const {project, alias, from:projectFrom} = selectProject(options.project, aliases,
+    {active:activeProject(directory), configured:typeof data.firebase === 'string' ? data.firebase : undefined});
   if (!project) fail('project-missing', 'No project id. Pass --project <id> (or -P <id>), or record one with firenook use --add <id> (projects.default in .firebaserc).');
   else if (!validProjectId(project)) fail('project-invalid', `Invalid project id ${project}: use lowercase letters, digits and hyphens (6 to 30 characters, starting with a letter), or a demo- prefix for a local-only project.`);
   const demo = isDemoProject(project);
@@ -291,7 +297,7 @@ export function inspectProject(options, cwd = process.cwd()) {
   // The engine needs a positive minimum only when a Functions codebase exists.
   const functionsConfigured = has('functions') || has('extensions');
   const minimumFunctions = options['minimum-functions'] !== undefined ? String(options['minimum-functions']) : (services.includes('functions') && functionsConfigured ? '1' : '0');
-  return {config, directory, rc, data, project, alias, demo, configured, services, skipped, ui, uiExplicit, singleProjectMode, host, ports, imported, exported, state, resume, minimumFunctions, errors, warnings, skips};
+  return {config, directory, rc, data, project, alias, projectFrom, demo, configured, services, skipped, ui, uiExplicit, singleProjectMode, host, ports, imported, exported, state, resume, minimumFunctions, errors, warnings, skips};
 }
 
 // What the engine is told about this launch (--launch-context), so the

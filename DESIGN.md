@@ -667,8 +667,8 @@ emulator), replayed by `npm run replay:functions:runtime`:
   resolve before the options that reference them, as the official CLI
   answers its prompts without a terminal: an env file value, else the
   default, else the codebase does not load; nothing is written to
-  `.env.local`. A trigger on a service the suite does not run is listed,
-  ignored and warned about.
+  `.env.local`. A trigger on a service the suite does not run is listed and
+  warned about once; it is still called directly.
   The discovery client keeps no connection open: the SDK's
   `/__/quitquitquit` calls `server.close()`, which waits for every
   connection, so a kept one held the process (and the codebase's load) for

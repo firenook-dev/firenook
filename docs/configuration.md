@@ -11,6 +11,15 @@ How Firenook reads `firebase.json`, `.firebaserc` and the command line, and what
   beside it. `--config` names another file, relative to the current
   directory.
 
+- **Which project.** As the official CLI picks it: `--project` (or `-P`),
+  else the active project `firebase use` recorded for this directory or a
+  parent (in the Firebase CLI's own `configstore/firebase-tools.json`, under
+  `$XDG_CONFIG_HOME`, else `~/.config`; the directory as it was recorded,
+  links not followed), else `firebase.json`'s legacy `firebase` key, else
+  `.firebaserc`: its only alias, or `projects.default`. A choice that names
+  an alias selects it, and with it `.env.<alias>`. `firenook use` records
+  `projects.default` and says when a `firebase use` choice comes first; that
+  file is only read, never written.
 - **Services.** A service starts when `firebase.json` has its top-level
   section (`firestore`, `storage`, `functions`; `extensions` counts as
   functions) or an `emulators.<name>` entry (Auth and Pub/Sub have no section,

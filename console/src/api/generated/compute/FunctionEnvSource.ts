@@ -3,4 +3,4 @@
 /**
  * Where a variable comes from.
  */
-export type FunctionEnvSource = "dotEnv" | "secretLocal" | "emulator" | "extensionParam";
+export type FunctionEnvSource = "dotEnv" | "secretLocal" | "paramDefault" | "emulator" | "extensionParam";

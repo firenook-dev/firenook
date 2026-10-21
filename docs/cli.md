@@ -127,8 +127,10 @@ records an alias (`--alias NAME`, else `default`, which makes it the active
 project); `--unalias NAME` removes an alias; `--clear` removes
 `projects.default`, so no project is active, and keeps the aliases. With no
 argument `use` lists the aliases and the active project (`--json` prints them
-as JSON). Only `storage` targets exist for Firenook (`database`/`hosting` are
-refused).
+as JSON). An active project set with `firebase use` for the directory comes
+before `projects.default`, as in the official CLI; `use` says when there is
+one, and `target:apply` files targets under the project a start would pick.
+Only `storage` targets exist for Firenook (`database`/`hosting` are refused).
 
 Commands that talk to a running suite (`emulators:export`, `firestore:delete`,
 `functions:invoke`, `mcp`) find its hub as the official CLI does, through the

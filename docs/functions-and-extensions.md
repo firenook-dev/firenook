@@ -20,11 +20,19 @@ firenook emulators:start --project demo-my-app --offline                  # neve
 
 Each codebase reads the official dotenv chain, later files winning: `.env`,
 `.env.<projectId>`, `.env.<alias>` and `.env.local`. The alias is the
-`.firebaserc` alias the project was selected by: `--project staging` when
-`staging` is an alias, else (no `--project`) the file's only alias, else
-`default`. A project named by its id has no alias. Having both
-`.env.<projectId>` and `.env.<alias>` is refused, as officially.
-`.secret.local` holds the secrets a function declares.
+`.firebaserc` alias the project was selected by (see
+[Configuration](configuration.md)): `staging` for
+`--project staging`, or for `firebase use staging`, when `staging` is an
+alias; with neither, the file's only alias, else `default`. A project named
+by its id has no alias. Having both `.env.<projectId>` and `.env.<alias>` is
+refused, as officially. `.secret.local` holds the secrets a function
+declares.
+
+The discovery process (the SDK run that turns the code into the function
+list) gets the env file values too, as the official emulator passes them, so
+code that reads `process.env` while it loads (a `region` from
+`process.env.SHOP_REGION`) sees the same values there and in the worker. A
+param's default and the secrets are not there yet; the worker has them.
 
 Params (`defineString`, `defineInt`, `defineBoolean`, `defineList`,
 `defineSecret` ...) resolve as the official emulator resolves them when no
@@ -48,8 +56,8 @@ terminal is attached, since Firenook never prompts:
 Two deliberate differences: the official emulator writes the answers it
 took, defaults included, to `.env.local`; Firenook writes nothing and takes
 the default again at every load, so a changed default applies on the next
-reload (the console's Environment tab still offers to write a value to
-`.env.local`). And a list param reaches `process.env` as the JSON array the
+reload (the console's Environment tab lists the default among the
+variables, marked `default`, and offers to write a value to `.env.local`). And a list param reaches `process.env` as the JSON array the
 SDK's `.value()` parses, as a deployed function gets it; the official
 emulator passes the text it wrote (`red,green`), which `.value()` cannot
 parse.
@@ -58,8 +66,10 @@ parse.
 
 A trigger on a service the suite does not run (Storage left out of `--only`,
 or the Realtime Database, which Firenook does not emulate) is loaded and
-listed but receives nothing, and the load says so with the official line,
-as a warning on the terminal screen and in the plain log:
+listed but receives no event, and the first load says so with the official
+line, as a warning on the terminal screen and in the plain log (the
+console's page for the function says which service it needs; Run and
+functions:invoke still call it directly):
 
 ```text
 functions[us-central1-onUpload]: function ignored because the storage emulator does not exist or is not running.

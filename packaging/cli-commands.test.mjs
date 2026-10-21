@@ -427,11 +427,33 @@ test('use edits .firebaserc aliases and the active default without touching othe
   assert.throws(() => use(undefined, {...options, alias:'x'}, dir, log()), /--alias needs the project id/);
   output = log();
   use(undefined, {...options, json:true}, dir, output);
-  assert.deepEqual(JSON.parse(output.out[0]), {path:join(dir, '.firebaserc'), projects:{ci:'demo-c'}, active:null});
+  assert.deepEqual(JSON.parse(output.out[0]), {path:join(dir, '.firebaserc'), projects:{ci:'demo-c'}, active:null, cliActive:null});
   // A fresh directory gets a new file.
   const fresh = mkdtempSync(join(tmpdir(), 'firenook-use-fresh-'));
   use('demo-new', options, fresh, log());
   assert.deepEqual(readJson(join(fresh, '.firebaserc')), {projects:{default:'demo-new'}});
+});
+test('use and target:apply heed the Firebase CLI active project for the directory', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-use-active-'));
+  writeFileSync(join(dir, '.firebaserc'), JSON.stringify({projects:{default:'demo-a', staging:'demo-b'}}));
+  const home = mkdtempSync(join(tmpdir(), 'firenook-configstore-'));
+  mkdirSync(join(home, 'configstore'));
+  writeFileSync(join(home, 'configstore', 'firebase-tools.json'), JSON.stringify({activeProjects:{[dir]:'staging'}}));
+  const previous = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = home;
+  try {
+    let output = log();
+    use('default', options, dir, output);
+    assert.match(output.out.join('\n'), /Now using alias default \(demo-a\)[\s\S]*active project for this directory is staging \(set by firebase use\); it is used before projects\.default/);
+    output = log();
+    use(undefined, {...options, json:true}, dir, output);
+    assert.equal(JSON.parse(output.out[0]).cliActive, 'staging');
+    // Deploy targets go under the project a start would choose.
+    targetApply(['storage', 'main', 'demo-b.appspot.com'], options, dir, log());
+    assert.deepEqual(readJson(join(dir, '.firebaserc')).targets, {'demo-b':{storage:{main:['demo-b.appspot.com']}}});
+  } finally {
+    if (previous === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = previous;
+  }
 });
 test('target:apply and target:clear mirror the official .firebaserc target semantics', () => {
   const rc = {};
