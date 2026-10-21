@@ -572,13 +572,15 @@ fn grouped(count: u64) -> String {
 
 /// The store's own tables, in the order `state inspect` lists them, with
 /// their names for people; anything else follows under its own name.
-const LABELS: [(&str, &str); 7] = [
+const LABELS: [(&str, &str); 9] = [
     ("documents_v2", "Documents"),
-    ("field_equality_v1", "Field index"),
-    ("field_equality_v1_prefixes", "Field index names"),
+    ("field_order_v1", "Field index"),
+    ("field_order_v1_prefixes", "Field index names"),
     ("collections_v2", "Collection index"),
     ("collection_groups_v2", "Collection-group index"),
     ("metadata_v1", "Store metadata"),
+    ("field_equality_v1", "Old field index"),
+    ("field_equality_v1_prefixes", "Old field index names"),
     ("documents_v1", "Old documents table"),
 ];
 

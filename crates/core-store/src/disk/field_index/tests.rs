@@ -4,13 +4,14 @@ use std::sync::Arc;
 use redb::{ReadableDatabase, ReadableTable};
 
 use super::super::{
-    DiskOptions, DiskStore, FIELD_INDEX, FIELD_INDEX_REVISION_KEY, METADATA, WalRecord,
-    rebuild_field_index,
+    DiskOptions, DiskStore, FIELD_INDEX, FIELD_INDEX_REVISION_KEY, LEGACY_FIELD_INDEX,
+    LEGACY_FIELD_INDEX_REVISION_KEY, LEGACY_FIELD_PREFIXES, METADATA, STATE_KEY, WalRecord, decode,
+    encode, rebuild_field_index,
 };
-use super::value_key;
+use super::{field_index_key, value_key};
 use crate::{
-    DatabaseName, DocumentKey, FieldEquality, FieldPath, Fields, Precondition, Timestamp, Value,
-    Write, compare_resource_paths,
+    DatabaseName, DocumentKey, FieldEquality, FieldOrderRange, FieldPath, Fields, Precondition,
+    Timestamp, Value, Write, compare_resource_paths,
 };
 
 struct TestDirectory(std::path::PathBuf);
@@ -189,7 +190,6 @@ fn values_the_query_engine_compares_as_equal_share_one_key() {
             value_key(&right),
             "{left:?} and {right:?} compare as equal"
         );
-        assert!(value_key(&left).is_some());
     }
 
     let distinct = [
@@ -216,12 +216,21 @@ fn values_the_query_engine_compares_as_equal_share_one_key() {
         );
     }
 
-    for unindexed in [
+    // Every type is indexed; a non-empty array, map or vector keys only its
+    // group, which the walk sorts.
+    for grouped in [
         Value::Array(vec![Value::Integer(1)]),
-        Value::Map(BTreeMap::new()),
+        Value::Map(BTreeMap::from([("k".to_owned(), Value::Null)])),
         Value::Vector(vec![1.0]),
     ] {
-        assert_eq!(value_key(&unindexed), None);
+        assert!(!field_index_key(&grouped).exact, "{grouped:?}");
+    }
+    for empty in [
+        Value::Array(Vec::new()),
+        Value::Map(BTreeMap::new()),
+        Value::Vector(Vec::new()),
+    ] {
+        assert!(field_index_key(&empty).exact, "{empty:?}");
     }
 }
 
@@ -246,11 +255,14 @@ fn value_keys_are_prefix_free() {
             latitude: 1.0,
             longitude: 2.0,
         },
+        Value::Array(Vec::new()),
+        Value::Array(vec![Value::Null]),
+        Value::Vector(Vec::new()),
+        Value::Vector(vec![1.0]),
+        Value::Map(BTreeMap::new()),
+        Value::Map(BTreeMap::from([("k".to_owned(), Value::Null)])),
     ];
-    let keys = values
-        .iter()
-        .map(|value| value_key(value).unwrap())
-        .collect::<Vec<_>>();
+    let keys = values.iter().map(value_key).collect::<Vec<_>>();
     for (left_index, left) in keys.iter().enumerate() {
         for (right_index, right) in keys.iter().enumerate() {
             if left_index != right_index {
@@ -642,4 +654,326 @@ fn an_open_that_rebuilds_counts_documents_like_a_plain_open() {
     };
     assert_eq!(rebuilt, plain);
     assert_eq!(rebuilt.entries, 3);
+}
+
+/// What a release before 0.2.0 decides when it opens the store: whether its
+/// equality index describes the persisted revision. When it does not, that
+/// release rebuilds the index before any query reads it.
+fn legacy_index_trusted(store: &DiskStore) -> bool {
+    let state = store.state();
+    let transaction = state.database.begin_read().unwrap();
+    let metadata = transaction.open_table(METADATA).unwrap();
+    let persisted: super::super::PersistedState =
+        decode(metadata.get(STATE_KEY).unwrap().unwrap().value()).unwrap();
+    metadata
+        .get(LEGACY_FIELD_INDEX_REVISION_KEY)
+        .unwrap()
+        .map(|revision| decode::<crate::Revision>(revision.value()).unwrap())
+        == Some(persisted.revision)
+}
+
+/// Leaves the tables and the stamp an older release writes when it opens
+/// the store and rebuilds its equality index without committing anything: a
+/// legacy index trusted at the current revision, with prefix ids of its own.
+fn write_legacy_index(store: &DiskStore) {
+    let state = store.state();
+    let transaction = state.database.begin_write().unwrap();
+    {
+        let mut index = transaction.open_table(LEGACY_FIELD_INDEX).unwrap();
+        index
+            .insert(&[0_u8, 0, 0, 0, 6, 0, 1, 2][..], &b"stale"[..])
+            .unwrap();
+        let mut prefixes = transaction.open_table(LEGACY_FIELD_PREFIXES).unwrap();
+        prefixes.insert(&b""[..], 7).unwrap();
+        let mut metadata = transaction.open_table(METADATA).unwrap();
+        let persisted: super::super::PersistedState =
+            decode(metadata.get(STATE_KEY).unwrap().unwrap().value()).unwrap();
+        metadata
+            .insert(
+                LEGACY_FIELD_INDEX_REVISION_KEY,
+                encode(&persisted.revision).unwrap().as_slice(),
+            )
+            .unwrap();
+    }
+    transaction.commit().unwrap();
+}
+
+fn has_table(store: &DiskStore, name: &str) -> bool {
+    use redb::TableHandle as _;
+    let state = store.state();
+    let transaction = state.database.begin_read().unwrap();
+    transaction
+        .list_tables()
+        .unwrap()
+        .any(|table| table.name() == name)
+}
+
+#[test]
+fn an_older_store_loses_its_equality_index_so_an_older_release_rebuilds_it() {
+    let directory = TestDirectory::new();
+    {
+        let store = DiskStore::open(&directory.0, DiskOptions::default()).unwrap();
+        store
+            .commit(&[set("jobs/a", fields([("status", text("queued"))]))])
+            .unwrap();
+        // As a release before 0.2.0 leaves it: its index stamped as current.
+        write_legacy_index(&store);
+        assert!(legacy_index_trusted(&store));
+    }
+    let store = DiskStore::open(&directory.0, DiskOptions::default()).unwrap();
+    assert!(
+        !legacy_index_trusted(&store),
+        "an older release must not trust an index this release no longer maintains"
+    );
+    assert!(!has_table(&store, "field_equality_v1"));
+    assert!(!has_table(&store, "field_equality_v1_prefixes"));
+    assert_eq!(
+        candidates(&store.snapshot(), "jobs", &[("status", &[text("queued")])]),
+        ["jobs/a"],
+        "the order index is untouched by the older release's prefix ids"
+    );
+}
+
+#[test]
+fn a_rebuild_drops_the_equality_index_in_the_same_transaction() {
+    let directory = TestDirectory::new();
+    {
+        let store = DiskStore::open(&directory.0, DiskOptions::default()).unwrap();
+        store
+            .commit(&[set("jobs/a", fields([("status", text("queued"))]))])
+            .unwrap();
+        write_legacy_index(&store);
+    }
+    {
+        // An older release writes without maintaining the order index.
+        let store = DiskStore::open(&directory.0, options(false)).unwrap();
+        assert!(
+            has_table(&store, "field_equality_v1"),
+            "a store opened with the index off is left as it is"
+        );
+        store
+            .commit(&[set("jobs/b", fields([("status", text("queued"))]))])
+            .unwrap();
+        store.flush().unwrap();
+    }
+    let store = DiskStore::open(&directory.0, DiskOptions::default()).unwrap();
+    assert!(!legacy_index_trusted(&store));
+    assert!(!has_table(&store, "field_equality_v1"));
+    assert_eq!(
+        candidates(&store.snapshot(), "jobs", &[("status", &[text("queued")])]),
+        ["jobs/a", "jobs/b"]
+    );
+}
+
+#[test]
+fn a_store_written_before_the_order_index_builds_it_on_open() {
+    let directory = TestDirectory::new();
+    {
+        let store = DiskStore::open(&directory.0, DiskOptions::default()).unwrap();
+        store
+            .commit(&[
+                set("jobs/a", fields([("n", Value::Integer(2))])),
+                set("jobs/b", fields([("n", Value::Double(1.5))])),
+                set("jobs/c", fields([("n", text("x"))])),
+            ])
+            .unwrap();
+        // A release before 0.2.0 never made the order index or its stamp.
+        let state = store.state();
+        let transaction = state.database.begin_write().unwrap();
+        transaction.delete_table(FIELD_INDEX).unwrap();
+        transaction
+            .delete_table(super::super::FIELD_PREFIXES)
+            .unwrap();
+        transaction
+            .open_table(METADATA)
+            .unwrap()
+            .remove(FIELD_INDEX_REVISION_KEY)
+            .unwrap();
+        transaction.commit().unwrap();
+        drop(state);
+        write_legacy_index(&store);
+    }
+    let store = DiskStore::open(&directory.0, DiskOptions::default()).unwrap();
+    assert_eq!(
+        walked(&store.snapshot(), "jobs", "n", false),
+        ["jobs/b", "jobs/a", "jobs/c"]
+    );
+    assert!(!legacy_index_trusted(&store));
+}
+
+/// The paths a walk over `field` yields, with no bounds or lookups.
+fn walked(
+    snapshot: &crate::Snapshot,
+    collection: &str,
+    field: &str,
+    descending: bool,
+) -> Vec<String> {
+    walked_within(
+        snapshot,
+        collection,
+        field,
+        descending,
+        &FieldOrderRange::all(),
+        &[],
+    )
+}
+
+fn walked_within(
+    snapshot: &crate::Snapshot,
+    collection: &str,
+    field: &str,
+    descending: bool,
+    bounds: &FieldOrderRange,
+    lookups: &[(&str, &[Value])],
+) -> Vec<String> {
+    let equalities = lookups
+        .iter()
+        .map(|(field, values)| FieldEquality { field, values })
+        .collect::<Vec<_>>();
+    snapshot
+        .walk_field_order(
+            &database(),
+            collection,
+            field,
+            descending,
+            bounds,
+            &equalities,
+        )
+        .expect("the disk snapshot walks the field index")
+        .map(|entry| entry.key.path().to_owned())
+        .collect()
+}
+
+/// Documents whose `n` covers null, NaN, equal numbers of both types, a
+/// string and an array, beside ones that lack it or live elsewhere.
+fn walk_store(directory: &TestDirectory) -> DiskStore {
+    let store = DiskStore::open(&directory.0, DiskOptions::default()).unwrap();
+    store
+        .commit(&[
+            set(
+                "jobs/__id9__",
+                fields([("n", Value::Integer(1)), ("k", text("x"))]),
+            ),
+            set(
+                "jobs/__id10__",
+                fields([("n", Value::Double(1.0)), ("k", text("y"))]),
+            ),
+            set("jobs/a", fields([("n", Value::Null), ("k", text("x"))])),
+            set("jobs/b", fields([("n", Value::Array(vec![Value::Null]))])),
+            set(
+                "jobs/c",
+                fields([("n", Value::Double(f64::NAN)), ("k", text("x"))]),
+            ),
+            set("jobs/d", fields([("n", text("t"))])),
+            set("jobs/e", fields([("k", text("x"))])),
+            set("jobs/d/sub/f", fields([("n", Value::Integer(0))])),
+            set("other/g", fields([("n", Value::Integer(0))])),
+        ])
+        .unwrap();
+    store
+}
+
+#[test]
+fn a_walk_yields_every_holder_of_the_field_in_value_then_name_order() {
+    let directory = TestDirectory::new();
+    let store = walk_store(&directory);
+    let snapshot = store.snapshot();
+    let ascending = [
+        "jobs/a",
+        "jobs/c",
+        "jobs/__id9__",
+        "jobs/__id10__",
+        "jobs/d",
+        "jobs/b",
+    ];
+    assert_eq!(walked(&snapshot, "jobs", "n", false), ascending);
+    let mut descending = ascending;
+    descending.reverse();
+    assert_eq!(walked(&snapshot, "jobs", "n", true), descending);
+    assert_eq!(
+        walked(&snapshot, "jobs", "absent", false),
+        Vec::<String>::new()
+    );
+
+    // The array is one group of its own; every other entry is exact.
+    let tied = snapshot
+        .walk_field_order(
+            &database(),
+            "jobs",
+            "n",
+            false,
+            &FieldOrderRange::all(),
+            &[],
+        )
+        .unwrap()
+        .map(|entry| entry.tied.is_some())
+        .collect::<Vec<_>>();
+    assert_eq!(tied, [false, false, false, false, false, true]);
+
+    // A historical snapshot keeps the scan.
+    let revision = store.snapshot().revision();
+    store.commit(&[delete("jobs/a")]).unwrap();
+    assert!(
+        store
+            .snapshot_at(revision)
+            .unwrap()
+            .walk_field_order(
+                &database(),
+                "jobs",
+                "n",
+                false,
+                &FieldOrderRange::all(),
+                &[]
+            )
+            .is_none()
+    );
+}
+
+#[test]
+fn a_walk_keeps_to_its_bounds_and_lookups() {
+    let directory = TestDirectory::new();
+    let store = walk_store(&directory);
+    let snapshot = store.snapshot();
+    let mut numbers = FieldOrderRange::all();
+    numbers.within_type_of(&Value::Integer(0));
+    assert_eq!(
+        walked_within(&snapshot, "jobs", "n", false, &numbers, &[]),
+        ["jobs/__id9__", "jobs/__id10__"],
+        "a number range leaves NaN out"
+    );
+    let mut from = FieldOrderRange::all();
+    from.after(&Value::Integer(1), Some("__id9__"));
+    assert_eq!(
+        walked_within(&snapshot, "jobs", "n", false, &from, &[]),
+        ["jobs/__id10__", "jobs/d", "jobs/b"],
+        "a cursor seeks to its document inside one value"
+    );
+    assert_eq!(
+        walked_within(&snapshot, "jobs", "n", true, &from, &[]),
+        ["jobs/b", "jobs/d", "jobs/__id10__"]
+    );
+    let all = FieldOrderRange::all();
+    assert_eq!(
+        walked_within(&snapshot, "jobs", "n", false, &all, &[("k", &[text("x")])]),
+        ["jobs/a", "jobs/c", "jobs/__id9__"],
+        "a lookup on another field skips documents without reading them"
+    );
+    assert_eq!(
+        walked_within(
+            &snapshot,
+            "jobs",
+            "n",
+            false,
+            &all,
+            &[("absent", &[text("x")])]
+        ),
+        Vec::<String>::new()
+    );
+    let mut nothing = FieldOrderRange::all();
+    nothing.within_values(&[]);
+    assert!(nothing.is_empty());
+    assert_eq!(
+        walked_within(&snapshot, "jobs", "n", false, &nothing, &[]),
+        Vec::<String>::new()
+    );
 }

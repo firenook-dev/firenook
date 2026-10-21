@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use firenook_core_store::{
     DatabaseName, Document, DocumentKey, FieldEquality, Fields, LazyDocument, Snapshot, Value,
-    compare_resource_paths, field_index_holds,
+    compare_resource_paths,
 };
 
 use crate::indexes::IndexScope;
@@ -1500,12 +1500,11 @@ fn scoped_documents(
     }
 }
 
-/// The conjunctive `==` and `in` filters on one top-level field whose values
-/// the field index holds, as `(field, alternatives)`. `in` drops `null` and
-/// NaN, which never match a membership; an `in` left with no value matches
-/// nothing, and its empty lookup yields no candidate. Filters under an `or`,
-/// on nested or `__name__` paths, or on arrays, maps and vectors are not
-/// lookups.
+/// The conjunctive `==` and `in` filters on one top-level field, as `(field,
+/// alternatives)`. `in` drops `null` and NaN, which never match a
+/// membership; an `in` left with no value matches nothing, and its empty
+/// lookup yields no candidate. Filters under an `or` or on nested or
+/// `__name__` paths are not lookups.
 fn equality_lookups(query: &Query) -> Vec<(String, Vec<Value>)> {
     fn collect(filter: &Filter, lookups: &mut Vec<(String, Vec<Value>)>) {
         match filter {
@@ -1531,9 +1530,7 @@ fn equality_lookups(query: &Query) -> Vec<(String, Vec<Value>)> {
                         .collect(),
                     _ => return,
                 };
-                if values.iter().all(field_index_holds) {
-                    lookups.push((field.clone(), values));
-                }
+                lookups.push((field.clone(), values));
             }
         }
     }

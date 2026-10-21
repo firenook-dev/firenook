@@ -114,17 +114,39 @@ pub(crate) fn decode_stored_document(bytes: &[u8]) -> Result<Document, DecodeErr
     Ok(document)
 }
 
-/// The top-level fields of a stored value whose values are not arrays, maps
-/// or vectors, decoding only those values: what the disk store's field index
-/// holds for the document. A value without a directory is decoded in full.
-pub(crate) fn stored_scalar_fields(bytes: &[u8]) -> Result<Vec<(String, Value)>, DecodeError> {
+/// A top-level field of a stored document as the disk field index needs it:
+/// an array or a map only by its emptiness, which is all its key holds, so
+/// reading a document's previous entries never decodes its nested values.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum StoredField {
+    Value(Value),
+    Array { empty: bool },
+    Map { empty: bool },
+}
+
+impl StoredField {
+    fn of(value: Value) -> Self {
+        match value {
+            Value::Array(values) => Self::Array {
+                empty: values.is_empty(),
+            },
+            Value::Map(fields) => Self::Map {
+                empty: fields.is_empty(),
+            },
+            value => Self::Value(value),
+        }
+    }
+}
+
+/// Every top-level field of a stored value, decoding only the values the
+/// disk field index keys in full. A value without a directory is decoded in
+/// full.
+pub(crate) fn stored_index_fields(bytes: &[u8]) -> Result<Vec<(String, StoredField)>, DecodeError> {
     if bytes.first() != Some(&DIRECTORY_MARKER) {
         return Ok(decode_stored_document(bytes)?
             .fields
             .into_iter()
-            .filter(|(_, value)| {
-                !matches!(value, Value::Array(_) | Value::Map(_) | Value::Vector(_))
-            })
+            .map(|(field, value)| (field, StoredField::of(value)))
             .collect());
     }
     let mut directory_decoder = decoder(&bytes[1..]);
@@ -158,11 +180,17 @@ pub(crate) fn stored_scalar_fields(bytes: &[u8]) -> Result<Vec<(String, Value)>,
         let value = bytes
             .get(start..end)
             .ok_or(DecodeError::UnexpectedEnd { additional: len })?;
-        let variant = u32::decode(&mut decoder(value))?;
-        if matches!(variant, VARIANT_ARRAY | VARIANT_MAP | VARIANT_VECTOR) {
-            continue;
-        }
-        fields.push((key, Value::decode(&mut decoder(value))?));
+        let mut value_decoder = decoder(value);
+        let field = match u32::decode(&mut value_decoder)? {
+            VARIANT_ARRAY => StoredField::Array {
+                empty: length(&mut value_decoder)? == 0,
+            },
+            VARIANT_MAP => StoredField::Map {
+                empty: length(&mut value_decoder)? == 0,
+            },
+            _ => StoredField::Value(Value::decode(&mut decoder(value))?),
+        };
+        fields.push((key, field));
     }
     Ok(fields)
 }
@@ -694,6 +722,22 @@ mod tests {
         );
         assert!(!lazy.is_decoded());
         assert_eq!(bytes_of(&lazy.into_document()), bytes_of(&document));
+    }
+
+    #[test]
+    fn stored_index_fields_match_the_decoded_document() {
+        for (layout, encoded, document) in layouts(rich_fields()) {
+            let expected = document
+                .fields()
+                .iter()
+                .map(|(field, value)| (field.clone(), StoredField::of(value.clone())))
+                .collect::<Vec<_>>();
+            let actual = stored_index_fields(&encoded.bytes).unwrap();
+            // NaN compares unequal to itself; compare debug forms instead.
+            assert_eq!(format!("{actual:?}"), format!("{expected:?}"), "{layout}");
+            assert!(actual.contains(&("empty".to_owned(), StoredField::Map { empty: true })));
+            assert!(actual.contains(&("array".to_owned(), StoredField::Array { empty: false })));
+        }
     }
 
     #[test]

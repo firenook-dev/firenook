@@ -27,15 +27,15 @@ mod precision;
 
 pub use disk::{
     DEFAULT_REDB_CACHE_SIZE_BYTES, DEFAULT_WRITE_BEHIND_INTERVAL, DiskBulkCommit, DiskDurability,
-    DiskError, DiskOptions, DiskStore, OpenWatch, WeakDiskStore, adopt_legacy_files,
-    field_indexes_from_env,
+    DiskError, DiskOptions, DiskStore, FieldIndexKey, FieldOrderRange, OpenWatch, WeakDiskStore,
+    adopt_legacy_files, field_index_key, field_indexes_from_env,
 };
 /// Work on a stopped store's file.
 pub mod maintenance {
     pub use crate::disk::{Compaction, StoreSize, TableSize, compact, inspect};
 }
 pub use lazy::{EncodedDocument, LazyDocument};
-use lazy::{decode_stored_document, encode_stored_document, stored_scalar_fields};
+use lazy::{decode_stored_document, encode_stored_document, stored_index_fields};
 
 /// Firestore document fields in deterministic field-name order.
 pub type Fields = BTreeMap<String, Value>;
@@ -149,11 +149,35 @@ pub struct FieldEquality<'a> {
     pub values: &'a [Value],
 }
 
-/// Whether the disk store's field index holds `value`, so an equality on it
-/// can be read from the index. Arrays, maps and vectors are not indexed.
-#[must_use]
-pub const fn field_index_holds(value: &Value) -> bool {
-    !matches!(value, Value::Array(_) | Value::Map(_) | Value::Vector(_))
+/// One document of a [`FieldOrderWalk`].
+#[derive(Debug, Clone)]
+pub struct FieldOrderEntry {
+    /// The document's key.
+    pub key: DocumentKey,
+    /// The document, decoded only as far as it is read.
+    pub document: LazyDocument,
+    /// `None` when the index puts the document exactly where the query order
+    /// does. Otherwise the number shared by a run of consecutive entries
+    /// whose values the index cannot tell apart (long strings, non-empty
+    /// arrays and maps): the run sits in its place among the other entries,
+    /// and the caller sorts its members itself.
+    pub tied: Option<u64>,
+}
+
+/// The documents of one collection that hold one top-level field, in that
+/// field's query order; see [`Snapshot::walk_field_order`].
+pub struct FieldOrderWalk(Box<disk::DiskOrderWalk>);
+
+impl Iterator for FieldOrderWalk {
+    type Item = FieldOrderEntry;
+
+    fn next(&mut self) -> Option<FieldOrderEntry> {
+        self.0.next().map(|(key, document, tied)| FieldOrderEntry {
+            key,
+            document,
+            tied,
+        })
+    }
 }
 
 /// A project and database pair.
@@ -1635,9 +1659,9 @@ impl Snapshot {
     /// top-level fields satisfy every equality, in the collection's query
     /// order, read through the disk store's field index. `None` when this
     /// snapshot has no field index (memory stores, or the index switched
-    /// off), when `equalities` is empty or when a value is not indexed; the
-    /// caller then scans the collection. The caller must still evaluate its
-    /// filters on every candidate.
+    /// off) or when `equalities` is empty; the caller then scans the
+    /// collection. The caller must still evaluate its filters on every
+    /// candidate.
     #[must_use]
     pub fn iter_collection_equal(
         &self,
@@ -1645,17 +1669,48 @@ impl Snapshot {
         collection_path: &str,
         equalities: &[FieldEquality<'_>],
     ) -> Option<SnapshotLazyDocumentIterator> {
-        if equalities
-            .iter()
-            .any(|equality| !equality.values.iter().all(field_index_holds))
-        {
-            return None;
-        }
         match &self.documents {
             SnapshotDocuments::Memory { .. } => None,
             SnapshotDocuments::Disk(documents) => documents
                 .iter_collection_equal(database, collection_path, equalities)
                 .map(|documents| SnapshotDocumentIterator::disk(documents).lazy()),
+        }
+    }
+
+    /// The direct documents of `collection_path` that hold the top-level
+    /// `field`, in its query order and then by name (both backwards when
+    /// `descending`), from the disk store's field index: the order a query
+    /// ordered by that field returns, so the caller can stop at its limit.
+    /// Only documents inside `bounds` and satisfying every equality are
+    /// yielded; documents failing an equality are never read. Every
+    /// document holding the field inside the bounds comes out once, each in
+    /// its place, except the members of a tied run (see
+    /// [`FieldOrderEntry::tied`]), which the caller sorts. The caller must
+    /// still evaluate its filters and cursors on every document. `None` for
+    /// memory stores, with the index switched off, and for historical
+    /// snapshots.
+    #[must_use]
+    pub fn walk_field_order(
+        &self,
+        database: &DatabaseName,
+        collection_path: &str,
+        field: &str,
+        descending: bool,
+        bounds: &FieldOrderRange,
+        equalities: &[FieldEquality<'_>],
+    ) -> Option<FieldOrderWalk> {
+        match &self.documents {
+            SnapshotDocuments::Memory { .. } => None,
+            SnapshotDocuments::Disk(documents) => documents
+                .walk_field_order(
+                    database,
+                    collection_path,
+                    field,
+                    descending,
+                    bounds,
+                    equalities,
+                )
+                .map(|walk| FieldOrderWalk(Box::new(walk))),
         }
     }
 
