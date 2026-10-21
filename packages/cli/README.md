@@ -142,7 +142,8 @@ Every command and option: [CLI reference](https://github.com/firenook-dev/fireno
 
 ## Requirements
 
-Node 24 on macOS (Apple silicon or Intel), Linux (x64 or arm64, glibc) or
+Node 24 on macOS (Apple silicon or Intel), Linux (x64 or arm64, glibc 2.28 or
+newer: RHEL 8, Debian 10, Ubuntu 20.04, node:24-slim and later; not Alpine) or
 Windows x64. Keep optional dependencies enabled: they carry the native engine
 for your platform. Firenook is in preview (`0.2.0-next` releases): pin an exact
 version (`--save-exact`) and upgrade on purpose.

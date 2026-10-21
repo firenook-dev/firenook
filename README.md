@@ -252,8 +252,9 @@ connectStorageEmulator(storage, '127.0.0.1', 9199);
 connectFunctionsEmulator(functions, '127.0.0.1', 5001);
 ```
 
-Firenook needs Node 24 on macOS, Linux (glibc) or Windows x64. The
-[getting started guide](docs/getting-started.md) covers each step in more
+Firenook needs Node 24 on macOS, Linux (glibc 2.28 or newer, so RHEL 8,
+Debian 10, Ubuntu 20.04, node:24-slim and later; not Alpine) or Windows x64.
+The [getting started guide](docs/getting-started.md) covers each step in more
 depth, including tests and keeping data.
 
 ## Documentation

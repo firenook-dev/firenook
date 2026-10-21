@@ -77,14 +77,19 @@ jobs:
         run: |
           test "$(git -C accepted-engine rev-parse HEAD)" = "$EXPECTED_REVISION"
           rustup toolchain install "$TOOLCHAIN" --profile minimal --no-self-update
+          cargo=(cargo "+$TOOLCHAIN")
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             export CARGO_BUILD_TARGET=x86_64-pc-windows-msvc
             export CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS='-C target-feature=+crt-static'
           fi
-          cargo "+$TOOLCHAIN" build --manifest-path accepted-engine/Cargo.toml --locked --release --bin firenook
-          cargo "+$TOOLCHAIN" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-suite-runtime --lib control::tests
-          cargo "+$TOOLCHAIN" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-auth-front --lib password_tests
-          cargo "+$TOOLCHAIN" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-auth-front --lib tests::oauth
+          # Linked against glibc 2.28 in the manylinux_2_28 image, not the
+          # runner's 2.39: the engine then starts on RHEL 8, Debian 10,
+          # Ubuntu 20.04 and node:24-slim. The tests run there too.
+          if [[ "$RUNNER_OS" == "Linux" ]]; then cargo=(node packaging/cargo-glibc.mjs "$TOOLCHAIN"); fi
+          "${cargo[@]}" build --manifest-path accepted-engine/Cargo.toml --locked --release --bin firenook
+          "${cargo[@]}" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-suite-runtime --lib control::tests
+          "${cargo[@]}" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-auth-front --lib password_tests
+          "${cargo[@]}" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-auth-front --lib tests::oauth
       - name: Pack actual public artifacts
         env:
           LOCAL_REVISION: ${{ steps.engine.outputs.local_revision }}
@@ -97,6 +102,12 @@ jobs:
           node packaging/smoke-packed.mjs dist/${{ matrix.platform }} npm
           node packaging/smoke-packed.mjs dist/${{ matrix.platform }} bun
           node packaging/smoke-suite.mjs dist/${{ matrix.platform }}
+      # The packed engine's glibc symbol versions, then the engine started in
+      # AlmaLinux 8 (glibc 2.28), Debian 11, Ubuntu 22.04 and node:24-slim
+      # containers, and refused in plain words on Alpine and Amazon Linux 2.
+      - name: Old glibc systems
+        if: runner.os == 'Linux'
+        run: node packaging/smoke-glibc.mjs dist/${{ matrix.platform }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: success()
         with:
