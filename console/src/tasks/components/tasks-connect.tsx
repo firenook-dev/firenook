@@ -11,7 +11,7 @@ import { statusQuery } from '@/api/queries'
 import { type CodeDialect, CodeBlock } from '@/components/console/code-block'
 import { serviceAddress } from '@/components/console/request/address'
 import { connectSnippet } from '@/lib/connect'
-import { quoteShell } from '../code'
+import { enqueueSnippet, quoteShell } from '../code'
 import { base64Utf8 } from '../payload'
 
 export function TasksConnect({ queue }: { queue?: TasksQueue | undefined }) {
@@ -25,15 +25,7 @@ export function TasksConnect({ queue }: { queue?: TasksQueue | undefined }) {
     id: 'admin-node',
     label: 'Admin SDK',
     language: 'js',
-    code: [
-      "import { getFunctions } from 'firebase-admin/functions'",
-      '',
-      '// Functions running in this emulator reach it already; a script outside it',
-      `// needs CLOUD_TASKS_EMULATOR_HOST=${host}.`,
-      'await getFunctions()',
-      `  .taskQueue('${target}')`,
-      "  .enqueue({ orderId: 'o_1' })",
-    ].join('\n'),
+    code: enqueueSnippet(target, host, queue?.project ?? status.data.projectId),
   }
   const environment: CodeDialect = {
     id: 'env',

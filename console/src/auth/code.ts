@@ -106,10 +106,12 @@ function nodeCode(detail: AuthUserDetail, context: CodeContext): string {
     ? `getAuth().tenantManager().authForTenant(${JSON.stringify(context.tenant)})`
     : 'getAuth()'
   const lines = [
-    `// FIREBASE_AUTH_EMULATOR_HOST=${context.authAddress}`,
     "import { initializeApp } from 'firebase-admin/app'",
     "import { getAuth } from 'firebase-admin/auth'",
     '',
+    // Set, not named in a comment: without it the user is created in the
+    // project's real Auth. `??=` keeps one already set.
+    `process.env.FIREBASE_AUTH_EMULATOR_HOST ??= ${JSON.stringify(context.authAddress)}`,
     `initializeApp({ projectId: ${JSON.stringify(context.project)} })`,
     `const auth = ${auth}`,
     '',
@@ -170,7 +172,8 @@ function pythonCode(detail: AuthUserDetail, context: CodeContext): string {
   if (context.tenant) imports.push('tenant_mgt')
   const client = context.tenant ? 'client' : 'auth'
   const lines = [
-    `# FIREBASE_AUTH_EMULATOR_HOST=${context.authAddress}`,
+    'import os',
+    `os.environ.setdefault("FIREBASE_AUTH_EMULATOR_HOST", ${JSON.stringify(context.authAddress)})`,
     'import firebase_admin',
     `from firebase_admin import ${imports.join(', ')}`,
     '',

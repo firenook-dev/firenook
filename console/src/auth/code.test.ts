@@ -67,6 +67,21 @@ describe('a user as code', () => {
     expect(code).not.toContain('importUsers')
   })
 
+  it('sends the user to the Auth emulator, not to the project’s real Auth', () => {
+    // Without FIREBASE_AUTH_EMULATOR_HOST the Admin SDKs create the user in
+    // production, so the code sets it rather than naming it in a comment.
+    const node = userAsCode(detail(), 'node', context).split('\n')
+    const set = node.indexOf('process.env.FIREBASE_AUTH_EMULATOR_HOST ??= "127.0.0.1:9099"')
+    expect(set).toBeGreaterThan(-1)
+    expect(set).toBeLessThan(node.findIndex((line) => line.startsWith('initializeApp(')))
+    const python = userAsCode(detail(), 'python', context).split('\n')
+    expect(python.slice(0, 2)).toEqual([
+      'import os',
+      'os.environ.setdefault("FIREBASE_AUTH_EMULATOR_HOST", "127.0.0.1:9099")',
+    ])
+    expect(python.join('\n')).not.toContain('# FIREBASE_AUTH_EMULATOR_HOST')
+  })
+
   it('writes a phone user without an email or a password', () => {
     const phone = detail({
       row: { email: null, phoneNumber: '+15550100', displayName: null, providers: ['phone'] },

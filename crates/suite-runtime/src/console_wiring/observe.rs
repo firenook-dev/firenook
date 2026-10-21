@@ -22,7 +22,7 @@ use firenook_rules_runtime::{
     Denial, DenialOrigin, RequestOperation, RulesEvent, RulesOrigin, RulesRuntime,
 };
 use firenook_suite_front::{
-    Audience, EntityRef, LogInput, LogLevel, LoggingRuntime, OverviewConnection,
+    Audience, DEMO_TOKEN_PATH, EntityRef, LogInput, LogLevel, LoggingRuntime, OverviewConnection,
     OverviewEngineConfig, OverviewEngineDetails, OverviewEnvSource, OverviewEnvVariable,
     OverviewNotice, OverviewNoticeLevel, SnapshotPort, kinds,
 };
@@ -184,7 +184,8 @@ pub(crate) fn engine_details(
 
 /// The environment variables the SDKs read, for the running services:
 /// those `firenook emulators:exec` sets for its command (the npm CLI's
-/// `prepareLaunch`), then those only Functions workers get.
+/// `execEnvironment`), which are the official `emulators:exec`'s set, and
+/// the demo credentials Firenook adds. Functions workers get them too.
 pub(crate) fn connection_env(
     config: &SuiteConfig,
     credentials: Option<(String, String)>,
@@ -200,22 +201,40 @@ pub(crate) fn connection_env(
             note: None,
         };
     let exec = OverviewEnvSource::Exec;
+    let project = &config.project_id;
     let mut env = vec![
-        variable("GCLOUD_PROJECT", config.project_id.clone(), "project", exec),
-        variable(
-            "GOOGLE_CLOUD_PROJECT",
-            config.project_id.clone(),
-            "project",
-            exec,
-        ),
+        variable("GCLOUD_PROJECT", project.clone(), "project", exec),
+        variable("GOOGLE_CLOUD_PROJECT", project.clone(), "project", exec),
+        // The official runScript's, in its key order, unless the
+        // environment has one: the bucket named after the project, not the
+        // engine's default bucket.
+        OverviewEnvVariable {
+            note: Some("unless your environment sets it".to_owned()),
+            ..variable(
+                "FIREBASE_CONFIG",
+                format!(
+                    "{{\"projectId\":{},\"storageBucket\":{},\"databaseURL\":{}}}",
+                    Value::String(project.clone()),
+                    Value::String(format!("{project}.appspot.com")),
+                    Value::String(format!("https://{project}.firebaseio.com")),
+                ),
+                "project",
+                exec,
+            )
+        },
     ];
     if services.firestore {
-        env.push(variable(
+        for name in [
             "FIRESTORE_EMULATOR_HOST",
-            address(config.ports.firestore),
-            "firestore",
-            exec,
-        ));
+            "FIREBASE_FIRESTORE_EMULATOR_ADDRESS",
+        ] {
+            env.push(variable(
+                name,
+                address(config.ports.firestore),
+                "firestore",
+                exec,
+            ));
+        }
     }
     if services.auth {
         env.push(variable(
@@ -253,41 +272,44 @@ pub(crate) fn connection_env(
             exec,
         ));
     }
+    if services.functions {
+        env.push(variable(
+            "CLOUD_TASKS_EMULATOR_HOST",
+            address(config.ports.tasks),
+            "tasks",
+            exec,
+        ));
+        env.push(variable(
+            "CLOUD_EVENTARC_EMULATOR_HOST",
+            config.origin(config.ports.eventarc),
+            "eventarc",
+            exec,
+        ));
+    }
     if let Some((path, content)) = credentials {
         env.push(OverviewEnvVariable {
             note: Some(content),
             ..variable("GOOGLE_APPLICATION_CREDENTIALS", path, "project", exec)
         });
     }
-    if services.functions {
-        let functions = OverviewEnvSource::Functions;
-        env.push(variable(
-            "CLOUD_TASKS_EMULATOR_HOST",
-            address(config.ports.tasks),
-            "tasks",
-            functions,
-        ));
-        env.push(variable(
-            "CLOUD_EVENTARC_EMULATOR_HOST",
-            config.origin(config.ports.eventarc),
-            "eventarc",
-            functions,
-        ));
-    }
     env
 }
 
 /// The demo credentials file at `path` (its path and compact content),
-/// when it is the authorized-user stub `emulators:exec` writes; any other
-/// file is a developer's real credentials and is never shown.
+/// when it is the stub `emulators:exec` writes, whose token comes from a
+/// hub's [`DEMO_TOKEN_PATH`]; any other file is a developer's real
+/// credentials and is never shown.
 pub(crate) fn demo_credentials(path: &std::path::Path) -> Option<(String, String)> {
     let text = std::fs::read_to_string(path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let demo = value["type"] == "authorized_user"
+    let demo = value["type"] == "external_account_authorized_user"
         && value["client_id"] == "demo"
         && value["client_secret"] == "demo"
         && value["refresh_token"] == "demo"
-        && value.as_object().is_some_and(|fields| fields.len() == 4);
+        && value["token_url"]
+            .as_str()
+            .is_some_and(|url| url.starts_with("http://") && url.ends_with(DEMO_TOKEN_PATH))
+        && value.as_object().is_some_and(|fields| fields.len() == 5);
     demo.then(|| (path.display().to_string(), value.to_string()))
 }
 

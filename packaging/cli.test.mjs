@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { NODE_TESTED, manifest, nodeCheck, platformKey, release, sha256, verifyBinary } from '../packages/cli/src/binary.mjs';
 import { canonical, inspectProject, launchContext, loadProject, parseOptions, selectProject } from '../packages/cli/src/options.mjs';
-import { diagnose, prepareLaunch, supervise, vendorExtensions } from '../packages/cli/src/runtime.mjs';
+import { DEMO_TOKEN_PATH, diagnose, execEnvironment, prepareLaunch, supervise, vendorExtensions } from '../packages/cli/src/runtime.mjs';
 
 function project() {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-cli-test-'));
@@ -336,8 +337,10 @@ test('host binding accepts any address with a warning; per-service conflicts sti
   assert.match(lan.warnings.join('\n'),/binding 0\.0\.0\.0; the emulators have no authentication/);
   const launch = launchFor(dir,{...options,host:'0.0.0.0'});
   assert.equal(flagValue(launch.args,'--host'),'0.0.0.0');
-  assert.equal(launch.env.FIRESTORE_EMULATOR_HOST,'127.0.0.1:8080', 'clients connect through the loopback address');
-  assert.equal(launchFor(dir,{...options,host:'::'}).env.FIREBASE_AUTH_EMULATOR_HOST,'[::1]:9099');
+  assert.equal(launch.hub,'http://127.0.0.1:4400', 'clients connect through the loopback address');
+  const tokenUrl = launch => JSON.parse(readFileSync(launch.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')).token_url;
+  assert.equal(tokenUrl(launch),'http://127.0.0.1:4400/firenook/oauth2/token');
+  assert.equal(tokenUrl(launchFor(dir,{...options,host:'::'})),'http://[::1]:4400/firenook/oauth2/token');
   assert.equal(inspectProject(options,dir).warnings.length,0);
   config.emulators.auth.host = '192.0.2.10';
   save(config);
@@ -421,8 +424,65 @@ test('state and credential isolation stay outside original config and seed', () 
   const perCommit = prepareLaunch(diagnostic, {...options, durability: 'per-commit'}).args;
   assert.equal(perCommit[perCommit.indexOf('--durability') + 1], 'per-commit');
   assert.equal(launch.env.GCLOUD_PROJECT,'demo-fixture');
-  assert.equal(launch.env.FIREBASE_AUTH_EMULATOR_HOST,'127.0.0.1:9099');
   assert.equal(launch.env.FIREBASE_TOKEN,undefined);
+});
+test('the demo credentials get their token from the hub, never from Google', () => {
+  const {dir,options} = project();
+  const launch = launchFor(dir,{...options,'hub-port':'31400'},'exec');
+  assert.equal(launch.hub,'http://127.0.0.1:31400');
+  // An authorized_user file sends the Node.js SDK to oauth2.googleapis.com
+  // for its token whatever it holds; every Admin SDK reads this kind's
+  // token_url, which is the hub's.
+  assert.deepEqual(JSON.parse(readFileSync(launch.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')),
+    {type:'external_account_authorized_user',client_id:'demo',client_secret:'demo',refresh_token:'demo',token_url:'http://127.0.0.1:31400/firenook/oauth2/token'});
+  assert.equal(DEMO_TOKEN_PATH,'/firenook/oauth2/token');
+  assert.equal(launch.env.CLOUDSDK_CONFIG,join(launch.run,'gcloud'));
+  // The engine is told its ports by its arguments; the emulators' variables
+  // are the command's, from the hub's listing once they run.
+  for (const name of ['FIRESTORE_EMULATOR_HOST','FIREBASE_AUTH_EMULATOR_HOST','FIREBASE_STORAGE_EMULATOR_HOST','STORAGE_EMULATOR_HOST','FIREBASE_EMULATOR_HUB','PUBSUB_EMULATOR_HOST'])
+    assert.equal(launch.env[name],undefined,name);
+});
+test('exec gives its command the official emulators:exec variables, for the emulators that run', () => {
+  // Captured from the official emulators:exec (setEnvVarsForEmulators over
+  // the running emulators, and runScript's GCLOUD_PROJECT and FIREBASE_CONFIG).
+  const oracle = JSON.parse(readFileSync(new URL('fixtures/firebase-cli-15.34.0-exec-env.json', import.meta.url)));
+  const shown = env => Object.fromEntries(Object.entries(env).filter(([name]) => /EMULATOR|GCLOUD|GOOGLE_CLOUD|FIREBASE_CONFIG|GOOGLE_APPLICATION|CLOUDSDK/.test(name)).sort(([a],[b]) => a.localeCompare(b)));
+  assert.deepEqual(oracle.runs.map(run => run.only),['auth,functions','storage,firestore','pubsub']);
+  for (const run of oracle.runs) assert.deepEqual(shown(execEnvironment({GCLOUD_PROJECT:'demo-shop',PATH:'/bin'},run.running)),run.env,run.only);
+  // A service that is not running gets no variable, whatever its port, and
+  // a variable the developer set for it is left as it was.
+  const firestoreOnly = execEnvironment({GCLOUD_PROJECT:'demo-shop',PUBSUB_EMULATOR_HOST:'127.0.0.1:1'},{hub:{host:'127.0.0.1',port:4400},firestore:{host:'127.0.0.1',port:8080},'firestore.websocket':{host:'127.0.0.1',port:9150}});
+  assert.deepEqual(Object.keys(shown(firestoreOnly)),['FIREBASE_CONFIG','FIREBASE_EMULATOR_HUB','FIREBASE_FIRESTORE_EMULATOR_ADDRESS','FIRESTORE_EMULATOR_HOST','GCLOUD_PROJECT','PUBSUB_EMULATOR_HOST']);
+  assert.equal(firestoreOnly.PUBSUB_EMULATOR_HOST,'127.0.0.1:1');
+  // The developer's own FIREBASE_CONFIG is kept, as officially; IPv6 is bracketed.
+  assert.equal(execEnvironment({GCLOUD_PROJECT:'demo-shop',FIREBASE_CONFIG:'{}'},{}).FIREBASE_CONFIG,'{}');
+  assert.equal(execEnvironment({},{}).FIREBASE_CONFIG,undefined);
+  assert.equal(execEnvironment({},{storage:{host:'::1',port:9199}}).STORAGE_EMULATOR_HOST,'http://[::1]:9199');
+});
+test('exec reads what runs from the hub before its command starts', async () => {
+  const listing = {hub:{name:'hub',host:'127.0.0.1',port:0},auth:{name:'auth',host:'127.0.0.1',port:9099},functions:{name:'functions',host:'127.0.0.1',port:5001},eventarc:{name:'eventarc',host:'127.0.0.1',port:9299},tasks:{name:'tasks',host:'127.0.0.1',port:9499}};
+  const hub = createServer((request, response) => {
+    response.setHeader('content-type','application/json');
+    response.end(JSON.stringify(request.url === '/emulators' ? listing : {}));
+  });
+  await new Promise(resolve => hub.listen(0,'127.0.0.1',resolve));
+  listing.hub.port = hub.address().port;
+  const out = join(mkdtempSync(join(tmpdir(),'firenook-exec-env-')),'env.json');
+  const engine = `const stop=()=>setTimeout(()=>process.exit(0),60); process.on('SIGINT',stop); if(process.platform==='win32') process.stdin.on('data',stop); console.log('All emulators ready'); setInterval(()=>{},1000)`;
+  const launch = {binary:process.execPath,args:['-e',engine],cwd:process.cwd(),env:{...process.env,GCLOUD_PROJECT:'demo-fixture'},hub:`http://127.0.0.1:${listing.hub.port}`};
+  try {
+    assert.equal(await supervise(launch,[process.execPath,'-e',`require('fs').writeFileSync(${JSON.stringify(out)}, JSON.stringify(process.env))`]),0);
+    const env = JSON.parse(readFileSync(out,'utf8'));
+    assert.equal(env.FIREBASE_AUTH_EMULATOR_HOST,'127.0.0.1:9099');
+    assert.equal(env.CLOUD_TASKS_EMULATOR_HOST,'127.0.0.1:9499');
+    assert.equal(env.CLOUD_EVENTARC_EMULATOR_HOST,'http://127.0.0.1:9299');
+    assert.equal(env.FIREBASE_EMULATOR_HUB,`127.0.0.1:${listing.hub.port}`);
+    for (const name of ['FIRESTORE_EMULATOR_HOST','FIREBASE_STORAGE_EMULATOR_HOST','PUBSUB_EMULATOR_HOST']) assert.equal(env[name],process.env[name],name);
+  } finally { hub.close(); }
+  // No listing, no command: it would run with a guessed environment.
+  const ran = join(mkdtempSync(join(tmpdir(),'firenook-exec-env-')),'ran');
+  await assert.rejects(supervise({...launch,hub:'http://127.0.0.1:9'},[process.execPath,'-e',`require('fs').writeFileSync(${JSON.stringify(ran)}, '')`]),/did not list the running emulators/);
+  assert.throws(() => readFileSync(ran),/ENOENT/);
 });
 test('the engine is told the release it ships as, since it cannot know it itself', () => {
   const {dir,options} = project();

@@ -559,7 +559,9 @@ fn the_connection_lists_what_the_sdks_read_for_running_services_only() {
         [
             "GCLOUD_PROJECT",
             "GOOGLE_CLOUD_PROJECT",
+            "FIREBASE_CONFIG",
             "FIRESTORE_EMULATOR_HOST",
+            "FIREBASE_FIRESTORE_EMULATOR_ADDRESS",
             "FIREBASE_AUTH_EMULATOR_HOST",
             "FIREBASE_STORAGE_EMULATOR_HOST",
             "STORAGE_EMULATOR_HOST",
@@ -578,7 +580,9 @@ fn the_connection_lists_what_the_sdks_read_for_running_services_only() {
         [
             "GCLOUD_PROJECT",
             "GOOGLE_CLOUD_PROJECT",
+            "FIREBASE_CONFIG",
             "FIRESTORE_EMULATOR_HOST",
+            "FIREBASE_FIRESTORE_EMULATOR_ADDRESS",
             "FIREBASE_EMULATOR_HUB"
         ]
     );
@@ -596,8 +600,22 @@ fn the_connection_lists_what_the_sdks_read_for_running_services_only() {
         "http://127.0.0.1:10"
     );
     assert_eq!(
+        value("FIREBASE_FIRESTORE_EMULATOR_ADDRESS").value,
+        "127.0.0.1:1"
+    );
+    assert_eq!(
+        value("FIREBASE_CONFIG").value,
+        r#"{"projectId":"demo-diagnostics","storageBucket":"demo-diagnostics.appspot.com","databaseURL":"https://demo-diagnostics.firebaseio.com"}"#
+    );
+    // The official emulators:exec sets the Tasks and Eventarc hosts too,
+    // whenever Functions (and so they) run.
+    assert_eq!(
         value("CLOUD_TASKS_EMULATOR_HOST").set_by,
-        OverviewEnvSource::Functions
+        OverviewEnvSource::Exec
+    );
+    assert_eq!(
+        value("CLOUD_EVENTARC_EMULATOR_HOST").set_by,
+        OverviewEnvSource::Exec
     );
     assert_eq!(
         value("PUBSUB_EMULATOR_HOST").set_by,
@@ -625,21 +643,23 @@ fn the_connection_lists_what_the_sdks_read_for_running_services_only() {
             );
         }
     }
+}
+
+#[test]
+fn the_connection_ends_with_the_demo_credentials_exec_hands_its_command() {
     let with_credentials = connection_env(
         &test_config(),
         Some((
             "/work/demo-adc.json".to_owned(),
-            "{\"type\":\"authorized_user\"}".to_owned(),
+            "{\"type\":\"external_account_authorized_user\"}".to_owned(),
         )),
     );
-    let credentials = with_credentials
-        .iter()
-        .find(|variable| variable.name == "GOOGLE_APPLICATION_CREDENTIALS")
-        .expect("listed");
+    let credentials = with_credentials.last().expect("listed");
+    assert_eq!(credentials.name, "GOOGLE_APPLICATION_CREDENTIALS");
     assert_eq!(credentials.value, "/work/demo-adc.json");
     assert_eq!(
         credentials.note.as_deref(),
-        Some("{\"type\":\"authorized_user\"}")
+        Some("{\"type\":\"external_account_authorized_user\"}")
     );
 }
 
@@ -651,7 +671,21 @@ fn only_the_demo_credentials_stub_is_ever_shown() {
     let stub = directory.join("demo-adc.json");
     std::fs::write(
         &stub,
+        r#"{"type":"external_account_authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo","token_url":"http://127.0.0.1:4400/firenook/oauth2/token"}"#,
+    )
+    .expect("written");
+    // The stub before 0.2.0, whose token came from Google, is no longer
+    // written, and a file shaped like it is somebody's own.
+    let old = directory.join("old-adc.json");
+    std::fs::write(
+        &old,
         r#"{"type":"authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo"}"#,
+    )
+    .expect("written");
+    let elsewhere = directory.join("elsewhere-adc.json");
+    std::fs::write(
+        &elsewhere,
+        r#"{"type":"external_account_authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo","token_url":"https://sts.googleapis.com/v1/oauthtoken"}"#,
     )
     .expect("written");
     let real = directory.join("adc.json");
@@ -663,6 +697,9 @@ fn only_the_demo_credentials_stub_is_ever_shown() {
     let (path, note) = demo_credentials(&stub).expect("the stub is shown");
     assert_eq!(path, stub.display().to_string());
     assert!(note.contains("\"client_id\":\"demo\""), "{note}");
+    assert!(note.contains("/firenook/oauth2/token"), "{note}");
+    assert_eq!(demo_credentials(&old), None);
+    assert_eq!(demo_credentials(&elsewhere), None);
     assert_eq!(demo_credentials(&real), None);
     assert_eq!(demo_credentials(&directory.join("missing.json")), None);
     let _ = std::fs::remove_dir_all(&directory);

@@ -179,9 +179,26 @@ connectFunctionsEmulator(functions, '127.0.0.1', 5001);
 
 The Admin SDK and server code read the usual variables
 (`FIRESTORE_EMULATOR_HOST`, `FIREBASE_AUTH_EMULATOR_HOST`,
-`FIREBASE_STORAGE_EMULATOR_HOST`, `PUBSUB_EMULATOR_HOST`). The console's
-**Connect** button shows the snippet for each platform with your ports filled
-in.
+`FIREBASE_STORAGE_EMULATOR_HOST`, `PUBSUB_EMULATOR_HOST`,
+`CLOUD_TASKS_EMULATOR_HOST`, `CLOUD_EVENTARC_EMULATOR_HOST`), though not
+every SDK reads all of them, and a service whose variable is missing goes to
+production. The console's **Connect** button shows the snippet for each
+platform with your ports filled in, and each snippet sets what that SDK
+reads:
+
+- Python's Storage client reads `STORAGE_EMULATOR_HOST`, a URL
+  (`http://127.0.0.1:9199`); the Python SDK ignores
+  `FIREBASE_STORAGE_EMULATOR_HOST`.
+- Java's Storage and Pub/Sub clients read no emulator variable, so the Java
+  snippet builds them on the emulator.
+- On Apple platforms, Firestore's `useEmulator` leaves TLS on, which the
+  emulator does not speak, so the snippet sets `isSSLEnabled = false`.
+- The Python, Go and Java SDKs look up default credentials when they start.
+  Their snippets point them at demo credentials whose token comes from the
+  emulators' hub (`/firenook/oauth2/token` on the hub port), so a call that
+  asks for an access token never reaches Google. The Node.js SDK asks for one
+  only to publish an Eventarc event, and its snippet gives it demo
+  credentials of the kind it reads.
 
 ## Keep your data between runs
 
@@ -214,8 +231,10 @@ npx firenook emulators:exec -- node ./integration-test.mjs
 ```
 
 `emulators:exec` starts the suite, runs the command once everything is ready
-with the emulator variables set, then stops and passes on the exit code. In
-`package.json`:
+with the emulator variables set, then stops and passes on the exit code. The
+command gets the variables the official `emulators:exec` sets, for the
+emulators that run and no others, and demo credentials (see
+[data, state and tests](data-and-state.md)). In `package.json`:
 
 ```json
 {
