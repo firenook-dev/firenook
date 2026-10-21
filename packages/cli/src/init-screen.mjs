@@ -204,7 +204,7 @@ export async function initInTerminal(options, {cwd = process.cwd(), out = proces
   const began = Date.now();
   const files = {id: 'files', label: 'Files', state: 'running', began, detail: 'writing'};
   try {
-    const {plan} = scaffoldPlan(choices, config, {force: Boolean(options.force)});
+    const {plan} = scaffoldPlan(choices, config);
     writeScaffold(plan);
     const kinds = [];
     for (const file of plan) {
@@ -213,7 +213,7 @@ export async function initInTerminal(options, {cwd = process.cwd(), out = proces
       if (!kinds.includes(kind)) kinds.push(kind);
     }
     const kept = plan.filter(file => file.skip).length;
-    Object.assign(files, {state: 'done', ms: Date.now() - began, detail: `${kinds.join(', ')}${kept ? `${DOT}${dim(`${kept} kept as they were`)}` : ''}`});
+    Object.assign(files, {state: 'done', ms: Date.now() - began, detail: `${kinds.join(', ')}${kept ? `${DOT}${dim(kept === 1 ? '1 kept as it was' : `${kept} kept as they were`)}` : ''}`});
   } catch (error) {
     Object.assign(files, {state: 'failed', ms: Date.now() - began, detail: error.message});
     return finish([...section(divider(bold('Set-up')), [inside(row(files))]), bottom(), ''], 1);
@@ -282,14 +282,14 @@ export async function initInTerminal(options, {cwd = process.cwd(), out = proces
       return {lines, log: {log: () => {}, error: text => lines.push(text)}};
     };
     const findings = lines => lines.flatMap(text => {
-      const match = /^ {2}(error|skip|add|ok|wrote)\s+(.*)$/.exec(text);
+      const match = /^ {2}(error|warn|skip|add|ok|wrote)\s+(.*)$/.exec(text);
       if (!match) return [];
       const [, verb, said] = match;
       // Paths as the project names them, and Firenook's own name dropped:
       // the whole card is Firenook's.
       const what = said.replace(/^Firenook: /, '').split(`${directory}${sep}`).join('').replace(/^(\S+)$/, name => (name === directory ? '.' : name));
-      const marker = {error: red(G.fail), skip: yellow(G.warn), add: dim(G.wait), ok: green(G.ok), wrote: green(G.ok)}[verb];
-      const paint = verb === 'error' ? red : verb === 'skip' ? yellow : text => text;
+      const marker = {error: red(G.fail), warn: yellow(G.warn), skip: yellow(G.warn), add: dim(G.wait), ok: green(G.ok), wrote: green(G.ok)}[verb];
+      const paint = verb === 'error' ? red : verb === 'warn' || verb === 'skip' ? yellow : text => text;
       return wrap(what, t.bodyRoom()).map((part, i) => cells('', i === 0 ? marker : '', paint(part)));
     });
     let dry;

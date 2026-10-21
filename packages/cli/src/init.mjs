@@ -7,6 +7,7 @@ import { DEFAULT_PORTS, inspectProject, readJson, validProjectId } from './optio
 import { PROJECT_AGENTS, applyAgents, planAgents } from './agents.mjs';
 import { enclosingPackage, nextSteps, setUpSteps } from './setup.mjs';
 import { manifest } from './binary.mjs';
+import { setMember } from './json-text.mjs';
 
 // The official `firebase init` port defaults, written explicitly.
 export const INIT_PORTS = Object.fromEntries(['auth', 'functions', 'firestore', 'pubsub', 'storage', 'eventarc', 'tasks', 'hub', 'logging', 'ui'].map(name => [name, DEFAULT_PORTS[name]]));
@@ -165,8 +166,11 @@ export function initChoices(options, directory, {env = process.env, home} = {}) 
 }
 
 // The files a scaffold writes for these choices, and the firebase.json it
-// holds. Existing files are kept, unless --force.
-export function scaffoldPlan(choices, config, {force = false} = {}) {
+// holds. firebase.json is written (init refuses an existing one without
+// --force); every other file that exists is kept: rules, indexes and code
+// are the developer's, as the official init keeps them unless told to
+// overwrite each.
+export function scaffoldPlan(choices, config) {
   const directory = dirname(config);
   if (!validProjectId(choices.project)) throw new Error(invalidProjectId(choices.project));
   const functions = choices.language !== 'none';
@@ -185,7 +189,7 @@ export function scaffoldPlan(choices, config, {force = false} = {}) {
   // A deploy builds a TypeScript codebase first, as the official init sets it up.
   if (functions) firebase.functions = {source:'functions', codebase:'default', ignore:FUNCTIONS_IGNORE, ...(typescript ? {predeploy:['npm --prefix "$RESOURCE_DIR" run build']} : {})};
   firebase.emulators = emulators;
-  const file = (path, content) => ({path:join(directory, path), content, skip:existsSync(join(directory, path)) && !force});
+  const file = (path, content) => ({path:join(directory, path), content, skip:existsSync(join(directory, path))});
   // An existing .firebaserc keeps everything it holds; only a project chosen
   // other than its default becomes the default.
   let rc = file('.firebaserc', json({projects:{default:choices.project}}));
@@ -219,10 +223,10 @@ export const writeScaffold = (plan, log = console, quiet = true) => writePlan(pl
 export function scaffold(options, cwd = process.cwd(), log = console, {env = process.env, home, version = manifest.version, platform = process.platform, spawner} = {}) {
   const config = resolve(cwd, options.config || 'firebase.json');
   const directory = dirname(config);
-  if (existsSync(config) && !options.force) throw new Error(`${config} exists; use firenook init --adopt to adapt it, or --force to overwrite the scaffold files`);
+  if (existsSync(config) && !options.force) throw new Error(`${config} exists; use firenook init --adopt to adapt it, or --force to write a new one (the other files there are kept)`);
   const choices = initChoices(options, directory, {env, home});
   if (!validProjectId(choices.project)) throw new Error(invalidProjectId(choices.project));
-  const {plan} = scaffoldPlan(choices, config, {force:Boolean(options.force)});
+  const {plan} = scaffoldPlan(choices, config);
   const functions = choices.language !== 'none';
   const dry = Boolean(options['dry-run']);
   const offered = planAgents(directory, {agents:choices.agents, config, env}).filter(step => step.content);
@@ -282,7 +286,9 @@ function referencedFiles(data, directory) {
 }
 
 // init --adopt [--dry-run] [--project ID]: collect every launcher finding, then
-// apply only additions (never rewriting existing keys) when nothing blocks.
+// apply only additions when nothing blocks. firebase.json and .firebaserc
+// are edited as text: what is there stays as it was written, and each
+// addition takes the layout of the object it joins.
 export function adopt(options, cwd = process.cwd(), log = console, {env = process.env} = {}) {
   const config = resolve(cwd, options.config || 'firebase.json');
   const directory = dirname(config);
@@ -310,29 +316,31 @@ export function adopt(options, cwd = process.cwd(), log = console, {env = proces
   // The coding agents the project uses get the MCP server, as firenook mcp add does.
   const agents = planAgents(directory, {config, env});
   for (const step of agents.filter(step => step.content)) additions.push({kind:'agent', target:step.path, agent:step.agent, description:`give ${step.name} the Firenook MCP server: ${step.path}`});
-  for (const step of agents.filter(step => step.action === 'differs')) warnings.push(`${step.path} already has another firenook entry for ${step.name}; firenook mcp add --force replaces it`);
-  for (const step of agents.filter(step => step.action === 'unreadable')) warnings.push(`${step.path} is not plain JSON, so ${step.name} gets no MCP server from init; add this by hand: ${step.snippet}`);
+  // A skip is something init or the launcher leaves out; every other
+  // warning (a host every device can reach) is said as a warning.
+  const skips = new Set(inspection.skips);
+  const skip = message => { warnings.push(message); skips.add(message); };
+  for (const step of agents.filter(step => step.action === 'differs')) skip(`${step.path} already has another firenook entry for ${step.name}; firenook mcp add --force replaces it`);
+  for (const step of agents.filter(step => step.action === 'unreadable')) skip(`${step.path} is not plain JSON, so ${step.name} gets no MCP server from init; add this by hand: ${step.snippet}`);
   const apply = !options['dry-run'] && !options.json && !errors.length;
   if (options.json) {
     log.log(JSON.stringify({config, project, services:inspection.services, errors, warnings, additions:additions.map(({description, ...rest}) => rest), applied:false}));
   } else {
     log.error(`Firenook init --adopt: ${config}`);
     for (const message of errors) log.error(`  error   ${message}`);
-    for (const message of warnings) log.error(`  skip    ${message}`);
+    for (const message of warnings) log.error(`  ${skips.has(message) ? 'skip' : 'warn'}    ${message}`);
     for (const addition of additions) log.error(`  add     ${addition.description}`);
     if (!errors.length && !additions.length) log.error(`  ok      nothing to change; services: ${inspection.services.join(', ')}`);
   }
   if (apply && additions.length) {
     if (Object.keys(emulatorEntries).length) {
-      if (!data.emulators || typeof data.emulators !== 'object' || Array.isArray(data.emulators)) data.emulators = {};
-      Object.assign(data.emulators, emulatorEntries);
-      writeFileSync(config, json(data));
+      let text = readFileSync(config, 'utf8');
+      for (const [name, entry] of Object.entries(emulatorEntries)) text = setMember(text, ['emulators', name], entry);
+      writeFileSync(config, text);
       log.error(`  wrote   ${config}`);
     }
     if (projectMissing) {
-      if (!rcData.projects || typeof rcData.projects !== 'object' || Array.isArray(rcData.projects)) rcData.projects = {};
-      rcData.projects.default = project;
-      writeFileSync(inspection.rc, json(rcData));
+      writeFileSync(inspection.rc, rcExists ? setMember(readFileSync(inspection.rc, 'utf8'), ['projects', 'default'], project) : json({projects:{default:project}}));
       log.error(`  wrote   ${inspection.rc}`);
     }
     for (const file of files) { mkdirSync(dirname(file.path), {recursive:true}); writeFileSync(file.path, file.content); log.error(`  wrote   ${file.path}`); }

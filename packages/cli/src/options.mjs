@@ -106,7 +106,8 @@ const isObject = value => value !== null && typeof value === 'object' && !Array.
 
 // Reads firebase.json and .firebaserc with every check the launcher applies,
 // collecting findings instead of throwing: `errors` (Firenook cannot start),
-// `warnings` (configured official services it skips, safety notes). Invalid
+// `warnings` (services it skips, which are also in `skips`, and safety
+// notes). Invalid
 // JSON and a missing firebase.json still throw.
 export function inspectProject(options, cwd = process.cwd()) {
   const errors = [];
@@ -134,8 +135,16 @@ export function inspectProject(options, cwd = process.cwd()) {
   if (!isObject(emulators)) fail('emulators', 'firebase.json emulators must be an object');
   const known = [...SERVICES, 'hub', 'ui', 'logging', 'eventarc', 'tasks', 'extensions', 'singleProjectMode'];
   const skipped = [];
+  // The warnings that name a service Firenook skips: an official one it
+  // does not implement, or one --only names that firebase.json does not
+  // configure.
+  const skips = [];
   for (const name of Object.keys(isObject(emulators) ? emulators : {})) {
-    if (UNIMPLEMENTED.includes(name)) { skipped.push(name); warnings.push(`Firenook: firebase.json configures the ${name} emulator, which Firenook does not implement; skipping it.`); }
+    if (UNIMPLEMENTED.includes(name)) {
+      skipped.push(name);
+      skips.push(`Firenook: firebase.json configures the ${name} emulator, which Firenook does not implement; skipping it.`);
+      warnings.push(skips.at(-1));
+    }
     else if (!known.includes(name)) fail('emulators-key', `Unsupported configured emulator: ${name}. Valid emulators keys are ${[...known, ...UNIMPLEMENTED].join(', ')}.`);
   }
   const has = key => Object.hasOwn(data, key);
@@ -158,7 +167,11 @@ export function inspectProject(options, cwd = process.cwd()) {
       else if (name === 'extensions') wanted.add('functions');
       else if (!FOLLOWERS.includes(name)) wanted.add(name);
     }
-    for (const name of wanted) if (!configured.includes(name)) warnings.push(`Firenook: not starting the ${name} emulator; firebase.json does not configure it (run firenook init --adopt or add emulators.${name}).`);
+    for (const name of wanted) {
+      if (configured.includes(name)) continue;
+      skips.push(`Firenook: not starting the ${name} emulator; firebase.json does not configure it (run firenook init --adopt or add emulators.${name}).`);
+      warnings.push(skips.at(-1));
+    }
     services = configured.filter(name => wanted.has(name));
   }
   if (!errors.length && !services.length) fail('services', 'No emulators to start, run firenook init to get started.');
@@ -233,7 +246,7 @@ export function inspectProject(options, cwd = process.cwd()) {
   // The engine needs a positive minimum only when a Functions codebase exists.
   const functionsConfigured = has('functions') || has('extensions');
   const minimumFunctions = options['minimum-functions'] !== undefined ? String(options['minimum-functions']) : (services.includes('functions') && functionsConfigured ? '1' : '0');
-  return {config, directory, rc, data, project, demo, configured, services, skipped, ui, uiExplicit, singleProjectMode, host, ports, imported, exported, state, resume, minimumFunctions, errors, warnings};
+  return {config, directory, rc, data, project, demo, configured, services, skipped, ui, uiExplicit, singleProjectMode, host, ports, imported, exported, state, resume, minimumFunctions, errors, warnings, skips};
 }
 
 // What the engine is told about this launch (--launch-context), so the

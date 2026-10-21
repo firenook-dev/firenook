@@ -62,14 +62,21 @@ is installed and the commands that finish the set-up are printed; `--yes` does
 the set-up as the screen would, one line a step (`--no-install`, `--no-pin`).
 `--only` names the data services (the console and the hub always come;
 Cloud Tasks and Eventarc come with Functions). It refuses to overwrite
-`firebase.json` without `--force`. `init --adopt` runs the launcher's own
+`firebase.json` without `--force`; with it, `firebase.json` is written again
+and every other file that exists is kept as it is (the rules, the indexes,
+the Functions code, the rest of `.firebaserc`), as the official init keeps
+each unless told to overwrite it: delete a file first to get its template.
+`init --adopt` runs the launcher's own
 checks over an existing project and prints a plan: errors Firenook cannot
-accept, official services it skips, and additions it can make (missing
+accept (`error`), services it skips (`skip`), other warnings (`warn`), and
+additions it can make (`add`: missing
 `emulators` entries for configured services, a missing `.firebaserc` default,
 referenced rules files that do not exist, and the MCP server for the coding
 agents the folder shows, as `mcp add` writes it). Without `--dry-run`/`--json`
-the additions are applied by editing the parsed JSON, never rewriting other
-keys; errors leave every file untouched and exit 1. In a terminal, `init` in a
+the additions are applied as text: `firebase.json` and `.firebaserc` keep
+every byte they had, and each addition goes at the end of the object it
+joins, in that object's indentation, line endings and one-line or one-a-line
+layout; errors leave every file untouched and exit 1. In a terminal, `init` in a
 folder with a `firebase.json` shows that plan and applies it on a yes.
 
 `--build` (start and exec) runs each Functions codebase's own build: a start

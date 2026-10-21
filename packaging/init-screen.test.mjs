@@ -251,6 +251,28 @@ test('in a terminal, Enter takes every choice, the set-up runs on the card, and 
   assert.ok(existsSync(join(dir, 'functions/src/index.ts')));
 });
 
+test('in a terminal, --force writes firebase.json again and keeps the rules there are, and says how many', async () => {
+  const kept = async files => {
+    const dir = folder();
+    writeFileSync(join(dir, 'firebase.json'), '{}');
+    for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content);
+    const {out, input, typing, text} = terminal(140);
+    const {spawner} = installer([]);
+    const running = initInTerminal({force: true}, {cwd: dir, out, input, env: screenEnv, platform: 'darwin', version: '9.9.9-next.1', home: '/nowhere', spawner, node: '24.20.0', ...quietPorts});
+    await until(() => text().includes('esc cancel'));
+    shows(text(), 'a new project in');
+    await typing('\r');
+    await until(() => text().includes('Start the emulators now?') || text().includes('Next'));
+    await typing('n');
+    await running;
+    for (const [name, content] of Object.entries(files)) assert.equal(readFileSync(join(dir, name), 'utf8'), content, name);
+    assert.ok(readJson(join(dir, 'firebase.json')).emulators, 'firebase.json is written');
+    return text();
+  };
+  shows(await kept({'firestore.rules': 'mine'}), '1 kept as it was');
+  shows(await kept({'firestore.rules': 'mine', 'storage.rules': 'mine too'}), '2 kept as they were');
+});
+
 test('in a terminal, changed choices are what is written, No prints the next steps, and Esc writes nothing', async () => {
   const dir = folder();
   const {out, input, typing, text} = terminal();
@@ -299,11 +321,12 @@ test('in a terminal on another Node, a taken port is named, and the set-up ends 
 
 test('in a terminal, a folder with a firebase.json is shown what init --adopt adds, and a yes adds it', async () => {
   const dir = folder();
-  writeFileSync(join(dir, 'firebase.json'), JSON.stringify({firestore: {rules: 'firestore.rules'}, emulators: {firestore: {port: 8080}}}));
+  writeFileSync(join(dir, 'firebase.json'), JSON.stringify({firestore: {rules: 'firestore.rules'}, emulators: {firestore: {port: 8080, host: '0.0.0.0'}}}));
   const {out, input, typing, text} = terminal();
   const running = initInTerminal({}, {cwd: dir, out, input, env: screenEnv, platform: 'darwin', version: '9.9.9-next.1', home: '/nowhere', node: '24.20.0', ...quietPorts});
   await until(() => text().includes('Add these'));
-  for (const expected of ['This folder has a firebase.json', 'set .firebaserc projects.default', 'write Firestore rules (official init template): firestore.rules']) shows(text(), expected);
+  for (const expected of ['This folder has a firebase.json', 'set .firebaserc projects.default', 'write Firestore rules (official init template): firestore.rules',
+    '! binding 0.0.0.0; the emulators have no authentication']) shows(text(), expected);
   await typing('y');
   assert.equal(await running, 0);
   for (const expected of ['Added', '.firebaserc', 'npx firenook emulators:start']) shows(text(), expected);
