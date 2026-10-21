@@ -15,6 +15,34 @@ firenook ext:vendor --project demo-my-app                                 # copy
 firenook emulators:start --project demo-my-app --offline                  # never contact the Extensions registry
 ```
 
+## TypeScript
+
+```sh
+npx firenook emulators:start --build      # what `npm run emulators` runs in a project made by init
+```
+
+A TypeScript codebase loads from what its compiler writes (`main` is
+`lib/index.js`), so it has to be compiled before it loads and again after
+every save. With `--build`, Firenook runs the codebase's own `build:watch`
+script (`tsc --watch` in the official template), starts the emulators once
+the first compile is done, and keeps it running: save `src/index.ts`, the
+compiler writes `lib/`, and the codebase reloads, in one terminal. A compile
+with errors says them in the log, where they are and what the compiler said:
+
+```text
+22:30:29    ✕ build                   2 errors · functions
+            │ src/index.ts:7:33  Type 'string' is not assignable to type 'number'.
+22:30:34    ✓ build                   no errors · functions
+22:30:36    ↻ reloaded        168 ms  1 function · default
+```
+
+A codebase with a `build` script but no `build:watch` is built once, before
+the start. `emulators:exec --build` runs `build` once and runs no test when it
+fails. The scripts are the project's own, the ones a deploy's `predeploy`
+runs, so what loads locally is what a deploy builds.
+
+## Invoking a function by hand
+
 `functions:invoke` finds the running suite through the hub locator (so a
 suite started on other ports is found) and, without `--event-data`, sends a
 plain request (`--method`, default `POST`) or a callable body (`--data`) to the

@@ -115,45 +115,44 @@ test('mcp add: --agent, --dry-run, --json, a project in a subfolder and an agent
   assert.ok(!existsSync(join(home, '.codeium', 'windsurf', 'mcp_config.json')), 'a home folder file is never written');
 });
 
-test('init prints --keep-data, and offers the MCP server to the agents it finds', async () => {
+test('init prints --keep-data, and gives the agents it finds the MCP server with --yes or prints how', async () => {
   const plain = folder();
   const output = log();
   assert.equal(scaffold({...options, project:'demo-plain'}, plain, output, {env}), 0);
-  assert.match(output.err.join('\n'), /Next steps:[\s\S]*firenook emulators:start --project demo-plain --keep-data/);
+  assert.match(output.err.join('\n'), /Next steps:[\s\S]*npx firenook emulators:start --keep-data --build/);
   assert.doesNotMatch(output.err.join('\n'), /mcp add/, 'no agent, no offer');
 
-  // Not in a terminal: the command is printed, nothing is written.
+  // Without --yes: the command is printed, nothing is written.
   const found = folder('.claude/', '.cursor/');
   const printed = log();
   assert.equal(scaffold({...options, project:'demo-found'}, found, printed, {env}), 0);
-  assert.match(printed.err.join('\n'), /firenook mcp add\s+\(gives Claude Code and Cursor the Firenook MCP server\)/);
+  assert.match(printed.err.join('\n'), /npx firenook mcp add\s+\(gives Claude Code and Cursor the Firenook MCP server\)/);
   assert.ok(!existsSync(join(found, '.mcp.json')));
 
-  // In a terminal: asked once; yes writes the files, no prints the command.
-  const asked = [];
+  // --yes writes them, as the screen does once its choices are made.
   const yes = folder('.claude/', '.cursor/', '.vscode/');
   const accepted = log();
-  assert.equal(await scaffold({...options, project:'demo-yes'}, yes, accepted, {env, ask:question => { asked.push(question); return true; }}), 0);
-  assert.deepEqual(asked, ['Give Claude Code, Cursor and VS Code the Firenook MCP server? This writes .mcp.json, .cursor/mcp.json, .vscode/mcp.json. [Y/n] ']);
+  assert.equal(await scaffold({...options, project:'demo-yes', yes:true, 'no-install':true, 'no-pin':true}, yes, accepted, {env}), 0);
   assert.deepEqual(readJson(join(yes, '.mcp.json')), {mcpServers:{firenook:SERVER}});
-  assert.ok(existsSync(join(yes, '.vscode/mcp.json')));
+  assert.ok(existsSync(join(yes, '.vscode/mcp.json')) && existsSync(join(yes, '.cursor/mcp.json')));
+  assert.match(accepted.err.join('\n'), /done {4}Agents: \.mcp\.json for Claude Code, \.cursor\/mcp\.json for Cursor, \.vscode\/mcp\.json for VS Code/);
   assert.doesNotMatch(accepted.err.join('\n'), /firenook mcp add/);
-  const no = folder('.cursor/');
-  const declined = log();
-  assert.equal(await scaffold({...options, project:'demo-no'}, no, declined, {env, ask:async () => false}), 0);
-  assert.ok(!existsSync(join(no, '.cursor/mcp.json')));
-  assert.match(declined.err.join('\n'), /firenook mcp add\s+\(gives Cursor the Firenook MCP server\)/);
+  // --agent picks them; an empty pick asks for none.
+  const picked = folder('.cursor/');
+  await scaffold({...options, project:'demo-picked', yes:true, 'no-install':true, 'no-pin':true, agent:'vscode'}, picked, log(), {env});
+  assert.ok(existsSync(join(picked, '.vscode/mcp.json')) && !existsSync(join(picked, '.cursor/mcp.json')));
+  assert.throws(() => scaffold({...options, agent:'emacs'}, folder(), log(), {env}), /Unknown agent emacs/);
 
-  // Dry runs and JSON plans list the offer and never ask.
+  // Dry runs and JSON plans list the offer and write nothing.
   const dry = folder('.vscode/');
   const plan = log();
-  scaffold({...options, project:'demo-dry', 'dry-run':true}, dry, plan, {env, ask:() => assert.fail('a dry run never asks')});
+  scaffold({...options, project:'demo-dry', 'dry-run':true}, dry, plan, {env});
   assert.match(plan.err.join('\n'), /offer\s+\S+mcp\.json \(VS Code: the Firenook MCP server\)/);
   const json = log();
-  scaffold({...options, project:'demo-json', json:true}, folder('.vscode/'), json, {env, ask:() => assert.fail('--json never asks')});
+  scaffold({...options, project:'demo-json', json:true}, folder('.vscode/'), json, {env});
   const parsed = JSON.parse(json.out[0]);
   assert.deepEqual(parsed.agents.map(agent => agent.agent), ['vscode']);
-  assert.ok(parsed.next.includes('firenook emulators:start --project demo-json --keep-data'));
+  assert.ok(parsed.next.includes('npx firenook emulators:start --keep-data --build'));
 });
 
 test('init --adopt lists the MCP server as one more addition and applies it with the rest', () => {

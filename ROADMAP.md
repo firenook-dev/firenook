@@ -1611,3 +1611,71 @@ Swift, Kotlin and Java snippets marked as JavaScript. Built on 2026-10-21.
   26.9.0. Switch to Node 24 (with nvm: nvm install 24) and run it again". A
   test holds the floor. The placeholder cannot change; on a Node older than
   20 it is still what npx finds.
+
+## `firenook init` in a terminal, and TypeScript compiled as you save (`0.2.0-next.9`)
+
+Found on 2026-10-21, trying the published next.8 the way a newcomer would:
+`npx firenook init` in an empty folder wrote the files and printed two next
+steps, and nothing else. It chose everything (every emulator, JavaScript
+Functions), installed nothing, and its start command, `firenook
+emulators:start`, was not a command that folder had: Firenook was not
+installed there. On Node 26 `init` succeeded and the start then refused.
+`firebase init` asks about twenty questions instead, one at a time, each
+emulator's port separately, and needs a Google login first. The first thing
+a new project runs should feel like the start screen and end with the
+emulators running. Built on 2026-10-21.
+
+- [x] **One screen with every choice made.** In a terminal, `init` draws the
+  start screen's card: the mark, then the project id (`demo-<folder>`), the
+  emulators, each on its usual port, the Functions language (TypeScript,
+  JavaScript or none), the coding agents given the MCP server (those the
+  folder shows), and whether to install the packages and pin Firenook. Enter
+  takes them all; `↑` `↓` move, `←` `→` and Space change one, letters edit the
+  id (a space becomes a hyphen), Esc writes nothing. The row in focus has its
+  hint under it, and an id that cannot be used says why there. A port
+  something already listens on is named with what holds it ("Firestore 8080
+  is held by an official Firebase emulator (PID 4242)"); the banner says when
+  the Node is not 24. Built on the start screen's own drawing (`form.mjs`,
+  `init-screen.mjs` on `terminal.mjs`): the same colours, the ASCII fallback,
+  `NO_COLOR`, and no dependency added.
+- [x] **The set-up runs on the card and ends with the emulators.** The files,
+  the agents' MCP files, Firenook pinned in `package.json` (exact, with an
+  `emulators` script: `firenook emulators:start --keep-data`, plus `--build`
+  for TypeScript), `npm install` in `functions/` beside the project's own
+  install (the lockfile's package manager, else the one that ran `init`,
+  else npm, with npx's own `npm_*` settings kept out), and the first build,
+  as rows that fill like the start-up. Then "Start the emulators now?", and
+  a yes hands the same terminal to the start screen. On other Node, or after
+  a failure (the command's last lines shown), the card ends with the
+  commands still to type. Ctrl-C stops the installs and keeps what was
+  written. On this machine: 7.8 s from Enter to the question (241 packages,
+  build 657 ms), then ready in 1.6 s with the function loaded.
+- [x] **TypeScript by default, the official template.** `functions/src/index.ts`
+  with a `helloWorld`, the official `tsconfig.json`, `build` and `build:watch`
+  scripts, TypeScript 7, and the official `predeploy` build in `firebase.json`
+  so a deploy compiles it. `--language javascript` keeps the JavaScript
+  template; `--language none` (or `--no-functions`) leaves Functions out.
+- [x] **`--build`: TypeScript compiled as you save, in one terminal.** A
+  start runs each Functions codebase's own `build:watch` script (its `build`
+  when it has none), waits for the first compile, then starts the engine and
+  keeps the watch running: a save is compiled and the engine reloads what the
+  compiler wrote. TypeScript's errors show in the log with where they are,
+  the footer says "build errors" until a compile has none, and the start-up
+  card has a Build row. `emulators:exec --build` runs `build` once and runs no
+  test when it fails. Pipes and CI get each error as a plain line. The script
+  is the project's, the one `predeploy` runs, so Firenook compiles nothing
+  itself; TypeScript 6 and 7 print the same watch lines.
+- [x] **A folder with a `firebase.json` is not a dead end.** `init` there
+  showed an error naming `--adopt`. In a terminal it now shows what `init
+  --adopt` would add, with paths as the project names them, and adds it on a
+  yes.
+- [x] **The same choices without a terminal.** Scripts, CI and `--json` get
+  the files and the commands that finish the set-up; `--yes` does the set-up
+  as the screen would, one line a step. `--language`, `--only` (the data
+  services; the console comes along, as with `emulators:start --only`),
+  `--agent`, `--no-install` and `--no-pin` change the choices. A project id
+  chosen other than an existing `.firebaserc` default becomes the default,
+  keeping the rest of the file. The printed start commands say `npx
+  firenook` or the package script, never a bare `firenook` that the folder
+  does not have.
+- [ ] A recording of the screen for the README, beside the start screen's.

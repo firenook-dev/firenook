@@ -18,13 +18,13 @@ export const VERBOSITIES = ['DEBUG', 'INFO', 'QUIET', 'SILENT', 'WARN', 'ERROR']
 // Where --keep-data keeps the data, inside the project directory.
 export const KEEP_DATA_DIR = join('.firenook', 'state');
 
-const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'instance', 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'log-verbosity', 'alias', 'add', 'unalias', 'database', 'agent']);
+const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'instance', 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'log-verbosity', 'alias', 'add', 'unalias', 'database', 'agent', 'language']);
 const durabilities = new Set(['write-behind', 'per-commit']);
-const switches = new Set(['resume-state', 'keep-data', 'no-diagnostics', 'help', 'offline', 'non-interactive', 'json', 'force', 'debug', 'ui', 'plain', 'adopt', 'dry-run', 'recursive', 'shallow', 'all-collections', 'clear', 'functions', 'no-functions', 'no-copy']);
+const switches = new Set(['resume-state', 'keep-data', 'no-diagnostics', 'help', 'offline', 'non-interactive', 'json', 'force', 'debug', 'ui', 'plain', 'adopt', 'dry-run', 'recursive', 'shallow', 'all-collections', 'clear', 'functions', 'no-functions', 'no-copy', 'build', 'yes', 'no-install', 'no-pin']);
 // Optional-value options: a bare flag or --name=value.
 const optionalValues = new Set(['inspect-functions']);
 // Official single-letter aliases.
-const shorts = {P:'project', c:'config', C:'config', r:'recursive', f:'force', h:'help'};
+const shorts = {P:'project', c:'config', C:'config', r:'recursive', f:'force', h:'help', y:'yes'};
 const repeated = new Set(['storage-bucket', 'instance']);
 
 // Returns {options, command, positionals, flags}: `command` is the argv after

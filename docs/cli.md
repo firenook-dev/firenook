@@ -5,7 +5,10 @@
 Every command the `firenook` executable accepts. Run them through your package manager (`npx firenook …`, `bunx firenook …`) or from your package scripts.
 
 ```sh
-firenook init [--force] [--dry-run] [--no-functions] [--project ID]   # scaffold a project
+firenook init                                     # a new project: a screen of choices in a terminal
+firenook init --yes [--no-install] [--no-pin]     # the same set-up, no questions
+firenook init [--language typescript|javascript|none] [--only firestore,auth,functions,storage,pubsub]
+              [--agent claude,cursor,vscode] [--project ID] [--force] [--dry-run] [--json]
 firenook init --adopt [--dry-run] [--json]        # adapt an existing firebase.json
 firenook use [alias|projectId] [--add ID [--alias NAME]] [--unalias NAME] [--clear]
 firenook target:apply storage NAME BUCKET...      # .firebaserc Storage targets
@@ -14,6 +17,7 @@ firenook setup                                    # nothing to download; kept fo
 firenook doctor [options]                         # read-only checks, JSON
 firenook emulators:start [options]
 firenook emulators:start --keep-data [--import SEED]   # keep the data between runs in .firenook/state
+firenook emulators:start --build                  # compile each Functions codebase first and on every save
 firenook emulators:exec [options] "npm test"      # script through the shell
 firenook emulators:exec [options] -- CMD ARGS...  # argv command, no shell
 firenook emulators:export DIR [--force] [--only firestore,auth,storage]
@@ -30,23 +34,52 @@ firenook mcp add [--agent claude,cursor,vscode] [--dry-run] [--force] [--json]  
 firenook binary-path | native ARGS...
 ```
 
-`init` writes `firebase.json` (Firestore, Storage in the `{rules}` form, a
-JavaScript Functions codebase unless `--no-functions`, every emulator on the
-official default port, `ui.enabled: true`, `singleProjectMode: true`),
-`.firebaserc` with `demo-<directory name>` (or `--project`), the official
-Firestore/Storage rules and indexes templates, `functions/package.json` and
-`functions/index.js`, and appends `.firenook/` and `*-debug.log` to
-`.gitignore`. Nothing is installed; it refuses to overwrite `firebase.json`
-without `--force`. `init --adopt` runs the launcher's own checks over an
-existing project and prints a plan: errors Firenook cannot accept, official
-services it skips, and additions it can make (missing `emulators` entries for
-configured services, a missing `.firebaserc` default, referenced rules files
-that do not exist, and the MCP server for the coding agents the folder shows,
-as `mcp add` writes it). Without `--dry-run`/`--json` the additions are applied
-by editing the parsed JSON, never rewriting other keys; errors leave every file
-untouched and exit 1. A new project's `init` prints its start command with
-`--keep-data` and, in a terminal, asks once whether to give the coding agents it
-finds the MCP server.
+`init` in a terminal opens on a screen with every choice made: the project
+id (`demo-<directory name>`), the emulators (Firestore, Auth, Storage, Pub/Sub
+and the console, each on the official default port, a port in use named with
+what holds it), the Functions language (TypeScript, JavaScript or none), the
+coding agents given the MCP server (those the folder shows), and whether to
+install the packages and pin Firenook. Enter takes them; Esc writes nothing.
+It then writes the files, gives the agents the server, writes
+`package.json` (Firenook as an exact devDependency and an `emulators` script,
+`firenook emulators:start --keep-data`, with `--build` for TypeScript; a script
+or a pin already there is kept), runs `npm install` in `functions/` and the
+project's package manager's install beside it (the lockfile's, else the one
+that ran `init`, else npm), builds a TypeScript codebase once, and offers to
+start the emulators in the same terminal; on Node other than 24 it says how
+to switch instead. Ctrl-C stops the installs and keeps what was written.
+
+The files are the same without a terminal: `firebase.json` (Firestore,
+Storage in the `{rules}` form, the Functions codebase, every emulator on its
+official port, `ui.enabled`, `singleProjectMode: true`), `.firebaserc` with
+the project id as its default (other keys of an existing one kept), the
+official Firestore/Storage rules and indexes templates, and the official
+TypeScript codebase (`functions/package.json` with `build` and `build:watch`,
+`tsconfig.json`, `src/index.ts`, and a `predeploy` build in `firebase.json`,
+as a deploy needs) or `functions/index.js` with `--language javascript`, and
+appends `.firenook/` and `*-debug.log` to `.gitignore`. Without `--yes` nothing
+is installed and the commands that finish the set-up are printed; `--yes` does
+the set-up as the screen would, one line a step (`--no-install`, `--no-pin`).
+`--only` names the data services (the console and the hub always come;
+Cloud Tasks and Eventarc come with Functions). It refuses to overwrite
+`firebase.json` without `--force`. `init --adopt` runs the launcher's own
+checks over an existing project and prints a plan: errors Firenook cannot
+accept, official services it skips, and additions it can make (missing
+`emulators` entries for configured services, a missing `.firebaserc` default,
+referenced rules files that do not exist, and the MCP server for the coding
+agents the folder shows, as `mcp add` writes it). Without `--dry-run`/`--json`
+the additions are applied by editing the parsed JSON, never rewriting other
+keys; errors leave every file untouched and exit 1. In a terminal, `init` in a
+folder with a `firebase.json` shows that plan and applies it on a yes.
+
+`--build` (start and exec) runs each Functions codebase's own build: a start
+runs its `build:watch` script (its `build` when it has none) and waits for the
+first compile before the engine loads the codebase, then keeps it running, so
+every save is compiled and the engine reloads what the compiler wrote; exec
+runs `build` once and refuses to run the tests when it fails. TypeScript's
+errors are shown in the log with where they are (`src/index.ts:3:7`), other
+build output as it is. Firenook compiles nothing itself: the script is the
+project's, as `predeploy` runs it for a deploy.
 
 `mcp add` writes the `firenook mcp` server into the project file of each
 coding agent the folder shows: `.mcp.json` for Claude Code (a `.claude/`

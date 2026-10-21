@@ -15,6 +15,7 @@ import { canonical, loadProject } from '../packages/cli/src/options.mjs';
 import { exportEmulators, firestoreDelete, locatorPath } from '../packages/cli/src/hub.mjs';
 import { applyTarget, clearTarget, targetApply, targetClear, use } from '../packages/cli/src/rc.mjs';
 import { INIT_PORTS, adopt, firestoreRules, scaffold } from '../packages/cli/src/init.mjs';
+import { buildPlan } from '../packages/cli/src/build.mjs';
 import { EMULATED_SERVICE_ACCOUNT, invokeFunction, matchParams, runInvoke, substituteParams } from '../packages/cli/src/invoke.mjs';
 import { PROTOCOL_VERSIONS, TOOLS, TOOL_GROUPS, createMcpServer, validateArguments } from '../packages/cli/src/mcp.mjs';
 import { manifest } from '../packages/cli/src/binary.mjs';
@@ -471,7 +472,7 @@ test('init scaffolds a runnable demo project with the official defaults and neve
   const dir = join(root, 'My App'); mkdirSync(dir);
   writeFileSync(join(dir, '.gitignore'), 'node_modules/\n');
   const output = log();
-  assert.equal(scaffold(options, dir, output, hermetic), 0);
+  assert.equal(scaffold({...options, language:'javascript'}, dir, output, hermetic), 0);
   const config = readJson(join(dir, 'firebase.json'));
   assert.deepEqual(Object.keys(config), ['firestore', 'storage', 'functions', 'emulators']);
   assert.deepEqual(config.storage, {rules:'storage.rules'});
@@ -490,11 +491,12 @@ test('init scaffolds a runnable demo project with the official defaults and neve
   assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), 'node_modules/\n.firenook/\n*-debug.log\n');
   assert.equal(readFileSync(join(dir, 'functions/.gitignore'), 'utf8'), 'node_modules/\n*.local\n');
   assert.ok(!existsSync(join(dir, 'functions/node_modules')), 'nothing is installed');
-  assert.match(output.err.join('\n'), /Next steps:[\s\S]*cd functions && npm install[\s\S]*firenook emulators:start --project demo-my-app/);
+  assert.ok(!existsSync(join(dir, 'package.json')), 'nothing is pinned without --yes');
+  assert.match(output.err.join('\n'), /Next steps:\n {2}cd functions && npm install && cd \.\.\n {2}npx firenook emulators:start --keep-data$/);
   assert.equal(firestoreRules(new Date(Date.UTC(2026, 0, 15, 12))).includes('timestamp.date(2026, 2, 14)'), true);
   assert.throws(() => scaffold(options, dir, log(), hermetic), /exists; use firenook init --adopt/);
   writeFileSync(join(dir, 'storage.rules'), 'custom');
-  scaffold({...options, force:true, project:'demo-forced'}, dir, log(), hermetic);
+  scaffold({...options, force:true, project:'demo-forced', language:'javascript'}, dir, log(), hermetic);
   assert.equal(readFileSync(join(dir, 'storage.rules'), 'utf8').startsWith("rules_version = '2';"), true, '--force rewrites every scaffold file');
   assert.equal(readJson(join(dir, '.firebaserc')).projects.default, 'demo-forced');
   assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), 'node_modules/\n.firenook/\n*-debug.log\n', 'gitignore lines are never duplicated');
@@ -510,6 +512,7 @@ test('init scaffolds a runnable demo project with the official defaults and neve
   assert.ok(!existsSync(join(lean, 'firebase.json')));
   const parsed = JSON.parse(plan.out[0]);
   assert.equal(parsed.functions, false);
+  assert.equal(parsed.language, 'none');
   assert.equal(parsed.applied, false);
   assert.ok(parsed.files.every(file => file.action === 'write' && !file.path.includes('functions')));
   scaffold({...options, 'no-functions':true, project:'demo-lean'}, lean, log(), hermetic);
@@ -518,6 +521,43 @@ test('init scaffolds a runnable demo project with the official defaults and neve
   assert.deepEqual(Object.keys(leanConfig.emulators), ['auth', 'firestore', 'pubsub', 'storage', 'hub', 'logging', 'ui', 'singleProjectMode']);
   assert.equal(loadProject(options, lean).minimumFunctions, '0');
   assert.throws(() => scaffold({...options, project:'Nope'}, mkdtempSync(join(tmpdir(), 'firenook-init-bad-')), log(), hermetic), /Invalid project id/);
+});
+test('init writes a TypeScript codebase by default, built before a deploy and by --build before a start', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-init-ts-'));
+  const output = log();
+  assert.equal(scaffold({...options, project:'demo-typed'}, dir, output, hermetic), 0);
+  const config = readJson(join(dir, 'firebase.json'));
+  assert.deepEqual(config.functions.predeploy, ['npm --prefix "$RESOURCE_DIR" run build'], 'a deploy builds it first, as the official init sets up');
+  const pkg = readJson(join(dir, 'functions/package.json'));
+  assert.equal(pkg.main, 'lib/index.js');
+  assert.deepEqual(pkg.scripts, {build:'tsc', 'build:watch':'tsc --watch', serve:'firenook emulators:start --only functions --build'});
+  assert.deepEqual(pkg.devDependencies, {typescript:'^7.0.0'});
+  assert.deepEqual(readJson(join(dir, 'functions/tsconfig.json')).compilerOptions, {module:'NodeNext', esModuleInterop:true, moduleResolution:'nodenext',
+    noImplicitReturns:true, noUnusedLocals:true, outDir:'lib', rootDir:'src', sourceMap:true, strict:true, target:'es2017'});
+  assert.match(readFileSync(join(dir, 'functions/src/index.ts'), 'utf8'), /export const helloWorld = onRequest\(/);
+  assert.ok(!existsSync(join(dir, 'functions/index.js')));
+  assert.equal(readFileSync(join(dir, 'functions/.gitignore'), 'utf8'), 'node_modules/\nlib/\n*.local\n');
+  assert.match(output.err.join('\n'), /npx firenook emulators:start --keep-data --build$/);
+  // --build runs the codebase's own scripts: build:watch for a start, build for exec.
+  const project = loadProject(options, dir);
+  assert.deepEqual(buildPlan(project, 'start').map(({codebase, shown, script, watch}) => ({codebase, shown, script, watch})), [{codebase:'default', shown:'functions', script:'build:watch', watch:true}]);
+  assert.equal(buildPlan(project, 'exec')[0].script, 'build');
+  writeFileSync(join(dir, 'functions/package.json'), JSON.stringify({scripts:{}}));
+  assert.equal(buildPlan(project, 'start')[0].script, undefined, 'a codebase with no build script has nothing to build');
+});
+test('init --only picks the data services, the console comes along, and a chosen project becomes the default', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-init-only-'));
+  writeFileSync(join(dir, '.firebaserc'), JSON.stringify({projects:{default:'demo-old', staging:'demo-staging'}, targets:{}}));
+  assert.equal(scaffold({...options, only:'firestore,auth', project:'demo-chosen'}, dir, log(), hermetic), 0);
+  const config = readJson(join(dir, 'firebase.json'));
+  assert.deepEqual(Object.keys(config), ['firestore', 'emulators']);
+  assert.deepEqual(Object.keys(config.emulators), ['auth', 'firestore', 'hub', 'logging', 'ui', 'singleProjectMode']);
+  assert.equal(config.emulators.ui.enabled, true);
+  assert.ok(!existsSync(join(dir, 'storage.rules')) && !existsSync(join(dir, 'functions')));
+  assert.deepEqual(readJson(join(dir, '.firebaserc')), {projects:{default:'demo-chosen', staging:'demo-staging'}, targets:{}}, 'the rest of .firebaserc is kept');
+  assert.throws(() => scaffold({...options, only:'firestore,hosting'}, mkdtempSync(join(tmpdir(), 'firenook-init-only-')), log(), hermetic), /hosting is not an emulator firenook init sets up/);
+  assert.throws(() => scaffold({...options, only:'firestore', language:'typescript'}, mkdtempSync(join(tmpdir(), 'firenook-init-only-')), log(), hermetic), /--language typescript needs functions in --only/);
+  assert.throws(() => scaffold({...options, language:'go'}, mkdtempSync(join(tmpdir(), 'firenook-init-only-')), log(), hermetic), /--language takes typescript, javascript, none/);
 });
 test('init --adopt lists skips, errors and additions, then applies only the additions', () => {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-adopt-'));

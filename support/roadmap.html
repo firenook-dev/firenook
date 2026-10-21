@@ -630,7 +630,7 @@ const DATA = {
   {
     "name": "init",
     "status": "done",
-    "note": "Non-interactive scaffold with the official templates; --adopt diagnoses and completes an existing project (next.9)",
+    "note": "In a terminal, one screen with every choice made, then the set-up (installs, Firenook pinned, the first build) and the emulators started (0.2.0-next.9); without one, the official templates and the commands that finish it, or --yes; --adopt diagnoses and completes an existing project (0.1.0-next.9)",
     "remaining": "—",
     "size": "—"
   },
@@ -757,6 +757,16 @@ const DATA = {
   }
 ],
   backlog: [
+  {
+    "item": "init in a terminal",
+    "why": "Built for next.9: npx firenook init chose everything, installed nothing and printed a start command the folder did not have; it now opens on one screen with every choice made (project id, emulators, Functions language, coding agents, set-up), runs the installs, the pin and the first build as rows of the card, and starts the emulators in the same terminal",
+    "size": "days"
+  },
+  {
+    "item": "TypeScript compiled as you save",
+    "why": "Built for next.9: --build runs each Functions codebase's own build:watch beside the engine, starts it after the first compile, and shows TypeScript's errors in the log; exec --build runs no test on code that did not build. init's TypeScript projects start with it",
+    "size": "days"
+  },
   {
     "item": "The Firestore tree at once",
     "why": "Built for next.8: the tree's first walk reads the collection index instead of the documents (37 s instead of 133 s on 2.7 million documents), a clean stop saves the tree with the data so the next start shows it in under a millisecond, and the root collections are listed while a walk runs",

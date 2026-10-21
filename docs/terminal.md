@@ -2,18 +2,20 @@
 
 [Docs](README.md) · The terminal
 
-What `firenook emulators:start` draws in a terminal, the keys it answers, and the plain output pipes and CI get.
+What `firenook emulators:start` and `firenook init` draw in a terminal, the keys they answer, and the plain output pipes and CI get.
 
 ![The terminal: the start-up card, the ready summary and a live log of function calls](assets/terminal.gif)
 
 In a terminal, `firenook emulators:start` draws its own screen:
 
 - a card with the start-up, one row per service, filling in with how long
-  each took and what it holds (documents, users, objects, functions);
+  each took and what it holds (documents, users, objects, functions), and
+  with `--build` a first row for the compile;
 - the ready summary: the console's address, the ports, any start-up
   warnings, and a newer release when one is out;
 - the log below it, one line per call with how long it took and what caused
-  it, the function's own output under it, and reloads as you save;
+  it, the function's own output under it, reloads as you save, and with
+  `--build` each compile's errors, with where they are;
 - a footer that stays on the window's last line, with the keys.
 
 | Key | Does |
@@ -36,9 +38,20 @@ functions do not load, everything else keeps running: the
 card shows the error and the code around it, and the next save loads them
 again.
 
+`firenook init` draws the same card: the mark, then the new project's
+choices as rows, each already made. `↑` `↓` (or Tab) move between rows,
+`←` `→` change a choice, Space turns one of several on or off, letters edit
+the project id, Enter goes on and Esc leaves without writing anything. The
+row in focus has its hint under it, and an answer that cannot be used says
+why there. The set-up then runs as rows of the card, like the start-up, and a
+yes to "Start the emulators now?" hands the same terminal to the start
+screen. In a folder with a `firebase.json`, the card shows what
+`init --adopt` would add and asks before adding it.
+
 Pipes, CI, log files and `emulators:exec` get the plain line protocol, the
 same lines as before, `All emulators ready` alone on its line. So do
-`--plain`, `FIRENOOK_PLAIN=1` and `TERM=dumb`. `NO_COLOR` keeps the screen
+`--plain`, `FIRENOOK_PLAIN=1` and `TERM=dumb`; `init` there writes the files
+and prints the commands that finish the set-up, or does it with `--yes`. `NO_COLOR` keeps the screen
 and drops the colour. Terminals that cannot draw its symbols (the Windows
 console outside Windows Terminal, the Linux text console, or
 `FIRENOOK_ASCII=1`) get plain characters instead.

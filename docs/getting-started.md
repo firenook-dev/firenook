@@ -97,22 +97,51 @@ on the same ports or the same working directory.
 
 ```sh
 npx firenook init
-cd functions && npm install && cd ..
-npx firenook emulators:start --keep-data
 ```
 
-`init` writes `firebase.json` with every emulator on its usual port,
-`.firebaserc` with a `demo-<folder>` project, the default Firestore and
-Storage rules and indexes, and a JavaScript Functions codebase
-(`--no-functions` leaves it out). It installs nothing and never overwrites an
-existing `firebase.json` unless you pass `--force`. A `demo-` project id never
-reaches a real Firebase project.
+In a terminal, `init` opens on one screen with every choice already made, so
+Enter takes them all:
 
-The start command it prints carries `--keep-data`, so a new project keeps its
-data between runs from the first start. When the folder shows a coding agent
-(`.claude/`, `.cursor/`, `.vscode/`, or `claude` on the PATH), `init` asks
-once whether to give it the [MCP server](mcp.md); `npx firenook mcp add` does
-the same at any time.
+- **Project ID**: `demo-<folder>`. A `demo-` id never reaches a real
+  Firebase project; type another to use your real project's id.
+- **Emulators**: Firestore, Auth, Storage, Pub/Sub and the console, each on
+  its usual port. A port something already listens on is named, with what
+  holds it.
+- **Functions**: TypeScript, JavaScript or none. Cloud Tasks and Eventarc come
+  with Functions.
+- **Agents**: the coding agents the folder shows (`.claude/`, `.cursor/`,
+  `.vscode/`, or `claude` on the PATH) get the [MCP server](mcp.md).
+- **Set up**: install the packages, and pin Firenook in `package.json` with an
+  `emulators` script.
+
+`↑` `↓` move between them, `←` `→` and Space change one, Esc leaves without
+writing anything. Then `init` writes the files, installs the Functions
+codebase's packages and Firenook's, builds a TypeScript codebase once, and
+asks whether to start the emulators there and then. Later, one command starts
+them:
+
+```sh
+npm run emulators            # firenook emulators:start --keep-data --build
+```
+
+`--keep-data` keeps the data between runs from the first start. `--build`
+runs the codebase's own `build:watch` script (`tsc --watch`) beside the
+emulators, so TypeScript is compiled before it loads and again on every save,
+with any errors in the log; see [Functions](functions-and-extensions.md#typescript).
+
+The files are the official `firebase init` templates: `firebase.json` with each
+emulator on its usual port, `.firebaserc`, the default Firestore and Storage
+rules and indexes, and the Functions codebase (`functions/src/index.ts`
+compiled to `functions/lib`, with a `predeploy` build in `firebase.json` as a
+deploy needs, or `functions/index.js`). `init` never overwrites an existing
+`firebase.json` unless you pass `--force`; in a folder that already has one,
+it shows what `init --adopt` would add, and adds it on a yes.
+
+Without a terminal (a script, CI, `--json`), `init` writes the files and
+prints the commands that finish the set-up. `--yes` takes the screen's
+choices with no questions and does the set-up too; `--language
+typescript|javascript|none`, `--only firestore,auth,functions,storage,pubsub`,
+`--agent claude,cursor,vscode`, `--no-install` and `--no-pin` change them.
 
 ## Start
 

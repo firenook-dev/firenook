@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { binaryPath, manifest, release } from './binary.mjs';
 import { SERVICES, connectHost, launchContext, loadProject } from './options.mjs';
 import { nativeEnvironment, requestNativeStop } from './processes.mjs';
+import { buildPlan, errorPlace, startBuild } from './build.mjs';
 
 // The Functions workers run on this Node and are tested on Node 24. The check
 // is here and not in package.json's engines: npm refuses no release for its
@@ -137,7 +138,7 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {
   // Functions workers' environment.
   delete env.CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE;
   writeFileSync(join(run, 'launch.json'), JSON.stringify({version:manifest.version, engineRevision:release.engineRevision, args, state, exported:p.exported,
-    services:p.services, ui, singleProjectMode:p.singleProjectMode, project:{id:p.project, demo:p.demo}, debugLog}, null, 2));
+    services:p.services, ui, singleProjectMode:p.singleProjectMode, project:{id:p.project, demo:p.demo}, debugLog, build:Boolean(options.build)}, null, 2));
   say(`Firenook ${manifest.version}; engine ${release.engineRevision}; disk/WAL state ${state}`);
   say(`Services: ${p.services.join(', ')}; Emulator UI ${ui ? 'on' : 'off'}; host ${p.host}`);
   if (p.demo) say(`Demo project ${p.project}: no cloud service is contacted, but user Functions can still reach external providers; this CLI is not a network sandbox.`);
@@ -145,7 +146,28 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {
   if (debugLog) say(`Debug log: ${debugLog}`);
   if (options['log-verbosity'] && options['log-verbosity'] !== 'DEBUG') say(`note: --log-verbosity ${options['log-verbosity']} is accepted for compatibility; Firenook prints its full log`);
   say(`Working data and launch receipt are preserved in ${run}. No automatic deletion.`);
-  return {binary:diagnostic.binary, args, env:nativeEnvironment(env), cwd:p.directory, run, ui, services:p.services, debugLog};
+  // --build: the codebases whose own build Firenook runs beside the engine.
+  const builds = options.build ? buildPlan(p, mode) : [];
+  for (const entry of builds) say(entry.script ? `Build: ${entry.shown} runs its ${entry.script} script${entry.watch ? ', and Firenook loads what it writes on every save' : ' before the emulators start'}`
+    : `note: ${entry.shown} has no build or build:watch script, so --build builds nothing there`);
+  return {binary:diagnostic.binary, args, env:nativeEnvironment(env), cwd:p.directory, run, ui, services:p.services, debugLog, builds};
+}
+
+// --build without the terminal UI: each build's lines on stderr, marked
+// with its codebase, starting before the engine does.
+function startBuilds(launch, stopping, write = text => process.stderr.write(`${text}\n`)) {
+  return (launch.builds ?? []).filter(entry => entry.script).map(entry => {
+    const tag = `build ${entry.shown}:`;
+    const errors = list => { for (const error of list) write(`${tag} ${errorPlace(error)} ${error.code}: ${error.message}`); };
+    return startBuild(entry, {onEvent: event => {
+      if (event.type === 'compiled') { errors(event.errors); write(`${tag} ${event.count ? `${event.count} ${event.count === 1 ? 'error' : 'errors'}` : 'compiled, no errors'}`); }
+      else if (event.type === 'text') write(`${tag} ${event.text}`);
+      else if (event.type === 'ended' && !stopping()) {
+        if (!entry.watch) errors(event.errors ?? []);
+        if (event.code !== 0 || entry.watch) write(`${tag} ${entry.script} ${event.code === 0 ? 'ended' : event.error ? `could not run: ${event.error.message}` : `failed (exit code ${event.code})`}${entry.watch ? '; saves are no longer compiled' : ''}`);
+      }
+    }});
+  });
 }
 
 // Signal only children owned by this invocation. Wait through native export;
@@ -153,18 +175,36 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {
 // `command` is an argv array (spawned directly) or a script string (run
 // through the platform shell, as the official emulators:exec does).
 export async function supervise(launch, command) {
+  // The builds come first: a start loads what they wrote, and exec runs no
+  // test on code that did not build.
+  let requestedStop = false;
+  const builds = startBuilds(launch, () => requestedStop);
+  if (builds.length) {
+    let interrupted = false;
+    const early = () => { interrupted = requestedStop = true; for (const build of builds) build.stop(); };
+    process.on('SIGINT', early);
+    process.on('SIGTERM', early);
+    let firsts;
+    try { firsts = await Promise.all(builds.map(build => build.first)); } finally { process.off('SIGINT', early); process.off('SIGTERM', early); }
+    if (interrupted) return 130;
+    const failed = builds.findIndex((build, at) => !build.entry.watch && firsts[at].code !== 0);
+    if (failed !== -1 && command?.length) {
+      for (const build of builds) build.stop();
+      throw new Error(`the build in ${builds[failed].entry.shown} failed (${builds[failed].command}); the tests did not run`);
+    }
+  }
   const child = spawn(launch.binary, launch.args, {cwd:launch.cwd, env:launch.env,
     detached:process.platform === 'win32', windowsHide:true,
     stdio:[process.platform === 'win32' ? 'pipe' : 'inherit','pipe','pipe']});
   child.stdin?.on('error', error => { startupError = error; });
   let testChild;
   let ready = false;
-  let requestedStop = false;
   let commandStatus;
   let tail = '';
   let startupError;
   const stop = signal => {
     requestedStop = true;
+    for (const build of builds) build.stop();
     if (testChild && testChild.exitCode === null) testChild.kill(signal);
     if (child.exitCode === null) requestNativeStop(child, signal);
   };
@@ -222,5 +262,6 @@ export async function supervise(launch, command) {
     clearTimeout(timeout);
     process.off('SIGINT', onInt);
     process.off('SIGTERM', onTerm);
+    for (const build of builds) build.stop();
   }
 }

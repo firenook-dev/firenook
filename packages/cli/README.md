@@ -32,7 +32,7 @@ Same flags, same ports, and your `firebase.json`, rules, Functions code and app
 stay as they are. In a terminal, run it as `npx firenook emulators:start`. To
 keep your data between runs, add `--keep-data`.
 Firenook needs Node 24. Starting a new project? `npx firenook init` sets one
-up.
+up on one screen, installs it and starts the emulators.
 
 <p align="center">
   <img alt="firenook emulators:start: the start-up card, the ready summary and a live log of function calls" src="https://raw.githubusercontent.com/firenook-dev/firenook/main/docs/assets/terminal.gif" width="760">
@@ -123,10 +123,12 @@ filters over a large collection, batch gets).
 ## Commands
 
 ```sh
-firenook init [--adopt] [--dry-run]           # scaffold a project, or adapt an existing one
+firenook init [--yes]                         # a new project: choose, install, start
+firenook init --adopt [--dry-run]             # adapt an existing firebase.json
 firenook doctor                               # read-only checks, JSON
 firenook emulators:start [options]            # --only, --project, --import, --export-on-exit, --inspect-functions
 firenook emulators:start --keep-data [--import ./seed]   # keep data between runs, in .firenook/state
+firenook emulators:start --build              # compile TypeScript first and on every save
 firenook emulators:exec "npm test"            # start, run your tests, stop
 firenook emulators:export ./export            # snapshot a running suite
 firenook functions:invoke NAME [--data JSON | --event-data JSON]   # call any function, any trigger
