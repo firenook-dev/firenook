@@ -8,7 +8,7 @@ use firenook_functions_bridge::FunctionsInventory;
 use firenook_suite_front::{EntityRef, LogInput, LogLevel, LoggingRuntime, kinds};
 
 use super::{FunctionsConsoleOptions, HookContext};
-use crate::SuiteConfig;
+use crate::{SuiteConfig, terminal};
 
 /// Authentication's console: the Auth emulator's own application, its
 /// state, and the feed the console installs as the runtime's observer
@@ -21,12 +21,15 @@ pub(crate) fn auth_console(
     AuthConsole::attach(auth, config.diagnostics, logging.clone())
 }
 
-/// Auth's log lines. The terminal line and the official record (and the
+/// Auth's log lines. The plain line and the official record (and the
 /// `--debug-log` line) are exactly what the suite has always written:
 /// `firenook auth: <text>` on stdout, or stderr for `WARN` and `ERROR`, and
 /// a record at `INFO` (`BULLET`, `SUCCESS`), `WARN` or `ERROR` filed under
-/// `auth`. The console's line is the same text; a line that prints a code
-/// or a link is an `auth.message` with links to that message and its user.
+/// `auth`. With the terminal's events on, the line is a line of its log (a
+/// warning before readiness is a start-up warning), and a line that prints
+/// a code or a link is shown even when it comes before readiness. The
+/// console's line is the same text; a line that prints a code or a link is
+/// an `auth.message` with links to that message and its user.
 pub(crate) fn auth_line_sink(logging: LoggingRuntime) -> LineSink {
     Arc::new(move |line: &AuthLogLine<'_>| {
         let legacy = match line.kind {
@@ -34,10 +37,11 @@ pub(crate) fn auth_line_sink(logging: LoggingRuntime) -> LineSink {
             "ERROR" => "ERROR",
             _ => "INFO",
         };
-        if legacy == "INFO" {
-            println!("firenook auth: {}", line.text);
+        let plain = format!("firenook auth: {}", line.text);
+        if line.message.is_some() {
+            terminal::print_kept(legacy, "auth", line.text, &plain);
         } else {
-            eprintln!("firenook auth: {}", line.text);
+            terminal::print(legacy, "auth", line.text, &plain);
         }
         let mut refs = Vec::new();
         if let Some(message) = line.message {

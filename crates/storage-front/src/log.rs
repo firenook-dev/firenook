@@ -1,7 +1,8 @@
-//! Where Storage's own log lines go: rules runtime errors and failed
-//! flushes. A plain closure, so this crate needs no logging crate of the
-//! suite's; the suite adapts it to its log, and without one the lines go to
-//! standard error as they always did.
+//! Where Storage's own log lines go: rules runtime errors, failed flushes,
+//! and the staged uploads and idle upload sessions it removes. A plain
+//! closure, so this crate needs no logging crate of the suite's; the suite
+//! adapts it to its log, and without one the lines are printed as they
+//! always were (stdout for information, stderr otherwise).
 
 use std::fmt;
 use std::sync::{Arc, RwLock};
@@ -21,8 +22,9 @@ pub enum StorageLogLevel {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StorageLogLine {
     pub level: StorageLogLevel,
-    /// `storage.rules` (a rules runtime error) or `storage.flush` (a
-    /// write-behind flush that failed).
+    /// `storage.rules` (a rules runtime error), `storage.flush` (a
+    /// write-behind flush that failed) or `storage.uploads` (staged
+    /// uploads and idle upload sessions removed, or their sweep failing).
     pub kind: &'static str,
     pub message: String,
 }
@@ -31,6 +33,8 @@ pub struct StorageLogLine {
 pub(crate) const RULES: &str = "storage.rules";
 /// A write-behind flush that failed.
 pub(crate) const FLUSH: &str = "storage.flush";
+/// Staged uploads and idle upload sessions removed, or their sweep failing.
+pub(crate) const UPLOADS: &str = "storage.uploads";
 
 /// The sink in force, shared by every task that logs.
 #[derive(Clone, Default)]
@@ -64,6 +68,10 @@ impl LogHandle {
                 message,
             }),
             None if kind == RULES => eprintln!("firenook Storage rules: {message}"),
+            None if kind == UPLOADS && level == StorageLogLevel::Info => {
+                println!("firenook storage: {message}");
+            }
+            None if kind == UPLOADS => eprintln!("firenook storage: {message}"),
             None => eprintln!("firenook Storage: {message}"),
         }
     }

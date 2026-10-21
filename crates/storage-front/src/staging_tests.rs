@@ -258,13 +258,50 @@ async fn orphans_are_removed_at_open() {
     let orphan = root.join("uploads/left-by-a-crash.part");
     std::fs::write(&orphan, vec![0_u8; 4_096]).expect("orphan");
 
-    let runtime = start(&root).await;
+    // The removal is said through the log sink the options give, from the
+    // opening on, before anything could set one on the runtime.
+    let said: Arc<Mutex<Vec<StorageLogLine>>> = Arc::default();
+    let sink_said = Arc::clone(&said);
+    let registry = TriggerRegistry::default();
+    let (observer, _receiver) = TriggerObserver::channel(registry.clone());
+    let runtime = StorageRuntime::start_with(
+        StorageConfig {
+            project: PROJECT.to_owned(),
+            origin: "http://127.0.0.1:21002".to_owned(),
+            data_dir: root.clone(),
+            rules: None,
+            durability: StorageDurability::PerCommit,
+        },
+        StorageOptions {
+            log: Some(Arc::new(move |line| {
+                sink_said.lock().expect("lines").push(line);
+            })),
+            ..StorageOptions::default()
+        },
+        observer.queue(),
+        registry,
+    )
+    .await
+    .expect("Storage runtime");
     assert!(
         !orphan.exists(),
         "a staged file no session names is removed"
     );
     assert!(session_file.exists(), "a session's staged file stays");
     assert_eq!(staged_files(&root), vec![session_file]);
+    let said = said.lock().expect("lines").clone();
+    let removed = said
+        .iter()
+        .find(|line| line.kind == "storage.uploads")
+        .unwrap_or_else(|| panic!("the removal is said: {said:?}"));
+    assert_eq!(removed.level, StorageLogLevel::Warn);
+    assert!(
+        removed
+            .message
+            .starts_with("removed 1 staged upload file left by an earlier run ("),
+        "{}",
+        removed.message
+    );
     runtime.shutdown().await.expect("shutdown");
     std::fs::remove_dir_all(root).expect("remove test storage");
 }
