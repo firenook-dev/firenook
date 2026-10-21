@@ -13,6 +13,7 @@ import {
 import { requestNativeStop } from './processes.mjs';
 import { errorPlace, startBuild } from './build.mjs';
 import { diagnose, prepareLaunch } from './runtime.mjs';
+import { connectHost } from './options.mjs';
 import { pendingUpdate, refreshUpdates } from './updates.mjs';
 
 export const EVENT_PREFIX = 'FIRENOOK_EVENT ';
@@ -181,7 +182,7 @@ async function freePort(host, port, taken = new Set()) {
     const free = await new Promise(done => {
       const server = createServer();
       server.once('error', () => done(false));
-      server.listen(next, host, () => server.close(() => done(true)));
+      server.listen(next, host.replace(/^\[|\]$/g, ''), () => server.close(() => done(true)));
     });
     if (free) return next;
   }
@@ -212,7 +213,9 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   // which no later start reads.
   const ephemeral = !stateDir || /[\\/]\.firenook[\\/]runs[\\/]session-[^\\/]+[\\/]state$/.test(stateDir);
   const exportDir = value('--export-on-exit');
-  const host = value('--host') || '127.0.0.1';
+  // Where this process reaches the suite (the hub for an export, the
+  // console's address): the host clients are told.
+  const host = connectHost(value('--host') || '127.0.0.1');
   const update = pendingUpdate(version, cwd, {env, platform});
   // The next start's answer; this one never waits for it.
   void refreshUpdates({env, platform});
@@ -742,7 +745,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     try {
       mkdirSync(destination, {recursive: true});
       // No Origin header: the hub refuses requests that carry one.
-      const response = await fetch(`http://${host === '0.0.0.0' ? '127.0.0.1' : host === '::' ? '[::1]' : host}:${hub}/_admin/export`, {method: 'POST', headers: {'content-type': 'application/json'},
+      const response = await fetch(`http://${host}:${hub}/_admin/export`, {method: 'POST', headers: {'content-type': 'application/json'},
         body: JSON.stringify({path: destination, targets, initiatedBy: 'firenook terminal'}), signal: AbortSignal.timeout(30 * 60_000)});
       model.task = undefined;
       if (response.ok) happened(green(G.ok), 'exported', Date.now() - began, dim(shortPath(destination, cwd)));
@@ -886,7 +889,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   // border is printed: the banner, and the ready rows as the launch's own
   // ports and console address foretell them.
   const port = name => Number(value(`--${name}-port`)) || undefined;
-  const foretold = {console: launch.args.includes('--no-ui') ? undefined : `http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port('ui') ?? 4000}/console`,
+  const foretold = {console: launch.args.includes('--no-ui') ? undefined : `http://${host}:${port('ui') ?? 4000}/console`,
     ports: Object.fromEntries(PORTS.map(([name]) => [name, selected.has(name) || name === 'hub' ? port(name) : undefined]).filter(([, number]) => number)), ms: 0};
   model.ready = foretold;
   for (const row of readyRows(Infinity)) t.claim(row);

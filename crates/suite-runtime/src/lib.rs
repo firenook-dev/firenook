@@ -324,10 +324,33 @@ pub struct SuiteConfig {
 impl SuiteConfig {
     /// The address clients connect to: the listen host unless that is a
     /// wildcard (`0.0.0.0` → `127.0.0.1`, `::` → `::1`), as the official
-    /// CLI's `connectableHostname`.
+    /// CLI's `connectableHostname`, or `localhost`, whose first address is
+    /// what the official CLI advertises.
     #[must_use]
     pub fn connect_host(&self) -> String {
         connectable_hostname(&self.host)
+    }
+
+    /// The address every listener binds: the listen host, except
+    /// `localhost` (the official default host), which the official CLI
+    /// resolves to 127.0.0.1 first; see [`SuiteConfig::also_ipv6`].
+    #[must_use]
+    pub fn bind_host(&self) -> &str {
+        if self.host == "localhost" {
+            "127.0.0.1"
+        } else {
+            &self.host
+        }
+    }
+
+    /// Whether `listener` also listens on `::1`: the hub and the console
+    /// when the host is `localhost`, as the official CLI binds them. It
+    /// binds every other emulator on the first address only, so a client
+    /// that tries `[::1]` first (a browser, Node for `localhost`) falls back
+    /// to 127.0.0.1 for those as it would officially.
+    #[must_use]
+    pub fn also_ipv6(&self, listener: &str) -> bool {
+        self.host == "localhost" && matches!(listener, "hub" | "ui")
     }
 
     /// `host:port` (bracketed for IPv6) on the connect host.
@@ -353,7 +376,7 @@ impl SuiteConfig {
 #[must_use]
 pub fn connectable_hostname(host: &str) -> String {
     match host.trim_start_matches('[').trim_end_matches(']') {
-        "0.0.0.0" => "127.0.0.1".to_owned(),
+        "0.0.0.0" | "localhost" => "127.0.0.1".to_owned(),
         "::" => "::1".to_owned(),
         other => other.to_owned(),
     }
@@ -2174,10 +2197,38 @@ fn suite_directory(config: &SuiteConfig) -> Result<SuiteDirectory, SuiteRuntimeE
         if name == "pubsub" {
             service.pid = Some(std::process::id());
         }
+        if config.also_ipv6(name) {
+            match std::net::TcpListener::bind(("::1", port)) {
+                Ok(_) => service = service.also_on("::1"),
+                Err(error) => partly_available(name, port, &error),
+            }
+        }
         service
     });
     SuiteDirectory::new(&config.project_id, services)
         .map_err(|error| failure(format!("invalid suite directory: {error}")))
+}
+
+/// The host the Functions runtime names its own port by (its origin, and
+/// the inspector's address): the connect host, bracketed when it is an
+/// IPv6 literal, so `::1` makes `http://[::1]:5001`.
+fn functions_host(config: &SuiteConfig) -> String {
+    let host = config.connect_host();
+    if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host
+    }
+}
+
+/// `localhost`'s second address could not be bound for `name`: it answers
+/// on 127.0.0.1 only, which the official CLI accepts with this warning.
+fn partly_available(name: &str, port: u16, error: &std::io::Error) {
+    let message = format!(
+        "Port {port} is available on 127.0.0.1 but not ::1 ({error}), so the {} answers on 127.0.0.1 only. This may cause issues with some clients; if you encounter connectivity issues, consider switching to a different port or explicitly specifying \"host\": \"<ip address>\" instead of hostname in firebase.json.",
+        if name == "ui" { "console" } else { name }
+    );
+    terminal::print("WARN", name, &message, &format!("firenook: {message}"));
 }
 
 fn locator_path(config: &SuiteConfig) -> PathBuf {
@@ -2271,7 +2322,12 @@ fn startup_log_messages(config: &SuiteConfig) -> Vec<String> {
         .collect()
 }
 
-struct ListenerSet(std::collections::BTreeMap<&'static str, TcpListener>);
+/// Every bound listener, and the second address of the ones that listen
+/// on two ([`SuiteConfig::also_ipv6`]).
+struct ListenerSet {
+    primary: std::collections::BTreeMap<&'static str, TcpListener>,
+    also: std::collections::BTreeMap<&'static str, TcpListener>,
+}
 
 struct StaticApplications {
     firestore: Option<tonic::service::Routes>,
@@ -2285,22 +2341,39 @@ struct StaticApplications {
 
 impl ListenerSet {
     fn take(&mut self, name: &'static str) -> Result<TcpListener, SuiteRuntimeError> {
-        self.0
+        self.primary
             .remove(name)
             .ok_or_else(|| failure(format!("missing bound {name} listener")))
+    }
+
+    /// `name`'s listener on its second address, when it has one.
+    fn take_also(&mut self, name: &'static str) -> Option<TcpListener> {
+        self.also.remove(name)
     }
 }
 
 async fn bind_listeners(config: &SuiteConfig) -> Result<ListenerSet, SuiteRuntimeError> {
-    let mut listeners = std::collections::BTreeMap::new();
+    let mut listeners = ListenerSet {
+        primary: std::collections::BTreeMap::new(),
+        also: std::collections::BTreeMap::new(),
+    };
     for (name, port) in listener_plan(config) {
-        let address = endpoint(&config.host, port);
+        let address = endpoint(config.bind_host(), port);
         let listener = TcpListener::bind(&address)
             .await
             .map_err(|error| failure(format!("cannot bind {name} at {address}: {error}")))?;
-        listeners.insert(name, listener);
+        listeners.primary.insert(name, listener);
+        if config.also_ipv6(name) {
+            // Taken since the directory was written: 127.0.0.1 only.
+            match TcpListener::bind(("::1", port)).await {
+                Ok(listener) => {
+                    listeners.also.insert(name, listener);
+                }
+                Err(error) => partly_available(name, port, &error),
+            }
+        }
     }
-    Ok(ListenerSet(listeners))
+    Ok(listeners)
 }
 
 fn spawn_static_servers(
@@ -2315,10 +2388,19 @@ fn spawn_static_servers(
     let mut servers = vec![spawn_axum(
         "hub",
         listeners.take("hub")?,
-        applications.hub,
+        applications.hub.clone(),
         shutdown.subscribe(),
         failed.clone(),
     )];
+    if let Some(also) = listeners.take_also("hub") {
+        servers.push(spawn_axum(
+            "hub",
+            also,
+            applications.hub,
+            shutdown.subscribe(),
+            failed.clone(),
+        ));
+    }
     if let Some(firestore) = applications.firestore {
         servers.push(spawn_firestore(
             "firestore",
@@ -2359,10 +2441,19 @@ fn spawn_static_servers(
         servers.push(spawn_axum(
             "ui",
             listeners.take("ui")?,
-            ui,
+            ui.clone(),
             shutdown.subscribe(),
             failed.clone(),
         ));
+        if let Some(also) = listeners.take_also("ui") {
+            servers.push(spawn_axum(
+                "ui",
+                also,
+                ui,
+                shutdown.subscribe(),
+                failed.clone(),
+            ));
+        }
         servers.push(spawn_axum(
             "logging",
             listeners.take("logging")?,
@@ -2547,7 +2638,7 @@ async fn start_functions_runtime(
     let runtime_config = FunctionsRuntimeConfig {
         project_id: config.project_id.clone(),
         project_alias: None,
-        host: config.host.clone(),
+        host: functions_host(config),
         functions_port: config.ports.functions,
         project_dir: config.project_dir.clone(),
         node: config.node.clone(),
@@ -3520,5 +3611,36 @@ mod tests {
         );
         assert!(metadata.auth.is_none() && metadata.storage.is_none());
         std::fs::remove_dir_all(&root).expect("test directory should clean up");
+    }
+
+    #[test]
+    fn hosts_are_bound_and_named_as_the_official_cli_binds_them() {
+        let with = |host: &str| SuiteConfig {
+            host: host.to_owned(),
+            ..crate::diagnostics_tests::test_config()
+        };
+        // localhost: 127.0.0.1 for every emulator, and ::1 for the hub and
+        // the console as well; clients are told 127.0.0.1.
+        let localhost = with("localhost");
+        assert_eq!(localhost.bind_host(), "127.0.0.1");
+        assert_eq!(localhost.connect_host(), "127.0.0.1");
+        assert!(localhost.also_ipv6("hub") && localhost.also_ipv6("ui"));
+        assert!(!localhost.also_ipv6("firestore") && !localhost.also_ipv6("auth"));
+        assert_eq!(functions_host(&localhost), "127.0.0.1");
+        // An address is that address alone.
+        for (host, connect, functions) in [
+            ("127.0.0.1", "127.0.0.1", "127.0.0.1"),
+            ("::1", "::1", "[::1]"),
+            ("[::1]", "::1", "[::1]"),
+            ("0.0.0.0", "127.0.0.1", "127.0.0.1"),
+            ("::", "::1", "[::1]"),
+        ] {
+            let config = with(host);
+            assert_eq!(config.bind_host(), host);
+            assert_eq!(config.connect_host(), connect, "{host}");
+            assert_eq!(functions_host(&config), functions, "{host}");
+            assert!(!config.also_ipv6("hub"), "{host}");
+        }
+        assert_eq!(with("::1").endpoint(8080), "[::1]:8080");
     }
 }

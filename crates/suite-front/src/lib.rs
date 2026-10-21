@@ -60,6 +60,10 @@ pub struct ServiceInfo {
     /// Whether the official shape includes a `listen` array.
     #[serde(skip)]
     pub include_listen: bool,
+    /// Addresses it listens on besides `host` (the hub and the console on
+    /// `::1` for `localhost`, as the official CLI binds them).
+    #[serde(skip)]
+    pub also: Vec<String>,
     /// Process id for services that expose it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
@@ -74,8 +78,31 @@ impl ServiceInfo {
             host: host.to_owned(),
             port,
             include_listen: true,
+            also: Vec::new(),
             pid: None,
         }
+    }
+
+    /// Also listening on `address`, after `host`.
+    #[must_use]
+    pub fn also_on(mut self, address: &str) -> Self {
+        self.also.push(address.to_owned());
+        self
+    }
+
+    /// The origins it answers on: `host`, then every other address.
+    #[must_use]
+    pub fn origins(&self) -> Vec<String> {
+        std::iter::once(&self.host)
+            .chain(&self.also)
+            .map(|address| {
+                if address.contains(':') && !address.starts_with('[') {
+                    format!("http://[{address}]:{}", self.port)
+                } else {
+                    format!("http://{address}:{}", self.port)
+                }
+            })
+            .collect()
     }
 
     /// Creates a workload/dependency advertisement without `listen` metadata.
@@ -86,6 +113,7 @@ impl ServiceInfo {
             host: host.to_owned(),
             port,
             include_listen: false,
+            also: Vec::new(),
             pid: None,
         }
     }
@@ -97,11 +125,16 @@ impl ServiceInfo {
             "port": self.port,
         });
         if self.include_listen {
-            value["listen"] = json!([{
-                "address": self.host,
-                "family": if self.host.contains(':') { "IPv6" } else { "IPv4" },
-                "port": self.port,
-            }]);
+            value["listen"] = std::iter::once(&self.host)
+                .chain(&self.also)
+                .map(|address| {
+                    json!({
+                        "address": address,
+                        "family": if address.contains(':') { "IPv6" } else { "IPv4" },
+                        "port": self.port,
+                    })
+                })
+                .collect();
         }
         if let Some(pid) = self.pid {
             value["pid"] = json!(pid);
@@ -237,7 +270,7 @@ impl HubRuntime {
         let hub = config.directory.required("hub");
         let locator_value = json!({
             "version": FIREBASE_TOOLS_COMPATIBILITY_VERSION,
-            "origins": [format!("http://{}:{}", hub.host, hub.port)],
+            "origins": hub.origins(),
             "pid": config.pid,
         });
         let locator = config

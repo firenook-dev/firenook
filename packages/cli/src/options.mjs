@@ -83,9 +83,10 @@ export function parseOptions(argv) {
 export const validProjectId = id => typeof id === 'string' && (/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(id) || /^demo-[a-z0-9][a-z0-9-]*$/.test(id));
 export const isDemoProject = id => typeof id === 'string' && id.startsWith('demo-');
 export const isLoopback = host => LOOPBACK.includes(host);
-// Host clients connect to when the suite binds a wildcard address.
+// Host clients connect to when the suite binds a wildcard address, or
+// localhost (its first address, as the official CLI advertises it).
 export function connectHost(host) {
-  if (host === '0.0.0.0') return '127.0.0.1';
+  if (host === '0.0.0.0' || host === 'localhost') return '127.0.0.1';
   if (host === '::' || host === '[::]' || host === '::1') return '[::1]';
   if (host.includes(':') && !host.startsWith('[')) return `[${host}]`;
   return host;
@@ -207,7 +208,9 @@ export function inspectProject(options, cwd = process.cwd()) {
 
   const entry = name => (isObject(emulators) && isObject(emulators[name]) ? emulators[name] : undefined);
   const configuredHost = LISTENERS.map(name => entry(name)?.host).find(host => typeof host === 'string' && host);
-  const host = options.host || configuredHost || '127.0.0.1';
+  // localhost, as the official default: the engine binds 127.0.0.1 for it,
+  // and ::1 as well for the hub and the console; clients are told 127.0.0.1.
+  const host = options.host || configuredHost || 'localhost';
   if (typeof host !== 'string' || !host.trim()) fail('host', '--host requires a host name or address');
   for (const name of LISTENERS) {
     const own = entry(name)?.host;

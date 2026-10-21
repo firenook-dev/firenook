@@ -237,6 +237,22 @@ test('--debug and --log-verbosity DEBUG add a debug log under the run directory'
   assert.match(quiet.stderr,/--log-verbosity QUIET is accepted for compatibility/);
   assert.ok(!launchFor(dir,options).args.includes('--debug-log'));
 });
+test('the default host is localhost, as officially, and clients are told 127.0.0.1', () => {
+  const {dir,options} = project();
+  // The engine binds 127.0.0.1 for it, and ::1 as well for the hub and the
+  // console; every client address stays 127.0.0.1.
+  for (const host of [undefined, 'localhost']) {
+    const launch = launchFor(dir, {...options, host});
+    assert.equal(flagValue(launch.args,'--host'),'localhost');
+    assert.equal(launch.env.FIRESTORE_EMULATOR_HOST,'127.0.0.1:8080');
+    assert.equal(launch.env.FIREBASE_EMULATOR_HUB,'127.0.0.1:4400');
+    assert.equal(launch.env.STORAGE_EMULATOR_HOST,'http://127.0.0.1:9199');
+    assert.equal(inspectProject({...options, host},dir).warnings.length,0);
+  }
+  // An address is that address; IPv6 literals are bracketed for clients.
+  assert.equal(launchFor(dir,{...options,host:'127.0.0.1'}).env.FIRESTORE_EMULATOR_HOST,'127.0.0.1:8080');
+  for (const host of ['::1','[::1]']) assert.equal(launchFor(dir,{...options,host}).env.FIRESTORE_EMULATOR_HOST,'[::1]:8080', host);
+});
 test('host binding accepts any address with a warning; per-service conflicts still fail', () => {
   const {dir,config,options,save} = project();
   const lan = inspectProject({...options,host:'0.0.0.0'},dir);
