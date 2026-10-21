@@ -22,38 +22,21 @@ export const DEMO_TOKEN_PATH = '/firenook/oauth2/token'
 
 /**
  * What `firenook emulators:exec` writes and points GOOGLE_APPLICATION_CREDENTIALS
- * at, with the hub at `hub` (`host:port`): credentials whose token comes from
- * the hub. Every Admin SDK reads this kind's `token_url`, so an SDK that asks
- * for an access token never calls Google; the Python, Go and Java ones use it.
+ * at, with the hub at `hub` (`host:port`): an authorized_user file, the one
+ * kind every release of every Admin SDK reads, holding the emulators' own
+ * token (which the Python SDK takes as it is) and the hub as its `token_uri`
+ * (where the Go and Java SDKs refresh it). The Node.js SDKs send any refresh
+ * to Google, so only emulators:exec answers theirs, in their process.
  */
 export function demoCredentials(hub: string): string {
   return JSON.stringify({
-    type: 'external_account_authorized_user',
+    type: 'authorized_user',
     client_id: 'demo',
     client_secret: 'demo',
     refresh_token: 'demo',
-    token_url: `http://${hub}${DEMO_TOKEN_PATH}`,
-  })
-}
-
-/**
- * The demo credentials the Node.js Admin SDK can take a token from: it
- * reads none from `demoCredentials`' kind, so an Eventarc publish (the one
- * call that wants a token while the emulators run) needs an
- * `external_account`, whose subject token and access token both come from
- * the hub. Java refuses this kind's plain-HTTP token URL, so it is Node's.
- */
-export function nodeDemoCredentials(hub: string): string {
-  const url = `http://${hub}${DEMO_TOKEN_PATH}`
-  return JSON.stringify({
-    type: 'external_account',
-    audience: 'firenook',
-    subject_token_type: 'urn:ietf:params:oauth:token-type:access_token',
-    token_url: url,
-    credential_source: {
-      url,
-      format: { type: 'json', subject_token_field_name: 'access_token' },
-    },
+    token_uri: `http://${hub}${DEMO_TOKEN_PATH}`,
+    token: 'owner',
+    expiry: '2999-12-31T23:59:59Z',
   })
 }
 
@@ -158,7 +141,6 @@ export function connectSnippet(
     host,
     bareHost: host.replace(/^\[|\]$/g, ''),
     credentials: demoCredentials(`${host}:${hub}`),
-    nodeCredentials: nodeDemoCredentials(`${host}:${hub}`),
     android: (options.host ?? '') === ANDROID_HOST,
     project: status.projectId,
     demo: status.projectId.startsWith('demo-'),
@@ -175,10 +157,8 @@ interface SnippetContext {
   host: string
   /** Without the brackets, for an SDK that adds them itself. */
   bareHost: string
-  /** The demo credentials file's content, its token from this engine's hub. */
+  /** The demo credentials file's content: the emulators' token, refreshed from this engine's hub. */
   credentials: string
-  /** The same for the Node.js SDK, which takes no token from `credentials`' kind. */
-  nodeCredentials: string
   android: boolean
   project: string
   demo: boolean
@@ -300,7 +280,7 @@ const WRITERS: Record<ConnectTarget, (context: SnippetContext) => string[]> = {
     )
   },
 
-  'admin-node': ({ host, nodeCredentials, project, bucket, ports }) => {
+  'admin-node': ({ host, project, bucket, ports }) => {
     const variables = adminVariables('node', { host, ports })
     return lines(
       "// Easiest: run your script with the emulators' environment set for you:",
@@ -312,11 +292,8 @@ const WRITERS: Record<ConnectTarget, (context: SnippetContext) => string[]> = {
       ...variables.map(([name, value]) => `process.env.${name} = '${value}'`),
       ...(ports.eventarc !== undefined
         ? [
-            "// Eventarc's publish asks for an access token: these demo credentials get it",
-            "// from the emulators' hub, never from Google. Set them under emulators:exec too,",
-            '// whose own the Node.js SDK cannot use. The file holds:',
-            `//   ${nodeCredentials}`,
-            "process.env.GOOGLE_APPLICATION_CREDENTIALS = 'demo-credentials.json'",
+            "// Eventarc's publish asks for an access token: under emulators:exec it gets the",
+            "// emulators' own; run otherwise, it asks your default credentials for one.",
           ]
         : []),
       '',
@@ -332,7 +309,7 @@ const WRITERS: Record<ConnectTarget, (context: SnippetContext) => string[]> = {
       '# Or set these before initialize_app. The SDK looks up default credentials',
       '# when it starts, so point it at a demo credentials file holding:',
       `#   ${credentials}`,
-      "# Its token comes from the emulators' hub, never from Google.",
+      "# It holds the emulators' own token, so the SDK never asks Google for one.",
       ports.storage !== undefined &&
         '# Storage reads STORAGE_EMULATOR_HOST, a URL; Python ignores FIREBASE_STORAGE_EMULATOR_HOST.',
       'import os',
@@ -352,7 +329,7 @@ const WRITERS: Record<ConnectTarget, (context: SnippetContext) => string[]> = {
       '// Or set these before firebase.NewApp. The SDK looks up default credentials',
       '// when it starts, so point it at a demo credentials file holding:',
       `//   ${credentials}`,
-      "// Its token comes from the emulators' hub, never from Google.",
+      "// The SDK refreshes its token from the emulators' hub, its token_uri.",
       'os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "demo-credentials.json")',
       ...adminVariables('go', { host, ports }).map(
         ([name, value]) => `os.Setenv("${name}", "${value}")`,
@@ -368,7 +345,7 @@ const WRITERS: Record<ConnectTarget, (context: SnippetContext) => string[]> = {
       "// Or set these in the JVM's environment before it starts; Java cannot set them itself:",
       '//   GOOGLE_APPLICATION_CREDENTIALS=demo-credentials.json, a file holding',
       `//     ${credentials}`,
-      "//     (its token comes from the emulators' hub, never from Google)",
+      "//     (the SDK refreshes its token from the emulators' hub, its token_uri)",
       ...adminVariables('java', { host, ports }).map(([name, value]) => `//   ${name}=${value}`),
       'FirebaseOptions options = FirebaseOptions.builder()',
       `    .setProjectId("${project}")`,

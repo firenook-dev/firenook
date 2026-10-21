@@ -25,7 +25,7 @@ function fixture(root, fault) {
       const files = {'package.json': JSON.stringify(metadata), 'LICENSE': 'synthetic', 'NOTICE': 'synthetic'};
       if (cli) {
         files['release.json'] = JSON.stringify(identity.release);
-        for (const path of ['README.md', 'bin/firenook.mjs', 'src/agents.mjs', 'src/binary.mjs', 'src/build.mjs', 'src/client.mjs', 'src/configstore.mjs', 'src/firestore-values.mjs', 'src/form.mjs', 'src/hub.mjs', 'src/init-screen.mjs', 'src/init.mjs', 'src/invoke.mjs', 'src/json-text.mjs', 'src/mcp-console.mjs', 'src/mcp-suite.mjs', 'src/mcp.mjs', 'src/options.mjs', 'src/processes.mjs', 'src/rc.mjs', 'src/runtime.mjs', 'src/session.mjs', 'src/setup.mjs', 'src/terminal.mjs', 'src/updates.mjs']) files[path] = 'synthetic';
+        for (const path of ['README.md', 'bin/firenook.mjs', 'src/agents.mjs', 'src/binary.mjs', 'src/build.mjs', 'src/client.mjs', 'src/configstore.mjs', 'src/exec-token.cjs', 'src/firestore-values.mjs', 'src/form.mjs', 'src/hub.mjs', 'src/init-screen.mjs', 'src/init.mjs', 'src/invoke.mjs', 'src/json-text.mjs', 'src/mcp-console.mjs', 'src/mcp-suite.mjs', 'src/mcp.mjs', 'src/options.mjs', 'src/processes.mjs', 'src/rc.mjs', 'src/runtime.mjs', 'src/session.mjs', 'src/setup.mjs', 'src/terminal.mjs', 'src/updates.mjs']) files[path] = 'synthetic';
       } else {
         files['receipt.json'] = JSON.stringify({engineRevision: revision, platform,
           version, target: release.platforms[platform],

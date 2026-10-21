@@ -194,11 +194,12 @@ reads:
 - On Apple platforms, Firestore's `useEmulator` leaves TLS on, which the
   emulator does not speak, so the snippet sets `isSSLEnabled = false`.
 - The Python, Go and Java SDKs look up default credentials when they start.
-  Their snippets point them at demo credentials whose token comes from the
-  emulators' hub (`/firenook/oauth2/token` on the hub port), so a call that
-  asks for an access token never reaches Google. The Node.js SDK asks for one
-  only to publish an Eventarc event, and its snippet gives it demo
-  credentials of the kind it reads.
+  Their snippets point them at the demo credentials `emulators:exec` writes,
+  which every release of every Admin SDK reads and which never send a token
+  request to Google (see [data, state and tests](data-and-state.md)). The
+  Node.js SDK needs a token only to publish an Eventarc event: under
+  `emulators:exec` it gets the emulators' own, and run by hand it asks your
+  default credentials.
 
 ## Keep your data between runs
 
