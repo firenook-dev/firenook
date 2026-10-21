@@ -214,6 +214,19 @@ describe('which host an app should use', () => {
     expect(defaultConnectHost(status(), '127.0.0.1')).toEqual({ host: '127.0.0.1', why: 'engine' })
   })
 
+  it("keeps the engine's host when a local proxy names the console (portless)", () => {
+    for (const page of ['my-app.localhost', 'branch.emulator.my-app.localhost', 'App.LocalHost.']) {
+      expect(defaultConnectHost(status(), page)).toEqual({ host: '127.0.0.1', why: 'engine' })
+      expect(connectHosts(status(), page).map((entry) => entry.host)).toEqual([
+        '127.0.0.1',
+        '10.0.2.2',
+      ])
+    }
+    // Only names under localhost: a lookalike is another machine.
+    expect(defaultConnectHost(status(), 'localhost.example.test').why).toBe('browser')
+    expect(defaultConnectHost(status(), 'my-laptop.local').why).toBe('browser')
+  })
+
   it("is the page's host when the console was opened from another machine", () => {
     expect(defaultConnectHost(status(), '192.168.1.20')).toEqual({
       host: '192.168.1.20',

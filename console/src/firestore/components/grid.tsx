@@ -66,6 +66,7 @@ import { type FsDocument, formatNumber, isPartial } from '../value'
 import { CellEditor } from './cell-editor'
 import { FOLDED_COLUMN, type GridColumn, GridRow, ID_COLUMN, type RowActions } from './grid-row'
 import { FoldedHeader, HeaderMenu, IdHeaderMenu } from './header-menu'
+import { RootCount } from './root-count'
 import { subcollectionsWidth } from './subcollections-cell'
 import { useWorkbench } from './workbench-context'
 
@@ -1084,16 +1085,6 @@ function RootLanding() {
         )}
       </ul>
     </div>
-  )
-}
-
-function RootCount({ path }: { path: string }) {
-  const workbench = useWorkbench()
-  const count = useQuery(countQueryOptions(workbench.ownerScope, path, false, EMPTY_QUERY))
-  return (
-    <span className="shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums">
-      {count.data ? formatNumber(count.data.count) : ''}
-    </span>
   )
 }
 

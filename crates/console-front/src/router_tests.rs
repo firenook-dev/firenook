@@ -472,7 +472,15 @@ async fn only_allowed_hosts_are_answered() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    for host in ["localhost:4000", "127.0.0.1:4000", "[::1]:4000"] {
+    // A local proxy's name (portless: `my-app.localhost`, on 443 or :1355)
+    // is this machine too.
+    for host in [
+        "localhost:4000",
+        "127.0.0.1:4000",
+        "[::1]:4000",
+        "my-app.localhost",
+        "branch.emulator.my-app.localhost:1355",
+    ] {
         let (status, _) = send(
             &router,
             request(Method::GET, "/api/v1/status", &[("host", host)], ""),

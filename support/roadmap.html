@@ -758,6 +758,26 @@ const DATA = {
 ],
   backlog: [
   {
+    "item": "The Firestore tree at once",
+    "why": "Built for next.8: the tree's first walk reads the collection index instead of the documents (37 s instead of 133 s on 2.7 million documents), a clean stop saves the tree with the data so the next start shows it in under a millisecond, and the root collections are listed while a walk runs",
+    "size": "days"
+  },
+  {
+    "item": "The console behind local proxies",
+    "why": "Built for next.8: any name under localhost (portless's my-app.localhost) is answered like localhost, since browsers resolve it to this machine and no page can rebind it; .local and custom domains still need --allowed-hosts",
+    "size": "hours"
+  },
+  {
+    "item": "Code in colour",
+    "why": "Built for next.8: every code block in the console is coloured with the editor's palette, each block must name its language, the Connect dialog's Flutter, Swift, Kotlin and Java snippets are no longer marked as JavaScript, and each parser loads only when a block needs it",
+    "size": "days"
+  },
+  {
+    "item": "npx on any Node",
+    "why": "Built for next.8: on any Node but 24, npx firenook installed the 0.0.0 name placeholder, since npm passes over a release whose engines exclude the running Node; engines now names only npm's own floor (>=20), and the emulators say themselves that they need Node 24 and how to switch",
+    "size": "hours"
+  },
+  {
     "item": "Keeping data without a seed",
     "why": "Built for next.7: --resume-state no longer needs --import (a seedless state records an empty seed, and next.6 refuses it cleanly); --keep-data keeps the data in .firenook/state, and init prints it",
     "size": "days"
@@ -790,6 +810,11 @@ const DATA = {
   {
     "item": "Store size",
     "why": "A 32.6 GB store held 7.5 GB of documents. Built for next.6: state:compact gives back the free pages, the old layout's leftover table is cleared, state:inspect and the Overview show the size; later, a repack gives back the part-filled pages too",
+    "size": "days"
+  },
+  {
+    "item": "Node 22 and 26",
+    "why": "Node 26 is Homebrew's node and the next LTS, and many Functions codebases declare 22; the worker uses only standard Node modules, and a first run on Node 26 served an HTTP function and a Firestore trigger. Needs the Functions conformance and console journeys on 22 and 26 in CI, and a warning when the Node differs from the codebase's engines, as the official emulator gives",
     "size": "days"
   },
   {

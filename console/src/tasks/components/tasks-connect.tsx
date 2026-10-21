@@ -8,7 +8,7 @@
 import { useQuery } from '@tanstack/react-query'
 import type { TasksQueue } from '@/api/generated/messaging/TasksQueue'
 import { statusQuery } from '@/api/queries'
-import { CodeBlock } from '@/components/console/code-block'
+import { type CodeDialect, CodeBlock } from '@/components/console/code-block'
 import { serviceAddress } from '@/components/console/request/address'
 import { connectSnippet } from '@/lib/connect'
 import { quoteShell } from '../code'
@@ -21,9 +21,10 @@ export function TasksConnect({ queue }: { queue?: TasksQueue | undefined }) {
   const address = serviceAddress('tasks', status.data)
   const host = address?.origin.replace(/^https?:\/\//, '') ?? '<host:port>'
   const target = queue ? `locations/${queue.location}/functions/${queue.id}` : 'processOrder'
-  const admin = {
+  const admin: CodeDialect = {
     id: 'admin-node',
     label: 'Admin SDK',
+    language: 'js',
     code: [
       "import { getFunctions } from 'firebase-admin/functions'",
       '',
@@ -34,13 +35,19 @@ export function TasksConnect({ queue }: { queue?: TasksQueue | undefined }) {
       "  .enqueue({ orderId: 'o_1' })",
     ].join('\n'),
   }
-  const environment = { id: 'env', label: 'Environment', code: env }
+  const environment: CodeDialect = {
+    id: 'env',
+    label: 'Environment',
+    code: env,
+    language: 'dotenv',
+  }
   if (queue) {
     const path = `projects/${queue.project}/locations/${queue.location}/queues/${queue.id}`
     const body = base64Utf8(JSON.stringify({ data: { orderId: 'o_1' } }))
-    const curl = {
+    const curl: CodeDialect = {
       id: 'curl',
       label: 'curl',
+      language: 'shell',
       code: [
         `curl -X POST ${quoteShell(`${address?.origin ?? `http://${host}`}/${path}/tasks`)} \\`,
         "  -H 'Content-Type: application/json' \\",
@@ -65,6 +72,7 @@ export function TasksConnect({ queue }: { queue?: TasksQueue | undefined }) {
           {
             id: 'function',
             label: 'onTaskDispatched',
+            language: 'js',
             code: [
               "const { onTaskDispatched } = require('firebase-functions/v2/tasks')",
               '',

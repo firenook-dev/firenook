@@ -1022,6 +1022,31 @@ impl Store {
         }
     }
 
+    /// Saves a reader's note for the data as it is at `revision`; see
+    /// [`DiskStore::save_note`]. The in-memory backend keeps none: its data
+    /// ends with the process.
+    pub fn save_note(
+        &self,
+        name: &str,
+        revision: Revision,
+        bytes: &[u8],
+    ) -> Result<bool, DiskError> {
+        match &self.backend {
+            StoreBackend::Memory(_) => Ok(false),
+            StoreBackend::Disk(store) => store.save_note(name, revision, bytes),
+        }
+    }
+
+    /// The note saved as `name` while the data is unchanged since; see
+    /// [`DiskStore::note`].
+    #[must_use]
+    pub fn note(&self, name: &str) -> Option<Vec<u8>> {
+        match &self.backend {
+            StoreBackend::Memory(_) => None,
+            StoreBackend::Disk(store) => store.note(name),
+        }
+    }
+
     /// A handle that does not keep this store open; see [`WeakStore`].
     #[must_use]
     pub fn downgrade(&self) -> WeakStore {
@@ -1437,6 +1462,22 @@ impl Snapshot {
         }
     }
 
+    /// Every document key of `database`, in no particular order, without
+    /// reading a document body. On disk it walks the collection index, far
+    /// smaller than the documents table a [`KeyCursor`] walks; use it when
+    /// the whole database is wanted and the order is not.
+    #[must_use]
+    pub fn document_keys(&self, database: &DatabaseName) -> DocumentKeys {
+        match &self.documents {
+            SnapshotDocuments::Memory { .. } => {
+                DocumentKeys(DocumentKeysInner::Cursor(self.key_cursor(database, "")))
+            }
+            SnapshotDocuments::Disk(documents) => DocumentKeys(DocumentKeysInner::Index(Box::new(
+                documents.document_keys(database),
+            ))),
+        }
+    }
+
     /// The ids of the collections directly under `parent` (a document path)
     /// or under the database root, in byte order. A collection is listed
     /// when any document exists anywhere below it, as `ListCollectionIds`
@@ -1809,6 +1850,26 @@ impl KeyCursor {
                 }
             }
             KeyCursorInner::Disk(cursor) => cursor.seek(path),
+        }
+    }
+}
+
+/// Every document key of one database, in no particular order. See
+/// [`Snapshot::document_keys`].
+pub struct DocumentKeys(DocumentKeysInner);
+
+enum DocumentKeysInner {
+    Cursor(KeyCursor),
+    Index(Box<disk::DiskDocumentKeys>),
+}
+
+impl Iterator for DocumentKeys {
+    type Item = DocumentKey;
+
+    fn next(&mut self) -> Option<DocumentKey> {
+        match &mut self.0 {
+            DocumentKeysInner::Cursor(cursor) => cursor.next(),
+            DocumentKeysInner::Index(keys) => keys.next(),
         }
     }
 }
@@ -3603,6 +3664,120 @@ mod tests {
             }
         }
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn document_keys_list_what_the_key_cursor_lists_flushed_or_not_on_both_backends() {
+        let directory = temporary_directory("document-keys");
+        let disk = Store::open_disk(&directory, DiskOptions::default()).expect("disk store");
+        for store in [Store::default(), disk] {
+            let db = database("(default)");
+            let other = database("other");
+            let listed = |snapshot: &Snapshot| {
+                let keys = snapshot
+                    .document_keys(&db)
+                    .map(|key| key.path().to_owned())
+                    .collect::<Vec<_>>();
+                let unique = keys.iter().cloned().collect::<BTreeSet<_>>();
+                assert_eq!(keys.len(), unique.len(), "a key is listed once");
+                let mut cursor = snapshot.key_cursor(&db, "");
+                let mut walked = BTreeSet::new();
+                while let Some(key) = cursor.next() {
+                    walked.insert(key.path().to_owned());
+                }
+                assert_eq!(unique, walked, "the same keys as the key cursor");
+                unique.into_iter().collect::<Vec<_>>()
+            };
+            store
+                .commit(&[
+                    create(&db, "users/abc"),
+                    create(&db, "users/abc/posts/p1"),
+                    create(&db, "users/ghost/posts/p3"),
+                    create(&db, "users/zed"),
+                    create(&db, "teams/t1"),
+                    create(&other, "users/elsewhere"),
+                ])
+                .expect("seed");
+            store.flush().expect("flush");
+            let flushed = store.snapshot();
+            // Not flushed: the overlay holds a deletion of a flushed key, a
+            // replacement of one and two new keys.
+            store
+                .commit(&[
+                    Write::Delete {
+                        key: key(&db, "users/zed"),
+                        precondition: Precondition::None,
+                    },
+                    Write::Set {
+                        key: key(&db, "teams/t1"),
+                        fields: fields(Value::Integer(2)),
+                        transforms: Vec::new(),
+                        precondition: Precondition::None,
+                    },
+                    create(&db, "users/abc/posts/p2"),
+                    create(&db, "vendors/v1"),
+                ])
+                .expect("mutate");
+            assert_eq!(
+                listed(&store.snapshot()),
+                [
+                    "teams/t1",
+                    "users/abc",
+                    "users/abc/posts/p1",
+                    "users/abc/posts/p2",
+                    "users/ghost/posts/p3",
+                    "vendors/v1",
+                ]
+            );
+            assert_eq!(
+                listed(&flushed),
+                [
+                    "teams/t1",
+                    "users/abc",
+                    "users/abc/posts/p1",
+                    "users/ghost/posts/p3",
+                    "users/zed",
+                ],
+                "an earlier snapshot keeps its own keys"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_note_is_read_only_while_the_data_is_as_it_was_saved() {
+        let directory = temporary_directory("notes");
+        let db = database("(default)");
+        let store = Store::open_disk(&directory, DiskOptions::default()).expect("disk store");
+        store.commit(&[create(&db, "users/a")]).expect("seed");
+        let saved_at = store.snapshot().revision();
+        assert!(store.save_note("map", saved_at, b"one").expect("save"));
+        assert_eq!(store.note("map").as_deref(), Some(&b"one"[..]));
+        assert_eq!(store.note("other"), None);
+        store.close(Duration::from_secs(5)).expect("close");
+
+        let store = Store::open_disk(&directory, DiskOptions::default()).expect("reopen");
+        assert_eq!(
+            store.note("map").as_deref(),
+            Some(&b"one"[..]),
+            "kept across a reopen"
+        );
+        store.commit(&[create(&db, "users/b")]).expect("move on");
+        assert_eq!(store.note("map"), None, "a commit since leaves it unread");
+        assert!(
+            !store.save_note("map", saved_at, b"two").expect("refused"),
+            "never saved for a revision the store has moved past"
+        );
+        store.close(Duration::from_secs(5)).expect("close");
+        let _ = std::fs::remove_dir_all(&directory);
+
+        let memory = Store::default();
+        assert!(
+            !memory
+                .save_note("map", memory.snapshot().revision(), b"x")
+                .expect("memory")
+        );
+        assert_eq!(memory.note("map"), None);
     }
 
     #[test]

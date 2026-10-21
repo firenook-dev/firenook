@@ -1608,9 +1608,14 @@ function HowToFix() {
       </div>
       <CodeBlock
         dialects={[
-          { id: 'web', label: 'Web', code: snippet('web') },
-          { id: 'admin-node', label: 'Admin (Node.js)', code: snippet('admin-node') },
-          { id: 'env', label: 'Environment', code: snippet('env') },
+          { id: 'web', label: 'Web', code: snippet('web'), language: 'js' },
+          {
+            id: 'admin-node',
+            label: 'Admin (Node.js)',
+            code: snippet('admin-node'),
+            language: 'js',
+          },
+          { id: 'env', label: 'Environment', code: snippet('env'), language: 'dotenv' },
         ]}
       />
     </div>

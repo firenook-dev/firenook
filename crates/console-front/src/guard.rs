@@ -7,7 +7,11 @@
 //!
 //! - **Host.** A request must name a host the console answers for, so a
 //!   page that rebinds its own name to `127.0.0.1` (DNS rebinding) is
-//!   refused before anything else happens.
+//!   refused before anything else happens. Every name under `localhost`
+//!   is answered too: such a name is this machine by definition (RFC 6761),
+//!   browsers resolve it to loopback themselves and no one can register it,
+//!   so no page can rebind it. That is what local proxies such as portless
+//!   name apps by (`my-app.localhost`).
 //! - **`Sec-Fetch-Site`.** Browsers say where a request came from; only the
 //!   console itself (`same-origin`, or `none` for a typed address) may call
 //!   the Console API. A page on another port of the same host is
@@ -131,10 +135,11 @@ impl AllowedHosts {
     /// Whether a request whose `Host` is `host` (port included or not) is
     /// answered. The port is not compared: a rebinding attack is a foreign
     /// *name*, and a forwarded port (a container, a tunnel) is the same
-    /// console.
+    /// console. A name under `localhost` is answered like `localhost`.
     #[must_use]
     pub fn allows(&self, host: &str) -> bool {
-        self.any || self.names.contains(&normalize(strip_port(host)))
+        let name = normalize(strip_port(host));
+        self.any || is_under_localhost(&name) || self.names.contains(&name)
     }
 }
 
@@ -329,6 +334,16 @@ fn normalize(name: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// `app.localhost`, `chat.my-app.localhost`: a name under the reserved
+/// `localhost` domain, which is this machine whatever resolves it. A
+/// `.local` (mDNS) or custom domain is not: something on the network, or
+/// whatever the resolver is told, answers for it, so it needs
+/// `--allowed-hosts`.
+fn is_under_localhost(name: &str) -> bool {
+    name.strip_suffix(".localhost")
+        .is_some_and(|label| !label.is_empty() && !label.ends_with('.'))
+}
+
 fn is_wildcard(name: &str) -> bool {
     matches!(name, "0.0.0.0" | "::" | "")
 }
@@ -361,6 +376,30 @@ mod tests {
             assert!(!hosts.allows(refused), "{refused}");
         }
         assert!(!hosts.accepts_any());
+    }
+
+    #[test]
+    fn every_name_under_localhost_is_answered_and_nothing_else_like_it() {
+        let hosts = AllowedHosts::new("127.0.0.1", None::<&str>);
+        for allowed in [
+            "app.localhost",
+            "my-branch.emulator.my-app.localhost",
+            "App.LocalHost.:1355",
+            "chat.my-app.localhost:443",
+        ] {
+            assert!(hosts.allows(allowed), "{allowed}");
+        }
+        for refused in [
+            "localhost.evil.example",
+            "evillocalhost",
+            "app.localhost.evil.example",
+            ".localhost",
+            "app..localhost",
+            "my-laptop.local",
+            "app.test",
+        ] {
+            assert!(!hosts.allows(refused), "{refused}");
+        }
     }
 
     #[test]

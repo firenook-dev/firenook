@@ -587,7 +587,9 @@ test('a screen of rows asks for its subcollections once, not once a row', async 
       const body = JSON.parse(request.postData() ?? '{}') as { paths?: string[] }
       batches.push(body.paths ?? [])
     }
-    if (url.includes(':listCollectionIds')) perDocument += 1
+    // A document's own listing. The tree lists the root collections while it
+    // maps (`documents:listCollectionIds`): one request for the database.
+    if (/\/documents\/[^?]+:listCollectionIds/.test(url)) perDocument += 1
   })
   await page.goto(`${origin()}/console/firestore?path=users`)
   await expect(page.getByTestId('subcollections-chip').first()).toBeVisible()

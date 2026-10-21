@@ -1515,3 +1515,86 @@ directory is slow only until the copy's pending writes reach the disk
 (`sync` before the start: 0.56–0.66 s on both releases), so nothing in
 Firenook needs fixing. Ordered and range field indexes, the six slower query
 shapes, remain for a later release.
+
+## The Firestore tree at once, and code in colour (`0.2.0-next.8`)
+
+Found on 2026-10-21 on a store of 2.7 million documents (26 GB): the
+console's Firestore tree said "Mapping the database…" for about three and a
+half minutes after each start, while the grid beside it already listed the
+root collections. And the console's code (the Connect dialog's snippets, a
+document as code, a request as code) was plain grey text, with Flutter,
+Swift, Kotlin and Java snippets marked as JavaScript. Built on 2026-10-21.
+
+- [ ] **The tree's first walk reads the collection index, not the
+  documents.** The tree comes from the schema index, built by one walk of a
+  database's document keys the first time a console asks. Walking the keys
+  of the documents table still reads every page of every body, which sits
+  beside its key: 17.5 GB of pages on that store. `Snapshot::document_keys`
+  lists a database's keys from the collection index instead, one short
+  entry per document (1.4 GB of pages there), with the snapshot's overlay
+  merged; counting does not need path order. The walk took 37 s instead of
+  133 s on clones of that store, and 39.5 s through the console. A test
+  checks it lists the key cursor's keys, flushed or not, on both backends.
+- [ ] **A clean stop saves the tree with the data.** The index is saved as a
+  note of the store (`Store::save_note`, a `metadata_v1` entry with the
+  revision it describes) once the services have stopped, and only when no
+  document changed since the newest commit the index was told of; the next
+  start loads it when the store opens at that revision. A commit since, a
+  crash, or a stop that did not save means a walk on first use, as before.
+  On that store: the restart was ready in 0.6 s and the tree answered in
+  0.9 ms, identical to the walked one; a write before a clean stop was in the
+  next start's tree; a write followed by `kill -9` left the older note
+  unread, and the walk counted the write. The stop with the save took 0.2 s.
+- [ ] **The tree shows the root collections while it waits.** The roots come
+  from `ListCollectionIds` (17 ms on that store), each with its own count,
+  drawn like the tree's roots and opening their collection on a click, with
+  "Finding subcollections…" held at the panel's foot, so no row moves when
+  the tree arrives.
+- [ ] **Code in colour wherever the console shows it.** Every code block is
+  coloured with the editor's own palette (`code-editor/ink.ts`), keywords
+  and keys in the key hue, strings in the string hue, numbers and types in
+  the literal hue, comments and punctuation receding. A block now has to say
+  its language, so the type checker finds any that does not; the Connect
+  dialog's tabs say theirs (Flutter Dart, Apple Swift, Android Kotlin, Java,
+  Python, Go, JavaScript, shell, JSON, and the environment variables as
+  `.env` lines: name, value, comment). Comments take the console's secondary
+  grey in the editor too; the inactive grey read at about 1.5:1 in the light
+  theme. A word after a dot is a member in every language (Dart's `.set(`
+  is no keyword, and Go's mode no longer calls a dot a number). Each
+  language's parser loads the
+  first time a block in it is shown (0.8 to 7.7 KB gzipped each; the
+  JavaScript and JSON grammars are the editor's), so no route's first load
+  grows, and both bundle budgets hold.
+- [ ] **The console answers for any name under `localhost`.** Reached
+  through portless (`https://my-branch.emulator.my-app.localhost/console`),
+  it answered "This console does not answer for host …": the host guard
+  knew `localhost`, `127.0.0.1`, `::1`, the `--host` address and
+  `--allowed-hosts` only. A name under the reserved `localhost` domain is
+  this machine by definition (RFC 6761): browsers resolve it to loopback
+  themselves and no one can register one, so no page can rebind it, and it
+  is now answered like `localhost`. `.local` (mDNS, answered by devices on
+  the network) and custom domains still need `--allowed-hosts`.
+  The Connect dialog and the request composer count such a name as this
+  machine too, so their snippets keep the engine's address instead of the
+  proxy's name, which routes only the console. `docs/console.md` says how to
+  reach the console through portless: an alias to the UI port, since the
+  console does not read the `PORT` that `portless run` sets. Checked in a
+  browser through portless's HTTPS: every page, the live event stream and
+  Storage previews, 248 requests, none failed.
+- [ ] **`npx firenook` gets the release on any Node.** On Node 26,
+  `npx firenook init` in an empty folder installed `firenook@0.0.0`, the
+  placeholder that held the name before the first release, and printed its
+  old advice. Every release declared `engines.node` as `>=24 <25`. npm
+  installs a release whose engines do not match with a warning only, but for
+  a bare name it takes `latest` only when its engines admit the running
+  Node, and otherwise the highest version that is not a preview: for this
+  name, the placeholder. Node 20, 22, 25 and 27 did the same, checked with
+  npm's own version picker; `firenook@latest`, `firenook@next` and
+  `npm install firenook` were not affected. `engines.node` is now `>=20`,
+  the floor npm itself runs on, and the Node 24 check stays in the CLI:
+  `init`, `use`, `mcp add` and the rest run on any Node (checked on 20.20,
+  22.23, 24.20 and 26.9), and the emulators stop with what to switch to:
+  "the emulators need Node 24, since your Functions run on it; this is Node
+  26.9.0. Switch to Node 24 (with nvm: nvm install 24) and run it again". A
+  test holds the floor. The placeholder cannot change; on a Node older than
+  20 it is still what npx finds.
