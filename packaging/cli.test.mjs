@@ -124,7 +124,15 @@ test('existing config, project aliases and full or partial --only selection', ()
   const {dir:bare,save} = project();
   save({firestore:{rules:'firestore.rules'}});
   assert.throws(()=>loadProject({...options,only:'auth'},bare),/No emulators to start, run firenook init/);
-  assert.match(inspectProject({...options,only:'auth'},bare).warnings.join('\n'),/not starting the auth emulator/);
+  // The advice is what configures the service, as firebase init writes it.
+  const skipped = inspectProject({...options,only:'auth,pubsub,functions'},bare).warnings.join('\n');
+  assert.match(skipped,/not starting the auth emulator; firebase\.json does not configure it \(add "auth": \{"port": 9099\} under "emulators" in firebase\.json, as firebase init emulators writes it\)/);
+  assert.match(skipped,/not starting the pubsub emulator; firebase\.json does not configure it \(add "pubsub": \{"port": 8085\} under "emulators"/);
+  assert.match(skipped,/not starting the functions emulator; firebase\.json has no Functions codebase \(add a "functions" section naming its source, as firebase init functions writes it\)/);
+  assert.doesNotMatch(skipped,/init --adopt/, 'adopt adds entries for the services firebase.json configures, never others');
+  // Following the advice is enough.
+  save({firestore:{rules:'firestore.rules'},emulators:{auth:{port:9099}}});
+  assert.deepEqual(loadProject({...options,only:'auth'},bare).services,['auth']);
 });
 test('services are derived from top-level sections and emulators entries like the official CLI', () => {
   const {dir,options,save} = project();
