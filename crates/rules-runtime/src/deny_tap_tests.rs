@@ -107,6 +107,11 @@ async fn a_refused_read_sends_one_denial_naming_the_recorded_decision() {
             path: "/databases/(default)/documents/users/u_2fc4c".to_owned(),
             uid: Some("u_9f3k2".to_owned()),
             error: None,
+            refused_by: vec![RefusingAllow {
+                line: 1,
+                operation: RequestOperation::Get,
+                error: None,
+            }],
             request_id: Some(Arc::from(id)),
             origin: DenialOrigin::App,
         }

@@ -536,7 +536,7 @@ async fn patch_document(
             request_time,
         )
         .map_err(|error| RestError::commit(&error))?;
-    require_atomic_allowed(verdict)?;
+    require_atomic_allowed(&verdict)?;
     state
         .store
         .commit(&[write])
@@ -575,7 +575,7 @@ async fn delete_document(
             now_timestamp(),
         )
         .map_err(|error| RestError::commit(&error))?;
-    require_atomic_allowed(verdict)?;
+    require_atomic_allowed(&verdict)?;
     state
         .store
         .commit(&[write])
@@ -881,7 +881,7 @@ async fn commit(
             now_timestamp(),
         )
         .map_err(|error| RestError::commit(&error))?;
-    require_atomic_allowed(verdict)?;
+    require_atomic_allowed(&verdict)?;
     let result = state
         .store
         .commit(&writes)
@@ -1172,7 +1172,7 @@ fn authorize_query(
         None,
         query,
     );
-    require_allowed(state.rules.evaluate(
+    require_allowed(&state.rules.evaluate(
         database,
         authorization,
         &request,
@@ -1191,31 +1191,30 @@ fn request_authorization(headers: &HeaderMap) -> Result<Authorization, RestError
     Authorization::parse(header).map_err(|error| RestError::invalid(error.to_string()))
 }
 
-fn require_allowed(verdict: firenook_rules_runtime::EvaluationResult) -> Result<(), RestError> {
+/// A refusal is 403 `PERMISSION_DENIED` with production's text, followed by
+/// the allows that refused it as the official emulator names them.
+fn require_allowed(verdict: &firenook_rules_runtime::EvaluationResult) -> Result<(), RestError> {
     if verdict.allowed {
         Ok(())
     } else {
-        Err(RestError::permission_denied(verdict.error.map_or_else(
-            || "Security Rules denied the request".to_owned(),
-            |error| error.message,
-        )))
+        Err(RestError::permission_denied(verdict.denial_message()))
     }
 }
 
+/// An atomic request is refused for its first refused operation.
 fn require_atomic_allowed(
-    verdict: firenook_rules_runtime::AtomicEvaluationResult,
+    verdict: &firenook_rules_runtime::AtomicEvaluationResult,
 ) -> Result<(), RestError> {
     if verdict.allowed {
         return Ok(());
     }
     let message = verdict
         .operations
-        .into_iter()
+        .iter()
         .find(|operation| !operation.allowed)
-        .and_then(|operation| operation.error)
         .map_or_else(
-            || "Security Rules denied the request".to_owned(),
-            |error| error.message,
+            || firenook_rules_runtime::PRODUCTION_DENIAL.to_owned(),
+            firenook_rules_runtime::EvaluationResult::denial_message,
         );
     Err(RestError::permission_denied(message))
 }

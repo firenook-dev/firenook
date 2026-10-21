@@ -2008,7 +2008,7 @@ fn install_firestore_rules(
 /// official emulator loads one rules file and applies it to every database
 /// (`conformance/fixtures/request-identity-v1`), so an unlisted database is
 /// never left open while rules are configured.
-fn stand_in(databases: &[FirestoreDatabaseConfig]) -> Option<&FirestoreDatabaseConfig> {
+pub(crate) fn stand_in(databases: &[FirestoreDatabaseConfig]) -> Option<&FirestoreDatabaseConfig> {
     let ruled = || databases.iter().filter(|entry| entry.rules.is_some());
     ruled()
         .find(|entry| entry.database_id == "(default)")

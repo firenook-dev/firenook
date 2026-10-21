@@ -396,6 +396,20 @@ pub enum RequestOperation {
     Delete,
 }
 
+impl RequestOperation {
+    /// The rules method it is: `get`, `list`, `create`, `update` or `delete`.
+    #[must_use]
+    pub const fn method(self) -> &'static str {
+        match self {
+            Self::Get => "get",
+            Self::List => "list",
+            Self::Create => "create",
+            Self::Update => "update",
+            Self::Delete => "delete",
+        }
+    }
+}
+
 /// One request evaluated against an installed ruleset.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EvaluationRequest {
@@ -554,6 +568,59 @@ pub struct EvaluationResult {
     pub document_cache_hits: usize,
     /// Matching allow declarations considered.
     pub matching_allows: usize,
+    /// For a refused request, the allow conditions that refused it, in
+    /// evaluation order without repeats and at most
+    /// [`MAXIMUM_REFUSALS`]; empty when it was allowed or no allow applied.
+    pub refused_by: Vec<RefusingAllow>,
+}
+
+/// Refusing allows kept per request; a ruleset with more names the first.
+pub const MAXIMUM_REFUSALS: usize = 16;
+
+/// One allow condition that refused a request, as the official emulator's
+/// denial names it: `false for 'get' @ L4`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RefusingAllow {
+    /// One-based source line of the `allow` statement.
+    pub line: usize,
+    /// The operation it was evaluated for.
+    pub operation: RequestOperation,
+    /// The failure that stopped the condition, or `None` when it was false.
+    pub error: Option<String>,
+}
+
+/// What production answers a request the rules refused.
+pub const PRODUCTION_DENIAL: &str = "Missing or insufficient permissions.";
+
+impl EvaluationResult {
+    /// What a client is told when the rules refused it: production's text,
+    /// then, on the next line, what the official emulator adds, each allow
+    /// that refused it (`false for 'get' @ L4`, or the failure in place of
+    /// `false`), or `No matching allow statements` when no allow applied.
+    /// The status stays the one production sends, `PERMISSION_DENIED`.
+    #[must_use]
+    pub fn denial_message(&self) -> String {
+        let mut message = format!("{PRODUCTION_DENIAL}\n");
+        if self.refused_by.is_empty() {
+            message.push_str(
+                self.error
+                    .as_ref()
+                    .map_or("No matching allow statements", |error| &error.message),
+            );
+            return message;
+        }
+        for (index, refusal) in self.refused_by.iter().enumerate() {
+            if index > 0 {
+                message.push_str(", ");
+            }
+            message.push_str(refusal.error.as_deref().unwrap_or("false"));
+            message.push_str(" for '");
+            message.push_str(refusal.operation.method());
+            message.push_str("' @ L");
+            message.push_str(&refusal.line.to_string());
+        }
+        message
+    }
 }
 
 /// Combined verdict and accounting for one transaction or batched write.

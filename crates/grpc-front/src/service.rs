@@ -483,7 +483,7 @@ impl FirestoreService {
     ) -> Result<(), Status> {
         let current = snapshot.get(key);
         let request = evaluation_request(operation, key, now(), current.as_deref(), None, query);
-        require_rules_allowed(self.rules.evaluate_with_read_transaction(
+        require_rules_allowed(&self.rules.evaluate_with_read_transaction(
             key.database(),
             authorization,
             &request,
@@ -502,7 +502,7 @@ impl FirestoreService {
     ) -> Result<(), Status> {
         let request =
             evaluation_request(RequestOperation::List, candidate, now(), None, None, query);
-        require_rules_allowed(self.rules.evaluate_with_read_transaction(
+        require_rules_allowed(&self.rules.evaluate_with_read_transaction(
             candidate.database(),
             authorization,
             &request,
@@ -527,7 +527,7 @@ impl FirestoreService {
             .rules
             .evaluate_writes(database, authorization, &writes, snapshot, request_time)
             .map_err(commit_status)?;
-        require_atomic_rules_allowed(verdict)
+        require_atomic_rules_allowed(&verdict)
     }
 
     pub(crate) async fn apply_stream_writes(
@@ -769,28 +769,28 @@ fn require_owner<T>(request: &Request<T>, refusal: &str) -> Result<(), Status> {
     }
 }
 
-pub(crate) fn require_rules_allowed(verdict: EvaluationResult) -> Result<(), Status> {
+/// A refusal is `PERMISSION_DENIED` with production's text, followed by the
+/// allows that refused it as the official emulator names them
+/// ([`EvaluationResult::denial_message`]).
+pub(crate) fn require_rules_allowed(verdict: &EvaluationResult) -> Result<(), Status> {
     if verdict.allowed {
         return Ok(());
     }
-    Err(Status::permission_denied(verdict.error.map_or_else(
-        || "Security Rules denied the request".to_owned(),
-        |error| error.message,
-    )))
+    Err(Status::permission_denied(verdict.denial_message()))
 }
 
-pub(crate) fn require_atomic_rules_allowed(verdict: AtomicEvaluationResult) -> Result<(), Status> {
+/// An atomic request is refused for its first refused operation.
+pub(crate) fn require_atomic_rules_allowed(verdict: &AtomicEvaluationResult) -> Result<(), Status> {
     if verdict.allowed {
         return Ok(());
     }
     let message = verdict
         .operations
-        .into_iter()
+        .iter()
         .find(|operation| !operation.allowed)
-        .and_then(|operation| operation.error)
         .map_or_else(
-            || "Security Rules denied the request".to_owned(),
-            |error| error.message,
+            || firenook_rules_runtime::PRODUCTION_DENIAL.to_owned(),
+            EvaluationResult::denial_message,
         );
     Err(Status::permission_denied(message))
 }
@@ -1176,13 +1176,15 @@ impl Firestore for FirestoreService {
                         result: Some(result),
                     });
                 }
-                require_atomic_rules_allowed(service.rules.evaluate_atomic_with_read_transaction(
-                    &database,
-                    &authorization,
-                    &evaluations,
-                    &SnapshotAccess::current(snapshot, database.project_id()),
-                    read_write_transaction,
-                ))?;
+                require_atomic_rules_allowed(
+                    &service.rules.evaluate_atomic_with_read_transaction(
+                        &database,
+                        &authorization,
+                        &evaluations,
+                        &SnapshotAccess::current(snapshot, database.project_id()),
+                        read_write_transaction,
+                    ),
+                )?;
                 Ok((responses, reads))
             })
             .await?

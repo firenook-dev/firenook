@@ -707,6 +707,7 @@ fn allowed() -> EvaluationResult {
         document_accesses: 0,
         document_cache_hits: 0,
         matching_allows: 0,
+        refused_by: Vec::new(),
     }
 }
 

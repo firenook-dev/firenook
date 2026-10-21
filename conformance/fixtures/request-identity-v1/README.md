@@ -8,7 +8,7 @@ headers themselves. Reproduce with Node 24.20.0 and the pinned jar in the
 Firebase CLI cache (or `FIREBASE_EMULATORS_PATH` / `FIRESTORE_EMULATOR_JAR`):
 
 ```
-node --import tsx conformance/src/rules/capture-request-identity.ts --output /tmp/fresh-request-identity
+npm run capture:rules:identity --prefix conformance -- --output /tmp/fresh-request-identity
 ```
 
 The capture starts three emulators: one with `identityRules`

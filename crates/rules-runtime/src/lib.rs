@@ -40,7 +40,8 @@ use firenook_rules_engine::{
 use serde_json::Value as JsonValue;
 
 pub use firenook_rules_engine::{
-    AtomicEvaluationResult, EvaluationResult, Query as RulesQuery, RequestOperation,
+    AtomicEvaluationResult, EvaluationResult, PRODUCTION_DENIAL, Query as RulesQuery,
+    RefusingAllow, RequestOperation,
 };
 
 /// Owner/admin bypass token used by the emulator control plane and backend SDKs.
@@ -532,6 +533,7 @@ fn allowed_result() -> EvaluationResult {
         document_accesses: 0,
         document_cache_hits: 0,
         matching_allows: 0,
+        refused_by: Vec::new(),
     }
 }
 

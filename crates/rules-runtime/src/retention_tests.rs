@@ -31,6 +31,7 @@ fn denied() -> EvaluationResult {
         document_accesses: 0,
         document_cache_hits: 0,
         matching_allows: 1,
+        refused_by: Vec::new(),
     }
 }
 
