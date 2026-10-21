@@ -8,12 +8,15 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { truthy } from './terminal.mjs';
 
 export const REGISTRY = 'https://registry.npmjs.org/-/package/firenook/dist-tags';
 const DAY = 24 * 60 * 60 * 1000;
 
+// Off when any of these is set to something other than empty, 0 or false:
+// CI=false is no CI.
 export function updatesOff(env = process.env) {
-  return ['CI', 'FIRENOOK_NO_UPDATE_CHECK', 'NO_UPDATE_NOTIFIER'].some(name => env[name] !== undefined && env[name] !== '' && env[name] !== '0');
+  return ['CI', 'FIRENOOK_NO_UPDATE_CHECK', 'NO_UPDATE_NOTIFIER'].some(name => truthy(env[name]));
 }
 
 // Where the last answer is kept: the platform's cache directory.

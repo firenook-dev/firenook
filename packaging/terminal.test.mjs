@@ -21,6 +21,7 @@ test('the terminal UI draws only for emulators:start in a terminal', () => {
   assert.equal(interactive({stdout: {}, stdin: tty, env: {}}), false, 'a pipe');
   assert.equal(interactive({stdout: tty, stdin: {}, env: {}}), false, 'no keyboard');
   assert.equal(interactive({stdout: tty, stdin: tty, env: {CI: 'true'}}), false);
+  for (const value of ['false', '0', '']) assert.equal(interactive({stdout: tty, stdin: tty, env: {CI: value}}), true, `CI=${value} is no CI`);
   assert.equal(interactive({stdout: tty, stdin: tty, env: {TERM: 'dumb'}}), false);
   assert.equal(interactive({stdout: tty, stdin: tty, env: {FIRENOOK_PLAIN: '1'}}), false);
   assert.equal(interactive({stdout: tty, stdin: tty, env: {FIRENOOK_PLAIN: '0'}}), true);
@@ -102,7 +103,11 @@ test('the update check follows the channel, compares versions and names the pack
   writeFileSync(join(project, 'bun.lock'), '');
   assert.equal(installCommand(project, 'next'), 'bun add -d firenook@next');
   assert.equal(updatesOff({CI: '1'}), true);
+  assert.equal(updatesOff({CI: 'true'}), true);
+  // Only a truthy CI is CI, as the ecosystem reads it.
+  for (const value of ['false', 'FALSE', '0', '']) assert.equal(updatesOff({CI: value}), false, `CI=${value}`);
   assert.equal(updatesOff({FIRENOOK_NO_UPDATE_CHECK: '1'}), true);
+  assert.equal(updatesOff({FIRENOOK_NO_UPDATE_CHECK: 'false'}), false);
   assert.equal(updatesOff({}), false);
 
   const env = {XDG_CACHE_HOME: mkdtempSync(join(tmpdir(), 'firenook-cache-'))};
