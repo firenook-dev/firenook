@@ -1,6 +1,7 @@
 //! What the engine tells the terminal UI (`--terminal-events`): a count
-//! says its noun in the singular for one, and a start-up warning from any
-//! service reaches the `ready` event, which the terminal's `w` key lists.
+//! says its noun in the singular for one, a start-up warning from any
+//! service reaches the `ready` event, which the terminal's `w` key lists,
+//! and a service's line after it is a line of the log, never a raw one.
 
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
@@ -280,6 +281,74 @@ fn a_schedule_that_cannot_run_on_a_clock_is_a_start_up_warning() {
     assert_eq!(
         figures(&engine, "pubsub"),
         serde_json::json!([[1, "schedule"]])
+    );
+    stop(engine);
+}
+
+/// A request to a local port, and the status line it answered with.
+fn post(port: u16, path: &str, body: &str) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connected");
+    write!(
+        stream,
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .expect("request");
+    let mut response = String::new();
+    stream.read_to_string(&mut response).expect("response");
+    response.lines().next().unwrap_or_default().to_owned()
+}
+
+#[test]
+fn a_cloud_tasks_line_once_running_is_a_line_of_the_log() {
+    if node().is_none() {
+        eprintln!("skipped: node is not on PATH, and a suite with Functions needs it");
+        return;
+    }
+    let project = Project::new("tasks");
+    project.write("firebase.json", r#"{"functions":[{"source":"functions"}]}"#);
+    project.write(
+        "functions/functions.yaml",
+        "specVersion: v1alpha1\nendpoints:\n  api:\n    entryPoint: api\n    platform: gcfv2\n    httpsTrigger: {}\n",
+    );
+    project.write(
+        "functions/package.json",
+        r#"{"name":"tasks","main":"index.js"}"#,
+    );
+    project.write("functions/index.js", "");
+    let ports = free_ports::<11>();
+    let engine = start(&project, "functions", false, ports);
+    // A task for a queue no function registers: Cloud Tasks warns.
+    let status = post(
+        ports[9],
+        &format!(
+            "/projects/{}/locations/us-central1/queues/missing/tasks",
+            project.id
+        ),
+        "{}",
+    );
+    assert!(status.contains(" 404"), "{status}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let said = loop {
+        let found = engine.events().into_iter().find(|event| {
+            event["type"] == "log"
+                && event["source"] == "tasks"
+                && event["message"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("non-existent queue"))
+        });
+        if found.is_some() || Instant::now() > deadline {
+            break found;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let said =
+        said.unwrap_or_else(|| panic!("the warning is a line of the log:\n{}", engine.printed()));
+    assert_eq!(said["level"], "warn");
+    assert!(
+        !engine.printed().contains("firenook tasks: Tried to queue"),
+        "nothing is printed raw:\n{}",
+        engine.printed()
     );
     stop(engine);
 }

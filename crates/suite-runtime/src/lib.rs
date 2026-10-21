@@ -824,9 +824,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             &inventory,
             &config.origin(config.ports.functions),
             Arc::new(move |level: &str, text: &str| {
-                if level != "DEBUG" {
-                    terminal::print(level, "tasks", text, &format!("firenook tasks: {text}"));
-                }
+                console_wiring::messaging::print_tasks_line(level, text);
                 tasks_logging.record(level, Some("tasks"), text.to_owned());
             }),
         );
