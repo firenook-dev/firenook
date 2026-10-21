@@ -448,7 +448,7 @@ fn seed_path(config: &SuiteConfig) -> Result<Option<PathBuf>, SuiteRuntimeError>
 /// The seed's canonical path, once its manifest is known to point inside it.
 fn validate_seed(seed: &Path) -> Result<PathBuf, SuiteRuntimeError> {
     let seed = fs::canonicalize(seed).map_err(io_error)?;
-    require_file(&seed.join("firebase-export-metadata.json"))?;
+    // Its suite metadata, or the production Firestore export it holds.
     let manifest = crate::read_export_metadata(&seed)?;
     for path in [
         manifest.firestore.map(|value| value.metadata_file),

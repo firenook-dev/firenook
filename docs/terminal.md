@@ -35,7 +35,13 @@ else holds names the program and its process id, with the command that
 stops it and a free port for `firebase.json`. Saved data refused because its
 seed changed names the files that changed, with the command that keeps the
 data. A repair after an unclean stop shows how far it has got, and a stop
-while Firenook is still starting closes the data before it exits.
+while Firenook is still starting closes the data before it exits. The card
+says nothing was changed only when nothing could have been: once the
+emulators were ready, the data is kept with whatever was written, and an
+engine that was killed (or crashed) leaves the next start to check the data
+first. Killing the `firenook` process itself (a closed pane, `kill -9`) stops
+the engine too, saving the data, rather than leaving it running with the
+ports.
 
 When your functions do not load, what happens depends on when. At the
 start, a project whose `firebase.json` has a Functions codebase asks for at
@@ -67,7 +73,10 @@ same lines as before, `All emulators ready` alone on its line. So do
 and prints the commands that finish the set-up, or does it with `--yes`. `NO_COLOR` keeps the screen
 and drops the colour. Terminals that cannot draw its symbols (the Windows
 console outside Windows Terminal, the Linux text console, or
-`FIRENOOK_ASCII=1`) get plain characters instead.
+`FIRENOOK_ASCII=1`) get plain characters instead. In the plain output, an
+engine that ends without being asked to (killed, or exiting on its own once
+ready) adds a line that says so, `firenook: the engine was ended (SIGKILL)
+while it was running; …`, and the command exits non-zero.
 
 The release check asks the npm registry for `firenook`'s version tags at
 most once a day, in the background. The answer shows on the next start, so

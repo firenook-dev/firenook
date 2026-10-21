@@ -3,7 +3,7 @@
 // footer, and answers the keys. Only `emulators:start` in a terminal comes
 // here; everything else gets the plain line protocol (`supervise`).
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -13,6 +13,7 @@ import {
 import { requestNativeStop } from './processes.mjs';
 import { errorPlace, startBuild } from './build.mjs';
 import { diagnose, prepareLaunch } from './runtime.mjs';
+import { connectHost } from './options.mjs';
 import { pendingUpdate, refreshUpdates } from './updates.mjs';
 
 export const EVENT_PREFIX = 'FIRENOOK_EVENT ';
@@ -110,6 +111,17 @@ export function loadError(error) {
   return {message: named === -1 ? first : lines[named].trim(), where: at === -1 ? undefined : lines[at].trim().replace(/^\.\//, ''), frame: frame.slice(0, 8)};
 }
 
+// Whether the engine will skip an --import, with a warning, as the
+// official CLI does: a file, or a directory with no export in it (neither
+// suite metadata nor a production Firestore export). One that is not there
+// at all the engine refuses.
+const skippedSeed = seed => {
+  try {
+    if (!statSync(seed).isDirectory()) return true;
+    return !readdirSync(seed).some(name => name === 'firebase-export-metadata.json' || name.endsWith('.overall_export_metadata'));
+  } catch { return false; }
+};
+
 // How the data starts, as the wrapper can tell before the engine says:
 // saved state with a complete receipt is picked up, a seed is imported,
 // otherwise it is a fresh start.
@@ -127,7 +139,7 @@ export function expectedOpening(args) {
       }
     } catch { /* not saved state: an import or a fresh start */ }
   }
-  if (seed) return {kind: 'import', seed};
+  if (seed && !skippedSeed(seed)) return {kind: 'import', seed};
   return {kind: 'fresh'};
 }
 
@@ -172,7 +184,7 @@ async function freePort(host, port, taken = new Set()) {
     const free = await new Promise(done => {
       const server = createServer();
       server.once('error', () => done(false));
-      server.listen(next, host, () => server.close(() => done(true)));
+      server.listen(next, host.replace(/^\[|\]$/g, ''), () => server.close(() => done(true)));
     });
     if (free) return next;
   }
@@ -203,7 +215,9 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   // which no later start reads.
   const ephemeral = !stateDir || /[\\/]\.firenook[\\/]runs[\\/]session-[^\\/]+[\\/]state$/.test(stateDir);
   const exportDir = value('--export-on-exit');
-  const host = value('--host') || '127.0.0.1';
+  // Where this process reaches the suite (the hub for an export, the
+  // console's address): the host clients are told.
+  const host = connectHost(value('--host') || '127.0.0.1');
   const update = pendingUpdate(version, cwd, {env, platform});
   // The next start's answer; this one never waits for it.
   void refreshUpdates({env, platform});
@@ -404,11 +418,18 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     lines.push(...space(), ...field(dim('Data'), `nothing was deleted: ${shortPath(stateDir, cwd)} is untouched`, dim));
     return lines;
   };
-  const dataLine = () => (model.opening.kind === 'resume' ? `nothing was changed: ${shortPath(stateDir, cwd)} is as you left it`
-    : model.opening.kind === 'import' && launch.args.includes('--resume-state') ? `the seed was imported into ${shortPath(stateDir, cwd)}; the next start picks it up`
-      : ephemeral ? 'nothing of yours was changed'
-        : model.opening.kind === 'fresh' && launch.args.includes('--resume-state') ? `the data is saved in ${shortPath(stateDir, cwd)}; the next start picks it up`
-          : `the data in ${shortPath(stateDir, cwd)} is kept`);
+  // What became of the data. Before readiness nothing was served, so
+  // nothing of the developer's was written; once ready, anything may have
+  // been, and is kept.
+  const dataLine = () => (model.ready ? (ephemeral ? `this run's data stays in ${shortPath(dirname(stateDir ?? ''), cwd)}` : `everything is kept in ${shortPath(stateDir, cwd)}`)
+    : model.opening.kind === 'resume' ? `nothing was changed: ${shortPath(stateDir, cwd)} is as you left it`
+      : model.opening.kind === 'import' && launch.args.includes('--resume-state') ? `the seed was imported into ${shortPath(stateDir, cwd)}; the next start picks it up`
+        : ephemeral ? 'nothing of yours was changed'
+          : model.opening.kind === 'fresh' && launch.args.includes('--resume-state') ? `the data is saved in ${shortPath(stateDir, cwd)}; the next start picks it up`
+            : `the data in ${shortPath(stateDir, cwd)} is kept`);
+  // An engine that ended without finishing a stop (killed, or crashed) may
+  // have left the files open: the next start checks them first.
+  const uncheckedLine = () => (stateDir && !ephemeral ? `the next start checks ${shortPath(stateDir, cwd)} first, and repairs it if it needs to` : dataLine());
   async function problemLines(failure) {
     if (failure.kind === 'port') {
       const listener = LISTENERS[failure.service] ?? {label: failure.service, key: `"${failure.service}": { "port": PORT }`};
@@ -727,7 +748,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     try {
       mkdirSync(destination, {recursive: true});
       // No Origin header: the hub refuses requests that carry one.
-      const response = await fetch(`http://${host === '0.0.0.0' ? '127.0.0.1' : host === '::' ? '[::1]' : host}:${hub}/_admin/export`, {method: 'POST', headers: {'content-type': 'application/json'},
+      const response = await fetch(`http://${host}:${hub}/_admin/export`, {method: 'POST', headers: {'content-type': 'application/json'},
         body: JSON.stringify({path: destination, targets, initiatedBy: 'firenook terminal'}), signal: AbortSignal.timeout(30 * 60_000)});
       model.task = undefined;
       if (response.ok) happened(green(G.ok), 'exported', Date.now() - began, dim(shortPath(destination, cwd)));
@@ -871,7 +892,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   // border is printed: the banner, and the ready rows as the launch's own
   // ports and console address foretell them.
   const port = name => Number(value(`--${name}-port`)) || undefined;
-  const foretold = {console: launch.args.includes('--no-ui') ? undefined : `http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port('ui') ?? 4000}/console`,
+  const foretold = {console: launch.args.includes('--no-ui') ? undefined : `http://${host}:${port('ui') ?? 4000}/console`,
     ports: Object.fromEntries(PORTS.map(([name]) => [name, selected.has(name) || name === 'hub' ? port(name) : undefined]).filter(([, number]) => number)), ms: 0};
   model.ready = foretold;
   for (const row of readyRows(Infinity)) t.claim(row);
@@ -1001,7 +1022,9 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     screen.live(() => []);
     const lines = model.raw.slice(-12);
     const title = requestedStop ? 'Firenook did not finish stopping' : model.ready ? 'Firenook stopped unexpectedly' : 'Firenook could not start';
-    const data = requestedStop && stateDir && !ephemeral ? `the next start checks ${shortPath(stateDir, cwd)} first, and repairs it if it needs to` : dataLine();
+    // Ended by a signal, or by itself with no stop and nothing it could
+    // describe: either way it may not have closed the data.
+    const data = requestedStop || outcome.signal || model.ready ? uncheckedLine() : dataLine();
     screen.emit(() => ['', ...section(divider(`${red(G.fail)} ${bold(red(title))}`, dim(outcome.signal ? `signal ${outcome.signal}` : `exit code ${outcome.code}`)),
       [...lines.flatMap(line => field('', line, dim)), ...field(dim('Data'), data, dim)].map(inside)), bottom(), '']);
     screen.end();

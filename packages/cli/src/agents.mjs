@@ -7,6 +7,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join, relative, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import { findConfig } from './options.mjs';
 
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
 const found = (directory, ...names) => names.some(name => existsSync(join(directory, name)));
@@ -99,8 +100,9 @@ export function describeStep(step, directory) {
 
 // firenook mcp add [--agent claude,cursor,vscode] [--dry-run] [--force] [--json]
 export function mcpAdd(options, cwd = process.cwd(), log = console, env = process.env) {
-  const directory = resolve(cwd);
-  const config = options.config ? resolve(cwd, options.config) : existsSync(join(directory, 'firebase.json')) ? join(directory, 'firebase.json') : undefined;
+  // The project's folder, where its firebase.json is; outside a project, here.
+  const config = findConfig(options, cwd);
+  const directory = config && !options.config ? dirname(config) : resolve(cwd);
   const agents = options.agent ? String(options.agent).split(',').map(item => item.trim()).filter(Boolean) : undefined;
   const plan = planAgents(directory, {agents, config, force:Boolean(options.force), env});
   const home = homeAgentLines(directory, config, {env});

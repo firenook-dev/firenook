@@ -59,6 +59,15 @@ state directory as an implicit reset/reimport. Data kept without a seed needs
 `--export-on-exit` without a directory follows `--import`; never use this with
 an immutable resume seed. Ctrl-C requests graceful export; await completion.
 
+An `--import` is read as the official CLI reads it. A directory with
+`firebase-export-metadata.json` is a suite export; one holding a production
+Firestore export (`*.overall_export_metadata`) imports that into Firestore.
+A directory with neither, or a file, is no import: the start warns `Could not
+find import/export metadata file, skipping data import!` and goes on empty.
+A directory that does not exist is refused, unless `--export-on-exit` writes
+it: `--import ./data --export-on-exit` then starts empty the first time, and
+the stop creates `./data` for the next start.
+
 Picking saved data up checks that the seed has not changed since it was
 imported. Each file's size and times are recorded at the import
 (`native-seed.json`, beside the receipt), so the check reads only a file whose
@@ -108,8 +117,14 @@ syncs every write before acknowledging it, at the drive's flush latency
 A stop at any moment, even while the data is still opening, closes the data
 cleanly: a check of the seed or a repair is abandoned, an import into a fresh
 run's directory ends at once, and an import into saved data finishes first,
-since half an import could never be picked up. A process killed anyway leaves
-the store to repair at the next start. Under write-behind, the store saves
+since half an import could never be picked up. Clients still connected do
+not hold the stop up: the Listen and Write sessions a web page opened end
+with it, as do gRPC streams and the console's own. A launcher that goes away
+without a word (killed, or its terminal's process gone) stops the engine the
+same way, saving the data: on every platform the engine's stdin is a pipe
+only the launcher holds, and its end is a stop. A process killed anyway leaves
+the store to repair at the next start, and the launcher says the engine was
+ended (in a terminal, that the next start checks the data first). Under write-behind, the store saves
 what a repair needs with each sync, so that repair takes moments;
 `--durability per-commit` leaves that out to keep its commit latency, and
 repairs by reading the store once, with its progress on screen.

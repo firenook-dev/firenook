@@ -1,10 +1,13 @@
 // Commands that address a running suite through the Emulator Hub: the same
 // locator file (`<tmpdir>/hub-<projectId>.json`) and routes the official CLI
-// uses, so either CLI can find a suite the other started.
+// uses, so either CLI can find a suite the other started. The locator names
+// one suite per project id, the first one started; each Firenook suite also
+// keeps a record of its own, with its folder (see recordPath), so that two
+// suites for one project id can each be found.
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { DEFAULT_PORTS, SERVICES, canonical, connectHost, contains, loadProject, validProjectId } from './options.mjs';
+import { DEFAULT_PORTS, SERVICES, canonical, connectHost, contains, findConfig, loadProject, validProjectId } from './options.mjs';
 import { suiteFetch } from './client.mjs';
 
 export const EXPORTABLE = ['firestore', 'auth', 'storage'];
@@ -12,6 +15,54 @@ export const METADATA_FILE = 'firebase-export-metadata.json';
 // FIRENOOK_LOCATOR_DIR lets tests point the wrapper at a private directory.
 export const locatorDirectory = () => process.env.FIRENOOK_LOCATOR_DIR || tmpdir();
 export const locatorPath = project => join(locatorDirectory(), `hub-${project}.json`);
+
+// Each Firenook suite's own record: the locator's fields (its hub's
+// origins and its pid) and its project id, folder and firebase.json. It is
+// named by the suite's pid, so no other suite ever writes it.
+export const recordsDirectory = () => join(locatorDirectory(), 'firenook-hubs');
+export const recordPath = (project, pid) => join(recordsDirectory(), `hub-${project}-${pid}.json`);
+function readRecords(project) {
+  let names;
+  try { names = readdirSync(recordsDirectory()); } catch { return []; }
+  const prefix = `hub-${project}-`;
+  return names.filter(name => name.startsWith(prefix) && /^\d+\.json$/.test(name.slice(prefix.length))).flatMap(name => {
+    const path = join(recordsDirectory(), name);
+    try {
+      const record = JSON.parse(readFileSync(path, 'utf8'));
+      return record?.projectId === project && Array.isArray(record.origins) ? [{...record, path}] : [];
+    } catch { return []; }
+  });
+}
+const samePath = (a, b) => {
+  const [left, right] = [canonical(String(a)), canonical(String(b))];
+  return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
+};
+const originPort = origin => { try { return Number(new URL(origin).port); } catch { return undefined; } };
+
+// The hub's status when `origin` answers, with `pid` when one is given (a
+// stale file whose port another suite took does not count).
+async function probe(origin, pid, timeout = 2000) {
+  try {
+    const response = await suiteFetch(`${origin}/`, {signal:AbortSignal.timeout(timeout)});
+    if (!response.ok) return undefined;
+    const status = await response.json();
+    if (pid !== undefined && status?.pid !== undefined && status.pid !== pid) return undefined;
+    return status;
+  } catch { return undefined; }
+}
+// The suites running for `project` that keep a record, each with the
+// origin that answered.
+async function runningRecords(project) {
+  const found = await Promise.all(readRecords(project).map(async record => {
+    for (const origin of record.origins) {
+      const status = await probe(origin, record.pid);
+      if (status) return {...record, origin, status};
+    }
+    return undefined;
+  }));
+  return found.filter(Boolean);
+}
+const listed = records => records.map(record => `${record.origin} from ${record.projectDir}`).join(', ');
 
 export function readLocator(project) {
   const path = locatorPath(project);
@@ -24,8 +75,8 @@ export function readLocator(project) {
 // explicit --project id with default ports: export and delete only need the
 // id to find the locator file.
 // Discovery (discoverProject below) applies only when neither --project,
-// --config nor a firebase.json in cwd names a project.
-export const needsDiscovery = (options, cwd = process.cwd()) => !options.project && !options.config && !existsSync(resolve(cwd, 'firebase.json'));
+// --config nor a firebase.json in cwd or a folder above it names a project.
+export const needsDiscovery = (options, cwd = process.cwd()) => !options.project && !options.config && !findConfig(options, cwd);
 export function resolveProject(options, cwd = process.cwd()) {
   try { return loadProject(options, cwd); }
   catch (error) {
@@ -54,27 +105,36 @@ function locatorNames() {
   scanned = {directory, mtimeMs, names};
   return names;
 }
+// Every Firenook record counts too: a second suite for one project id has
+// no locator of its own. A suite with both is listed once.
 export async function runningSuites(timeout = 2000) {
   let names;
   try { names = locatorNames(); }
   catch { return {answering:[], stale:[]}; }
-  const probes = await Promise.all(names.map(async name => {
-    const project = name.slice('hub-'.length, -'.json'.length);
-    const path = join(locatorDirectory(), name);
+  let records = [];
+  try { records = readdirSync(recordsDirectory()).filter(name => /^hub-.+-\d+\.json$/.test(name)); } catch { /* none */ }
+  const files = [...names.map(name => ({path:join(locatorDirectory(), name), project:name.slice('hub-'.length, -'.json'.length)})),
+    ...records.map(name => ({path:join(recordsDirectory(), name)}))];
+  const probes = await Promise.all(files.map(async ({path, project}) => {
     let locator;
     try { locator = JSON.parse(readFileSync(path, 'utf8')); } catch { return {project, path, answering:false}; }
+    project ??= locator?.projectId;
+    if (!validProjectId(project)) return undefined;
     for (const origin of Array.isArray(locator?.origins) ? locator.origins : []) {
-      try {
-        const response = await suiteFetch(`${origin}/`, {signal:AbortSignal.timeout(timeout)});
-        if (!response.ok) continue;
-        const status = await response.json();
-        if (locator.pid !== undefined && status?.pid !== undefined && status.pid !== locator.pid) continue;
-        return {project, path, origin, answering:true};
-      } catch { /* the next origin */ }
+      const status = await probe(origin, locator.pid, timeout);
+      if (status) return {project, path, origin, pid:status.pid ?? locator.pid, answering:true};
     }
     return {project, path, answering:false};
   }));
-  const pick = answering => probes.filter(probe => probe.answering === answering).map(({answering: _, ...probe}) => probe).sort((a, b) => a.project.localeCompare(b.project));
+  const seen = new Set();
+  const unique = probes.filter(Boolean).filter(probe => {
+    if (!probe.answering) return true;
+    const key = `${probe.project} ${probe.pid ?? probe.origin}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const pick = answering => unique.filter(probe => probe.answering === answering).map(({answering: _, pid: __, ...probe}) => probe).sort((a, b) => a.project.localeCompare(b.project));
   return {answering:pick(true), stale:pick(false)};
 }
 
@@ -82,37 +142,76 @@ export async function runningSuites(timeout = 2000) {
 // project folder (no firebase.json, no --project): the configless project
 // resolveProject builds for --project, plus how it was found. Two answering
 // suites ask for --project; none is an error naming emulators:start.
-export async function discoverProject(cwd = process.cwd(), command = 'this command') {
-  const {answering, stale} = await runningSuites();
+// --hub-port picks the suite whose hub it is.
+export async function discoverProject(cwd = process.cwd(), command = 'this command', options = {}) {
+  const found = await runningSuites();
+  const stale = found.stale;
+  const answering = options['hub-port'] ? found.answering.filter(suite => originPort(suite.origin) === Number(options['hub-port'])) : found.answering;
   if (answering.length === 1) {
     const [suite] = answering;
     return {project:suite.project, directory:cwd, host:'127.0.0.1', ports:{...DEFAULT_PORTS}, services:SERVICES, configless:true, discovered:{locator:suite.path, origin:suite.origin}};
   }
   if (answering.length > 1) {
-    throw new Error(`${answering.length} running suites answer (${answering.map(suite => `${suite.project} at ${suite.origin}`).join(', ')}); start ${command} with --project <id> to choose one`);
+    // --project tells suites of different projects apart; --hub-port, two of one.
+    const projects = new Set(answering.map(suite => suite.project)).size;
+    const choose = projects === answering.length ? 'with --project <id> to choose one' : `with --hub-port <port> to choose one${projects > 1 ? ', or with --project <id>' : ''}`;
+    throw new Error(`${answering.length} running suites answer (${answering.map(suite => `${suite.project} at ${suite.origin}`).join(', ')}); start ${command} ${choose}`);
   }
   const ignored = stale.length ? ` (stale, not answering: ${stale.map(suite => suite.path).join(', ')})` : '';
   throw new Error(`No running suite found: no firebase.json in ${cwd}, no --project, and no hub locator in ${locatorDirectory()} answers${ignored}. Start the emulators with firenook emulators:start in the project folder, or start ${command} with --project <id> (or --config <firebase.json>).`);
 }
 
-// Finds the running hub: the locator file's origins first, then the port the
-// configuration names. Returns {origin, status, locator}.
+// Finds the running hub. Returns {origin, status, locator}.
+// --hub-port names the hub: that one, and no other. A project read from a
+// folder's firebase.json reaches the suite started from that folder (its
+// record says so), whichever suite the official locator names; a project
+// known only by its id reaches the one Firenook suite running for it, and
+// asks for --hub-port when there are two. Then, for a suite that keeps no
+// record (the official CLI's), the locator file's origins, and the port the
+// configuration names; a hub that answers there for another folder's
+// suite is not this folder's.
 export async function findHub(project, options = {}) {
   const locator = readLocator(project.project);
+  const notFound = (origins, reason, more = '') => {
+    const stale = locator ? ` If no suite is running, delete the stale locator ${locatorPath(project.project)}.` : '';
+    return new Error(`Did not find a running emulator hub for project ${project.project} (tried ${origins.join(', ')}): ${reason}.${more} Start it with firenook emulators:start.${stale}`);
+  };
+  if (options['hub-port']) {
+    const origin = `http://${connectHost(project.host)}:${options['hub-port']}`;
+    try {
+      const response = await suiteFetch(`${origin}/`, {signal:AbortSignal.timeout(5000)});
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return {origin, status:await response.json(), locator};
+    } catch (error) { throw notFound([origin], describe(error)); }
+  }
+  const records = await runningRecords(project.project);
+  const folder = project.configless ? undefined : project.directory;
+  const mine = folder ? records.filter(record => samePath(record.projectDir, folder)) : records;
+  if (mine.length === 1) return {origin:mine[0].origin, status:mine[0].status, locator};
+  if (mine.length > 1) {
+    // Two from one folder (their ports set at the start): the configured hub's.
+    const configured = folder && mine.find(record => originPort(record.origin) === project.ports.hub);
+    if (configured) return {origin:configured.origin, status:configured.status, locator};
+    throw new Error(`${mine.length} suites run for ${project.project} (${listed(mine)}); ${folder ? '' : 'run the command in the project\'s folder, or '}pass --hub-port <port> to choose one`);
+  }
+  const others = folder ? records : [];
   const origins = [...(Array.isArray(locator?.origins) ? locator.origins : [])];
   // A discovered project has no configuration of its own: its locator is all.
-  const configured = `http://${connectHost(project.host)}:${options['hub-port'] || project.ports.hub}`;
+  const configured = `http://${connectHost(project.host)}:${project.ports.hub}`;
   if (!project.discovered && !origins.includes(configured)) origins.push(configured);
   let failure;
   for (const origin of origins) {
     try {
       const response = await suiteFetch(`${origin}/`, {signal:AbortSignal.timeout(5000)});
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return {origin, status:await response.json(), locator};
+      const status = await response.json();
+      if (others.some(record => record.pid === status?.pid)) continue;
+      return {origin, status, locator};
     } catch (error) { failure ??= error; }
   }
-  const stale = locator ? ` If no suite is running, delete the stale locator ${locatorPath(project.project)}.` : '';
-  throw new Error(`Did not find a running emulator hub for project ${project.project} (tried ${origins.join(', ')}): ${describe(failure)}. Start it with firenook emulators:start.${stale}`);
+  const elsewhere = others.length === 1 ? ` 1 other suite for ${project.project} runs, from another folder (${listed(others)}); --hub-port reaches it.`
+    : others.length ? ` ${others.length} other suites for ${project.project} run, from other folders (${listed(others)}); --hub-port reaches one.` : '';
+  throw notFound(origins, failure ? describe(failure) : 'the hub there is another folder\'s suite', elsewhere);
 }
 
 // Services the running suite reports, or undefined when the hub cannot list them.

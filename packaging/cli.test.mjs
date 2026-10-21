@@ -330,6 +330,28 @@ test('--debug and --log-verbosity DEBUG add a debug log under the run directory'
   assert.match(quiet.stderr,/--log-verbosity QUIET is accepted for compatibility/);
   assert.ok(!launchFor(dir,options).args.includes('--debug-log'));
 });
+test('the default host is localhost, as officially, and clients are told 127.0.0.1', () => {
+  const {dir,options} = project();
+  // The engine binds 127.0.0.1 for it, and ::1 as well for the hub and the
+  // console; every client address stays 127.0.0.1. Clients learn the
+  // addresses from the hub's listing (emulators:exec), whichever host the
+  // listing names.
+  const listing = host => ({firestore:{host,port:8080}, hub:{host,port:4400}, storage:{host,port:9199}});
+  for (const host of [undefined, 'localhost']) {
+    const launch = launchFor(dir, {...options, host});
+    assert.equal(flagValue(launch.args,'--host'),'localhost');
+    for (const listed of ['localhost', '127.0.0.1']) {
+      const env = execEnvironment(launch.env, listing(listed));
+      assert.equal(env.FIRESTORE_EMULATOR_HOST,'127.0.0.1:8080');
+      assert.equal(env.FIREBASE_EMULATOR_HUB,'127.0.0.1:4400');
+      assert.equal(env.STORAGE_EMULATOR_HOST,'http://127.0.0.1:9199');
+    }
+    assert.equal(inspectProject({...options, host},dir).warnings.length,0);
+  }
+  // An address is that address; IPv6 literals are bracketed for clients.
+  assert.equal(flagValue(launchFor(dir,{...options,host:'127.0.0.1'}).args,'--host'),'127.0.0.1');
+  for (const host of ['::1','[::1]']) assert.equal(execEnvironment({}, listing(host)).FIRESTORE_EMULATOR_HOST,'[::1]:8080', host);
+});
 test('host binding accepts any address with a warning; per-service conflicts still fail', () => {
   const {dir,config,options,save} = project();
   const lan = inspectProject({...options,host:'0.0.0.0'},dir);
@@ -378,6 +400,16 @@ test('export default, parent/symlink safety and resume isolation', () => {
   assert.equal(canonical(join(dir,'alias','new')),canonical(join(dir,'new')));
   assert.throws(()=>loadProject({...options,'export-on-exit':'alias'},dir),/ancestor/);
   assert.throws(()=>loadProject({...options,import:'seed','state-dir':'seed/state'},dir),/separate/);
+  // As the official CLI: a seed directory not there yet, exported to at the
+  // stop, is no import; the stop creates it.
+  const first = loadProject({...options,import:'seed','export-on-exit':true},dir);
+  assert.equal(first.imported,undefined);
+  assert.equal(first.exported,canonical(join(dir,'seed')));
+  assert.equal(loadProject({...options,import:'seed','export-on-exit':'seed'},dir).imported,undefined);
+  // Without the export, or once it is there, it is the import.
+  assert.equal(loadProject({...options,import:'seed'},dir).imported,canonical(join(dir,'seed')));
+  mkdirSync(join(dir,'seed'));
+  assert.equal(loadProject({...options,import:'seed','export-on-exit':true},dir).imported,canonical(join(dir,'seed')));
   assert.throws(()=>loadProject({...options,import:'seed','state-dir':'work','resume-state':true,'export-on-exit':true},dir),/immutable seed/);
   assert.throws(()=>loadProject({...options,'resume-state':true},dir),/requires/);
   mkdirSync(join(dir,'existing'));
@@ -395,6 +427,7 @@ test('--keep-data keeps the data in .firenook/state, with or without a seed', ()
   assert.equal(loadProject({...options,'state-dir':'work','resume-state':true},dir).resume,true);
   assert.equal(loadProject({...options,'keep-data':true,'state-dir':'elsewhere'},dir).state,canonical(join(dir,'elsewhere')));
   assert.equal(loadProject({...options,'keep-data':true,import:'seed'},dir).imported,canonical(join(dir,'seed')));
+  mkdirSync(join(dir,'seed'));
   assert.throws(()=>loadProject({...options,'keep-data':true,import:'seed','export-on-exit':true},dir),/immutable seed/);
   assert.throws(()=>loadProject({...options,'resume-state':true},dir),/--resume-state requires --state-dir; --keep-data alone keeps the data in \.firenook\/state/);
   const launch = launchFor(dir,{...options,'keep-data':true});

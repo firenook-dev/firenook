@@ -4,6 +4,13 @@
 
 How Firenook reads `firebase.json`, `.firebaserc` and the command line, and what it needs from your machine.
 
+- **Which `firebase.json`.** Every command uses the first `firebase.json` in
+  the current directory or a folder above it, up to the root of the file
+  system, as the official CLI finds it: run in `functions/` (where
+  `npm run serve` runs), it finds the project's. `.firebaserc` is the one
+  beside it. `--config` names another file, relative to the current
+  directory.
+
 - **Services.** A service starts when `firebase.json` has its top-level
   section (`firestore`, `storage`, `functions`; `extensions` counts as
   functions) or an `emulators.<name>` entry (Auth and Pub/Sub have no section,
@@ -22,7 +29,10 @@ How Firenook reads `firebase.json`, `.firebaserc` and the command line, and what
   no rules govern refuses every client request.
 - **Firestore** accepts the object form or an array of `{database, rules,
   indexes}` entries (one entry may omit `database` for `(default)`); the
-  engine serves every listed database.
+  engine serves every listed database. Index files are not enforced, as
+  officially; the console reads them to say whether a query's index is
+  declared. One that cannot be read or parsed is a warning, not a refusal
+  (the official emulator never reads it).
 - **Functions** need `--minimum-functions` at `1` only when a codebase or
   extensions are configured and selected; otherwise the CLI passes `0`, and
   the engine drops Functions (with Eventarc and Tasks) with a notice when
@@ -36,7 +46,14 @@ How Firenook reads `firebase.json`, `.firebaserc` and the command line, and what
   `emulators.singleProjectMode` (default `true`) is passed through.
 - **Host.** `--host` or `emulators.<name>.host` binds every listener; clients
   are pointed at the connectable address (`0.0.0.0` → `127.0.0.1`, `::` →
-  `::1`). A non-loopback host prints a warning: the emulators have no
+  `::1`). The default is `localhost`, as officially: every emulator listens on
+  127.0.0.1, and the hub and the console on `::1` as well (the official CLI
+  binds the others on the first address only, so `http://[::1]:8080` is
+  refused there too); clients, the environment of `emulators:exec` and the
+  console's Connect snippets are told 127.0.0.1. A port free on 127.0.0.1 but
+  not on `::1` is a warning. `::1` (or `[::1]`, which the official CLI cannot
+  resolve) puts every listener on the IPv6 loopback, and an address is that
+  address alone. A non-loopback host prints a warning: the emulators have no
   authentication, so every service, the data and arbitrary Functions execution
   are reachable from any device that can reach that host. Per-service hosts
   that differ from the chosen host and are not loopback are errors.

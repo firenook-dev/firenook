@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 // The five data services Firenook emulates.
@@ -83,15 +83,32 @@ export function parseOptions(argv) {
 export const validProjectId = id => typeof id === 'string' && (/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(id) || /^demo-[a-z0-9][a-z0-9-]*$/.test(id));
 export const isDemoProject = id => typeof id === 'string' && id.startsWith('demo-');
 export const isLoopback = host => LOOPBACK.includes(host);
-// Host clients connect to when the suite binds a wildcard address.
+// Host clients connect to when the suite binds a wildcard address, or
+// localhost (its first address, as the official CLI advertises it).
 export function connectHost(host) {
-  if (host === '0.0.0.0') return '127.0.0.1';
+  if (host === '0.0.0.0' || host === 'localhost') return '127.0.0.1';
   if (host === '::' || host === '[::]' || host === '::1') return '[::1]';
   if (host.includes(':') && !host.startsWith('[')) return `[${host}]`;
   return host;
 }
 
 export const readJson = file => JSON.parse(readFileSync(file, 'utf8'));
+const isDirectory = path => { try { return statSync(path).isDirectory(); } catch { return false; } };
+const isFile = path => { try { return statSync(path).isFile(); } catch { return false; } };
+
+// The project's firebase.json: --config, relative to the current directory,
+// or, as the official CLI finds it, the first firebase.json in the current
+// directory or a folder above it, up to the root of the file system (so a
+// command run in functions/ finds the project's). Undefined when there is
+// none.
+export function findConfig(options = {}, cwd = process.cwd()) {
+  if (options.config) return resolve(cwd, options.config);
+  for (let directory = resolve(cwd); ; directory = dirname(directory)) {
+    const candidate = join(directory, 'firebase.json');
+    if (isFile(candidate)) return candidate;
+    if (dirname(directory) === directory) return undefined;
+  }
+}
 // Resolve existing parent symlinks even for a destination that does not exist.
 export function canonical(path) {
   path = resolve(path);
@@ -128,7 +145,8 @@ export function inspectProject(options, cwd = process.cwd()) {
   const errors = [];
   const warnings = [];
   const fail = (code, message) => errors.push({code, message});
-  const config = resolve(cwd, options.config || 'firebase.json');
+  const config = findConfig(options, cwd);
+  if (!config) throw new Error(`No firebase.json in ${resolve(cwd)} or a folder above it; run firenook init in the project directory or pass --config`);
   const directory = dirname(config);
   if (!existsSync(config)) throw new Error(`No firebase.json at ${config}; run firenook init in the project directory or pass --config`);
   let data;
@@ -222,7 +240,9 @@ export function inspectProject(options, cwd = process.cwd()) {
 
   const entry = name => (isObject(emulators) && isObject(emulators[name]) ? emulators[name] : undefined);
   const configuredHost = LISTENERS.map(name => entry(name)?.host).find(host => typeof host === 'string' && host);
-  const host = options.host || configuredHost || '127.0.0.1';
+  // localhost, as the official default: the engine binds 127.0.0.1 for it,
+  // and ::1 as well for the hub and the console; clients are told 127.0.0.1.
+  const host = options.host || configuredHost || 'localhost';
   if (typeof host !== 'string' || !host.trim()) fail('host', '--host requires a host name or address');
   for (const name of LISTENERS) {
     const own = entry(name)?.host;
@@ -241,7 +261,7 @@ export function inspectProject(options, cwd = process.cwd()) {
   }
   if (new Set(Object.values(ports)).size !== Object.keys(ports).length) fail('port', 'Emulator ports must be distinct');
 
-  const imported = options.import ? canonical(resolve(cwd, options.import)) : undefined;
+  let imported = options.import ? canonical(resolve(cwd, options.import)) : undefined;
   let exported = options['export-on-exit'];
   if (exported === true) exported = imported;
   if (options['export-on-exit'] && !exported) fail('export', '--export-on-exit requires --import or an explicit destination');
@@ -249,6 +269,12 @@ export function inspectProject(options, cwd = process.cwd()) {
     exported = canonical(resolve(cwd, exported));
     if (contains(exported, canonical(cwd)) || contains(exported, canonical(directory))) fail('export', 'Export destination must not be the project directory or an ancestor');
   }
+  // As the official CLI: an --import directory that does not exist yet, and
+  // that the stop exports to, is no import. The first start is empty, and
+  // its stop creates the directory for the next one. (One that does not
+  // exist otherwise is refused by the engine; one with no export in it is
+  // skipped there, with a warning.)
+  if (imported && exported === imported && !isDirectory(imported)) imported = undefined;
   // --keep-data is --resume-state with the project's own state directory
   // (unless --state-dir names another): data kept between runs, with or
   // without a seed.

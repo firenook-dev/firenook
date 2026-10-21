@@ -66,6 +66,10 @@ pub struct ServiceInfo {
     /// Whether the official shape includes a `listen` array.
     #[serde(skip)]
     pub include_listen: bool,
+    /// Addresses it listens on besides `host` (the hub and the console on
+    /// `::1` for `localhost`, as the official CLI binds them).
+    #[serde(skip)]
+    pub also: Vec<String>,
     /// Process id for services that expose it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
@@ -80,8 +84,31 @@ impl ServiceInfo {
             host: host.to_owned(),
             port,
             include_listen: true,
+            also: Vec::new(),
             pid: None,
         }
+    }
+
+    /// Also listening on `address`, after `host`.
+    #[must_use]
+    pub fn also_on(mut self, address: &str) -> Self {
+        self.also.push(address.to_owned());
+        self
+    }
+
+    /// The origins it answers on: `host`, then every other address.
+    #[must_use]
+    pub fn origins(&self) -> Vec<String> {
+        std::iter::once(&self.host)
+            .chain(&self.also)
+            .map(|address| {
+                if address.contains(':') && !address.starts_with('[') {
+                    format!("http://[{address}]:{}", self.port)
+                } else {
+                    format!("http://{address}:{}", self.port)
+                }
+            })
+            .collect()
     }
 
     /// Creates a workload/dependency advertisement without `listen` metadata.
@@ -92,6 +119,7 @@ impl ServiceInfo {
             host: host.to_owned(),
             port,
             include_listen: false,
+            also: Vec::new(),
             pid: None,
         }
     }
@@ -103,11 +131,16 @@ impl ServiceInfo {
             "port": self.port,
         });
         if self.include_listen {
-            value["listen"] = json!([{
-                "address": self.host,
-                "family": if self.host.contains(':') { "IPv6" } else { "IPv4" },
-                "port": self.port,
-            }]);
+            value["listen"] = std::iter::once(&self.host)
+                .chain(&self.also)
+                .map(|address| {
+                    json!({
+                        "address": address,
+                        "family": if address.contains(':') { "IPv6" } else { "IPv4" },
+                        "port": self.port,
+                    })
+                })
+                .collect();
         }
         if let Some(pid) = self.pid {
             value["pid"] = json!(pid);
@@ -201,8 +234,15 @@ pub struct ExportCommand {
 pub struct HubConfig {
     /// Shared service directory.
     pub directory: SuiteDirectory,
-    /// Location of `hub-{project}.json`.
-    pub locator_file: PathBuf,
+    /// Location of `hub-{project}.json`, or `None` when another running
+    /// suite holds it: as the official CLI does, the second suite for a
+    /// project leaves it to the first.
+    pub locator_file: Option<PathBuf>,
+    /// This suite's own record, which no other suite writes (it is named by
+    /// the pid): its location, and what it says besides the locator's
+    /// fields (the project id and folder), so that each of two suites for
+    /// one project can be found.
+    pub record: Option<(PathBuf, JsonValue)>,
     /// Process ID owning the locator file.
     pub pid: u32,
     /// Combined export command channel.
@@ -222,22 +262,37 @@ pub struct BackgroundRequest {
     pub done: tokio::sync::oneshot::Sender<()>,
 }
 
-/// Active Hub router and owned locator file.
+/// Active Hub router and owned locator files.
 pub struct HubRuntime {
     application: Router,
-    locator: LocatorFile,
+    locator: Option<LocatorFile>,
+    record: Option<LocatorFile>,
 }
 
 impl HubRuntime {
-    /// Writes the locator file before returning the ready Hub application.
+    /// Writes the locator file and the record before returning the ready
+    /// Hub application.
     pub fn start(config: HubConfig) -> Result<Self, SuiteError> {
         let hub = config.directory.required("hub");
         let locator_value = json!({
             "version": FIREBASE_TOOLS_COMPATIBILITY_VERSION,
-            "origins": [format!("http://{}:{}", hub.host, hub.port)],
+            "origins": hub.origins(),
             "pid": config.pid,
         });
-        let locator = LocatorFile::create(config.locator_file, &locator_value)?;
+        let locator = config
+            .locator_file
+            .map(|path| LocatorFile::create(path, &locator_value))
+            .transpose()?;
+        let record = config
+            .record
+            .map(|(path, fields)| {
+                let mut value = locator_value.clone();
+                if let (Some(value), JsonValue::Object(fields)) = (value.as_object_mut(), fields) {
+                    value.extend(fields);
+                }
+                LocatorFile::create(path, &value)
+            })
+            .transpose()?;
         let state = HubState {
             directory: config.directory,
             locator: locator_value,
@@ -262,6 +317,7 @@ impl HubRuntime {
         Ok(Self {
             application,
             locator,
+            record,
         })
     }
 
@@ -270,9 +326,12 @@ impl HubRuntime {
         self.application.clone()
     }
 
-    /// Explicitly removes the locator after every listener has stopped.
+    /// Explicitly removes the locator and the record after every listener
+    /// has stopped.
     pub fn remove_locator(&mut self) -> Result<(), SuiteError> {
-        self.locator.remove()
+        let record = self.record.as_mut().map_or(Ok(()), LocatorFile::remove);
+        self.locator.as_mut().map_or(Ok(()), LocatorFile::remove)?;
+        record
     }
 }
 
@@ -455,6 +514,9 @@ impl LocatorFile {
         })
     }
 
+    /// Removes the file if it is still this suite's. One that another suite
+    /// wrote meanwhile is that suite's now, and stays, as the official CLI
+    /// removes a locator only while it names its own process.
     fn remove(&mut self) -> Result<(), SuiteError> {
         if !self.active {
             return Ok(());
@@ -462,11 +524,7 @@ impl LocatorFile {
         match std::fs::read(&self.path) {
             Ok(current) if current == self.expected => std::fs::remove_file(&self.path)
                 .map_err(|error| SuiteError(format!("failed to remove locator: {error}")))?,
-            Ok(_) => {
-                return Err(SuiteError(
-                    "locator ownership changed while Firenook was running".to_owned(),
-                ));
-            }
+            Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(SuiteError(format!("failed to read locator: {error}"))),
         }
@@ -577,16 +635,26 @@ mod tests {
         let locator = temporary("locator").join("hub-demo.json");
         let (exports, mut commands) = mpsc::channel(1);
         let triggers = TriggerRegistry::default();
+        let record = locator.with_file_name("hub-demo-42.json");
         let mut runtime = HubRuntime::start(HubConfig {
             background: None,
             directory: directory(),
-            locator_file: locator.clone(),
+            locator_file: Some(locator.clone()),
+            record: Some((
+                record.clone(),
+                json!({ "projectId": "demo", "projectDir": "/projects/demo" }),
+            )),
             pid: 42,
             exporter: exports,
             triggers: triggers.clone(),
         })
         .expect("Hub");
         assert!(locator.is_file());
+        let written: JsonValue =
+            serde_json::from_slice(&std::fs::read(&record).expect("record")).expect("record JSON");
+        assert_eq!(written["pid"], 42);
+        assert_eq!(written["origins"], json!(["http://127.0.0.1:21005"]));
+        assert_eq!(written["projectDir"], "/projects/demo");
         let root = runtime
             .application()
             .oneshot(Request::get("/").body(Body::empty()).expect("request"))
@@ -647,6 +715,27 @@ mod tests {
         }
         runtime.remove_locator().expect("remove locator");
         assert!(!locator.exists());
+        assert!(!record.exists());
+    }
+
+    #[test]
+    fn a_locator_another_suite_wrote_meanwhile_stays_and_the_stop_succeeds() {
+        let locator = temporary("taken").join("hub-demo.json");
+        let (exports, _commands) = mpsc::channel(1);
+        let mut runtime = HubRuntime::start(HubConfig {
+            background: None,
+            directory: directory(),
+            locator_file: Some(locator.clone()),
+            record: None,
+            pid: 42,
+            exporter: exports,
+            triggers: TriggerRegistry::default(),
+        })
+        .expect("Hub");
+        let other = r#"{"origins":["http://127.0.0.1:21105"],"pid":43,"version":"15.22.0"}"#;
+        std::fs::write(&locator, other).expect("another suite's locator");
+        runtime.remove_locator().expect("the stop goes on");
+        assert_eq!(std::fs::read_to_string(&locator).expect("kept"), other);
     }
 
     #[tokio::test]
@@ -655,7 +744,8 @@ mod tests {
         let runtime = HubRuntime::start(HubConfig {
             background: None,
             directory: directory(),
-            locator_file: temporary("token").join("hub-demo.json"),
+            locator_file: Some(temporary("token").join("hub-demo.json")),
+            record: None,
             pid: 42,
             exporter: exports,
             triggers: TriggerRegistry::default(),

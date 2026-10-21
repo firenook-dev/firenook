@@ -944,21 +944,24 @@ fn run_suite_runtime_inner(arguments: &SuiteArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // The lines of the outcome never panic: the launcher may be gone, and
+    // the exit code still says how the stop went.
+    let say = firenook_suite_runtime::terminal::err;
     match runtime.block_on(run_suite(config)) {
         Ok(outcome) if firenook_suite_runtime::terminal::enabled() => {
             match serde_json::to_value(&outcome) {
                 Ok(outcome) => firenook_suite_runtime::terminal::stopped(&outcome),
-                Err(error) => eprintln!("suite outcome failed to encode: {error}"),
+                Err(error) => say(&format!("suite outcome failed to encode: {error}")),
             }
             ExitCode::SUCCESS
         }
         Ok(outcome) => match serde_json::to_string(&outcome) {
             Ok(outcome) => {
-                eprintln!("firenook suite stopped cleanly: {outcome}");
+                say(&format!("firenook suite stopped cleanly: {outcome}"));
                 ExitCode::SUCCESS
             }
             Err(error) => {
-                eprintln!("suite outcome failed to encode: {error}");
+                say(&format!("suite outcome failed to encode: {error}"));
                 ExitCode::FAILURE
             }
         },
@@ -966,7 +969,7 @@ fn run_suite_runtime_inner(arguments: &SuiteArgs) -> ExitCode {
             if firenook_suite_runtime::terminal::enabled() {
                 firenook_suite_runtime::terminal::failed(&error.to_string());
             } else {
-                eprintln!("suite failed: {error}");
+                say(&format!("suite failed: {error}"));
             }
             ExitCode::FAILURE
         }

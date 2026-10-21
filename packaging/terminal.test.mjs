@@ -80,6 +80,11 @@ test('the banner knows how the data starts before the engine says', () => {
   writeFileSync(join(state, 'firestore/firenook.redb'), '');
   const args = ['suite', '--state-dir', state, '--resume-state', '--import', join(dir, 'seed')];
   assert.equal(expectedOpening(args).kind, 'import', 'no receipt yet: the seed is imported');
+  // A seed with no export in it is skipped, as the official CLI skips it.
+  mkdirSync(join(dir, 'seed'));
+  assert.equal(expectedOpening(args).kind, 'fresh', 'nothing to import: a fresh start');
+  writeFileSync(join(dir, 'seed', 'firebase-export-metadata.json'), '{}');
+  assert.equal(expectedOpening(args).kind, 'import');
   writeFileSync(join(state, 'native-state.json'), JSON.stringify({complete: true}));
   const resumed = expectedOpening(args);
   assert.equal(resumed.kind, 'resume');
@@ -432,4 +437,41 @@ test('a stop before the emulators are ready closes the data cleanly and says so'
   const shown = text();
   for (const expected of ['closing the data cleanly first', 'stopped', 'the data in /tmp/firenook-terminal-state is as it was', 'before it was ready']) shows(shown, expected);
   assert.ok(!flat(shown).includes('exported to'), 'nothing is exported before the emulators served anything');
+});
+
+test('an engine killed while it runs never says nothing was changed', async () => {
+  // Saved data, picked up and written to: a kill leaves what was written,
+  // and the next start checks the file.
+  const kept = async (args, ending) => {
+    const {out, text} = screen(150);
+    const {spawner} = engine(async ({send}) => {
+      send({type: 'opening', kind: args.includes('--resume-state') ? 'resume' : 'fresh'});
+      send({type: 'step', id: 'firestore', state: 'done', ms: 12, figures: [[3, 'documents']]});
+      send({type: 'ready', ms: 20, console: 'http://127.0.0.1:4000/console', ports: {firestore: 8080}, functions: 0, warnings: []});
+      await tick(40);
+      if (ending.failed) send({type: 'failed', kind: 'other', message: ending.failed});
+      return ending.code ?? {signal: ending.signal};
+    });
+    assert.equal(await runInteractive(launch(args), {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input: keyboard(), env, platform: 'darwin', spawner}), 1);
+    return text();
+  };
+  let shown = await kept(['--resume-state'], {signal: 'SIGKILL'});
+  for (const expected of ['Firenook stopped unexpectedly', 'signal SIGKILL', 'the next start checks /tmp/firenook-terminal-state first, and repairs it if it needs to']) shows(shown, expected);
+  assert.ok(!flat(shown).includes('nothing was changed'), 'a killed engine may have been written to');
+  // A service that failed under a running suite: its data is kept.
+  shown = await kept(['--resume-state'], {failed: 'the firestore listener failed: connection reset', code: 1});
+  for (const expected of ['Firenook stopped', 'everything is kept in /tmp/firenook-terminal-state']) shows(shown, expected);
+  assert.ok(!flat(shown).includes('nothing was changed'));
+  // A run without --state-dir keeps its data in its own run directory.
+  const run = launch();
+  run.args[run.args.indexOf('--state-dir') + 1] = '/tmp/project/.firenook/runs/session-AbC123/state';
+  const {out, text} = screen(150);
+  const {spawner} = engine(async ({send}) => {
+    send({type: 'ready', ms: 20, console: null, ports: {firestore: 8080}, functions: 0, warnings: []});
+    await tick(40);
+    return {signal: 'SIGKILL'};
+  });
+  await runInteractive(run, {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input: keyboard(), env, platform: 'darwin', spawner, cwd: '/tmp/project'});
+  shows(text(), "this run's data stays in .firenook/runs/session-AbC123");
+  assert.ok(!flat(text()).includes('nothing of yours was changed'));
 });

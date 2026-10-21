@@ -3,7 +3,7 @@
 // `init-screen.mjs` asks first; the files are the same either way.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { DEFAULT_PORTS, inspectProject, readJson, validProjectId } from './options.mjs';
+import { DEFAULT_PORTS, findConfig, inspectProject, readJson, validProjectId } from './options.mjs';
 import { PROJECT_AGENTS, applyAgents, planAgents } from './agents.mjs';
 import { enclosingPackage, nextSteps, setUpSteps } from './setup.mjs';
 import { manifest } from './binary.mjs';
@@ -290,7 +290,7 @@ function referencedFiles(data, directory) {
 // are edited as text: what is there stays as it was written, and each
 // addition takes the layout of the object it joins.
 export function adopt(options, cwd = process.cwd(), log = console, {env = process.env} = {}) {
-  const config = resolve(cwd, options.config || 'firebase.json');
+  const config = findConfig(options, cwd) ?? resolve(cwd, 'firebase.json');
   const directory = dirname(config);
   if (!existsSync(config)) throw new Error(`${config} does not exist; run firenook init without --adopt to scaffold a project`);
   const inspection = inspectProject(options, cwd);

@@ -5,14 +5,19 @@ export function envValue(env, name) {
   return env[Object.keys(env).find(key => key.toLowerCase() === name.toLowerCase())];
 }
 
+// The engine's environment. FIRENOOK_CONTROL_STDIN: its stdin is a pipe
+// only this launcher holds. On Windows the stop is asked on it; everywhere,
+// its end means the launcher is gone (killed, or crashed), and the engine
+// stops as a stop asked for would, saving the data, instead of running on
+// with the ports and the data for nobody. Spawn it with stdin 'pipe'.
 export function nativeEnvironment(env = process.env, platform = process.platform) {
   const copy = {...env};
   if (platform === 'win32') {
     // Set before native allocator initialization. Respect deliberate overrides.
     if (envValue(copy,'MIMALLOC_PURGE_DELAY') === undefined) copy.MIMALLOC_PURGE_DELAY = '100';
     if (envValue(copy,'MIMALLOC_PURGE_DECOMMITS') === undefined) copy.MIMALLOC_PURGE_DECOMMITS = '1';
-    copy.FIRENOOK_CONTROL_STDIN = '1';
   }
+  copy.FIRENOOK_CONTROL_STDIN = '1';
   return copy;
 }
 

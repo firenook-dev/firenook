@@ -130,9 +130,21 @@ argument `use` lists the aliases and the active project (`--json` prints them
 as JSON). Only `storage` targets exist for Firenook (`database`/`hosting` are
 refused).
 
-`emulators:export` finds the running suite through the same locator file the
-official CLI writes (`<tmpdir>/hub-<projectId>.json`, then the configured hub
-port), refuses the project directory or an ancestor, refuses a foreign
+Commands that talk to a running suite (`emulators:export`, `firestore:delete`,
+`functions:invoke`, `mcp`) find its hub as the official CLI does, through the
+locator file it writes (`<tmpdir>/hub-<projectId>.json`, then the configured
+hub port), with two differences. Run in a project's folder (or a folder
+inside it) they reach the suite started from that folder: the locator names
+one suite per project id, the first one started, so each Firenook suite also
+keeps a record of its own with its folder
+(`<tmpdir>/firenook-hubs/hub-<projectId>-<pid>.json`). And `--hub-port`
+reaches the hub on that port, and no other. A second suite for a project id
+warns that several are running, as the official CLI does, and leaves the
+locator to the first one; each still stops cleanly. With only `--project` and
+two suites for that id running, a command asks for `--hub-port` instead of
+picking one.
+
+`emulators:export` refuses the project directory or an ancestor, refuses a foreign
 non-empty directory without `--force` (an earlier export is replaced), and
 asks the hub to export the running exportable services. `firestore:delete`
 speaks to the running Firestore emulator: a document path deletes that
