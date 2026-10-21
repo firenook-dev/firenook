@@ -29,6 +29,7 @@ pub mod env_files;
 pub mod log;
 pub mod manifest;
 pub mod monitor;
+pub mod node;
 pub mod registry;
 mod server;
 pub mod watcher;
@@ -284,6 +285,9 @@ struct Backend {
     self_writes: std::sync::Mutex<BTreeMap<String, Option<[u8; 32]>>>,
     /// Requests on their way to the worker at once ([`WORKER_IN_FLIGHT`]).
     in_flight: Arc<tokio::sync::Semaphore>,
+    /// The Node warning the last load logged, so a reload that changes
+    /// nothing does not repeat it ([`RuntimeState::check_node`]).
+    node_warning: std::sync::Mutex<Option<String>>,
 }
 
 /// The most requests the runtime sends one worker at the same time; more
@@ -367,6 +371,9 @@ struct RuntimeState {
     monitor: Monitor,
     /// Cancelled when the runtime shuts down; ends its background tasks.
     stopping: CancellationToken,
+    /// The version of the Node the workers run on, asked once
+    /// ([`RuntimeState::node_version`]).
+    node_version: tokio::sync::OnceCell<Option<node::NodeVersion>>,
 }
 
 /// Readiness receipt printed by the suite (compatible with the previous
@@ -477,6 +484,7 @@ impl FunctionsRuntime {
                 edit: tokio::sync::Mutex::new(()),
                 self_writes: std::sync::Mutex::new(BTreeMap::new()),
                 in_flight: Arc::new(tokio::sync::Semaphore::new(WORKER_IN_FLIGHT)),
+                node_warning: std::sync::Mutex::new(None),
             }));
             order.push((backends.len() - 1, true));
         }
@@ -517,6 +525,7 @@ impl FunctionsRuntime {
                 edit: tokio::sync::Mutex::new(()),
                 self_writes: std::sync::Mutex::new(BTreeMap::new()),
                 in_flight: Arc::new(tokio::sync::Semaphore::new(WORKER_IN_FLIGHT)),
+                node_warning: std::sync::Mutex::new(None),
             }));
             order.push((backends.len() - 1, false));
         }
@@ -542,7 +551,16 @@ impl FunctionsRuntime {
             debug_mode,
             monitor,
             stopping: CancellationToken::new(),
+            node_version: tokio::sync::OnceCell::new(),
         });
+        // The Node's version is asked while the codebases load, so the
+        // check after each load does not wait for it.
+        if state.backends.iter().any(|backend| !backend.is_extension()) {
+            let state = Arc::clone(&state);
+            tokio::spawn(async move {
+                state.node_version().await;
+            });
+        }
         for backend in &state.backends {
             state
                 .monitor
@@ -997,6 +1015,9 @@ impl RuntimeState {
         self.monitor.codebase_loading(&backend.id);
         let began = Instant::now();
         let loaded = self.discover(backend).await;
+        if !backend.is_extension() {
+            self.check_node(backend).await;
+        }
         let definitions = loaded.definitions.clone();
         let previous = {
             let mut current = backend.loaded.write().await;
@@ -1162,6 +1183,46 @@ impl RuntimeState {
             }
             pending.store(false, Ordering::SeqCst);
         });
+    }
+
+    /// The version of the Node the workers run on (`node --version`, once).
+    async fn node_version(&self) -> Option<node::NodeVersion> {
+        *self
+            .node_version
+            .get_or_init(|| node::probe(&self.config.node))
+            .await
+    }
+
+    /// Warns, as the official emulator does, when the functions of a user
+    /// codebase run on a Node it does not ask for (firebase.json's
+    /// `runtime`, else package.json's `engines.node`). Said on the load that
+    /// finds the difference, and again only when the warning changes.
+    async fn check_node(&self, backend: &Backend) {
+        let directory = backend.directory();
+        let runtime = self
+            .config
+            .codebases
+            .iter()
+            .find(|codebase| codebase.id == backend.id)
+            .and_then(|codebase| codebase.runtime.as_deref());
+        let warning = match node::NodeRequest::of(runtime, &directory) {
+            Some(request) => self
+                .node_version()
+                .await
+                .and_then(|version| request.mismatch(version, &self.relative(&directory))),
+            None => None,
+        };
+        let mut said = backend
+            .node_warning
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(text) = warning.as_ref().filter(|text| said.as_ref() != Some(*text)) {
+            self.log.record(
+                LogEvent::new("WARN", &backend.label(), text.clone())
+                    .with_codebase(backend.id.clone()),
+            );
+        }
+        *said = warning;
     }
 
     async fn discover(&self, backend: &Backend) -> Loaded {
