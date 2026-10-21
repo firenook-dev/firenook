@@ -14,7 +14,8 @@ platform (`@firenook/cli-<platform>`) that npm or Bun selects for you. Install
 version with its engine revision, platform checks and publication receipt.
 Pin an exact version (`--save-exact`) when you need a reproducible install;
 Firenook never upgrades itself, and its start-up screen tells you when a newer
-release is out on your channel.
+release is out on your channel (on a preview, also a later release on
+`latest`).
 
 ## What you installed
 

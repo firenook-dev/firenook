@@ -125,6 +125,15 @@ test('the update check follows the channel, compares versions and names the pack
   assert.equal(pendingUpdate('0.2.0-next.3', project, {env: {...env, NO_UPDATE_NOTIFIER: '1'}}), undefined);
   assert.equal(await refreshUpdates({env: {...env, CI: 'true'}, fetcher, now: 10 * 24 * 3600_000}), undefined);
   assert.equal(asked, 2);
+  // A stable release on latest reaches a preview install even while next
+  // still names the last preview; a stable install follows latest alone.
+  writeFileSync(cacheFile(env), JSON.stringify({checkedAt: 0, tags: {latest: '0.2.0', next: '0.2.0-next.8'}}));
+  assert.deepEqual(pendingUpdate('0.2.0-next.8', project, {env}), {version: '0.2.0', tag: 'latest', command: 'bun add -d firenook@latest'});
+  assert.deepEqual(pendingUpdate('0.2.0-next.3', project, {env}), {version: '0.2.0', tag: 'latest', command: 'bun add -d firenook@latest'});
+  assert.equal(pendingUpdate('0.2.0', project, {env}), undefined);
+  writeFileSync(cacheFile(env), JSON.stringify({checkedAt: 0, tags: {latest: '0.2.0', next: '0.3.0-next.1'}}));
+  assert.equal(pendingUpdate('0.2.0', project, {env}), undefined, 'a preview is never offered to a stable install');
+  assert.deepEqual(pendingUpdate('0.2.0-next.8', project, {env}), {version: '0.3.0-next.1', tag: 'next', command: 'bun add -d firenook@next'});
 });
 
 // ── The session against a scripted engine ──────────────────────────────
