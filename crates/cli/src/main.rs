@@ -1168,9 +1168,19 @@ fn resolve_storage_rules(
                 .map_or(&[][..], Vec::as_slice),
         };
         if named.is_empty() {
+            // As officially, a demo project then ignores every target, those
+            // before this one included, for the default open rules; a real
+            // project cannot start.
+            if project.starts_with("demo-") {
+                return Ok((
+                    StorageRulesConfig::OpenDefaultIgnoringTargets,
+                    format!("{project}.appspot.com"),
+                ));
+            }
+            // The official `requireTarget` error, naming this CLI's command.
             return Err(format!(
-                "storage target {} has no bucket for {project}; pass --storage-bucket {}=<bucket>",
-                entry.target, entry.target
+                "Deploy target {target} not configured for project {project}. Configure with:\n\n  firenook target:apply storage {target} <resources...>\n\nor pass --storage-bucket {target}=<bucket>.",
+                target = entry.target
             ));
         }
         if entry.target == "default" && default_bucket.is_none() {
@@ -2724,6 +2734,61 @@ mod tests {
                 bucket("demo-media-local", "media.rules"),
                 bucket("demo-media.appspot.com", "storage.rules"),
             ])
+        );
+    }
+
+    /// A demo project whose Storage target `.firebaserc` maps to no bucket
+    /// starts on the official emulator: every target is ignored and the
+    /// default open rules govern every bucket (`getStorageRulesConfig`
+    /// returns them at the first unmapped target, whatever came before).
+    /// A real project refuses to start, officially too.
+    #[test]
+    fn a_demo_project_ignores_storage_targets_without_buckets() {
+        let config: FirebaseProjectConfig = serde_json::from_str(
+            r#"{ "storage": [
+                { "target": "media", "rules": "media.rules" },
+                { "target": "other", "rules": "other.rules" }
+            ] }"#,
+        )
+        .expect("targets storage config");
+        let resolve = |rc: &str, project: &str, overrides: &BTreeMap<String, String>| {
+            let firebase_rc: FirebaseRc = serde_json::from_str(rc).expect(".firebaserc parses");
+            resolve_storage_rules(
+                std::path::Path::new("/project"),
+                config.storage.as_ref(),
+                &firebase_rc,
+                project,
+                overrides,
+                true,
+            )
+        };
+        let ignored = Ok((
+            StorageRulesConfig::OpenDefaultIgnoringTargets,
+            "demo-media.appspot.com".to_owned(),
+        ));
+        let none = BTreeMap::new();
+        // No `.firebaserc` targets at all; one target mapped and the other
+        // not, in either order.
+        assert_eq!(resolve("{}", "demo-media", &none), ignored);
+        for mapped in ["media", "other"] {
+            let rc = format!(
+                r#"{{ "targets": {{ "demo-media": {{ "storage": {{ "{mapped}": ["demo-media-images"] }} }} }} }}"#
+            );
+            assert_eq!(resolve(&rc, "demo-media", &none), ignored, "{mapped}");
+        }
+        // Every target has a bucket, from `.firebaserc` or `--storage-bucket`.
+        let both = BTreeMap::from([
+            ("media".to_owned(), "demo-media-images".to_owned()),
+            ("other".to_owned(), "demo-media-other".to_owned()),
+        ]);
+        assert!(matches!(
+            resolve("{}", "demo-media", &both),
+            Ok((StorageRulesConfig::PerBucket(ref buckets), _)) if buckets.len() == 2
+        ));
+        let refused = resolve("{}", "real-media-project", &none).expect_err("a real project");
+        assert!(
+            refused.starts_with("Deploy target media not configured for project real-media-project. Configure with:\n\n  firenook target:apply storage media <resources...>"),
+            "{refused}"
         );
     }
 

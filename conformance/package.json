@@ -48,6 +48,8 @@
     "capture:rules:identity": "node --import tsx src/rules/capture-request-identity.ts",
     "test:rules:identity-replay": "node --import tsx --test test/request-identity-replay.test.ts",
     "test:rules:unit-testing": "node --import tsx src/rules/run-rules-unit-testing.ts",
+    "capture:storage:demo-targets": "node --import tsx src/storage-rules/capture-demo-targets.ts",
+    "test:storage:demo-targets-replay": "node --import tsx --test test/storage-demo-targets-replay.test.ts",
     "capture:suite:firestore-triggers": "node --import tsx src/suite/capture-firestore-triggers.ts",
     "capture:suite:auth": "node --import tsx src/suite/capture-auth.ts",
     "capture:suite:storage": "node --import tsx src/suite/capture-storage.ts",

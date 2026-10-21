@@ -26,7 +26,11 @@ How Firenook reads `firebase.json`, `.firebaserc` and the command line, and what
   entries (with `.firebaserc` targets or `--storage-bucket target=bucket`), or
   no section at all (open default rules for the project bucket). A target's
   rules govern every bucket `.firebaserc` maps it to, as officially; a bucket
-  no rules govern refuses every client request.
+  no rules govern refuses every client request. A demo project with a target
+  `.firebaserc` maps to no bucket starts with the default open rules for every
+  bucket and every target ignored, as officially (`Detected demo project ID
+  "demo-…", using a default (open) rules configuration. Storage targets in
+  firebase.json will be ignored.`); a real project then refuses to start.
 - **Firestore** accepts the object form or an array of `{database, rules,
   indexes}` entries (one entry may omit `database` for `(default)`); the
   engine serves every listed database. Index files are not enforced, as
