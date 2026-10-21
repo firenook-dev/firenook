@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 // The five data services Firenook emulates.
@@ -92,6 +92,7 @@ export function connectHost(host) {
 }
 
 export const readJson = file => JSON.parse(readFileSync(file, 'utf8'));
+const isDirectory = path => { try { return statSync(path).isDirectory(); } catch { return false; } };
 // Resolve existing parent symlinks even for a destination that does not exist.
 export function canonical(path) {
   path = resolve(path);
@@ -209,7 +210,7 @@ export function inspectProject(options, cwd = process.cwd()) {
   }
   if (new Set(Object.values(ports)).size !== Object.keys(ports).length) fail('port', 'Emulator ports must be distinct');
 
-  const imported = options.import ? canonical(resolve(cwd, options.import)) : undefined;
+  let imported = options.import ? canonical(resolve(cwd, options.import)) : undefined;
   let exported = options['export-on-exit'];
   if (exported === true) exported = imported;
   if (options['export-on-exit'] && !exported) fail('export', '--export-on-exit requires --import or an explicit destination');
@@ -217,6 +218,12 @@ export function inspectProject(options, cwd = process.cwd()) {
     exported = canonical(resolve(cwd, exported));
     if (contains(exported, canonical(cwd)) || contains(exported, canonical(directory))) fail('export', 'Export destination must not be the project directory or an ancestor');
   }
+  // As the official CLI: an --import directory that does not exist yet, and
+  // that the stop exports to, is no import. The first start is empty, and
+  // its stop creates the directory for the next one. (One that does not
+  // exist otherwise is refused by the engine; one with no export in it is
+  // skipped there, with a warning.)
+  if (imported && exported === imported && !isDirectory(imported)) imported = undefined;
   // --keep-data is --resume-state with the project's own state directory
   // (unless --state-dir names another): data kept between runs, with or
   // without a seed.

@@ -79,6 +79,11 @@ test('the banner knows how the data starts before the engine says', () => {
   writeFileSync(join(state, 'firestore/firenook.redb'), '');
   const args = ['suite', '--state-dir', state, '--resume-state', '--import', join(dir, 'seed')];
   assert.equal(expectedOpening(args).kind, 'import', 'no receipt yet: the seed is imported');
+  // A seed with no export in it is skipped, as the official CLI skips it.
+  mkdirSync(join(dir, 'seed'));
+  assert.equal(expectedOpening(args).kind, 'fresh', 'nothing to import: a fresh start');
+  writeFileSync(join(dir, 'seed', 'firebase-export-metadata.json'), '{}');
+  assert.equal(expectedOpening(args).kind, 'import');
   writeFileSync(join(state, 'native-state.json'), JSON.stringify({complete: true}));
   const resumed = expectedOpening(args);
   assert.equal(resumed.kind, 'resume');

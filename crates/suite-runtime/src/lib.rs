@@ -607,6 +607,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
     let functions_requested = config.services.functions;
     let config = without_absent_functions(config)?;
     validate_config(&config)?;
+    let config = without_unimportable_seed(config)?;
     // From here a stop is a request: the start-up work that can end early
     // does, and the data is closed as it was opened.
     control::listen_for_shutdown()?;
@@ -1328,7 +1329,7 @@ fn prepare_firestore(
     if !config.services.firestore {
         return Ok(None);
     }
-    let query_policy = query_policy(config)?;
+    let query_policy = query_policy()?;
     let firestore_rules = firestore_rules(config)?;
     let request_history = firestore_rules.request_history();
     // The console's editor replaces a database's ruleset in the same
@@ -1382,7 +1383,7 @@ fn prepare_firestore(
             store,
             &config.project_id,
             DatabaseEdition::Standard,
-            index_catalogs(config)?,
+            index_catalogs(config),
         ),
         rules: RulesEditor::new(
             &rules_for_console,
@@ -1663,6 +1664,27 @@ fn without_absent_functions(mut config: SuiteConfig) -> Result<SuiteConfig, Suit
     Ok(config)
 }
 
+/// An `--import` directory with nothing in it to import is no import: as
+/// the official CLI does, the start warns and goes on without one (and an
+/// `--export-on-exit` to it still writes it at the stop). A directory that
+/// does not exist is refused, as officially.
+fn without_unimportable_seed(mut config: SuiteConfig) -> Result<SuiteConfig, SuiteRuntimeError> {
+    let Some(root) = &config.import else {
+        return Ok(config);
+    };
+    if let ImportSource::Nothing(reason) = find_export_metadata(root)? {
+        let message = format!("{reason} (--import {})", root.display());
+        terminal::print(
+            "WARN",
+            "emulators",
+            &message,
+            &format!("firenook: {message}"),
+        );
+        config.import = None;
+    }
+    Ok(config)
+}
+
 fn validate_config(config: &SuiteConfig) -> Result<(), SuiteRuntimeError> {
     if config.project_id.is_empty()
         || config
@@ -1884,35 +1906,44 @@ impl OpeningWatch {
 /// the composite index their query needs is one the project already declares.
 /// A database with no index file gets no entry, which is the same answer as
 /// an empty catalog: nothing is declared.
-fn index_catalogs(
-    config: &SuiteConfig,
-) -> Result<BTreeMap<String, Arc<IndexCatalog>>, SuiteRuntimeError> {
+///
+/// The official emulator never reads an index file, so one that cannot be
+/// read or parsed is no reason to refuse a start: it is said once, and that
+/// database's queries are explained as if it declared no index.
+fn index_catalogs(config: &SuiteConfig) -> BTreeMap<String, Arc<IndexCatalog>> {
     let mut catalogs = BTreeMap::new();
     for database in &config.firestore_databases {
         let Some(path) = &database.indexes else {
             continue;
         };
-        let source = std::fs::read_to_string(path).map_err(|error| {
-            failure(format!(
-                "failed to read Firestore indexes for database \"{}\": {error}",
-                database.database_id
-            ))
-        })?;
-        let catalog = IndexCatalog::from_json(&source).map_err(|error| {
-            failure(format!(
-                "database \"{}\": invalid Firestore indexes: {error}",
-                database.database_id
-            ))
-        })?;
-        catalogs.insert(database.database_id.clone(), Arc::new(catalog));
+        let catalog = std::fs::read_to_string(path)
+            .map_err(|error| error.to_string())
+            .and_then(|source| IndexCatalog::from_json(&source).map_err(|error| error.to_string()));
+        match catalog {
+            Ok(catalog) => {
+                catalogs.insert(database.database_id.clone(), Arc::new(catalog));
+            }
+            Err(error) => {
+                let message = format!(
+                    "the Firestore indexes in {} were not read ({error}); the console explains the queries of database \"{}\" as if it declared none",
+                    path.display(),
+                    database.database_id
+                );
+                terminal::print(
+                    "WARN",
+                    "firestore",
+                    &message,
+                    &format!("firenook: {message}"),
+                );
+            }
+        }
     }
-    Ok(catalogs)
+    catalogs
 }
 
-/// Validates every configured index file; the suite enforces none of them,
-/// as the official local emulator does not.
-fn query_policy(config: &SuiteConfig) -> Result<QueryPolicy, SuiteRuntimeError> {
-    index_catalogs(config)?;
+/// The suite enforces no index file, as the official local emulator does
+/// not.
+fn query_policy() -> Result<QueryPolicy, SuiteRuntimeError> {
     suite_query_policy(None)
 }
 
@@ -2798,12 +2829,82 @@ struct ComponentMetadata {
     path: PathBuf,
 }
 
-fn read_export_metadata(root: &Path) -> Result<ExportMetadata, SuiteRuntimeError> {
+/// What an `--import` directory holds, found as the official CLI's
+/// `findExportMetadata` finds it.
+enum ImportSource {
+    /// A suite export (`firebase-export-metadata.json`), or a production
+    /// Firestore export (`*.overall_export_metadata`) imported as Firestore.
+    Export(ExportMetadata),
+    /// Nothing Firenook imports; the warning that says so.
+    Nothing(String),
+}
+
+const SKIPPED: &str = "Could not find import/export metadata file, skipping data import!";
+
+fn find_export_metadata(root: &Path) -> Result<ImportSource, SuiteRuntimeError> {
+    let kind = std::fs::metadata(root).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            failure(format!("Directory \"{}\" does not exist.", root.display()))
+        } else {
+            failure(format!("failed to read {}: {error}", root.display()))
+        }
+    })?;
+    if !kind.is_dir() {
+        return Ok(ImportSource::Nothing(SKIPPED.to_owned()));
+    }
     let path = root.join("firebase-export-metadata.json");
-    let bytes = std::fs::read(&path)
-        .map_err(|error| failure(format!("failed to read {}: {error}", path.display())))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| failure(format!("invalid suite export metadata: {error}")))
+    if path.is_file() {
+        let bytes = std::fs::read(&path)
+            .map_err(|error| failure(format!("failed to read {}: {error}", path.display())))?;
+        return serde_json::from_slice(&bytes)
+            .map(ImportSource::Export)
+            .map_err(|error| failure(format!("invalid suite export metadata: {error}")));
+    }
+    let mut names: Vec<String> = std::fs::read_dir(root)
+        .map_err(|error| failure(format!("failed to read {}: {error}", root.display())))?
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .collect();
+    names.sort();
+    if let Some(overall) = names
+        .iter()
+        .find(|name| name.ends_with(".overall_export_metadata"))
+    {
+        let message = format!(
+            "Detected non-emulator Firestore export at {}",
+            root.display()
+        );
+        terminal::print(
+            "INFO",
+            "firestore",
+            &message,
+            &format!("firenook: {message}"),
+        );
+        return Ok(ImportSource::Export(ExportMetadata {
+            firestore: Some(FirestoreMetadata {
+                metadata_file: PathBuf::from(overall),
+            }),
+            auth: None,
+            storage: None,
+        }));
+    }
+    // Case-sensitive, as the official CLI's `endsWith(".json")`.
+    if names
+        .iter()
+        .any(|name| Path::new(name).extension().is_some_and(|ext| ext == "json"))
+    {
+        return Ok(ImportSource::Nothing(
+            "Detected non-emulator Database export, which Firenook does not emulate, skipping data import!"
+                .to_owned(),
+        ));
+    }
+    Ok(ImportSource::Nothing(SKIPPED.to_owned()))
+}
+
+fn read_export_metadata(root: &Path) -> Result<ExportMetadata, SuiteRuntimeError> {
+    match find_export_metadata(root)? {
+        ImportSource::Export(metadata) => Ok(metadata),
+        ImportSource::Nothing(reason) => Err(failure(format!("{reason} ({})", root.display()))),
+    }
 }
 
 fn seed_store(
@@ -3290,6 +3391,59 @@ mod tests {
             PathBuf::from("firestore_export/firestore_export.overall_export_metadata")
         );
 
+        std::fs::remove_dir_all(&root).expect("test directory should clean up");
+    }
+
+    #[test]
+    fn an_import_directory_is_read_as_the_official_cli_reads_it() {
+        let unique = format!(
+            "firenook-suite-import-source-{}-{}",
+            std::process::id(),
+            OffsetDateTime::now_utc().unix_timestamp_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&root).expect("root should exist");
+        let skipped = |path: &Path| match find_export_metadata(path).expect("no refusal") {
+            ImportSource::Nothing(reason) => reason,
+            ImportSource::Export(_) => panic!("{} imported", path.display()),
+        };
+        // A directory that is not there is refused.
+        let missing = root.join("missing");
+        let refused = find_export_metadata(&missing).err().expect("refused");
+        assert_eq!(
+            refused.to_string(),
+            format!("Directory \"{}\" does not exist.", missing.display())
+        );
+        // An empty directory, or a file, has nothing to import.
+        let empty = root.join("empty");
+        std::fs::create_dir_all(&empty).expect("empty");
+        assert_eq!(skipped(&empty), SKIPPED);
+        let file = root.join("seed.txt");
+        std::fs::write(&file, "x").expect("file");
+        assert_eq!(skipped(&file), SKIPPED);
+        // A Realtime Database export: Firenook emulates no database.
+        let database = root.join("database");
+        std::fs::create_dir_all(&database).expect("database");
+        std::fs::write(database.join("data.json"), "{}").expect("data");
+        assert!(skipped(&database).contains("Database export"));
+        // A production Firestore export is imported as Firestore.
+        let production = root.join("production");
+        std::fs::create_dir_all(&production).expect("production");
+        std::fs::write(production.join("data.json"), "{}").expect("data");
+        std::fs::write(
+            production.join("2026-10-01T00:00:00_1.overall_export_metadata"),
+            "",
+        )
+        .expect("metadata");
+        let ImportSource::Export(metadata) = find_export_metadata(&production).expect("found")
+        else {
+            panic!("the production export was skipped");
+        };
+        assert_eq!(
+            metadata.firestore.expect("firestore").metadata_file,
+            PathBuf::from("2026-10-01T00:00:00_1.overall_export_metadata")
+        );
+        assert!(metadata.auth.is_none() && metadata.storage.is_none());
         std::fs::remove_dir_all(&root).expect("test directory should clean up");
     }
 }

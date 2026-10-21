@@ -283,6 +283,16 @@ test('export default, parent/symlink safety and resume isolation', () => {
   assert.equal(canonical(join(dir,'alias','new')),canonical(join(dir,'new')));
   assert.throws(()=>loadProject({...options,'export-on-exit':'alias'},dir),/ancestor/);
   assert.throws(()=>loadProject({...options,import:'seed','state-dir':'seed/state'},dir),/separate/);
+  // As the official CLI: a seed directory not there yet, exported to at the
+  // stop, is no import; the stop creates it.
+  const first = loadProject({...options,import:'seed','export-on-exit':true},dir);
+  assert.equal(first.imported,undefined);
+  assert.equal(first.exported,canonical(join(dir,'seed')));
+  assert.equal(loadProject({...options,import:'seed','export-on-exit':'seed'},dir).imported,undefined);
+  // Without the export, or once it is there, it is the import.
+  assert.equal(loadProject({...options,import:'seed'},dir).imported,canonical(join(dir,'seed')));
+  mkdirSync(join(dir,'seed'));
+  assert.equal(loadProject({...options,import:'seed','export-on-exit':true},dir).imported,canonical(join(dir,'seed')));
   assert.throws(()=>loadProject({...options,import:'seed','state-dir':'work','resume-state':true,'export-on-exit':true},dir),/immutable seed/);
   assert.throws(()=>loadProject({...options,'resume-state':true},dir),/requires/);
   mkdirSync(join(dir,'existing'));
@@ -300,6 +310,7 @@ test('--keep-data keeps the data in .firenook/state, with or without a seed', ()
   assert.equal(loadProject({...options,'state-dir':'work','resume-state':true},dir).resume,true);
   assert.equal(loadProject({...options,'keep-data':true,'state-dir':'elsewhere'},dir).state,canonical(join(dir,'elsewhere')));
   assert.equal(loadProject({...options,'keep-data':true,import:'seed'},dir).imported,canonical(join(dir,'seed')));
+  mkdirSync(join(dir,'seed'));
   assert.throws(()=>loadProject({...options,'keep-data':true,import:'seed','export-on-exit':true},dir),/immutable seed/);
   assert.throws(()=>loadProject({...options,'resume-state':true},dir),/--resume-state requires --state-dir; --keep-data alone keeps the data in \.firenook\/state/);
   const launch = launchFor(dir,{...options,'keep-data':true});

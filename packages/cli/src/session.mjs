@@ -3,7 +3,7 @@
 // footer, and answers the keys. Only `emulators:start` in a terminal comes
 // here; everything else gets the plain line protocol (`supervise`).
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -108,6 +108,17 @@ export function loadError(error) {
   return {message: named === -1 ? first : lines[named].trim(), where: at === -1 ? undefined : lines[at].trim().replace(/^\.\//, ''), frame: frame.slice(0, 8)};
 }
 
+// Whether the engine will skip an --import, with a warning, as the
+// official CLI does: a file, or a directory with no export in it (neither
+// suite metadata nor a production Firestore export). One that is not there
+// at all the engine refuses.
+const skippedSeed = seed => {
+  try {
+    if (!statSync(seed).isDirectory()) return true;
+    return !readdirSync(seed).some(name => name === 'firebase-export-metadata.json' || name.endsWith('.overall_export_metadata'));
+  } catch { return false; }
+};
+
 // How the data starts, as the wrapper can tell before the engine says:
 // saved state with a complete receipt is picked up, a seed is imported,
 // otherwise it is a fresh start.
@@ -125,7 +136,7 @@ export function expectedOpening(args) {
       }
     } catch { /* not saved state: an import or a fresh start */ }
   }
-  if (seed) return {kind: 'import', seed};
+  if (seed && !skippedSeed(seed)) return {kind: 'import', seed};
   return {kind: 'fresh'};
 }
 
