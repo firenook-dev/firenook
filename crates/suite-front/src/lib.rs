@@ -47,6 +47,12 @@ use tokio::sync::{mpsc, oneshot};
 pub const FIREBASE_TOOLS_COMPATIBILITY_VERSION: &str = "15.22.0";
 /// Maximum in-memory log records replayed to a newly connected UI.
 pub const LOG_REPLAY_CAPACITY: usize = 1_024;
+/// The hub's token endpoint: the `token_url` of the demo credentials
+/// `firenook emulators:exec` hands its command (and the console's server
+/// snippets name). It answers every refresh with the emulators' `owner`
+/// token, so an Admin SDK that asks for an access token gets one from this
+/// machine and never calls Google.
+pub const DEMO_TOKEN_PATH: &str = "/firenook/oauth2/token";
 
 /// One service advertised through the Emulator Hub and UI configuration.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -243,6 +249,7 @@ impl HubRuntime {
             .route("/", get(hub_root))
             .route("/emulators", get(emulators))
             .route("/_admin/export", post(export))
+            .route(DEMO_TOKEN_PATH, post(demo_token))
             .route(
                 "/functions/disableBackgroundTriggers",
                 put(disable_background),
@@ -333,6 +340,19 @@ async fn export(
         Ok(Err(error)) => suite_failure(&error),
         Err(_) => suite_failure("suite exporter stopped without a result"),
     }
+}
+
+/// The demo credentials' token, whatever the request: the
+/// `external_account_authorized_user` refresh the Python, Go and Java Admin
+/// SDKs send and the STS exchange of an `external_account`. The emulators
+/// take `owner` as an administrator's token and check no other.
+async fn demo_token() -> Json<JsonValue> {
+    Json(json!({
+        "access_token": "owner",
+        "expires_in": 3600,
+        "token_type": "Bearer",
+        "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+    }))
 }
 
 async fn disable_background(State(state): State<HubState>) -> Json<JsonValue> {
@@ -626,6 +646,49 @@ mod tests {
         }
         runtime.remove_locator().expect("remove locator");
         assert!(!locator.exists());
+    }
+
+    #[tokio::test]
+    async fn hub_answers_every_demo_credentials_refresh_with_the_owner_token() {
+        let (exports, _commands) = mpsc::channel(1);
+        let runtime = HubRuntime::start(HubConfig {
+            background: None,
+            directory: directory(),
+            locator_file: temporary("token").join("hub-demo.json"),
+            pid: 42,
+            exporter: exports,
+            triggers: TriggerRegistry::default(),
+        })
+        .expect("Hub");
+        // An external_account_authorized_user refresh and an STS token
+        // exchange, as the Admin SDKs send them: both get the same token.
+        for form in [
+            "grant_type=refresh_token&refresh_token=demo",
+            "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token=demo",
+        ] {
+            let response = runtime
+                .application()
+                .oneshot(
+                    Request::post(DEMO_TOKEN_PATH)
+                        .header(header::AUTHORIZATION, "Basic ZGVtbzpkZW1v")
+                        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                        .body(Body::from(form))
+                        .expect("request"),
+                )
+                .await
+                .expect("token");
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                body(response).await,
+                json!({
+                    "access_token": "owner",
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                    "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                })
+            );
+        }
+        assert_eq!(DEMO_TOKEN_PATH, "/firenook/oauth2/token");
     }
 
     #[test]

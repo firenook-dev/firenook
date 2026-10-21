@@ -1,0 +1,95 @@
+{
+  "source": "firebase-tools 15.34.0, firebase emulators:exec --only <only> --project demo-shop, with GOOGLE_APPLICATION_CREDENTIALS and FIREBASE_CONFIG unset; the command printed the hub /emulators listing (host and port of each entry) and every variable of its environment whose name has EMULATOR, GCLOUD, GOOGLE_CLOUD, FIREBASE_CONFIG, GOOGLE_APPLICATION or CLOUDSDK in it",
+  "runs": [
+    {
+      "only": "auth,functions",
+      "running": {
+        "hub": {
+          "host": "127.0.0.1",
+          "port": 35400
+        },
+        "logging": {
+          "host": "127.0.0.1",
+          "port": 35500
+        },
+        "auth": {
+          "host": "127.0.0.1",
+          "port": 35099
+        },
+        "functions": {
+          "host": "127.0.0.1",
+          "port": 35001
+        },
+        "eventarc": {
+          "host": "127.0.0.1",
+          "port": 35299
+        },
+        "tasks": {
+          "host": "127.0.0.1",
+          "port": 35499
+        }
+      },
+      "env": {
+        "CLOUD_EVENTARC_EMULATOR_HOST": "http://127.0.0.1:35299",
+        "CLOUD_TASKS_EMULATOR_HOST": "127.0.0.1:35499",
+        "FIREBASE_AUTH_EMULATOR_HOST": "127.0.0.1:35099",
+        "FIREBASE_CONFIG": "{\"projectId\":\"demo-shop\",\"storageBucket\":\"demo-shop.appspot.com\",\"databaseURL\":\"https://demo-shop.firebaseio.com\"}",
+        "FIREBASE_EMULATOR_HUB": "127.0.0.1:35400",
+        "GCLOUD_PROJECT": "demo-shop"
+      }
+    },
+    {
+      "only": "storage,firestore",
+      "running": {
+        "hub": {
+          "host": "127.0.0.1",
+          "port": 35400
+        },
+        "logging": {
+          "host": "127.0.0.1",
+          "port": 35500
+        },
+        "firestore": {
+          "host": "127.0.0.1",
+          "port": 35080
+        },
+        "storage": {
+          "host": "127.0.0.1",
+          "port": 35199
+        }
+      },
+      "env": {
+        "FIREBASE_CONFIG": "{\"projectId\":\"demo-shop\",\"storageBucket\":\"demo-shop.appspot.com\",\"databaseURL\":\"https://demo-shop.firebaseio.com\"}",
+        "FIREBASE_EMULATOR_HUB": "127.0.0.1:35400",
+        "FIREBASE_FIRESTORE_EMULATOR_ADDRESS": "127.0.0.1:35080",
+        "FIREBASE_STORAGE_EMULATOR_HOST": "127.0.0.1:35199",
+        "FIRESTORE_EMULATOR_HOST": "127.0.0.1:35080",
+        "GCLOUD_PROJECT": "demo-shop",
+        "STORAGE_EMULATOR_HOST": "http://127.0.0.1:35199"
+      }
+    },
+    {
+      "only": "pubsub",
+      "running": {
+        "hub": {
+          "host": "127.0.0.1",
+          "port": 35400
+        },
+        "logging": {
+          "host": "127.0.0.1",
+          "port": 35500
+        },
+        "pubsub": {
+          "host": "127.0.0.1",
+          "port": 35085
+        }
+      },
+      "env": {
+        "FIREBASE_CONFIG": "{\"projectId\":\"demo-shop\",\"storageBucket\":\"demo-shop.appspot.com\",\"databaseURL\":\"https://demo-shop.firebaseio.com\"}",
+        "FIREBASE_EMULATOR_HUB": "127.0.0.1:35400",
+        "GCLOUD_PROJECT": "demo-shop",
+        "PUBSUB_EMULATOR_HOST": "127.0.0.1:35085"
+      }
+    }
+  ]
+}

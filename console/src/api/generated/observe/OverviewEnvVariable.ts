@@ -7,8 +7,8 @@ import type { OverviewEnvSource } from "./OverviewEnvSource";
 export type OverviewEnvVariable = { name: string, value: string, 
 /**
  * The service it points at (`firestore`, `auth`, `storage`, `pubsub`,
- * `hub`, `tasks`, `eventarc`), or `project` for the project id and
- * credentials.
+ * `hub`, `tasks`, `eventarc`), or `project` for the project id, the
+ * Firebase configuration and the credentials.
  */
 service: string, 
 /**

@@ -5,6 +5,56 @@ import { binaryPath, manifest, release } from './binary.mjs';
 import { SERVICES, connectHost, launchContext, loadProject } from './options.mjs';
 import { nativeEnvironment, requestNativeStop } from './processes.mjs';
 import { buildPlan, errorPlace, startBuild } from './build.mjs';
+import { runningServices } from './hub.mjs';
+
+// The hub's token endpoint (the engine's DEMO_TOKEN_PATH): it answers every
+// refresh with the emulators' owner token.
+export const DEMO_TOKEN_PATH = '/firenook/oauth2/token';
+
+// The demo credentials emulators:exec hands its command, whose token comes
+// from the hub at `hub` (host:port). The Python, Go and Java Admin SDKs look
+// up default credentials when they start, and this keeps the developer's
+// own out of the tests. Every Admin SDK reads this kind's token_url, so one
+// that asks for an access token (Python's Storage client does) asks this
+// machine and never calls Google; an authorized_user file would send the
+// Node.js SDK to oauth2.googleapis.com whatever it held. The Node.js SDK
+// takes no token from this kind, so its Eventarc publish (the one Node call
+// that wants a token here) fails without calling anyone; the Java SDK
+// refuses the kind that would serve Node (an external_account) over HTTP.
+export function demoCredentials(hub) {
+  return {type:'external_account_authorized_user', client_id:'demo', client_secret:'demo', refresh_token:'demo', token_url:`http://${hub}${DEMO_TOKEN_PATH}`};
+}
+
+// The variables of each emulator the hub lists as running, as the official
+// setEnvVarsForEmulators writes them; a service that is not running gets
+// none, so no variable points at a port nothing of this suite listens on.
+function emulatorVariables(listing) {
+  const env = {};
+  for (const [name, service] of Object.entries(listing ?? {})) {
+    if (!service?.host || !service?.port) continue;
+    const address = `${connectHost(String(service.host))}:${service.port}`;
+    if (name === 'firestore') Object.assign(env, {FIRESTORE_EMULATOR_HOST:address, FIREBASE_FIRESTORE_EMULATOR_ADDRESS:address});
+    else if (name === 'auth') env.FIREBASE_AUTH_EMULATOR_HOST = address;
+    else if (name === 'storage') Object.assign(env, {FIREBASE_STORAGE_EMULATOR_HOST:address, STORAGE_EMULATOR_HOST:`http://${address}`});
+    else if (name === 'hub') env.FIREBASE_EMULATOR_HUB = address;
+    else if (name === 'pubsub') env.PUBSUB_EMULATOR_HOST = address;
+    else if (name === 'eventarc') env.CLOUD_EVENTARC_EMULATOR_HOST = `http://${address}`;
+    else if (name === 'tasks') env.CLOUD_TASKS_EMULATOR_HOST = address;
+  }
+  return env;
+}
+
+// The environment of the command emulators:exec runs, as the official
+// runScript builds it from `env` (which has GCLOUD_PROJECT): FIREBASE_CONFIG
+// unless `env` has one, then the variables of the emulators in the hub's
+// `listing`. Firenook's additions (GOOGLE_CLOUD_PROJECT, the demo
+// credentials and a gcloud directory of the run's own) are in `env`.
+export function execEnvironment(env, listing) {
+  const project = env.GCLOUD_PROJECT;
+  const config = project && !env.FIREBASE_CONFIG
+    ? {FIREBASE_CONFIG:JSON.stringify({projectId:project, storageBucket:`${project}.appspot.com`, databaseURL:`https://${project}.firebaseio.com`})} : {};
+  return {...env, ...config, ...emulatorVariables(listing)};
+}
 
 // The Functions workers run on this Node and are tested on Node 24. The check
 // is here and not in package.json's engines: npm refuses no release for its
@@ -89,8 +139,9 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {
   const state = p.state || join(run, 'state');
   const rc = existsSync(p.rc) ? p.rc : join(run, '.firebaserc');
   if (!existsSync(rc)) writeFileSync(rc, '{}\n', {flag:'wx', mode:0o600});
+  const host = connectHost(p.host);
   const credentials = join(run, 'demo-adc.json');
-  writeFileSync(credentials, JSON.stringify({type:'authorized_user', client_id:'demo', client_secret:'demo', refresh_token:'demo'}), {flag:'wx', mode:0o600});
+  writeFileSync(credentials, JSON.stringify(demoCredentials(`${host}:${p.ports.hub}`)), {flag:'wx', mode:0o600});
   // The engine reads emulators.ui.enabled itself, so --ui cannot re-enable a
   // console the configuration disables; it only keeps it on for exec.
   const ui = p.ui && (mode !== 'exec' || Boolean(options.ui) || p.uiExplicit);
@@ -122,17 +173,15 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {
   // service added to --only).
   const context = launchContext(p, {command:`firenook emulators:${mode === 'exec' ? 'exec' : 'start'}`, args:typed});
   args.push('--launch-context', JSON.stringify(context));
-  const host = connectHost(p.host);
   // The engine cannot know its own release: this wrapper's version is set by
   // the packaging checkout, while the binary is built from the pinned engine
   // commit. So tell it, and its `--version` and the console's engine badge
   // report what was installed instead of the placeholder crate version.
+  // The engine is told its ports by its arguments; exec's command gets the
+  // emulators' variables from the hub once they run (execEnvironment).
   const env = {...process.env, FIRENOOK_RELEASE_VERSION:manifest.version, FIRENOOK_ENGINE_REVISION:release.engineRevision,
     GOOGLE_CLOUD_PROJECT:p.project, GCLOUD_PROJECT:p.project,
-    GOOGLE_APPLICATION_CREDENTIALS:credentials, CLOUDSDK_CONFIG:join(run, 'gcloud'),
-    FIRESTORE_EMULATOR_HOST:`${host}:${p.ports.firestore}`, FIREBASE_AUTH_EMULATOR_HOST:`${host}:${p.ports.auth}`,
-    FIREBASE_STORAGE_EMULATOR_HOST:`${host}:${p.ports.storage}`, STORAGE_EMULATOR_HOST:`http://${host}:${p.ports.storage}`,
-    FIREBASE_EMULATOR_HUB:`${host}:${p.ports.hub}`, PUBSUB_EMULATOR_HOST:`${host}:${p.ports.pubsub}`};
+    GOOGLE_APPLICATION_CREDENTIALS:credentials, CLOUDSDK_CONFIG:join(run, 'gcloud')};
   // FIREBASE_TOKEN stays available to the native process for the Extensions
   // registry only; the runtime keeps it (and every credential) out of the
   // Functions workers' environment.
@@ -150,7 +199,7 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {
   const builds = options.build ? buildPlan(p, mode) : [];
   for (const entry of builds) say(entry.script ? `Build: ${entry.shown} runs its ${entry.script} script${entry.watch ? ', and Firenook loads what it writes on every save' : ' before the emulators start'}`
     : `note: ${entry.shown} has no build or build:watch script, so --build builds nothing there`);
-  return {binary:diagnostic.binary, args, env:nativeEnvironment(env), cwd:p.directory, run, ui, services:p.services, debugLog, builds};
+  return {binary:diagnostic.binary, args, env:nativeEnvironment(env), hub:`http://${host}:${p.ports.hub}`, cwd:p.directory, run, ui, services:p.services, debugLog, builds};
 }
 
 // --build without the terminal UI: each build's lines on stderr, marked
@@ -226,19 +275,34 @@ export async function supervise(launch, command) {
     if (!ready && /(?:^|\n)All emulators ready\r?\n/.test(tail)) {
       ready = true;
       clearTimeout(timeout);
-      if (command?.length && !requestedStop) {
-        testChild = typeof command === 'string'
-          ? spawn(command, {cwd:process.cwd(), env:launch.env, stdio:'inherit', shell:true, windowsHide:true})
-          : spawn(command[0], command.slice(1), {cwd:process.cwd(), env:launch.env, stdio:'inherit'});
-        testChild.on('error', error => { startupError = error; commandStatus = 1; stop('SIGTERM'); });
-        testChild.on('exit', (code, signal) => {
-          commandStatus = code ?? (signal === 'SIGINT' ? 130 : 1);
-          // A normal test completion initiates export-first native shutdown.
-          requestedStop = true;
-          requestNativeStop(child);
-        });
-      }
+      if (command?.length && !requestedStop) startCommand();
     }
+  }
+  // The command runs with the variables of what the hub lists as running,
+  // as the official runScript reads its registry; never with a guess.
+  async function startCommand() {
+    let env = launch.env;
+    if (launch.hub) {
+      const listing = await runningServices(launch.hub);
+      if (!listing) {
+        startupError = new Error(`the hub at ${launch.hub} did not list the running emulators, so the command did not run`);
+        commandStatus = 1;
+        stop('SIGTERM');
+        return;
+      }
+      env = execEnvironment(launch.env, listing);
+    }
+    if (requestedStop) return;
+    testChild = typeof command === 'string'
+      ? spawn(command, {cwd:process.cwd(), env, stdio:'inherit', shell:true, windowsHide:true})
+      : spawn(command[0], command.slice(1), {cwd:process.cwd(), env, stdio:'inherit'});
+    testChild.on('error', error => { startupError = error; commandStatus = 1; stop('SIGTERM'); });
+    testChild.on('exit', (code, signal) => {
+      commandStatus = code ?? (signal === 'SIGINT' ? 130 : 1);
+      // A normal test completion initiates export-first native shutdown.
+      requestedStop = true;
+      requestNativeStop(child);
+    });
   }
   child.stdout.on('data', chunk => output(chunk, process.stdout));
   child.stderr.on('data', chunk => output(chunk, process.stderr));
