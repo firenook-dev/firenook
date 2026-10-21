@@ -1565,3 +1565,19 @@ Swift, Kotlin and Java snippets marked as JavaScript. Built on 2026-10-21.
   first time a block in it is shown (0.8 to 7.7 KB gzipped each; the
   JavaScript and JSON grammars are the editor's), so no route's first load
   grows, and both bundle budgets hold.
+- [ ] **The console answers for any name under `localhost`.** Reached
+  through portless (`https://my-branch.emulator.my-app.localhost/console`),
+  it answered "This console does not answer for host …": the host guard
+  knew `localhost`, `127.0.0.1`, `::1`, the `--host` address and
+  `--allowed-hosts` only. A name under the reserved `localhost` domain is
+  this machine by definition (RFC 6761): browsers resolve it to loopback
+  themselves and no one can register one, so no page can rebind it, and it
+  is now answered like `localhost`. `.local` (mDNS, answered by devices on
+  the network) and custom domains still need `--allowed-hosts`.
+  The Connect dialog and the request composer count such a name as this
+  machine too, so their snippets keep the engine's address instead of the
+  proxy's name, which routes only the console. `docs/console.md` says how to
+  reach the console through portless: an alias to the UI port, since the
+  console does not read the `PORT` that `portless run` sets. Checked in a
+  browser through portless's HTTPS: every page, the live event stream and
+  Storage previews, 248 requests, none failed.

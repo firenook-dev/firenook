@@ -29,8 +29,18 @@ export const DEMO_CREDENTIALS =
 const DEMO_APP_ID = '1:000000000000:ios:0000000000000000'
 
 export function isLoopback(host: string): boolean {
-  const bare = host.replace(/^\[|\]$/g, '').toLowerCase()
-  return bare === 'localhost' || bare === '::1' || /^127(\.\d{1,3}){3}$/.test(bare)
+  const bare = host
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.$/, '')
+    .toLowerCase()
+  // A name under `localhost` (a local proxy's `my-app.localhost`) is this
+  // machine too: it routes the console only, so apps keep the engine's host.
+  return (
+    bare === 'localhost' ||
+    /^[^.]+(\.[^.]+)*\.localhost$/.test(bare) ||
+    bare === '::1' ||
+    /^127(\.\d{1,3}){3}$/.test(bare)
+  )
 }
 
 /** A host as it is written next to a port or inside a URL: IPv6 in brackets. */

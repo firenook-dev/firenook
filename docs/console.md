@@ -28,10 +28,13 @@ WebSocket and the Firestore Requests socket are unchanged for the tools that
 read them. The [parity checklist](../support/console-parity.md) maps every
 feature of the official UI to the console screen that covers it.
 
-The console answers only for `localhost`, `127.0.0.1`, `::1` and the
-`--host` address. Reached by another name — through a reverse proxy, a
-tunnel, a container's service name or a cloud host — it answers
-"This console does not answer for host …" until that name is allowed:
+The console answers only for `localhost`, `127.0.0.1`, `::1`, any name under
+`localhost` (`my-app.localhost`) and the `--host` address. A name under
+`localhost` is this machine by definition: browsers resolve it to loopback
+themselves, so no page can point it elsewhere. Reached by another name —
+through a reverse proxy, a tunnel, a container's service name or a cloud
+host — it answers "This console does not answer for host …" until that name
+is allowed:
 
 ```sh
 npx firenook emulators:start --project demo-my-app --allowed-hosts emulator.internal,dev.example.test
@@ -39,6 +42,24 @@ npx firenook emulators:start --project demo-my-app --allowed-hosts emulator.inte
 
 Started with `--host 0.0.0.0` (or `::`) and no `--allowed-hosts`, it answers
 any host name.
+
+Behind [portless](https://portless.sh), which names local apps under
+`.localhost`, the console answers with no flag. Point the name at the
+console's port with an alias, since the console listens on its UI port
+(4000, or `emulators.ui.port` in `firebase.json`) rather than the `PORT`
+that `portless run` hands a command:
+
+```sh
+portless alias my-app-console 4000
+```
+
+Then open `https://my-app-console.localhost/console` (with `:1355` when the
+proxy runs without sudo). The Connect dialog's snippets keep the engine's own
+address (`127.0.0.1`), since the alias routes the console and not the
+services' ports. With a custom TLD (`PORTLESS_TLD`) or in LAN mode
+(`.local` names for other devices), add the name with `--allowed-hosts`:
+your resolver or a device on the network answers for those names, not the
+browser alone, so the console does not trust them by default.
 
 ## A look around
 
