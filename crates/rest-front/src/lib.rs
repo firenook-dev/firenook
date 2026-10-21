@@ -204,11 +204,7 @@ async fn browser_cors(mut request: Request<Body>, next: Next) -> Response {
         .get(ACCESS_CONTROL_REQUEST_HEADERS)
         .cloned();
     let is_preflight = request.method() == Method::OPTIONS;
-    if request
-        .headers()
-        .get(CONTENT_TYPE)
-        .is_some_and(|value| value.as_bytes().eq_ignore_ascii_case(b"text/plain"))
-    {
+    if body_is_json(request.headers().get(CONTENT_TYPE)) {
         request
             .headers_mut()
             .insert(CONTENT_TYPE, JSON_CONTENT_TYPE);
@@ -233,6 +229,21 @@ async fn browser_cors(mut request: Request<Body>, next: Next) -> Response {
     }
 
     response
+}
+
+/// Whether a body typed `text/plain` (any parameters, any letter case) or
+/// not typed at all is read as JSON, as the official emulator reads it: the
+/// browser SDK posts `text/plain` to avoid a CORS preflight, and `fetch`
+/// types a string body `text/plain;charset=UTF-8`, which is how
+/// `@firebase/rules-unit-testing` sends its rules.
+fn body_is_json(content_type: Option<&HeaderValue>) -> bool {
+    content_type.is_none_or(|value| {
+        value
+            .to_str()
+            .ok()
+            .and_then(|value| value.split(';').next())
+            .is_some_and(|media| media.trim().eq_ignore_ascii_case("text/plain"))
+    })
 }
 
 /// Supplies allocator-owned process statistics to the debug-memory endpoint.
@@ -2494,6 +2505,63 @@ mod tests {
                 .rules_for(&database)
                 .expect("previous rules retained")
         ));
+    }
+
+    /// `@firebase/rules-unit-testing` sends its rules as a `fetch` string
+    /// body (`text/plain;charset=UTF-8`); the official emulator reads any
+    /// REST body as JSON when it is text/plain or untyped
+    /// (`conformance/fixtures/request-identity-v1`, `reload`).
+    #[tokio::test]
+    async fn bodies_typed_text_plain_or_untyped_are_read_as_json() {
+        let runtime = RulesRuntime::default();
+        let database = DatabaseName::new("demo-hot-reload", "(default)").expect("database");
+        let application = router_with_query_policy_memory_and_rules(
+            Store::default(),
+            QueryPolicy::default(),
+            None,
+            runtime.clone(),
+        );
+        for content_type in [Some("text/plain;charset=UTF-8"), Some("Text/Plain"), None] {
+            let previous = runtime.rules_for(&database);
+            let mut request = Request::put("/emulator/v1/projects/demo-hot-reload:securityRules");
+            if let Some(content_type) = content_type {
+                request = request.header(CONTENT_TYPE, content_type);
+            }
+            let response = application
+                .clone()
+                .oneshot(
+                    request
+                        .body(Body::from(
+                            json!({"rules":{"files":[{"content":test_rules("false")}]}})
+                                .to_string(),
+                        ))
+                        .expect("reload request"),
+                )
+                .await
+                .expect("reload response");
+            assert_eq!(response.status(), StatusCode::OK, "{content_type:?}");
+            let installed = runtime.rules_for(&database).expect("installed rules");
+            assert!(
+                previous.is_none_or(|previous| !Arc::ptr_eq(&previous, &installed)),
+                "{content_type:?}"
+            );
+        }
+        let commit = application
+            .oneshot(
+                Request::post("/v1/projects/demo-hot-reload/databases/(default)/documents:commit")
+                    .header(AUTHORIZATION, "Bearer owner")
+                    .body(Body::from(
+                        json!({"writes":[{"update":{
+                            "name":"projects/demo-hot-reload/databases/(default)/documents/items/one",
+                            "fields":{"n":{"integerValue":"1"}}
+                        }}]})
+                        .to_string(),
+                    ))
+                    .expect("commit request"),
+            )
+            .await
+            .expect("commit response");
+        assert_eq!(commit.status(), StatusCode::OK);
     }
 
     const MULTI_DATABASE_PROJECT: &str = "demo-multi-db";
