@@ -66,6 +66,18 @@ const GLOBAL_DIVERGENCES: ReadonlyArray<{ readonly pattern: RegExp; readonly rec
     firenook: "127.0.0.1",
     reason: "the official worker is reached over a Unix socket, so Express sees no remote address; Firenook's worker listens on loopback TCP and reports 127.0.0.1",
   },
+  {
+    pattern: /\.env\.GOOGLE_APPLICATION_CREDENTIALS$/u,
+    recorded: undefined,
+    firenook: "{{projectDir}}/state/gcloud/application_default_credentials.json",
+    reason: "the official worker gets no credentials, so an Admin SDK that wants a token (firebase-admin 12 and earlier read only $HOME's gcloud login) uses the developer's own; Firenook's worker gets the run's demo credentials, answered on this machine",
+  },
+  {
+    pattern: /\.gacPresent$/u,
+    recorded: false,
+    firenook: true,
+    reason: "the same demo credentials, seen as the variable's presence",
+  },
 ];
 
 /** Steps outside this phase's contract (their own fixtures pin them). */
