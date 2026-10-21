@@ -505,9 +505,14 @@ async fn a_minted_token_carries_a_draft_and_the_inspection_judges_tokens() {
     assert!(
         inspection["checks"][0]["reason"]
             .as_str()
-            .is_some_and(|reason| reason.contains("`demo-console`")
-                && reason.ends_with("production refuses it.")),
+            .is_some_and(|reason| reason.starts_with(
+                "Accepted, but production refuses it: it is for project `demo-console`; the emulator runs `demo-other`."
+            )),
         "{inspection}"
+    );
+    assert_eq!(
+        inspection["checks"][0]["fix"],
+        "Initialize the app with projectId `demo-other` (initializeApp({ projectId: 'demo-other' }))."
     );
     // A custom token is not what the rules read.
     let (_, inspection) = post(
@@ -555,14 +560,15 @@ async fn an_expired_token_is_explained() {
     let check = &inspection["checks"][0];
     assert_eq!(check["ok"], true, "{inspection}");
     assert!(
-        check["reason"].as_str().is_some_and(|reason| {
-            reason.starts_with(
-            "The rules see request.auth with uid `u_ada` and the token's claims. It expired 1 h ago"
-        ) && reason.ends_with(
-            "the rules read it anyway, as the official emulator does; production refuses it."
-        )
-        }),
+        check["reason"].as_str().is_some_and(|reason| reason
+            .starts_with("Accepted, but production refuses it: it expired 1 h ago")
+            && reason
+                .ends_with("The rules see request.auth with uid `u_ada` and the token's claims.")),
         "{check}"
+    );
+    assert_eq!(
+        check["fix"],
+        "Get a fresh token: the app's SDK refreshes it on its own; sign in again otherwise."
     );
 }
 

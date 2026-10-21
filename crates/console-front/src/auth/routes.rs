@@ -479,35 +479,50 @@ fn rules_check(project: &str, token: &str, inspection: &AuthTokenInspection) -> 
         .and_then(|payload| payload.get("aud"))
         .and_then(serde_json::Value::as_str)
         .filter(|audience| *audience != project);
+    // What production would refuse, and how to get a token it accepts.
     let refused = match (number("exp"), number("iat")) {
-        (Some(exp), _) if exp <= now => Some(format!(
-            "It expired {} ago (exp {})",
-            span(now - exp),
-            clock(exp)
+        (Some(exp), _) if exp <= now => Some((
+            format!("it expired {} ago (exp {})", span(now - exp), clock(exp)),
+            "Get a fresh token: the app's SDK refreshes it on its own; sign in again otherwise."
+                .to_owned(),
         )),
-        (_, Some(iat)) if iat > now => Some(format!(
-            "It is issued {} in the future (iat {})",
-            span(iat - now),
-            clock(iat)
+        (_, Some(iat)) if iat > now => Some((
+            format!(
+                "it is issued {} in the future (iat {})",
+                span(iat - now),
+                clock(iat)
+            ),
+            "Check this machine's clock.".to_owned(),
         )),
         _ => audience.map(|audience| {
-            format!("It is for project `{audience}`; the emulator runs `{project}`")
+            (
+                format!("it is for project `{audience}`; the emulator runs `{project}`"),
+                format!(
+                    "Initialize the app with projectId `{project}` (initializeApp({{ projectId: '{project}' }}))."
+                ),
+            )
         }),
     };
-    let reason = match refused {
-        Some(refused) => format!(
-            "{sees} {refused}: the rules read it anyway, as the official emulator does; production refuses it."
+    let (reason, fix) = match refused {
+        Some((refused, fix)) => (
+            format!(
+                "Accepted, but production refuses it: {refused}. The rules here read a token without checking it, as the official emulator's do. {sees}"
+            ),
+            Some(fix),
         ),
-        None if inspection.signed => format!(
-            "{sees} It is signed by production Firebase: the rules read its claims without checking the signature, as the official emulator does."
+        None if inspection.signed => (
+            format!(
+                "Signed by production Firebase: the rules here read its claims without checking the signature, as the official emulator's do. {sees}"
+            ),
+            None,
         ),
-        None => sees,
+        None => (sees, None),
     };
     AuthTokenCheck {
         consumer: AuthTokenConsumer::Rules,
         ok: true,
         reason: Some(reason),
-        fix: None,
+        fix,
     }
 }
 
