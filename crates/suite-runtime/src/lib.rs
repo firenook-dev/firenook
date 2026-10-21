@@ -233,6 +233,10 @@ pub enum StorageRulesConfig {
     /// (`templates/emulators/default_storage.rules`) govern every bucket of a
     /// demo project.
     OpenDefault,
+    /// A demo project whose `storage` targets include one `.firebaserc` maps
+    /// to no bucket: as officially, every target is ignored and the default
+    /// open rules govern every bucket.
+    OpenDefaultIgnoringTargets,
 }
 
 /// The official `templates/emulators/default_storage.rules`.
@@ -2038,6 +2042,23 @@ fn read_rules(path: &Path) -> Result<String, SuiteRuntimeError> {
     })
 }
 
+/// The official default open Storage rules, as the official emulator names
+/// them.
+fn open_default_rules() -> RulesSource {
+    RulesSource::Single(RulesFile {
+        name: "emulators/default_storage.rules".to_owned(),
+        content: DEFAULT_OPEN_STORAGE_RULES.to_owned(),
+    })
+}
+
+/// What the official emulator prints (an info line from `storage`) when a
+/// demo project's Storage targets are ignored.
+fn ignored_targets_notice(project: &str) -> String {
+    format!(
+        "Detected demo project ID \"{project}\", using a default (open) rules configuration. Storage targets in firebase.json will be ignored."
+    )
+}
+
 async fn start_storage(
     config: &SuiteConfig,
     delivery: &DeliveryRuntime,
@@ -2060,10 +2081,19 @@ async fn start_storage(
                 &message,
                 &format!("firenook storage: {message}"),
             );
-            RulesSource::Single(RulesFile {
-                name: "emulators/default_storage.rules".to_owned(),
-                content: DEFAULT_OPEN_STORAGE_RULES.to_owned(),
-            })
+            open_default_rules()
+        }
+        StorageRulesConfig::OpenDefaultIgnoringTargets => {
+            let message = ignored_targets_notice(&config.project_id);
+            // An information line, as officially; the terminal UI shows no
+            // information before readiness, so there it is a start-up
+            // warning: rules a project configured are being ignored.
+            if terminal::enabled() {
+                terminal::warn("storage", &message);
+            } else {
+                println!("firenook storage: {message}");
+            }
+            open_default_rules()
         }
         StorageRulesConfig::PerBucket(buckets) => RulesSource::PerBucket(
             buckets
@@ -2086,7 +2116,9 @@ async fn start_storage(
         StorageRulesConfig::Single(path) => {
             firenook_storage_front::RulesFiles::Single(path.clone())
         }
-        StorageRulesConfig::OpenDefault => firenook_storage_front::RulesFiles::None,
+        StorageRulesConfig::OpenDefault | StorageRulesConfig::OpenDefaultIgnoringTargets => {
+            firenook_storage_front::RulesFiles::None
+        }
         StorageRulesConfig::PerBucket(buckets) => firenook_storage_front::RulesFiles::PerBucket(
             buckets
                 .iter()
@@ -3212,6 +3244,24 @@ mod tests {
         );
         assert_eq!(snapshot.documents(&default).len(), 1);
         std::fs::remove_dir_all(&staging).expect("test directory should clean up");
+    }
+
+    /// The line the official emulator prints when a demo project's Storage
+    /// targets map to no bucket (`conformance/fixtures/storage-demo-targets-v1`).
+    #[test]
+    fn ignored_storage_targets_are_announced_as_officially() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../conformance/fixtures/storage-demo-targets-v1/fixture.json"
+        ))
+        .expect("fixture");
+        let case = &fixture["cases"][0];
+        assert_eq!(case["id"], "no-firebaserc");
+        assert_eq!(
+            case["notices"],
+            serde_json::json!([ignored_targets_notice(
+                case["project"].as_str().expect("project")
+            )])
+        );
     }
 
     #[test]

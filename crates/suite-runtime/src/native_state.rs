@@ -133,7 +133,9 @@ impl NativeState {
 
         let seed = seed_path(config)?;
         let mut buckets = match &config.storage_rules {
-            crate::StorageRulesConfig::Single(_) | crate::StorageRulesConfig::OpenDefault => {
+            crate::StorageRulesConfig::Single(_)
+            | crate::StorageRulesConfig::OpenDefault
+            | crate::StorageRulesConfig::OpenDefaultIgnoringTargets => {
                 vec![config.default_bucket.clone()]
             }
             crate::StorageRulesConfig::PerBucket(buckets) => buckets

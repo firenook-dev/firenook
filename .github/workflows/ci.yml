@@ -405,6 +405,8 @@ jobs:
         run: npm run test:rules:identity-replay --prefix conformance
       - name: Run rules-unit-testing and the console's exported rules tests against Firenook
         run: npm run test:rules:unit-testing --prefix conformance -- --target firenook
+      - name: Replay Storage targets without buckets against the suite
+        run: npm run test:storage:demo-targets-replay --prefix conformance
       - name: Run WebChannel browser demo
         run: npm run test:webchannel:browser --prefix conformance
       - name: Run WebChannel browser demo in disk/WAL mode
