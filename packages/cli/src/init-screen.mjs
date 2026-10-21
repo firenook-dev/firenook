@@ -252,7 +252,7 @@ export async function initInTerminal(options, {cwd = process.cwd(), out = proces
       return start(parseOptions(args).options, args);
     }
   }
-  const next = nextSteps(choices, work.steps, {manager: work.manager, node, platform});
+  const next = nextSteps(choices, work.steps, {manager: work.manager, node});
   const lines = [
     ...next.flatMap(step => [cells(dim(step.label), '', bold(step.command)), ...field('', step.why, dim)]),
     ...field(dim('Connect'), 'the console\'s Connect button has the lines that point your app at the emulators, for each SDK', dim),

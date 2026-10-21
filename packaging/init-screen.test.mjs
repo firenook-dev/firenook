@@ -164,14 +164,14 @@ test('the set-up pins and installs side by side, builds after the packages, and 
   assert.deepEqual(packages.tail, ['npm error code E404', 'npm error 404 Not Found']);
   assert.equal(result.steps.find(step => step.id === 'build').state, 'skipped');
   assert.deepEqual(nextSteps(everything(), result.steps, {manager: second.manager, node: '26.9.0', platform: 'darwin'}).map(step => step.command),
-    ['nvm use 24', 'cd functions && npm install && cd ..', 'npm run emulators']);
+    ['nvm use 24', 'npm install --prefix functions', 'npm run emulators']);
   // Without the install, the pin is written and the commands say the rest.
   const unpinned = setUpSteps(everything({install: false}), folder(), {version: '1.0.0', env: {}, platform: 'darwin', spawner: () => assert.fail('nothing runs')});
   const quiet = await unpinned.run();
   assert.deepEqual(nextSteps(everything({install: false}), quiet.steps, {manager: unpinned.manager, node: '24.20.0', platform: 'darwin'}).map(step => step.command),
-    ['cd functions && npm install && cd ..', 'npm install', 'npm run emulators']);
+    ['npm install --prefix functions', 'npm install', 'npm run emulators']);
   assert.deepEqual(nextSteps(everything({install: false, pin: false, language: 'javascript'}), [], {manager: unpinned.manager, node: '24.20.0', platform: 'darwin'}).map(step => step.command),
-    ['cd functions && npm install && cd ..', 'npx firenook emulators:start --keep-data']);
+    ['npm install --prefix functions', 'npx firenook emulators:start --keep-data']);
 });
 
 test('a build\'s lines are read as TypeScript writes them, in watch mode and once', async () => {
@@ -268,7 +268,7 @@ test('in a terminal, changed choices are what is written, No prints the next ste
   assert.deepEqual(readJson(join(dir, '.firebaserc')), {projects: {default: 'demo-shop'}});
   assert.ok(existsSync(join(dir, 'functions/index.js')));
   assert.ok(!existsSync(join(dir, 'functions/node_modules')) && readJson(join(dir, 'package.json')).devDependencies.firenook === '9.9.9-next.1');
-  for (const expected of ['cd functions && npm install && cd ..', 'npm install', 'npm run emulators', 'Connect']) shows(text(), expected);
+  for (const expected of ['npm install --prefix functions', 'npm install', 'npm run emulators', 'Connect']) shows(text(), expected);
 
   const empty = folder();
   const second = terminal();

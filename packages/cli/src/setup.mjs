@@ -208,13 +208,14 @@ export function setUpSteps(choices, directory, {version, config, env = process.e
 }
 
 // The commands still to type once init is done, each with what it is for.
-export function nextSteps(choices, steps, {manager, node = process.versions.node, platform = process.platform} = {}) {
+export function nextSteps(choices, steps, {manager, node = process.versions.node} = {}) {
   const find = id => steps.find(item => item.id === id);
   const typescript = choices.language === 'typescript';
   const lines = [];
   if (Number(node.split('.')[0]) !== 24) lines.push({label: 'Node', command: 'nvm use 24', why: `the emulators need Node 24, and this is ${node} (nvm install 24 if you have no Node 24)`});
   if (choices.language !== 'none' && find('packages')?.state !== 'done') {
-    lines.push({label: 'Packages', command: platform === 'win32' ? 'cd functions; npm install; cd ..' : 'cd functions && npm install && cd ..', why: 'installs the Functions codebase\'s packages'});
+    // --prefix rather than cd: one command every shell runs as it is.
+    lines.push({label: 'Packages', command: 'npm install --prefix functions', why: 'installs the Functions codebase\'s packages'});
   }
   const pin = find('firenook');
   if (pin?.written && !pin.installed) lines.push({label: 'Firenook', command: said(manager.install), why: 'installs Firenook, as package.json pins it'});

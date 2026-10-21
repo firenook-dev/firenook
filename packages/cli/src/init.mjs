@@ -228,7 +228,7 @@ export function scaffold(options, cwd = process.cwd(), log = console, {env = pro
   const offered = planAgents(directory, {agents:choices.agents, config, env}).filter(step => step.content);
   const setUp = setUpSteps(choices, directory, {version, config, env, platform, spawner});
   const next = () => {
-    const lines = nextSteps(choices, setUp.steps, {manager:setUp.manager, platform}).map(line => line.command);
+    const lines = nextSteps(choices, setUp.steps, {manager:setUp.manager}).map(line => line.command);
     if (offered.length && !options.yes) lines.push(`npx firenook mcp add   (gives ${agentNames(offered)} the Firenook MCP server)`);
     return lines;
   };
