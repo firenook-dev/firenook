@@ -58,8 +58,10 @@ parse.
 
 A trigger on a service the suite does not run (Storage left out of `--only`,
 or the Realtime Database, which Firenook does not emulate) is loaded and
-listed but receives nothing, and the load says so with the official line,
-as a warning on the terminal screen and in the plain log:
+listed but receives no event, and the first load says so with the official
+line, as a warning on the terminal screen and in the plain log (the
+console's page for the function says which service it needs; Run and
+functions:invoke still call it directly):
 
 ```text
 functions[us-central1-onUpload]: function ignored because the storage emulator does not exist or is not running.

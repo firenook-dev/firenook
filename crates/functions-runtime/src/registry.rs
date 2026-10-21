@@ -127,8 +127,11 @@ impl BlockingConfig {
 pub struct Registry {
     project: String,
     /// The services running beside the runtime; a trigger on another is
-    /// ignored with a warning.
+    /// warned about.
     services: RunningServices,
+    /// The keys already warned about for a service that is not running, so
+    /// a reload does not warn again.
+    warned: std::collections::HashSet<String>,
     records: Vec<Record>,
     index: HashMap<String, usize>,
     generation: u32,
@@ -155,13 +158,14 @@ impl Registry {
         Self::with_services(project, RunningServices::ALL)
     }
 
-    /// A table whose event triggers on a service the suite does not run
-    /// are ignored, with the official warning.
+    /// A table that warns about the triggers on a service the suite does
+    /// not run, with the official line.
     #[must_use]
     pub fn with_services(project: &str, services: RunningServices) -> Self {
         Self {
             project: project.to_owned(),
             services,
+            warned: std::collections::HashSet::new(),
             records: Vec::new(),
             index: HashMap::new(),
             generation: 0,
@@ -470,22 +474,23 @@ impl Registry {
         let mut admissions = Vec::with_capacity(definitions.len());
         for definition in definitions {
             let key = self.key_for(definition);
-            let mut previously_ignored = None;
             if let Some(index) = self.index.get(&key).copied() {
                 // Re-registering an existing key replaces the record in place;
                 // its earlier side effects are released before admission.
                 let previous = self.records[index].clone();
                 Self::unregister_side_effects(&previous, project, triggers);
-                previously_ignored = previous.ignored;
             }
             let admission = Admit {
                 key: &key,
                 project,
                 functions_origin,
                 services: self.services,
-                previously_ignored: previously_ignored.as_deref(),
+                warned: self.warned.contains(&key),
             };
-            let (ignored, url) = admission.admit(definition, triggers, log);
+            let (ignored, url, warned) = admission.admit(definition, triggers, log);
+            if warned {
+                self.warned.insert(key.clone());
+            }
             let record = Record {
                 key: key.clone(),
                 definition: definition.clone(),
@@ -596,18 +601,20 @@ struct Admit<'a> {
     project: &'a str,
     functions_origin: &'a str,
     services: RunningServices,
-    /// The reason the record this one replaces was ignored for: the same
-    /// reason again is not warned about a second time.
-    previously_ignored: Option<&'a str>,
+    /// This key was already warned about (an earlier load): a reload says
+    /// it at the information level.
+    warned: bool,
 }
 
 impl Admit<'_> {
+    /// Why the definition receives nothing (if it does not), its URL (if it
+    /// has one), and whether a service it needs is not running.
     fn admit(
         &self,
         definition: &Definition,
         triggers: &TriggerRegistry,
         log: &LogSink,
-    ) -> (Option<String>, Option<String>) {
+    ) -> (Option<String>, Option<String>, bool) {
         let Self {
             key,
             project,
@@ -626,15 +633,34 @@ impl Admit<'_> {
                 &format!("functions[{id}]"),
                 format!("http function initialized ({url})."),
             ));
-            return (None, Some(url));
+            return (None, Some(url), false);
         }
         if let Some(event) = definition.event_trigger() {
             let service = definition.service();
             let service_name = short_service_name(&service);
-            if let Some(missing) = self.services.missing(&service) {
-                return (Some(self.not_running(&id, missing, log)), None);
+            // A service the suite could run but does not: the function is
+            // registered as usual (it is still called directly), only no
+            // event reaches it; said once, in place of "initialized".
+            let missing = self.services.missing(&service);
+            if let Some(missing) = missing {
+                let reason = self.not_running(&id, missing, log);
+                if !matches!(
+                    service.as_str(),
+                    "firestore.googleapis.com"
+                        | "firebaseauth.googleapis.com"
+                        | "storage.googleapis.com"
+                        | "pubsub.googleapis.com"
+                ) {
+                    // The Realtime Database never runs here.
+                    return (Some(reason), None, true);
+                }
             }
-            match service.as_str() {
+            let initialized = |message: String| {
+                if missing.is_none() {
+                    log.record(LogEvent::new("INFO", &format!("functions[{id}]"), message));
+                }
+            };
+            let (ignored, url) = match service.as_str() {
                 "firestore.googleapis.com" => {
                     let registered = if definition.platform() == "gcfv2" {
                         let bundle = v2_firestore_bundle(event);
@@ -654,11 +680,7 @@ impl Admit<'_> {
                     };
                     match registered {
                         Ok(()) => {
-                            log.record(LogEvent::new(
-                                "INFO",
-                                &format!("functions[{id}]"),
-                                "firestore function initialized.".to_owned(),
-                            ));
+                            initialized("firestore function initialized.".to_owned());
                             (None, None)
                         }
                         Err(error) => {
@@ -674,11 +696,7 @@ impl Admit<'_> {
                 | "firebaseauth.googleapis.com"
                 | "storage.googleapis.com"
                 | "eventarc.googleapis.com" => {
-                    log.record(LogEvent::new(
-                        "INFO",
-                        &format!("functions[{id}]"),
-                        format!("{service_name} function initialized."),
-                    ));
+                    initialized(format!("{service_name} function initialized."));
                     (None, None)
                 }
                 _ => {
@@ -692,7 +710,8 @@ impl Admit<'_> {
                     ));
                     (Some(reason), None)
                 }
-            }
+            };
+            (ignored, url, missing.is_some())
         } else if definition.blocking_trigger().is_some() {
             let event_type = definition
                 .blocking_trigger()
@@ -712,14 +731,15 @@ impl Admit<'_> {
                 if let Some(missing) = self.services.missing("firebaseauth.googleapis.com") {
                     // Still served on its URL; the Auth emulator that would
                     // call it is not running.
-                    return (Some(self.not_running(&id, missing, log)), Some(url));
+                    self.not_running(&id, missing, log);
+                    return (None, Some(url), true);
                 }
                 log.record(LogEvent::new(
                     "INFO",
                     &format!("functions[{id}]"),
                     format!("{event_type} function initialized ({url})."),
                 ));
-                (None, Some(url))
+                (None, Some(url), false)
             } else {
                 let reason = format!(
                     "function ignored because the {event_type} emulator does not exist or is not running."
@@ -729,7 +749,7 @@ impl Admit<'_> {
                     &format!("functions[{id}]"),
                     reason.clone(),
                 ));
-                (Some(reason), Some(url))
+                (Some(reason), Some(url), false)
             }
         } else {
             log.warn(format!(
@@ -744,24 +764,19 @@ impl Admit<'_> {
                 &format!("functions[{id}]"),
                 reason.clone(),
             ));
-            (Some(reason), None)
+            (Some(reason), None, false)
         }
     }
 
     /// The official line for a trigger whose service the suite does not run
     /// (`function ignored because the <service> emulator does not exist or
     /// is not running.`), said as a warning so the terminal shows it, once
-    /// per record: a reload that ignores it for the same reason says it at
-    /// the information level.
+    /// per key: a reload says it again at the information level.
     fn not_running(&self, id: &str, service: &str, log: &LogSink) -> String {
         let reason = format!(
             "function ignored because the {service} emulator does not exist or is not running."
         );
-        let level = if self.previously_ignored == Some(reason.as_str()) {
-            "INFO"
-        } else {
-            "WARN"
-        };
+        let level = if self.warned { "INFO" } else { "WARN" };
         log.record(LogEvent::new(
             level,
             &format!("functions[{id}]"),

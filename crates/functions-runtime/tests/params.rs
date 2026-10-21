@@ -339,7 +339,7 @@ endpoints:
 ";
 
 #[tokio::test]
-async fn a_trigger_on_a_service_the_suite_does_not_run_is_ignored_with_a_warning() {
+async fn a_trigger_on_a_service_the_suite_does_not_run_is_warned_about_once() {
     let only_firestore = RunningServices {
         firestore: true,
         auth: false,
@@ -382,18 +382,18 @@ async fn a_trigger_on_a_service_the_suite_does_not_run_is_ignored_with_a_warning
         "only the dead triggers warn: {warnings:#?}"
     );
     let console = harness.runtime.console();
+    // Registered as usual: no event reaches it, but it is still called
+    // directly (the console says which service it needs).
     let upload = console
         .function("us-central1-onUpload")
         .await
         .expect("still listed");
-    assert_eq!(
-        upload.status,
-        RuntimeStatus::Ignored(
-            "function ignored because the storage emulator does not exist or is not running."
-                .to_owned()
-        )
+    assert_eq!(upload.status, RuntimeStatus::Receiving);
+    assert!(
+        !infos
+            .contains(&"functions[us-central1-onUpload]: storage function initialized.".to_owned()),
+        "the warning says it in place of initialized"
     );
-    // A blocking function stays callable on its URL.
     let before = console
         .function("us-central1-beforeCreate")
         .await
@@ -402,9 +402,14 @@ async fn a_trigger_on_a_service_the_suite_does_not_run_is_ignored_with_a_warning
         before.path.as_deref(),
         Some("/demo-dispatch/us-central1/beforeCreate")
     );
-    assert_eq!(harness.runtime.blocking().await.before_create, None);
+    // The Realtime Database never runs here: that one is ignored.
+    let written = console
+        .function("us-central1-onWritten")
+        .await
+        .expect("listed");
+    assert!(matches!(written.status, RuntimeStatus::Ignored(_)));
     let receipt = harness.runtime.receipt().await.expect("a receipt");
-    assert_eq!(receipt.ignored_count, 6);
+    assert_eq!(receipt.ignored_count, 1);
 
     // A reload that ignores them for the same reason says it once more at
     // the information level, not as a new warning.
