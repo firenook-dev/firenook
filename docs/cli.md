@@ -96,7 +96,10 @@ project.
 
 `use`, `target:apply` and `target:clear` are pure `.firebaserc` edits: no
 network, no login. `use <alias|id>` records `projects.default`, `--add`
-records an alias, `--unalias`/`--clear` remove one. Only `storage` targets
+records an alias, `--unalias`/`--clear` remove one. An active project set
+with `firebase use` for the directory comes before `projects.default`, as in
+the official CLI; `use` says when there is one, and `target:apply` files
+targets under the project a start would pick. Only `storage` targets
 exist for Firenook (`database`/`hosting` are refused).
 
 `emulators:export` finds the running suite through the same locator file the
