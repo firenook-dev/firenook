@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { gzipSync } from 'node:zlib';
-import { assertPublicText, auditPublicPackage, packageEntries } from './public-artifacts.mjs';
+import { assertPublicText, auditPublicPackage, cliFiles, packageEntries } from './public-artifacts.mjs';
 
 // Synthetic customer markers only; real integration policy stays private.
 const policy = {forbiddenTerms: ['private-customer.invalid']};
@@ -31,6 +31,13 @@ const native = () => [
   ['LICENSE', 'synthetic license'], ['NOTICE', 'synthetic notice'], ['bin/firenook', 'synthetic executable'],
 ];
 
+test('the CLI allowlist names every file the package ships, so a new module cannot fail the release', () => {
+  // `files` in packages/cli/package.json: bin, src and the root files.
+  const root = new URL('../packages/cli/', import.meta.url);
+  const shipped = ['bin', 'src'].flatMap(directory => readdirSync(new URL(`${directory}/`, root)).map(name => `${directory}/${name}`));
+  const listed = cliFiles.filter(path => path.startsWith('bin/') || path.startsWith('src/'));
+  assert.deepEqual([...shipped].sort(), [...listed].sort());
+});
 test('allowlisted package bytes pass without extraction or execution', () => {
   assert.equal(auditPublicPackage(archive(native()), expected, policy).passed, true);
 });
