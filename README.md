@@ -8,8 +8,8 @@
 <h3 align="center">A faster drop-in replacement for the Firebase Local Emulator Suite</h3>
 
 <p align="center">
-  Keep your <code>firebase.json</code>, SDKs and ports. Get 38× faster writes,
-  9× less memory, no Java, and data that survives restarts.
+  Keep your <code>firebase.json</code>, SDKs and ports. Get 40× faster writes,
+  10× less memory, no Java, and data that survives restarts.
 </p>
 
 <p align="center">
@@ -59,8 +59,8 @@ checked against recorded behaviour of the official emulator.
 
 **Fast and light.** The services are native Rust and the data lives on disk,
 not in a Java heap. On a real application's two-hour workload, Firenook
-peaked at 2.16 GiB of memory where the official emulator reached 19.56 GiB,
-answered writes in 5.3 ms against 203 ms at the median, and used 61% less CPU.
+peaked at 2.11 GiB of memory where the official emulator reached 22.57 GiB,
+answered writes in 5.1 ms against 208 ms at the median, and used 61% less CPU.
 
 **Your data stays.** Add `--keep-data` and Firestore, Auth and Storage come
 back with all your data in about half a second, even with millions of
@@ -152,12 +152,12 @@ stops, 26 query shapes and a store grown to 2.5 million documents.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmark-dark.svg">
-  <img alt="Firenook against the official emulator: 9 times less memory, writes 38 times faster, listener updates 18 times faster, restarts 39 times sooner, 80 times sooner on 2.5 million documents, 61% less CPU" src="docs/assets/benchmark-light.svg" width="880">
+  <img alt="Firenook against the official emulator: 10 times less memory, writes 40 times faster, listener updates 19 times faster, restarts 52 times sooner, orderBy with a limit 8 times faster, 61% less CPU" src="docs/assets/benchmark-light.svg" width="880">
 </picture>
 
-The official emulator answered 6 of 26 query shapes faster: ordering and range
-filters over a large collection, and batch gets of many documents. The method,
-every figure and those limits are in [the benchmarks](docs/benchmarks.md).
+Firenook answered 25 of the 26 query shapes faster and tied on the last, and
+both gave the same answers. The method, every figure and the limits are in
+[the benchmarks](docs/benchmarks.md).
 
 ## Get started
 
@@ -171,7 +171,7 @@ npm install --save-dev --save-exact firenook    # or: bun add --dev --exact fire
 ```
 
 `--save-exact` keeps you on the release you installed until you upgrade on
-purpose: Firenook is in preview, and a preview can change between releases.
+purpose, so every machine and CI run uses the same engine.
 
 Every run keeps its working data under `.firenook/`, so add that folder to
 your `.gitignore`.
@@ -271,10 +271,10 @@ depth, including tests and keeping data.
 
 ## Status
 
-Firenook is in preview: releases are `0.2.0-next` versions on npm. Every
-release passes conformance replays against the official emulator and packed
-installs on all five platforms, and releases are measured against the official
-emulator with a real application (most recently 0.2.0-next.6, in the
+Firenook 0.2.0 is the first stable release. Every release passes conformance
+replays against the official emulator and packed installs on all five
+platforms, and releases are measured against the official emulator with a
+real application (most recently 0.2.0, in the
 [benchmarks](docs/benchmarks.md)). Pin an exact version and upgrade on
 purpose; [the releases](https://github.com/firenook-dev/firenook/releases) list
 what each one carries.

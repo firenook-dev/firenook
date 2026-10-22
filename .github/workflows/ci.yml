@@ -375,9 +375,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    # The Auth and Pub/Sub oracle replays (Phases I and J) brought this job to
-    # 16-18 minutes on a typical runner; 20 was cancelling it on slow ones.
-    timeout-minutes: 30
+    # The 0.2.0 replays (who a request is from, Storage targets without
+    # buckets, rules-unit-testing on both emulators) brought this job to
+    # 24-30 minutes; 30 was cancelling it on slow runners.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0

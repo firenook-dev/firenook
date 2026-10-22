@@ -1,3 +1,80 @@
+# 0.2.0 — the first release for public use
+
+- Pin the engine to `7a9614bea49f8208f96d2126b29ef11ee2f2810b`, the merge of
+  [PR #117](https://github.com/firenook-dev/firenook/pull/117) on
+  0.2.0-next.8. Its tree is the PR head's, `bbd437e`, which passed CI
+  ([run 39667251564](https://github.com/firenook-dev/firenook/actions/runs/39667251564))
+  and the five-platform packed-install matrix
+  ([run 39667251694](https://github.com/firenook-dev/firenook/actions/runs/39667251694)).
+- **A stable version.** `npm install firenook` and a bare `npx firenook` get
+  0.2.0 on any Node from 20 up; previews keep their own versions, and a
+  preview install is told about 0.2.0.
+- **`firenook init` in a terminal.** One screen with every choice made (the
+  project id, the emulators on their usual ports, TypeScript, JavaScript or
+  no Functions, the coding agents, the set-up), then the installs, Firenook
+  pinned, the first build and the emulators started in the same terminal.
+  TypeScript is the default, from the official template. Without a terminal
+  it writes the files and prints the commands that finish the set-up;
+  `--yes` runs them.
+- **TypeScript compiled as you save.** `--build` runs each codebase's own
+  `build:watch` beside the engine and starts it after the first compile;
+  errors show in the log. `emulators:exec --build` runs `build` once and no
+  test when it fails.
+- **Ordered and range queries.** An order-preserving field index serves
+  `orderBy`, range filters and cursors on a top-level field, and checks
+  equality on other fields before a document is read; a batch get writes
+  stored documents straight into the reply. The six query shapes the
+  official emulator answered faster in the 0.2.0-next.6 benchmark are now
+  1.8 to 8 times faster than it (`orderBy` an integer, limit 20: 12.0 ms
+  against 96.3 ms). A store an earlier release wrote builds the index once
+  on its first open (7.4 s for 211,202 documents, 49.3 s for 2.7 million on
+  the benchmark server); an earlier release opening a 0.2.0 store rebuilds
+  its own index.
+- **Node 22, 24 and 26.** Older is refused with how to switch; an odd or
+  newer major starts with a warning; a codebase whose `engines.node` asks for
+  another Node is warned about, as the official emulator warns. `doctor`
+  reports the Node and every problem.
+- **Older Linux.** The engines need glibc 2.28 (RHEL 8, Debian 10, Ubuntu
+  20.04, node:24-slim and later) instead of 2.39; Alpine and older systems
+  are told what they lack.
+- **Security Rules as the official emulator applies them.** A gRPC request
+  without an `Authorization` header is signed out, not the owner.
+  `@firebase/rules-unit-testing` works. A database `firebase.json` does not
+  list follows the default database's rules; a Storage target with several
+  buckets applies its rules to each; a denial names the rule line.
+- **Nothing reaches production.** The console's snippets (Python Storage,
+  Apple Firestore, Tasks and Eventarc everywhere) and `emulators:exec`, which
+  now sets the official variables for the running emulators only. The demo
+  credentials of `exec` and of the Functions workers take their token from
+  the emulators: no firebase-admin release tested asked Google for one, and a
+  function no longer falls back to the developer's own gcloud login.
+- **Functions.** Params' defaults, `.env.<alias>`, the `.env` values at
+  discovery, the project `firebase use` chose, warnings for triggers on
+  services that do not run, `functions:invoke --help`, `ext:vendor
+  --offline`, the Firebase login on Windows.
+- **REST.** `createDocument` works, and every v1 method answers as the
+  official emulator does (the differences kept are listed in
+  `COMPATIBILITY.md`).
+- **Starts and stops.** Two suites with one project id; Firestore closed
+  after browser sessions; a killed launcher stops its engine, which saves
+  the data; `--import` without metadata and a bad indexes file warn;
+  `firebase.json` found from a folder inside the project; `localhost` and
+  `::1` bound as officially.
+- **Polish.** `init --force` keeps your rules, `init --adopt` keeps your
+  formatting, `--ui` comes before `ui.enabled: false`, counts agree with
+  their nouns, every service's lines reach the screen, `CI=false` is not CI.
+- Data 0.2.0 saves opens in 0.2.0-next.8, which rebuilds its own field index
+  first; no emulator protocol or port changed, except that `localhost` now
+  binds `::1` as well for the hub and the console, as officially.
+- [Benchmarked](docs/benchmarks.md) against the official emulator on one
+  application's two hours of traffic: 10 times less emulator memory (2.11
+  against 22.57 GiB), writes 40 times faster (5.1 against 208 ms at the
+  median), listener updates 19 times faster and 61% less CPU; a restart with
+  the data kept is ready in 0.59 s against 30.8 s, and Firenook is faster on
+  25 of 26 query shapes and ties on the last.
+- Published straight to `latest`; the CLI's `next` stays on 0.2.0-next.8
+  until it is moved by hand.
+
 # 0.2.0-next.8 — the Firestore tree at once, code in colour, npx on any Node
 
 - Pin the engine to `f7c3c663427fd181b0e67b31f960f6e5751b7d12`, the merge of

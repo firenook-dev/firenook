@@ -1700,8 +1700,9 @@ re-measured every document. Built on 2026-10-22.
   a group key, and the engine sorts each group itself. It replaces
   `field_equality_v1` (equality is a range of the same keys), with its own
   revision key: a store written by an older release builds it once on open
-  (about 0.14 s per 1,000 documents), and an older release opening a 0.2.0
-  store builds its own index again instead of trusting an empty one.
+  (7.4 s for 211,202 documents, 49.3 s for 2,711,202 on the benchmark
+  server), and an older release opening a 0.2.0 store builds its own index
+  again instead of trusting an empty one.
 - [x] **Queries walk it.** One top-level order field (plus `__name__`) walks
   the index in either direction; range, `==` and `in` filters and cursors set
   where the walk starts and stops; `==` and `in` on other fields are checked

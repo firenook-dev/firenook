@@ -77,7 +77,7 @@ function artifactSet(root) {
   }
 }
 
-// While the version is a preview, as now, this is also the prerelease case.
+// The plan depends only on the run's latest input, for a preview and a stable version alike.
 test('a dry run of the publisher prints the same plan unset and off, and the CLI on latest only when on', () => {
   const root = mkdtempSync(join(tmpdir(), 'firenook-release-plan-'));
   try {
