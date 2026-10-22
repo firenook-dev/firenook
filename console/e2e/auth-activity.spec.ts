@@ -413,7 +413,13 @@ test('A9 Inspect a token says how each consumer judges it, and how to fix it', a
     await expect(verdict('verify')).toHaveAttribute('data-ok', 'false')
     await expect(verdict('verify')).toContainText(/Expired 2\d min ago/)
     await expect(verdict('verify')).toContainText('Get a fresh token')
-    await expect(verdict('rules')).toHaveAttribute('data-ok', 'false')
+    // The rules read it, as the official emulator's do, and say production
+    // would not, and how to get one it would.
+    await expect(verdict('rules')).toHaveAttribute('data-ok', 'true')
+    await expect(verdict('rules')).toContainText(
+      /Accepted, but production refuses it: it expired 2\d min ago/,
+    )
+    await expect(verdict('rules')).toContainText('Get a fresh token')
 
     // Issued before the user's tokens were revoked.
     const early = unsignedJwt({ ...real, iat: now - 600, auth_time: now - 600, exp: now + 3_000 })
@@ -438,6 +444,13 @@ test('A9 Inspect a token says how each consumer judges it, and how to fix it', a
       `This ID token is for project \`demo-other\`; the emulator runs \`${engine.project}\`.`,
     )
     await expect(verdict('verify')).toContainText(
+      `initializeApp({ projectId: '${engine.project}' })`,
+    )
+    await expect(verdict('rules')).toHaveAttribute('data-ok', 'true')
+    await expect(verdict('rules')).toContainText(
+      `Accepted, but production refuses it: it is for project \`demo-other\`; the emulator runs \`${engine.project}\`.`,
+    )
+    await expect(verdict('rules')).toContainText(
       `initializeApp({ projectId: '${engine.project}' })`,
     )
     expect((await userDetail(engine, user.localId))?.row.disabled).toBe(false)

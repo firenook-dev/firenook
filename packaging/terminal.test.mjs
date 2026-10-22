@@ -21,6 +21,7 @@ test('the terminal UI draws only for emulators:start in a terminal', () => {
   assert.equal(interactive({stdout: {}, stdin: tty, env: {}}), false, 'a pipe');
   assert.equal(interactive({stdout: tty, stdin: {}, env: {}}), false, 'no keyboard');
   assert.equal(interactive({stdout: tty, stdin: tty, env: {CI: 'true'}}), false);
+  for (const value of ['false', '0', '']) assert.equal(interactive({stdout: tty, stdin: tty, env: {CI: value}}), true, `CI=${value} is no CI`);
   assert.equal(interactive({stdout: tty, stdin: tty, env: {TERM: 'dumb'}}), false);
   assert.equal(interactive({stdout: tty, stdin: tty, env: {FIRENOOK_PLAIN: '1'}}), false);
   assert.equal(interactive({stdout: tty, stdin: tty, env: {FIRENOOK_PLAIN: '0'}}), true);
@@ -79,6 +80,11 @@ test('the banner knows how the data starts before the engine says', () => {
   writeFileSync(join(state, 'firestore/firenook.redb'), '');
   const args = ['suite', '--state-dir', state, '--resume-state', '--import', join(dir, 'seed')];
   assert.equal(expectedOpening(args).kind, 'import', 'no receipt yet: the seed is imported');
+  // A seed with no export in it is skipped, as the official CLI skips it.
+  mkdirSync(join(dir, 'seed'));
+  assert.equal(expectedOpening(args).kind, 'fresh', 'nothing to import: a fresh start');
+  writeFileSync(join(dir, 'seed', 'firebase-export-metadata.json'), '{}');
+  assert.equal(expectedOpening(args).kind, 'import');
   writeFileSync(join(state, 'native-state.json'), JSON.stringify({complete: true}));
   const resumed = expectedOpening(args);
   assert.equal(resumed.kind, 'resume');
@@ -102,7 +108,11 @@ test('the update check follows the channel, compares versions and names the pack
   writeFileSync(join(project, 'bun.lock'), '');
   assert.equal(installCommand(project, 'next'), 'bun add -d firenook@next');
   assert.equal(updatesOff({CI: '1'}), true);
+  assert.equal(updatesOff({CI: 'true'}), true);
+  // Only a truthy CI is CI, as the ecosystem reads it.
+  for (const value of ['false', 'FALSE', '0', '']) assert.equal(updatesOff({CI: value}), false, `CI=${value}`);
   assert.equal(updatesOff({FIRENOOK_NO_UPDATE_CHECK: '1'}), true);
+  assert.equal(updatesOff({FIRENOOK_NO_UPDATE_CHECK: 'false'}), false);
   assert.equal(updatesOff({}), false);
 
   const env = {XDG_CACHE_HOME: mkdtempSync(join(tmpdir(), 'firenook-cache-'))};
@@ -120,6 +130,15 @@ test('the update check follows the channel, compares versions and names the pack
   assert.equal(pendingUpdate('0.2.0-next.3', project, {env: {...env, NO_UPDATE_NOTIFIER: '1'}}), undefined);
   assert.equal(await refreshUpdates({env: {...env, CI: 'true'}, fetcher, now: 10 * 24 * 3600_000}), undefined);
   assert.equal(asked, 2);
+  // A stable release on latest reaches a preview install even while next
+  // still names the last preview; a stable install follows latest alone.
+  writeFileSync(cacheFile(env), JSON.stringify({checkedAt: 0, tags: {latest: '0.2.0', next: '0.2.0-next.8'}}));
+  assert.deepEqual(pendingUpdate('0.2.0-next.8', project, {env}), {version: '0.2.0', tag: 'latest', command: 'bun add -d firenook@latest'});
+  assert.deepEqual(pendingUpdate('0.2.0-next.3', project, {env}), {version: '0.2.0', tag: 'latest', command: 'bun add -d firenook@latest'});
+  assert.equal(pendingUpdate('0.2.0', project, {env}), undefined);
+  writeFileSync(cacheFile(env), JSON.stringify({checkedAt: 0, tags: {latest: '0.2.0', next: '0.3.0-next.1'}}));
+  assert.equal(pendingUpdate('0.2.0', project, {env}), undefined, 'a preview is never offered to a stable install');
+  assert.deepEqual(pendingUpdate('0.2.0-next.8', project, {env}), {version: '0.3.0-next.1', tag: 'next', command: 'bun add -d firenook@next'});
 });
 
 // ── The session against a scripted engine ──────────────────────────────
@@ -235,6 +254,57 @@ test('a start whose functions do not load still runs, and says so', async () => 
   assert.equal(await running, 0);
   const shown = text();
   for (const expected of ['Your functions did not load', 'functions/index.js:3', '}}', 'except your functions', 'functions not loaded']) shows(shown, expected);
+});
+
+test('a count on the screen agrees with its noun, for one and for many', async () => {
+  const long = 'a start-up warning long enough that its row cannot hold it, so the summary counts it instead of showing it whole, '.repeat(2);
+  const run = async n => {
+    const {out, text} = screen(110, 60);
+    const input = keyboard();
+    const {spawner} = engine(async ({send, stopping}) => {
+      send({type: 'step', id: 'firestore', state: 'running', verb: 'resuming', done: n});
+      await tick(500);
+      send({type: 'step', id: 'firestore', state: 'done', ms: 520, figures: [[n, n === 1 ? 'document' : 'documents']]});
+      for (let i = 0; i < n; i += 1) send({type: 'codebase', codebase: {id: `ext-${i}`, kind: 'extension', state: 'ready', loads: 1, functionCount: 1, servingPrevious: false}});
+      send({type: 'codebase', codebase: {id: 'default', kind: 'user', state: 'failed', loads: 1, functionCount: 0, servingPrevious: false, directory: 'functions',
+        error: {message: 'Error: boom', detail: './functions/index.js:3\n  boom()\n  ^\n'}}});
+      send({type: 'ready', ms: 600, console: 'http://127.0.0.1:4000/console', ports: {}, functions: n, warnings: Array.from({length: n}, (_, i) => `${long}${i}`)});
+      await tick(30);
+      const frames = Array.from({length: n}, (_, i) => `    at node:internal/frame:${i}:1`).join('\n');
+      const call = {id: 'c-1', functionId: 'us-central1-api', codebase: 'default', kind: 'http', durationMs: 3, outcomeClass: 'failed', error: `Error: boom\n    at api (index.js:3:9)\n${frames}`};
+      send({type: 'call', state: 'started', call});
+      send({type: 'call', state: 'finished', call});
+      await stopping;
+      send({type: 'stopped', outcome: {}});
+      return 0;
+    });
+    const running = runInteractive(launch(), {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input, env, platform: 'darwin', spawner});
+    for (let i = 0; i < 100 && !text().includes('more line'); i += 1) await tick(20);
+    input.emit('data', Buffer.from('q'));
+    assert.equal(await running, 0);
+    return text();
+  };
+  let shown = await run(1);
+  for (const expected of ['resuming  1 document', '1 start-up warning ·', 'The extension codebase and every emulator keep running', '+ 1 more line ·']) shows(shown, expected);
+  for (const wrong of ['1 documents', '1 start-up warnings', '1 more lines']) assert.ok(!flat(shown).includes(wrong), wrong);
+  shown = await run(2);
+  for (const expected of ['resuming  2 documents', '2 start-up warnings', 'The 2 extension codebases and every emulator keep running', '+ 2 more lines']) shows(shown, expected);
+  // Without an extension, the emulators alone keep running.
+  const {out, text} = screen(110, 60);
+  const input = keyboard();
+  const {spawner} = engine(async ({send, stopping}) => {
+    send({type: 'codebase', codebase: {id: 'default', kind: 'user', state: 'failed', loads: 1, functionCount: 0, servingPrevious: false, directory: 'functions',
+      error: {message: 'Error: boom', detail: null}}});
+    send({type: 'ready', ms: 60, console: null, ports: {}, functions: 0, warnings: []});
+    await stopping;
+    send({type: 'stopped', outcome: {}});
+    return 0;
+  });
+  const running = runInteractive(launch(), {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input, env, platform: 'darwin', spawner});
+  for (let i = 0; i < 100 && !text().includes('except your functions'); i += 1) await tick(20);
+  input.emit('data', Buffer.from('q'));
+  assert.equal(await running, 0);
+  shows(text(), 'fix it and save: Firenook loads it again by itself. Every emulator keeps running');
 });
 
 test('a service that fails after readiness stops the session with a card that says so', async () => {
@@ -367,4 +437,41 @@ test('a stop before the emulators are ready closes the data cleanly and says so'
   const shown = text();
   for (const expected of ['closing the data cleanly first', 'stopped', 'the data in /tmp/firenook-terminal-state is as it was', 'before it was ready']) shows(shown, expected);
   assert.ok(!flat(shown).includes('exported to'), 'nothing is exported before the emulators served anything');
+});
+
+test('an engine killed while it runs never says nothing was changed', async () => {
+  // Saved data, picked up and written to: a kill leaves what was written,
+  // and the next start checks the file.
+  const kept = async (args, ending) => {
+    const {out, text} = screen(150);
+    const {spawner} = engine(async ({send}) => {
+      send({type: 'opening', kind: args.includes('--resume-state') ? 'resume' : 'fresh'});
+      send({type: 'step', id: 'firestore', state: 'done', ms: 12, figures: [[3, 'documents']]});
+      send({type: 'ready', ms: 20, console: 'http://127.0.0.1:4000/console', ports: {firestore: 8080}, functions: 0, warnings: []});
+      await tick(40);
+      if (ending.failed) send({type: 'failed', kind: 'other', message: ending.failed});
+      return ending.code ?? {signal: ending.signal};
+    });
+    assert.equal(await runInteractive(launch(args), {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input: keyboard(), env, platform: 'darwin', spawner}), 1);
+    return text();
+  };
+  let shown = await kept(['--resume-state'], {signal: 'SIGKILL'});
+  for (const expected of ['Firenook stopped unexpectedly', 'signal SIGKILL', 'the next start checks /tmp/firenook-terminal-state first, and repairs it if it needs to']) shows(shown, expected);
+  assert.ok(!flat(shown).includes('nothing was changed'), 'a killed engine may have been written to');
+  // A service that failed under a running suite: its data is kept.
+  shown = await kept(['--resume-state'], {failed: 'the firestore listener failed: connection reset', code: 1});
+  for (const expected of ['Firenook stopped', 'everything is kept in /tmp/firenook-terminal-state']) shows(shown, expected);
+  assert.ok(!flat(shown).includes('nothing was changed'));
+  // A run without --state-dir keeps its data in its own run directory.
+  const run = launch();
+  run.args[run.args.indexOf('--state-dir') + 1] = '/tmp/project/.firenook/runs/session-AbC123/state';
+  const {out, text} = screen(150);
+  const {spawner} = engine(async ({send}) => {
+    send({type: 'ready', ms: 20, console: null, ports: {firestore: 8080}, functions: 0, warnings: []});
+    await tick(40);
+    return {signal: 'SIGKILL'};
+  });
+  await runInteractive(run, {version: '9.9.9', projectId: 'demo-terminal', demo: true, out, input: keyboard(), env, platform: 'darwin', spawner, cwd: '/tmp/project'});
+  shows(text(), `this run's data stays in ${join('.firenook', 'runs', 'session-AbC123')}`);
+  assert.ok(!flat(text()).includes('nothing of yours was changed'));
 });

@@ -1,5 +1,6 @@
 //! The Extensions registry API (`firebaseextensions.googleapis.com/v1beta`)
 //! and the OAuth refresh-token exchange the Firebase CLI performs for it.
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use serde_json::Value;
@@ -84,9 +85,20 @@ pub fn discover_credential() -> Option<Credential> {
 }
 
 fn configstore_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
+    configstore_path_from(|name| std::env::var_os(name), crate::home::home_dir())
+}
+
+/// Where `configstore` 5 keeps the CLI's `firebase-tools.json`: under
+/// `XDG_CONFIG_HOME` when it is set, else under `<home>/.config`
+/// (`xdg-basedir` 4, with `home` from Node's `os.homedir()`).
+fn configstore_path_from(
+    var: impl Fn(&str) -> Option<OsString>,
+    home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    let base = var("XDG_CONFIG_HOME")
+        .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+        .or_else(|| home.map(|home| home.join(".config")))?;
     Some(base.join("configstore").join("firebase-tools.json"))
 }
 
@@ -396,6 +408,42 @@ mod tests {
     use axum::routing::{get, post};
     use axum::{Json, Router};
     use serde_json::json;
+
+    #[test]
+    fn the_cli_login_is_found_where_configstore_writes_it_on_each_platform() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| OsString::from(value))
+            }
+        };
+        let file = |base: PathBuf| base.join("configstore").join("firebase-tools.json");
+        // Windows: the profile directory, not a HOME a shell set.
+        let windows = env(&[("HOME", "/d/shop"), ("USERPROFILE", r"C:\Users\shop")]);
+        assert_eq!(
+            configstore_path_from(windows, crate::home::from_env(windows, true)),
+            Some(file(PathBuf::from(r"C:\Users\shop").join(".config")))
+        );
+        let unix = env(&[("HOME", "/u/shop")]);
+        assert_eq!(
+            configstore_path_from(unix, crate::home::from_env(unix, false)),
+            Some(file(PathBuf::from("/u/shop/.config")))
+        );
+        // XDG_CONFIG_HOME wins when it is set, and only then.
+        let xdg = env(&[("HOME", "/u/shop"), ("XDG_CONFIG_HOME", "/xdg")]);
+        assert_eq!(
+            configstore_path_from(xdg, crate::home::from_env(xdg, false)),
+            Some(file(PathBuf::from("/xdg")))
+        );
+        let blank = env(&[("HOME", "/u/shop"), ("XDG_CONFIG_HOME", "")]);
+        assert_eq!(
+            configstore_path_from(blank, crate::home::from_env(blank, false)),
+            Some(file(PathBuf::from("/u/shop/.config")))
+        );
+        assert_eq!(configstore_path_from(env(&[]), None), None);
+    }
 
     async fn mock_server() -> String {
         let app = Router::new()

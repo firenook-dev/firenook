@@ -17,9 +17,28 @@ import { CONNECT_TABS, type ConnectParam, type ConnectTarget } from './connect-t
 /** The Android emulator's name for the machine it runs on. */
 export const ANDROID_HOST = '10.0.2.2'
 
-/** What `firenook emulators:exec` writes and points GOOGLE_APPLICATION_CREDENTIALS at. */
-export const DEMO_CREDENTIALS =
-  '{"type":"authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo"}'
+/** The hub's token endpoint, which answers every refresh with the emulators' `owner` token. */
+export const DEMO_TOKEN_PATH = '/firenook/oauth2/token'
+
+/**
+ * What `firenook emulators:exec` writes and points GOOGLE_APPLICATION_CREDENTIALS
+ * at, with the hub at `hub` (`host:port`): an authorized_user file, the one
+ * kind every release of every Admin SDK reads, holding the emulators' own
+ * token (which the Python SDK takes as it is) and the hub as its `token_uri`
+ * (where the Go and Java SDKs refresh it). The Node.js SDKs send any refresh
+ * to Google, so only emulators:exec answers theirs, in their process.
+ */
+export function demoCredentials(hub: string): string {
+  return JSON.stringify({
+    type: 'authorized_user',
+    client_id: 'demo',
+    client_secret: 'demo',
+    refresh_token: 'demo',
+    token_uri: `http://${hub}${DEMO_TOKEN_PATH}`,
+    token: 'owner',
+    expiry: '2999-12-31T23:59:59Z',
+  })
+}
 
 /**
  * An app id each mobile SDK accepts without a registered app: the
@@ -116,8 +135,12 @@ export function connectSnippet(
     hub: port('hub'),
     database: port('database'),
   }
+  // The hub always runs, whichever services a snippet is for.
+  const hub = status.services.find((service) => service.name === 'hub')?.port ?? 4400
   const context: SnippetContext = {
     host,
+    bareHost: host.replace(/^\[|\]$/g, ''),
+    credentials: demoCredentials(`${host}:${hub}`),
     android: (options.host ?? '') === ANDROID_HOST,
     project: status.projectId,
     demo: status.projectId.startsWith('demo-'),
@@ -130,7 +153,12 @@ export function connectSnippet(
 }
 
 interface SnippetContext {
+  /** As it is written next to a port or inside a URL: IPv6 in brackets. */
   host: string
+  /** Without the brackets, for an SDK that adds them itself. */
+  bareHost: string
+  /** The demo credentials file's content: the emulators' token, refreshed from this engine's hub. */
+  credentials: string
   android: boolean
   project: string
   demo: boolean
@@ -210,7 +238,7 @@ const WRITERS: Record<ConnectTarget, (context: SnippetContext) => string[]> = {
     )
   },
 
-  apple: ({ host, project, demo, bucket, ports }) => {
+  apple: ({ host, bareHost, project, demo, bucket, ports }) => {
     const { auth, firestore, storage, functions } = ports
     return lines(
       ...(demo
@@ -222,9 +250,17 @@ const WRITERS: Record<ConnectTarget, (context: SnippetContext) => string[]> = {
             'FirebaseApp.configure(options: options)',
           )
         : ['FirebaseApp.configure()']),
-      auth !== undefined && `Auth.auth().useEmulator(withHost: "${host}", port: ${auth})`,
-      firestore !== undefined &&
-        `Firestore.firestore().useEmulator(withHost: "${host}", port: ${firestore})`,
+      // Auth brackets an IPv6 host itself.
+      auth !== undefined && `Auth.auth().useEmulator(withHost: "${bareHost}", port: ${auth})`,
+      // Firestore's useEmulator leaves TLS on, which the emulator does not speak.
+      ...(firestore !== undefined
+        ? [
+            'let settings = Firestore.firestore().settings',
+            `settings.host = "${host}:${firestore}"`,
+            'settings.isSSLEnabled = false',
+            'Firestore.firestore().settings = settings',
+          ]
+        : []),
       storage !== undefined &&
         `Storage.storage().useEmulator(withHost: "${host}", port: ${storage})`,
       functions !== undefined &&
@@ -245,29 +281,40 @@ const WRITERS: Record<ConnectTarget, (context: SnippetContext) => string[]> = {
   },
 
   'admin-node': ({ host, project, bucket, ports }) => {
-    const variables = adminVariables({ host, ports })
+    const variables = adminVariables('node', { host, ports })
     return lines(
       "// Easiest: run your script with the emulators' environment set for you:",
       '//   firenook emulators:exec -- node your-script.js',
-      variables.length > 0 &&
-        '// Or set these before initializeApp; the Admin SDK reads them when it starts.',
+      '// Or set these before initializeApp; the Admin SDK reads them when it starts.',
+      // As emulators:exec does: without a project id, the task queue and
+      // Eventarc clients ask the Compute Engine metadata server for one.
+      `process.env.GCLOUD_PROJECT = '${project}'`,
       ...variables.map(([name, value]) => `process.env.${name} = '${value}'`),
+      ...(ports.eventarc !== undefined
+        ? [
+            "// Eventarc's publish asks for an access token: under emulators:exec it gets the",
+            "// emulators' own; run otherwise, it asks your default credentials for one.",
+          ]
+        : []),
       '',
       "import { initializeApp } from 'firebase-admin/app'",
       `initializeApp({ projectId: '${project}'${ports.storage !== undefined ? `, storageBucket: '${bucket}'` : ''} })`,
     )
   },
 
-  python: ({ host, project, bucket, ports }) =>
+  python: ({ host, credentials, project, bucket, ports }) =>
     lines(
       "# Easiest: run your script with the emulators' environment set for you:",
       '#   firenook emulators:exec -- python your_script.py',
       '# Or set these before initialize_app. The SDK looks up default credentials',
       '# when it starts, so point it at a demo credentials file holding:',
-      `#   ${DEMO_CREDENTIALS}`,
+      `#   ${credentials}`,
+      "# It holds the emulators' own token, so the SDK never asks Google for one.",
+      ports.storage !== undefined &&
+        '# Storage reads STORAGE_EMULATOR_HOST, a URL; Python ignores FIREBASE_STORAGE_EMULATOR_HOST.',
       'import os',
       'os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "demo-credentials.json"',
-      ...adminVariables({ host, ports }).map(
+      ...adminVariables('python', { host, ports }).map(
         ([name, value]) => `os.environ["${name}"] = "${value}"`,
       ),
       '',
@@ -275,33 +322,60 @@ const WRITERS: Record<ConnectTarget, (context: SnippetContext) => string[]> = {
       `firebase_admin.initialize_app(options={"projectId": "${project}"${ports.storage !== undefined ? `, "storageBucket": "${bucket}"` : ''}})`,
     ),
 
-  go: ({ host, project, bucket, ports }) =>
+  go: ({ host, credentials, project, bucket, ports }) =>
     lines(
       "// Easiest: run your program with the emulators' environment set for you:",
       '//   firenook emulators:exec -- go run .',
       '// Or set these before firebase.NewApp. The SDK looks up default credentials',
       '// when it starts, so point it at a demo credentials file holding:',
-      `//   ${DEMO_CREDENTIALS}`,
+      `//   ${credentials}`,
+      "// The SDK refreshes its token from the emulators' hub, its token_uri.",
       'os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "demo-credentials.json")',
-      ...adminVariables({ host, ports }).map(([name, value]) => `os.Setenv("${name}", "${value}")`),
+      ...adminVariables('go', { host, ports }).map(
+        ([name, value]) => `os.Setenv("${name}", "${value}")`,
+      ),
       '',
       `app, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: "${project}"${ports.storage !== undefined ? `, StorageBucket: "${bucket}"` : ''}})`,
     ),
 
-  java: ({ host, project, bucket, ports }) =>
+  java: ({ host, credentials, project, bucket, ports }) =>
     lines(
       "// Easiest: run your program with the emulators' environment set for you:",
       '//   firenook emulators:exec -- <your command>',
       "// Or set these in the JVM's environment before it starts; Java cannot set them itself:",
       '//   GOOGLE_APPLICATION_CREDENTIALS=demo-credentials.json, a file holding',
-      `//     ${DEMO_CREDENTIALS}`,
-      ...adminVariables({ host, ports }).map(([name, value]) => `//   ${name}=${value}`),
+      `//     ${credentials}`,
+      "//     (the SDK refreshes its token from the emulators' hub, its token_uri)",
+      ...adminVariables('java', { host, ports }).map(([name, value]) => `//   ${name}=${value}`),
       'FirebaseOptions options = FirebaseOptions.builder()',
       `    .setProjectId("${project}")`,
-      ports.storage !== undefined && `    .setStorageBucket("${bucket}")`,
       '    .setCredentials(GoogleCredentials.getApplicationDefault())',
       '    .build();',
       'FirebaseApp.initializeApp(options);',
+      ...(ports.storage !== undefined
+        ? [
+            '',
+            "// Java's Storage client reads no emulator variable, so build it on the emulator",
+            `// (the default bucket is "${bucket}"):`,
+            'Storage storage = StorageOptions.newBuilder()',
+            `    .setHost("http://${host}:${ports.storage}")`,
+            `    .setProjectId("${project}")`,
+            '    .setCredentials(NoCredentials.getInstance())',
+            '    .build()',
+            '    .getService();',
+          ]
+        : []),
+      ...(ports.pubsub !== undefined
+        ? [
+            '',
+            "// Java's Pub/Sub client reads no emulator variable, so give it a plaintext channel:",
+            `ManagedChannel channel = ManagedChannelBuilder.forTarget("${host}:${ports.pubsub}").usePlaintext().build();`,
+            `Publisher publisher = Publisher.newBuilder(TopicName.of("${project}", "orders"))`,
+            '    .setChannelProvider(FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel)))',
+            '    .setCredentialsProvider(NoCredentialsProvider.create())',
+            '    .build();',
+          ]
+        : []),
     ),
 
   env: ({ host, project, ports }) => {
@@ -311,6 +385,8 @@ const WRITERS: Record<ConnectTarget, (context: SnippetContext) => string[]> = {
       `GOOGLE_CLOUD_PROJECT=${project}\u0000${exec}`,
       ports.firestore !== undefined &&
         `FIRESTORE_EMULATOR_HOST=${host}:${ports.firestore}\u0000${exec}`,
+      ports.firestore !== undefined &&
+        `FIREBASE_FIRESTORE_EMULATOR_ADDRESS=${host}:${ports.firestore}\u0000${exec}`,
       ports.auth !== undefined && `FIREBASE_AUTH_EMULATOR_HOST=${host}:${ports.auth}\u0000${exec}`,
       ports.storage !== undefined &&
         `FIREBASE_STORAGE_EMULATOR_HOST=${host}:${ports.storage}\u0000${exec}`,
@@ -318,11 +394,10 @@ const WRITERS: Record<ConnectTarget, (context: SnippetContext) => string[]> = {
         `STORAGE_EMULATOR_HOST=http://${host}:${ports.storage}\u0000${exec}`,
       ports.hub !== undefined && `FIREBASE_EMULATOR_HUB=${host}:${ports.hub}\u0000${exec}`,
       ports.pubsub !== undefined && `PUBSUB_EMULATOR_HOST=${host}:${ports.pubsub}\u0000${exec}`,
-      `GOOGLE_APPLICATION_CREDENTIALS=demo-credentials.json\u0000emulators:exec writes a demo file and sets this`,
-      ports.tasks !== undefined &&
-        `CLOUD_TASKS_EMULATOR_HOST=${host}:${ports.tasks}\u0000for Cloud Tasks clients; Functions get it, exec does not set it`,
+      ports.tasks !== undefined && `CLOUD_TASKS_EMULATOR_HOST=${host}:${ports.tasks}\u0000${exec}`,
       ports.eventarc !== undefined &&
-        `CLOUD_EVENTARC_EMULATOR_HOST=http://${host}:${ports.eventarc}\u0000for Eventarc clients; Functions get it, exec does not set it`,
+        `CLOUD_EVENTARC_EMULATOR_HOST=http://${host}:${ports.eventarc}\u0000${exec}`,
+      `GOOGLE_APPLICATION_CREDENTIALS=demo-credentials.json\u0000emulators:exec writes a demo file and sets this`,
     )
     const width = Math.max(...rows.map((row) => row.indexOf('\u0000')))
     return rows.map((row) => {
@@ -372,18 +447,31 @@ function entry(name: string, value: string): string {
   return `    "${name}": ${value}`
 }
 
-/** The variables the Admin SDKs read, for the services that run. */
-function adminVariables({
-  host,
-  ports,
-}: Pick<SnippetContext, 'host' | 'ports'>): Array<[string, string]> {
+/**
+ * The variables one language's SDKs read, for the services that run: only
+ * those its clients read. Python's Storage takes STORAGE_EMULATOR_HOST (a URL)
+ * and ignores FIREBASE_STORAGE_EMULATOR_HOST; Java's Storage and Pub/Sub read
+ * neither, so the Java snippet builds those clients on the emulator; Node and
+ * Python enqueue tasks (Python publishes no Eventarc event).
+ */
+function adminVariables(
+  language: 'node' | 'python' | 'go' | 'java',
+  { host, ports }: Pick<SnippetContext, 'host' | 'ports'>,
+): Array<[string, string]> {
   const rows: Array<[string, string]> = []
   if (ports.firestore !== undefined)
     rows.push(['FIRESTORE_EMULATOR_HOST', `${host}:${ports.firestore}`])
   if (ports.auth !== undefined) rows.push(['FIREBASE_AUTH_EMULATOR_HOST', `${host}:${ports.auth}`])
-  if (ports.storage !== undefined)
+  if (ports.storage !== undefined && language === 'python')
+    rows.push(['STORAGE_EMULATOR_HOST', `http://${host}:${ports.storage}`])
+  else if (ports.storage !== undefined && language !== 'java')
     rows.push(['FIREBASE_STORAGE_EMULATOR_HOST', `${host}:${ports.storage}`])
-  if (ports.pubsub !== undefined) rows.push(['PUBSUB_EMULATOR_HOST', `${host}:${ports.pubsub}`])
+  if (ports.pubsub !== undefined && language !== 'java')
+    rows.push(['PUBSUB_EMULATOR_HOST', `${host}:${ports.pubsub}`])
+  if (ports.tasks !== undefined && (language === 'node' || language === 'python'))
+    rows.push(['CLOUD_TASKS_EMULATOR_HOST', `${host}:${ports.tasks}`])
+  if (ports.eventarc !== undefined && language === 'node')
+    rows.push(['CLOUD_EVENTARC_EMULATOR_HOST', `http://${host}:${ports.eventarc}`])
   return rows
 }
 

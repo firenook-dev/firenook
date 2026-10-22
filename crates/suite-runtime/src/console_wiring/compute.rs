@@ -186,7 +186,12 @@ fn watch_parameter_files(
                         old.stop();
                     }
                 }
-                Err(error) => eprintln!("firenook extensions: {error}"),
+                Err(error) => crate::terminal::print(
+                    "ERROR",
+                    "extensions",
+                    &error,
+                    &format!("firenook extensions: {error}"),
+                ),
             }
             let present = parameter_files(&directory, &extensions);
             if !present.is_empty() {

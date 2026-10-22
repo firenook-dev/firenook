@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { activeProject } from './configstore.mjs';
 
 // The five data services Firenook emulates.
 export const SERVICES = ['firestore', 'auth', 'storage', 'functions', 'pubsub'];
@@ -18,13 +19,13 @@ export const VERBOSITIES = ['DEBUG', 'INFO', 'QUIET', 'SILENT', 'WARN', 'ERROR']
 // Where --keep-data keeps the data, inside the project directory.
 export const KEEP_DATA_DIR = join('.firenook', 'state');
 
-const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'instance', 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'log-verbosity', 'alias', 'add', 'unalias', 'database', 'agent']);
+const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'instance', 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'log-verbosity', 'alias', 'add', 'unalias', 'database', 'agent', 'language']);
 const durabilities = new Set(['write-behind', 'per-commit']);
-const switches = new Set(['resume-state', 'keep-data', 'no-diagnostics', 'help', 'offline', 'non-interactive', 'json', 'force', 'debug', 'ui', 'plain', 'adopt', 'dry-run', 'recursive', 'shallow', 'all-collections', 'clear', 'functions', 'no-functions', 'no-copy']);
+const switches = new Set(['resume-state', 'keep-data', 'no-diagnostics', 'help', 'offline', 'non-interactive', 'json', 'force', 'debug', 'ui', 'plain', 'adopt', 'dry-run', 'recursive', 'shallow', 'all-collections', 'clear', 'functions', 'no-functions', 'no-copy', 'build', 'yes', 'no-install', 'no-pin']);
 // Optional-value options: a bare flag or --name=value.
 const optionalValues = new Set(['inspect-functions']);
 // Official single-letter aliases.
-const shorts = {P:'project', c:'config', C:'config', r:'recursive', f:'force', h:'help'};
+const shorts = {P:'project', c:'config', C:'config', r:'recursive', f:'force', h:'help', y:'yes'};
 const repeated = new Set(['storage-bucket', 'instance']);
 
 // Returns {options, command, positionals, flags}: `command` is the argv after
@@ -83,15 +84,32 @@ export function parseOptions(argv) {
 export const validProjectId = id => typeof id === 'string' && (/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(id) || /^demo-[a-z0-9][a-z0-9-]*$/.test(id));
 export const isDemoProject = id => typeof id === 'string' && id.startsWith('demo-');
 export const isLoopback = host => LOOPBACK.includes(host);
-// Host clients connect to when the suite binds a wildcard address.
+// Host clients connect to when the suite binds a wildcard address, or
+// localhost (its first address, as the official CLI advertises it).
 export function connectHost(host) {
-  if (host === '0.0.0.0') return '127.0.0.1';
+  if (host === '0.0.0.0' || host === 'localhost') return '127.0.0.1';
   if (host === '::' || host === '[::]' || host === '::1') return '[::1]';
   if (host.includes(':') && !host.startsWith('[')) return `[${host}]`;
   return host;
 }
 
 export const readJson = file => JSON.parse(readFileSync(file, 'utf8'));
+const isDirectory = path => { try { return statSync(path).isDirectory(); } catch { return false; } };
+const isFile = path => { try { return statSync(path).isFile(); } catch { return false; } };
+
+// The project's firebase.json: --config, relative to the current directory,
+// or, as the official CLI finds it, the first firebase.json in the current
+// directory or a folder above it, up to the root of the file system (so a
+// command run in functions/ finds the project's). Undefined when there is
+// none.
+export function findConfig(options = {}, cwd = process.cwd()) {
+  if (options.config) return resolve(cwd, options.config);
+  for (let directory = resolve(cwd); ; directory = dirname(directory)) {
+    const candidate = join(directory, 'firebase.json');
+    if (isFile(candidate)) return candidate;
+    if (dirname(directory) === directory) return undefined;
+  }
+}
 // Resolve existing parent symlinks even for a destination that does not exist.
 export function canonical(path) {
   path = resolve(path);
@@ -104,15 +122,36 @@ export const contains = (parent, child) => {
 };
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
+// The project, the .firebaserc alias it was selected by and where the choice
+// came from, as the official CLI's applyRC picks them: --project, else the
+// active project `firebase use` recorded for this directory (`active`), else
+// firebase.json's legacy `firebase` key (`configured`); a choice naming an
+// alias selects it. With none of them, the only alias the file holds, else
+// its default one. A Functions codebase reads .env.<alias> for that alias.
+// `projects.default` may hold another alias's name, which then names the
+// project.
+export function selectProject(selection, aliases, {active, configured} = {}) {
+  const entries = Object.entries(aliases).filter(([, id]) => typeof id === 'string' && id);
+  const named = name => entries.find(([alias]) => alias === name)?.[1];
+  const [chosen, from] = selection ? [selection, '--project'] : active ? [active, 'firebase use'] : configured ? [configured, 'firebase.json'] : [];
+  if (chosen) return named(chosen) ? {project:named(chosen), alias:chosen, from} : {project:chosen, from};
+  if (entries.length === 1) return {project:entries[0][1], alias:entries[0][0], from:'.firebaserc'};
+  const fallback = named('default');
+  if (fallback) return {project:named(fallback) || fallback, alias:'default', from:'.firebaserc'};
+  return {project:undefined};
+}
+
 // Reads firebase.json and .firebaserc with every check the launcher applies,
 // collecting findings instead of throwing: `errors` (Firenook cannot start),
-// `warnings` (configured official services it skips, safety notes). Invalid
+// `warnings` (services it skips, which are also in `skips`, and safety
+// notes). Invalid
 // JSON and a missing firebase.json still throw.
 export function inspectProject(options, cwd = process.cwd()) {
   const errors = [];
   const warnings = [];
   const fail = (code, message) => errors.push({code, message});
-  const config = resolve(cwd, options.config || 'firebase.json');
+  const config = findConfig(options, cwd);
+  if (!config) throw new Error(`No firebase.json in ${resolve(cwd)} or a folder above it; run firenook init in the project directory or pass --config`);
   const directory = dirname(config);
   if (!existsSync(config)) throw new Error(`No firebase.json at ${config}; run firenook init in the project directory or pass --config`);
   let data;
@@ -124,8 +163,8 @@ export function inspectProject(options, cwd = process.cwd()) {
     try { rcData = readJson(rc); } catch (error) { throw new Error(`${rc} is not valid JSON: ${error.message}`); }
   }
   const aliases = isObject(rcData?.projects) ? rcData.projects : {};
-  const selection = options.project || aliases.default;
-  const project = (selection !== undefined && aliases[selection]) || selection;
+  const {project, alias, from:projectFrom} = selectProject(options.project, aliases,
+    {active:activeProject(directory), configured:typeof data.firebase === 'string' ? data.firebase : undefined});
   if (!project) fail('project-missing', 'No project id. Pass --project <id> (or -P <id>), or record one with firenook use --add <id> (projects.default in .firebaserc).');
   else if (!validProjectId(project)) fail('project-invalid', `Invalid project id ${project}: use lowercase letters, digits and hyphens (6 to 30 characters, starting with a letter), or a demo- prefix for a local-only project.`);
   const demo = isDemoProject(project);
@@ -134,8 +173,16 @@ export function inspectProject(options, cwd = process.cwd()) {
   if (!isObject(emulators)) fail('emulators', 'firebase.json emulators must be an object');
   const known = [...SERVICES, 'hub', 'ui', 'logging', 'eventarc', 'tasks', 'extensions', 'singleProjectMode'];
   const skipped = [];
+  // The warnings that name a service Firenook skips: an official one it
+  // does not implement, or one --only names that firebase.json does not
+  // configure.
+  const skips = [];
   for (const name of Object.keys(isObject(emulators) ? emulators : {})) {
-    if (UNIMPLEMENTED.includes(name)) { skipped.push(name); warnings.push(`Firenook: firebase.json configures the ${name} emulator, which Firenook does not implement; skipping it.`); }
+    if (UNIMPLEMENTED.includes(name)) {
+      skipped.push(name);
+      skips.push(`Firenook: firebase.json configures the ${name} emulator, which Firenook does not implement; skipping it.`);
+      warnings.push(skips.at(-1));
+    }
     else if (!known.includes(name)) fail('emulators-key', `Unsupported configured emulator: ${name}. Valid emulators keys are ${[...known, ...UNIMPLEMENTED].join(', ')}.`);
   }
   const has = key => Object.hasOwn(data, key);
@@ -158,7 +205,16 @@ export function inspectProject(options, cwd = process.cwd()) {
       else if (name === 'extensions') wanted.add('functions');
       else if (!FOLLOWERS.includes(name)) wanted.add(name);
     }
-    for (const name of wanted) if (!configured.includes(name)) warnings.push(`Firenook: not starting the ${name} emulator; firebase.json does not configure it (run firenook init --adopt or add emulators.${name}).`);
+    for (const name of wanted) {
+      if (configured.includes(name)) continue;
+      // What configures it, as the official init writes it: a codebase for
+      // Functions, an emulators entry with its port for the others. adopt
+      // adds entries only for the services firebase.json already names.
+      skips.push(name === 'functions'
+        ? 'Firenook: not starting the functions emulator; firebase.json has no Functions codebase (add a "functions" section naming its source, as firebase init functions writes it).'
+        : `Firenook: not starting the ${name} emulator; firebase.json does not configure it (add "${name}": {"port": ${DEFAULT_PORTS[name]}} under "emulators" in firebase.json, as firebase init emulators writes it).`);
+      warnings.push(skips.at(-1));
+    }
     services = configured.filter(name => wanted.has(name));
   }
   if (!errors.length && !services.length) fail('services', 'No emulators to start, run firenook init to get started.');
@@ -190,7 +246,9 @@ export function inspectProject(options, cwd = process.cwd()) {
 
   const entry = name => (isObject(emulators) && isObject(emulators[name]) ? emulators[name] : undefined);
   const configuredHost = LISTENERS.map(name => entry(name)?.host).find(host => typeof host === 'string' && host);
-  const host = options.host || configuredHost || '127.0.0.1';
+  // localhost, as the official default: the engine binds 127.0.0.1 for it,
+  // and ::1 as well for the hub and the console; clients are told 127.0.0.1.
+  const host = options.host || configuredHost || 'localhost';
   if (typeof host !== 'string' || !host.trim()) fail('host', '--host requires a host name or address');
   for (const name of LISTENERS) {
     const own = entry(name)?.host;
@@ -209,7 +267,7 @@ export function inspectProject(options, cwd = process.cwd()) {
   }
   if (new Set(Object.values(ports)).size !== Object.keys(ports).length) fail('port', 'Emulator ports must be distinct');
 
-  const imported = options.import ? canonical(resolve(cwd, options.import)) : undefined;
+  let imported = options.import ? canonical(resolve(cwd, options.import)) : undefined;
   let exported = options['export-on-exit'];
   if (exported === true) exported = imported;
   if (options['export-on-exit'] && !exported) fail('export', '--export-on-exit requires --import or an explicit destination');
@@ -217,6 +275,12 @@ export function inspectProject(options, cwd = process.cwd()) {
     exported = canonical(resolve(cwd, exported));
     if (contains(exported, canonical(cwd)) || contains(exported, canonical(directory))) fail('export', 'Export destination must not be the project directory or an ancestor');
   }
+  // As the official CLI: an --import directory that does not exist yet, and
+  // that the stop exports to, is no import. The first start is empty, and
+  // its stop creates the directory for the next one. (One that does not
+  // exist otherwise is refused by the engine; one with no export in it is
+  // skipped there, with a warning.)
+  if (imported && exported === imported && !isDirectory(imported)) imported = undefined;
   // --keep-data is --resume-state with the project's own state directory
   // (unless --state-dir names another): data kept between runs, with or
   // without a seed.
@@ -233,7 +297,7 @@ export function inspectProject(options, cwd = process.cwd()) {
   // The engine needs a positive minimum only when a Functions codebase exists.
   const functionsConfigured = has('functions') || has('extensions');
   const minimumFunctions = options['minimum-functions'] !== undefined ? String(options['minimum-functions']) : (services.includes('functions') && functionsConfigured ? '1' : '0');
-  return {config, directory, rc, data, project, demo, configured, services, skipped, ui, uiExplicit, singleProjectMode, host, ports, imported, exported, state, resume, minimumFunctions, errors, warnings};
+  return {config, directory, rc, data, project, alias, projectFrom, demo, configured, services, skipped, ui, uiExplicit, singleProjectMode, host, ports, imported, exported, state, resume, minimumFunctions, errors, warnings, skips};
 }
 
 // What the engine is told about this launch (--launch-context), so the

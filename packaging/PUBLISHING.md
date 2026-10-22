@@ -1,7 +1,9 @@
 # Release owner runbook
 
-Status: preview packages exist. Release publication requires the protected
-workflow and human approval; never bypass that review.
+Status: the `0.2.0-next.N` previews are published, and the next release,
+`0.2.0`, is the first stable one: the CLI goes to `latest`. Release
+publication requires the protected workflow and human approval; never bypass
+that review.
 
 ## Package ownership and one-time bootstrap
 
@@ -82,7 +84,9 @@ macOS notarization and more platforms remain separate supported-platform work.
    It must point exactly to that main commit. The workflow runs full quality
    gates and all five fresh native builds/packed npm and Bun install smokes.
    Leave `latest` off to publish every package to `next`; turn it on only to
-   publish the CLI straight to `latest` (see below).
+   publish the CLI straight to `latest` (see below). A stable version (no
+   preview tag, such as `0.2.0`) is dispatched with `latest`; a preview
+   (`0.2.1-next.1`) without it.
 4. Approve the `npm-release` environment only after reviewing the exact artifacts
    and checks, and the channel line in the authorize job's summary.
    GitHub-hosted Ubuntu publishes using `id-token: write`, with no
@@ -119,9 +123,11 @@ macOS notarization and more platforms remain separate supported-platform work.
    reservation: either dispatch with `latest`, which moves the CLI only, or
    after registry verification the release owner runs `npm dist-tag add
    <package>@VERSION latest` interactively for the CLI and the five platform
-   packages. From the first stable release on, `latest` moves only for a
-   separately reviewed stable version. npm OIDC does not authenticate dist-tag
-   management; never add a long-lived token merely to automate that step.
+   packages. From the first stable release, `0.2.0`, on, `latest` moves only
+   for a separately reviewed stable version, dispatched with `latest`; a
+   preview never moves it, by hand or otherwise. npm OIDC does not
+   authenticate dist-tag management; never add a long-lived token merely to
+   automate that step.
 
 ## Publishing the CLI straight to `latest`
 
@@ -148,12 +154,20 @@ before anything is written.
 **What happens to `next`.** npm sets one tag per publish and OIDC cannot move
 tags, so a release published to `latest` leaves the CLI's `next` on the
 previous release. `npm i firenook@next` then installs an older version than
-`firenook@latest`, and the CLI's update notice, which follows `next` on a
-preview install, does not offer this release to installs of earlier
-previews. `next` stays there until the release owner moves it by hand
-(`npm dist-tag add firenook@VERSION next`, interactively with 2FA); the
-workflow never does, and has no token to do it with. Say so in the release
-notes of every release published this way.
+`firenook@latest`. The CLI's update notice on a preview install reads both
+tags and offers the later, so installs of earlier previews still hear of a
+release on `latest`. `next` stays where it was until the release owner moves
+it by hand (`npm dist-tag add firenook@VERSION next`, interactively with
+2FA); the workflow never does, and has no token to do it with. After a
+stable release, move it to that version, so that `firenook@next` is never
+older than `firenook@latest`, and say so in the release notes of every
+release published this way.
+
+The native packages' own `latest` stays where it was too (the `0.0.0`
+reservation, or a preview moved by hand): `npm view @firenook/cli-<platform>`
+shows that version. Nothing installs them by tag, since the CLI pins their
+exact versions; move them by hand only if the registry page should show the
+release.
 
 ## Recovering a partially published version without rebuilding
 
@@ -246,7 +260,11 @@ successful publish.
 
 ## Version and rollback policy
 
-- Use `0.1.0-next.N`/`0.1.0-rc.N` while the public contract is preview-only.
+- Versions are semver. The previews were `0.1.0-next.N` and `0.2.0-next.N`
+  (on `next`); `0.2.0` is the first stable release (on `latest`). A preview of
+  a later version is `X.Y.Z-next.N` or `X.Y.Z-rc.N` on `next`, and a stable
+  one is `X.Y.Z` on `latest`. While the major version is 0, a breaking change
+  raises the minor version.
 - Do not promise stable or universal Firebase compatibility from one consumer's acceptance.
 - Document breaking config/CLI/state changes explicitly, including during 0.x.
 - Never overwrite/unpublish a used version to fix a release. Publish a corrected

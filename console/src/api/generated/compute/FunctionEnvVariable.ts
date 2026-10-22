@@ -11,6 +11,7 @@ export type FunctionEnvVariable = { key: string,
  */
 value: string | null, secret: boolean, source: FunctionEnvSource, 
 /**
- * The file it came from, for dotenv and secret variables.
+ * The file it came from, for dotenv and secret variables (null for a
+ * param's default).
  */
 file: FunctionEnvFile | null, fileName: string | null, };

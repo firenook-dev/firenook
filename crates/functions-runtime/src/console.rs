@@ -119,13 +119,15 @@ pub struct ParamView {
     pub default: Option<Value>,
     pub label: Option<String>,
     pub description: Option<String>,
-    /// `None` for a secret param (reveal it through [`ConsoleHandle::secret`]).
+    /// The value the codebase loaded with: an env file's, or the param's
+    /// default when no file sets it. `None` for a secret param (reveal it
+    /// through [`ConsoleHandle::secret`]).
     pub value: Option<String>,
     pub secret: bool,
     /// The file the value comes from.
     pub file: Option<String>,
-    /// No env file sets it: the official emulator would prompt and write
-    /// `.env.local`.
+    /// No env file sets it: the official emulator would prompt (with the
+    /// default, if any, filled in) and write `.env.local`.
     pub unresolved: bool,
 }
 
@@ -182,6 +184,8 @@ pub struct FunctionView {
 pub enum EnvSource {
     DotEnv,
     SecretLocal,
+    /// A param no env file sets: its default, as the worker gets it.
+    ParamDefault,
     /// Set by the emulator for every worker.
     Emulator,
     /// An Extension instance's parameter.
@@ -661,6 +665,7 @@ impl ConsoleHandle {
                         param_view(
                             param,
                             &loaded.user_env,
+                            &loaded.param_defaults,
                             &loaded.env_sources,
                             &loaded.secrets,
                         )
@@ -786,6 +791,19 @@ impl ConsoleHandle {
                 source: EnvSource::DotEnv,
                 file: file_name.as_deref().map(|name| self.env_file_of(name)),
                 file_name,
+            });
+        }
+        for (key, value) in &loaded.param_env {
+            if loaded.user_env.contains_key(key) {
+                continue;
+            }
+            variables.push(EnvVariableView {
+                key: key.clone(),
+                value: Some(value.clone()),
+                secret: false,
+                source: EnvSource::ParamDefault,
+                file: None,
+                file_name: None,
             });
         }
         for key in loaded.secrets.keys() {
@@ -1683,6 +1701,7 @@ fn status_of(record: &Record) -> RuntimeStatus {
 fn param_view(
     param: &DeclaredParam,
     values: &BTreeMap<String, String>,
+    defaults: &BTreeMap<String, String>,
     sources: &BTreeMap<String, String>,
     secrets: &BTreeMap<String, String>,
 ) -> ParamView {
@@ -1696,7 +1715,10 @@ fn param_view(
         )
     } else {
         (
-            values.get(&param.name).cloned(),
+            values
+                .get(&param.name)
+                .or_else(|| defaults.get(&param.name))
+                .cloned(),
             sources.get(&param.name).cloned(),
         )
     };

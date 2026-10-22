@@ -6,8 +6,8 @@ use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
 use firenook_core_store::{
-    DatabaseName, Document, DocumentKey, FieldEquality, Fields, LazyDocument, Snapshot, Value,
-    compare_resource_paths, field_index_holds,
+    DatabaseName, Document, DocumentKey, FieldEquality, FieldOrderEntry, FieldOrderRange,
+    FieldOrderWalk, Fields, LazyDocument, Snapshot, Value, compare_resource_paths,
 };
 
 use crate::indexes::IndexScope;
@@ -24,6 +24,10 @@ mod field_index_tests;
 #[cfg(test)]
 #[path = "plan_tests.rs"]
 mod plan_tests;
+
+#[cfg(test)]
+#[path = "index_order_tests.rs"]
+mod index_order_tests;
 
 /// A document field or the special document-name field.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -543,6 +547,13 @@ pub fn count(
             }
             count
         }
+        QueryDocumentIteratorInner::IndexOrder(walk) => {
+            let mut count = 0_u64;
+            while walk.next_lazy().is_some() {
+                count = count.saturating_add(1);
+            }
+            count
+        }
         QueryDocumentIteratorInner::OrderedDisk(_) | QueryDocumentIteratorInner::Buffered(_) => {
             u64::try_from(iterator.count()).unwrap_or(u64::MAX)
         }
@@ -691,13 +702,6 @@ impl IncrementalQuery {
     }
 }
 
-/// Creates a lazy result iterator for a structured query.
-///
-/// Queries whose normalized order is ascending document name are evaluated
-/// directly over the store's ordered scope iterator. Unlimited ordered disk
-/// queries sort keys/ordering values and reload each result from the same
-/// snapshot. Limited, nearest and memory queries keep the bounded sorting path.
-/// Streaming transports can release large result payloads one at a time.
 /// How a query's results are produced. [`QueryStrategy::of`] is the only
 /// place that decides, so [`execute_iter`] and [`plan`] cannot disagree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -705,6 +709,10 @@ pub enum QueryStrategy {
     /// Candidates are filtered and limited as they are read, decoding only
     /// the fields a filter or an order inspects.
     Streaming,
+    /// Candidates come out of the disk field index already in the query's
+    /// order, so they are filtered and limited as they are read and reading
+    /// stops once the limit is met.
+    IndexOrder,
     /// Disk keys are sorted by their order values before any payload is
     /// decoded, so an unlimited ordered query retains nothing extra.
     OrderedDisk,
@@ -713,7 +721,8 @@ pub enum QueryStrategy {
 }
 
 impl QueryStrategy {
-    fn of(snapshot: &Snapshot, query: &Query, orders: &[Order]) -> Self {
+    /// `index_order` is whether [`index_order`] found a walk for the query.
+    fn of(snapshot: &Snapshot, query: &Query, orders: &[Order], index_order: bool) -> Self {
         if query.nearest.is_none()
             && !matches!(query.limit, Some(Limit::Last(_)))
             && orders
@@ -724,6 +733,9 @@ impl QueryStrategy {
         {
             return Self::Streaming;
         }
+        if index_order {
+            return Self::IndexOrder;
+        }
         if snapshot.is_disk_backed() && query.limit.is_none() && query.nearest.is_none() {
             return Self::OrderedDisk;
         }
@@ -731,6 +743,15 @@ impl QueryStrategy {
     }
 }
 
+/// Creates a lazy result iterator for a structured query.
+///
+/// Queries whose normalized order is ascending document name are evaluated
+/// directly over the store's ordered scope iterator. A query ordered by one
+/// top-level field of one disk collection walks that field's index in its
+/// order (see [`index_order`]). Other unlimited ordered disk queries sort
+/// keys/ordering values and reload each result from the same snapshot.
+/// Limited, nearest and memory queries keep the bounded sorting path.
+/// Streaming transports can release large result payloads one at a time.
 pub fn execute_iter(
     snapshot: &Snapshot,
     database: &DatabaseName,
@@ -741,8 +762,29 @@ pub fn execute_iter(
     validate_cursor(query.start.as_ref(), &orders)?;
     validate_cursor(query.end.as_ref(), &orders)?;
 
-    match QueryStrategy::of(snapshot, query, &orders) {
-        QueryStrategy::Streaming => Ok(QueryDocumentIterator {
+    let index_order = index_order(snapshot, database, query, &orders);
+    match (
+        QueryStrategy::of(snapshot, query, &orders, index_order.is_some()),
+        index_order,
+    ) {
+        (QueryStrategy::IndexOrder, Some(index_order)) => Ok(QueryDocumentIterator {
+            inner: QueryDocumentIteratorInner::IndexOrder(Box::new(
+                IndexOrderQueryDocumentIterator {
+                    snapshot: snapshot.clone(),
+                    walk: index_order.walk,
+                    pending: None,
+                    tied: Vec::new().into_iter(),
+                    edition,
+                    orders,
+                    query: query.clone(),
+                    remaining_limit: query.limit.map(|limit| match limit {
+                        Limit::First(limit) | Limit::Last(limit) => limit,
+                    }),
+                    remaining_offset: query.offset,
+                },
+            )),
+        }),
+        (QueryStrategy::Streaming, _) => Ok(QueryDocumentIterator {
             inner: QueryDocumentIteratorInner::Streaming(Box::new(
                 StreamingQueryDocumentIterator {
                     candidates: scoped_documents(snapshot, database, query),
@@ -756,13 +798,249 @@ pub fn execute_iter(
                 },
             )),
         }),
-        QueryStrategy::OrderedDisk => Ok(ordered_disk_iterator(
+        (QueryStrategy::OrderedDisk, _) => Ok(ordered_disk_iterator(
             snapshot, database, query, edition, &orders,
         )),
-        QueryStrategy::Buffered => execute_buffered(snapshot, database, query, edition, &orders)
-            .map(|documents| QueryDocumentIterator {
-                inner: QueryDocumentIteratorInner::Buffered(documents.into_iter()),
-            }),
+        // `of` names the index order only when a walk exists.
+        (QueryStrategy::Buffered | QueryStrategy::IndexOrder, _) => {
+            execute_buffered(snapshot, database, query, edition, &orders).map(|documents| {
+                QueryDocumentIterator {
+                    inner: QueryDocumentIteratorInner::Buffered(documents.into_iter()),
+                }
+            })
+        }
+    }
+}
+
+/// A walk checks every entry it passes against the other fields' index, one
+/// point read each, where an equality lookup reads only its own documents,
+/// each about as costly as this many point reads (measured on 45 KB
+/// documents: 110 of them cost what a walk past 2,000 entries did).
+const DOCUMENT_READ_IN_POINT_READS: u128 = 16;
+
+/// Equality lookups are counted up to this many documents; one holding more
+/// is walked, never read whole.
+const EQUALITY_PROBE_LIMIT: usize = 10_000;
+
+/// A query answered by walking one field's index: see [`index_order`].
+struct IndexOrder {
+    walk: FieldOrderWalk,
+    /// The field walked.
+    field: String,
+    /// The other fields whose `==`/`in` filters the walk checks in the index.
+    lookups: Vec<String>,
+}
+
+/// The walk over the disk field index that returns `query`'s candidates in
+/// its order, when there is one: a single collection, normalized orders of
+/// exactly one top-level field followed by `__name__` in the same direction,
+/// no limit-to-last, no nearest-neighbour stage and no pinned document names,
+/// on a disk snapshot that has the index. Range and `==`/`in` filters on the
+/// field and the cursors bound the walk; `==`/`in` filters on other
+/// top-level fields are checked in the index before a document is read.
+/// Every candidate is still evaluated in full, so the bounds only need to
+/// keep every result. When those filters leave few documents (see
+/// [`walk_costs_less`]) reading them through their own index and sorting
+/// is cheaper than the walk, and the query keeps that path.
+fn index_order(
+    snapshot: &Snapshot,
+    database: &DatabaseName,
+    query: &Query,
+    orders: &[Order],
+) -> Option<IndexOrder> {
+    if query.nearest.is_some() || matches!(query.limit, Some(Limit::Last(_))) {
+        return None;
+    }
+    let QueryScope::Collection(collection_path) = &query.scope else {
+        return None;
+    };
+    let [order, name] = orders else {
+        return None;
+    };
+    let FieldPath::Field(segments) = &order.path else {
+        return None;
+    };
+    let [field] = segments.as_slice() else {
+        return None;
+    };
+    if name.path != FieldPath::DocumentId
+        || name.direction != order.direction
+        || named_candidates(query, database).is_some()
+    {
+        return None;
+    }
+    let descending = order.direction == Direction::Descending;
+    let mut bounds = FieldOrderRange::all();
+    if let Some(filter) = &query.filter {
+        bound_by_filter(filter, &order.path, &mut bounds);
+    }
+    for (cursor, start) in [(query.start.as_ref(), true), (query.end.as_ref(), false)] {
+        if let Some(cursor) = cursor {
+            bound_by_cursor(
+                cursor,
+                start,
+                descending,
+                database,
+                collection_path,
+                &mut bounds,
+            );
+        }
+    }
+    let lookups = equality_lookups(query)
+        .into_iter()
+        .filter(|(lookup, _)| lookup != field)
+        .collect::<Vec<_>>();
+    let equalities = lookups
+        .iter()
+        .map(|(field, values)| FieldEquality { field, values })
+        .collect::<Vec<_>>();
+    if !walk_costs_less(snapshot, database, collection_path, query, &equalities) {
+        return None;
+    }
+    let walk = snapshot.walk_field_order(
+        database,
+        collection_path,
+        field,
+        descending,
+        &bounds,
+        &equalities,
+    )?;
+    Some(IndexOrder {
+        walk,
+        field: field.clone(),
+        lookups: lookups.into_iter().map(|(field, _)| field).collect(),
+    })
+}
+
+/// Whether walking the order beats reading what `equalities` leave and
+/// sorting it. The walk passes about `page × documents / candidates` entries
+/// to fill a page (the whole collection for an unlimited query), a point
+/// read each; the lookup reads `candidates` documents. The store's document
+/// count stands in for the collection's, which only favours the lookup, and
+/// counting candidates stops at [`EQUALITY_PROBE_LIMIT`].
+fn walk_costs_less(
+    snapshot: &Snapshot,
+    database: &DatabaseName,
+    collection_path: &str,
+    query: &Query,
+    equalities: &[FieldEquality<'_>],
+) -> bool {
+    let Some(candidates) = snapshot.count_collection_equal(
+        database,
+        collection_path,
+        equalities,
+        EQUALITY_PROBE_LIMIT,
+    ) else {
+        return true;
+    };
+    if candidates >= EQUALITY_PROBE_LIMIT {
+        return true;
+    }
+    let candidates = candidates as u128;
+    let page = match query.limit {
+        Some(Limit::First(limit)) => (query.offset.saturating_add(limit) as u128).min(candidates),
+        Some(Limit::Last(_)) | None => candidates,
+    };
+    let documents = u128::from(snapshot.logical_memory_usage().entries);
+    page * documents < DOCUMENT_READ_IN_POINT_READS * candidates * candidates
+}
+
+/// Narrows `bounds` by the top-level conjuncts on the order field: a range
+/// filter keeps its side of the value inside the value's type (a range never
+/// matches another type, nor NaN), `==` keeps one value, and `in` the span of
+/// its values.
+fn bound_by_filter(filter: &Filter, order: &FieldPath, bounds: &mut FieldOrderRange) {
+    match filter {
+        Filter::And(filters) => {
+            for filter in filters {
+                bound_by_filter(filter, order, bounds);
+            }
+        }
+        Filter::Field(filter) if filter.path == *order => {
+            let value = &filter.value;
+            match filter.operator {
+                FieldOperator::Equal => bounds.within_values(std::slice::from_ref(value)),
+                FieldOperator::In => match value {
+                    Value::Array(values) => {
+                        let members = values
+                            .iter()
+                            .filter(|value| !is_membership_sentinel(value))
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        bounds.within_values(&members);
+                    }
+                    _ => bounds.nothing(),
+                },
+                FieldOperator::LessThan
+                | FieldOperator::LessThanOrEqual
+                | FieldOperator::GreaterThan
+                | FieldOperator::GreaterThanOrEqual
+                    if matches!(value, Value::Double(number) if number.is_nan()) =>
+                {
+                    bounds.nothing();
+                }
+                FieldOperator::LessThan => {
+                    bounds.within_type_of(value);
+                    bounds.before(value, None);
+                }
+                FieldOperator::LessThanOrEqual => {
+                    bounds.within_type_of(value);
+                    bounds.at_or_before(value, None);
+                }
+                FieldOperator::GreaterThan => {
+                    bounds.within_type_of(value);
+                    bounds.after(value, None);
+                }
+                FieldOperator::GreaterThanOrEqual => {
+                    bounds.within_type_of(value);
+                    bounds.at_or_after(value, None);
+                }
+                FieldOperator::NotEqual
+                | FieldOperator::NotIn
+                | FieldOperator::ArrayContains
+                | FieldOperator::ArrayContainsAny => {}
+            }
+        }
+        Filter::Or(_) | Filter::Field(_) => {}
+    }
+}
+
+/// Narrows `bounds` by a start (`start`) or end cursor. Its first value is
+/// the order field's; a second names a document, which seeks inside that
+/// value when it is a document of this collection. A cursor naming any
+/// other document keeps the whole value: the engine decides there.
+fn bound_by_cursor(
+    cursor: &Cursor,
+    start: bool,
+    descending: bool,
+    database: &DatabaseName,
+    collection_path: &str,
+    bounds: &mut FieldOrderRange,
+) {
+    let Some(value) = cursor.values.first() else {
+        return;
+    };
+    let (inclusive, document_id) = match cursor.values.get(1) {
+        None => (cursor.inclusive, None),
+        Some(Value::Reference(name)) => match document_key_from_name(name, database)
+            .as_ref()
+            .and_then(|key| key.path().rsplit_once('/'))
+            .filter(|(parent, _)| *parent == collection_path)
+            .map(|(_, id)| id.to_owned())
+        {
+            Some(id) => (cursor.inclusive, Some(id)),
+            None => (true, None),
+        },
+        Some(_) => (true, None),
+    };
+    let document_id = document_id.as_deref();
+    // In ascending value order a start cursor is a lower bound; descending,
+    // an upper one, and an end cursor the opposite.
+    match (start != descending, inclusive) {
+        (true, true) => bounds.at_or_after(value, document_id),
+        (true, false) => bounds.after(value, document_id),
+        (false, true) => bounds.at_or_before(value, document_id),
+        (false, false) => bounds.before(value, document_id),
     }
 }
 
@@ -778,6 +1056,11 @@ pub enum QueryCandidates {
     /// An equality field index narrows the collection to the documents whose
     /// listed fields match.
     EqualityIndex { fields: Vec<String> },
+    /// The field index of `field` is walked in the query's order, from the
+    /// filters' and cursors' bounds on, until the limit is met; the
+    /// `lookups` fields' `==`/`in` filters are checked in their index before
+    /// a document is read.
+    OrderIndex { field: String, lookups: Vec<String> },
     /// Every document of the collection is read.
     CollectionScan,
     /// Every document of the collection group is read, optionally under one
@@ -815,11 +1098,20 @@ pub fn plan(
         QueryScope::Collection(path) => (path.clone(), IndexScope::Collection),
         QueryScope::CollectionGroup(id) => (id.clone(), IndexScope::CollectionGroup),
     };
+    let index_order = index_order(snapshot, database, query, &orders);
+    let strategy = QueryStrategy::of(snapshot, query, &orders, index_order.is_some());
+    let candidates = match index_order {
+        Some(index_order) => QueryCandidates::OrderIndex {
+            field: index_order.field,
+            lookups: index_order.lookups,
+        },
+        None => candidate_source(snapshot, database, query),
+    };
     Ok(QueryPlan {
         target,
         scope,
-        candidates: candidate_source(snapshot, database, query),
-        strategy: QueryStrategy::of(snapshot, query, &orders),
+        candidates,
+        strategy,
         orders,
     })
 }
@@ -866,6 +1158,7 @@ pub struct QueryDocumentIterator {
 
 enum QueryDocumentIteratorInner {
     Streaming(Box<StreamingQueryDocumentIterator>),
+    IndexOrder(Box<IndexOrderQueryDocumentIterator>),
     OrderedDisk(Box<OrderedDiskQueryDocumentIterator>),
     Buffered(std::vec::IntoIter<QueryDocument>),
 }
@@ -877,6 +1170,7 @@ impl QueryDocumentIterator {
     pub fn strategy(&self) -> QueryStrategy {
         match &self.inner {
             QueryDocumentIteratorInner::Streaming(_) => QueryStrategy::Streaming,
+            QueryDocumentIteratorInner::IndexOrder(_) => QueryStrategy::IndexOrder,
             QueryDocumentIteratorInner::OrderedDisk(_) => QueryStrategy::OrderedDisk,
             QueryDocumentIteratorInner::Buffered(_) => QueryStrategy::Buffered,
         }
@@ -889,6 +1183,7 @@ impl Iterator for QueryDocumentIterator {
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.inner {
             QueryDocumentIteratorInner::Streaming(documents) => documents.next(),
+            QueryDocumentIteratorInner::IndexOrder(documents) => documents.next(),
             QueryDocumentIteratorInner::OrderedDisk(documents) => documents.next(),
             QueryDocumentIteratorInner::Buffered(documents) => documents.next(),
         }
@@ -957,6 +1252,144 @@ fn ordered_disk_iterator(
                 projection: query.projection.clone(),
             },
         )),
+    }
+}
+
+/// Lazy evaluator for queries read in their order from a field index walk.
+/// Exactly ordered entries are filtered and limited as they come; a tied run
+/// (values the index cannot tell apart) is read whole, its matches sorted
+/// with the query's comparator, and emitted in that order. Only a run's keys
+/// and order values are kept, and with a limit only as many as it can reach.
+struct IndexOrderQueryDocumentIterator {
+    snapshot: Snapshot,
+    walk: FieldOrderWalk,
+    /// The entry after the tied run sorted last, read to find the run's end.
+    pending: Option<FieldOrderEntry>,
+    /// The sorted matches of a tied run still to emit.
+    tied: std::vec::IntoIter<DocumentKey>,
+    edition: DatabaseEdition,
+    orders: Vec<Order>,
+    query: Query,
+    remaining_limit: Option<usize>,
+    remaining_offset: usize,
+}
+
+impl IndexOrderQueryDocumentIterator {
+    /// The next result before it is decoded, so counting never pays for
+    /// document payloads.
+    fn next_lazy(&mut self) -> Option<(DocumentKey, LazyDocument)> {
+        loop {
+            if self.remaining_limit == Some(0) {
+                return None;
+            }
+            let (key, document) = if let Some(key) = self.tied.next() {
+                let document = self
+                    .snapshot
+                    .get(&key)
+                    .expect("a walked document remains present in the same immutable snapshot");
+                (key, LazyDocument::Decoded(document))
+            } else {
+                let entry = self.pending.take().or_else(|| self.walk.next())?;
+                if let Some(run) = entry.tied {
+                    self.sort_run(entry, run);
+                    continue;
+                }
+                if !candidate_matches(
+                    &self.query,
+                    &self.orders,
+                    self.edition,
+                    &entry.key,
+                    &entry.document,
+                ) {
+                    continue;
+                }
+                (entry.key, entry.document)
+            };
+            if self.remaining_offset > 0 {
+                self.remaining_offset -= 1;
+                continue;
+            }
+            if let Some(remaining) = &mut self.remaining_limit {
+                *remaining -= 1;
+            }
+            return Some((key, document));
+        }
+    }
+
+    /// Reads the tied run `run` that starts with `first` and queues its
+    /// matches in the query's order.
+    fn sort_run(&mut self, first: FieldOrderEntry, run: u64) {
+        let bound = self
+            .remaining_limit
+            .map(|limit| self.remaining_offset.saturating_add(limit));
+        let mut members: Vec<(DocumentKey, Vec<Option<Value>>)> = Vec::new();
+        let mut next = Some(first);
+        while let Some(entry) = next {
+            if entry.tied != Some(run) {
+                self.pending = Some(entry);
+                break;
+            }
+            if candidate_matches(
+                &self.query,
+                &self.orders,
+                self.edition,
+                &entry.key,
+                &entry.document,
+            ) {
+                let values = order_values(&entry.key, &entry.document, &self.orders);
+                match bound {
+                    None => members.push((entry.key, values)),
+                    Some(bound) => {
+                        let at = members
+                            .binary_search_by(|(key, existing)| {
+                                compare_order_values(
+                                    key,
+                                    existing,
+                                    &entry.key,
+                                    &values,
+                                    &self.orders,
+                                    self.edition,
+                                )
+                            })
+                            .unwrap_or_else(|index| index);
+                        if at < bound {
+                            members.insert(at, (entry.key, values));
+                            members.truncate(bound);
+                        }
+                    }
+                }
+            }
+            next = self.walk.next();
+        }
+        if bound.is_none() {
+            members.sort_by(|(left_key, left), (right_key, right)| {
+                compare_order_values(left_key, left, right_key, right, &self.orders, self.edition)
+            });
+        }
+        self.tied = members
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect::<Vec<_>>()
+            .into_iter();
+    }
+}
+
+impl Iterator for IndexOrderQueryDocumentIterator {
+    type Item = QueryDocument;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (key, document) = self.next_lazy()?;
+        let document = document.into_document();
+        let projected_fields = self
+            .query
+            .projection
+            .as_ref()
+            .map(|projection| project(document.fields(), projection));
+        Some(QueryDocument {
+            key,
+            document,
+            projected_fields,
+        })
     }
 }
 
@@ -1500,12 +1933,11 @@ fn scoped_documents(
     }
 }
 
-/// The conjunctive `==` and `in` filters on one top-level field whose values
-/// the field index holds, as `(field, alternatives)`. `in` drops `null` and
-/// NaN, which never match a membership; an `in` left with no value matches
-/// nothing, and its empty lookup yields no candidate. Filters under an `or`,
-/// on nested or `__name__` paths, or on arrays, maps and vectors are not
-/// lookups.
+/// The conjunctive `==` and `in` filters on one top-level field, as `(field,
+/// alternatives)`. `in` drops `null` and NaN, which never match a
+/// membership; an `in` left with no value matches nothing, and its empty
+/// lookup yields no candidate. Filters under an `or` or on nested or
+/// `__name__` paths are not lookups.
 fn equality_lookups(query: &Query) -> Vec<(String, Vec<Value>)> {
     fn collect(filter: &Filter, lookups: &mut Vec<(String, Vec<Value>)>) {
         match filter {
@@ -1531,9 +1963,7 @@ fn equality_lookups(query: &Query) -> Vec<(String, Vec<Value>)> {
                         .collect(),
                     _ => return,
                 };
-                if values.iter().all(field_index_holds) {
-                    lookups.push((field.clone(), values));
-                }
+                lookups.push((field.clone(), values));
             }
         }
     }

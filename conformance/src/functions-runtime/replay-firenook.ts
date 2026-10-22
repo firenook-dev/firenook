@@ -4,12 +4,13 @@
 //
 //   node --import tsx src/functions-runtime/replay-firenook.ts \
 //     --binary ../target/release/firenook [--profiles main,v1-blocking]
-//     [--programs a,b] [--output report.json] [--report-only]
+//     [--programs a,b] [--output report.json] [--report-only] [--node PATH]
 //
-// Requires FIREBASE_FUNCTIONS_7_2_ROOT, NODE24 and the cached UI archive
-// under ~/.cache/firebase/emulators. Deliberate differences are listed in
+// Requires FIREBASE_FUNCTIONS_7_2_ROOT, and NODE24 or --node: the Node the
+// engine runs the Functions on (the corpus was recorded on Node 24; CI
+// replays it on every supported Node). Deliberate differences are listed in
 // DIVERGENCES and asserted, never skipped.
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -64,6 +65,18 @@ const GLOBAL_DIVERGENCES: ReadonlyArray<{ readonly pattern: RegExp; readonly rec
     recorded: undefined,
     firenook: "127.0.0.1",
     reason: "the official worker is reached over a Unix socket, so Express sees no remote address; Firenook's worker listens on loopback TCP and reports 127.0.0.1",
+  },
+  {
+    pattern: /\.env\.GOOGLE_APPLICATION_CREDENTIALS$/u,
+    recorded: undefined,
+    firenook: "{{projectDir}}/state/gcloud/application_default_credentials.json",
+    reason: "the official worker gets no credentials, so an Admin SDK that wants a token (firebase-admin 12 and earlier read only $HOME's gcloud login) uses the developer's own; Firenook's worker gets the run's demo credentials, answered on this machine",
+  },
+  {
+    pattern: /\.gacPresent$/u,
+    recorded: false,
+    firenook: true,
+    reason: "the same demo credentials, seen as the variable's presence",
   },
 ];
 
@@ -131,7 +144,8 @@ const args = parseArguments(process.argv.slice(2));
 const fixturePath = args.fixture ? resolve(args.fixture) : resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures/functions-runtime-v1/emulator-programs.json");
 const binary = resolve(args.binary);
 const functionsRoot = requireEnv("FIREBASE_FUNCTIONS_7_2_ROOT");
-const node24 = requireEnv("NODE24");
+const workerNode = args.node ?? requireEnv("NODE24");
+const workerNodeVersion = execFileSync(workerNode, ["--version"], { encoding: "utf8" }).trim();
 const adminRoot = join(dirname(functionsRoot), "firebase-admin");
 const functionsPackage = JSON.parse(await readFile(join(functionsRoot, "package.json"), "utf8")) as { version: string };
 const adminPackage = JSON.parse(await readFile(join(adminRoot, "package.json"), "utf8")) as { version: string };
@@ -166,6 +180,7 @@ for (const profile of PROFILES) {
 const mismatched = results.filter((result) => result.mismatches.length > 0);
 const report = {
   binary,
+  node: workerNodeVersion,
   fixture: fixturePath,
   profiles: profileSummaries,
   steps: results.length,
@@ -178,7 +193,7 @@ if (args.output) {
   await mkdir(dirname(args.output), { recursive: true });
   await writeFile(args.output, `${JSON.stringify(report, null, 2)}\n`, "utf8");
 }
-process.stderr.write(`\n${report.matched}/${report.steps} steps match, ${report.mismatched} differ, ${report.assertedDivergences} recorded divergences asserted\n`);
+process.stderr.write(`\n${report.matched}/${report.steps} steps match, ${report.mismatched} differ, ${report.assertedDivergences} recorded divergences asserted (workers on Node ${workerNodeVersion})\n`);
 for (const entry of report.mismatches.slice(0, args.reportOnly ? 400 : 60)) {
   process.stderr.write(`- ${entry.profile}/${entry.program}/${entry.step}\n`);
   for (const mismatch of entry.mismatches) {
@@ -238,7 +253,7 @@ async function replayProfile(profile: Profile, recordedPrograms: readonly Record
     "--state-dir",
     join(projectDir, "state"),
     "--node",
-    node24,
+    workerNode,
     "--firestore-port",
     String(ports.firestore),
     "--auth-port",
@@ -440,8 +455,9 @@ async function reserveOne(): Promise<number> {
   return ports.hub;
 }
 
-function parseArguments(values: readonly string[]): { binary: string; profiles: string[]; programs: string[]; output: string | undefined; fixture: string | undefined; reportOnly: boolean } {
+function parseArguments(values: readonly string[]): { binary: string; profiles: string[]; programs: string[]; output: string | undefined; fixture: string | undefined; node: string | undefined; reportOnly: boolean } {
   let binary = "";
+  let node: string | undefined;
   let profiles = ["main"];
   let programs: string[] = [];
   let output: string | undefined;
@@ -469,12 +485,15 @@ function parseArguments(values: readonly string[]): { binary: string; profiles: 
     } else if (key === "--fixture" && value) {
       fixture = value;
       index += 1;
+    } else if (key === "--node" && value) {
+      node = value;
+      index += 1;
     } else {
       throw new Error(`unknown argument ${String(key)}`);
     }
   }
   if (!binary) throw new Error("--binary is required");
-  return { binary, profiles, programs, output, fixture, reportOnly };
+  return { binary, profiles, programs, output, fixture, node, reportOnly };
 }
 
 function requireEnv(name: string): string {

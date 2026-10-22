@@ -7,16 +7,18 @@
 
 // ── What the terminal can show ───────────────────────────────────────────
 
-// Whether the terminal UI draws, or the plain line protocol prints (pipes,
-// CI, log files, `TERM=dumb`, `--plain`, and `emulators:exec`, whose test
-// command shares the terminal).
+// Whether the terminal UI draws (`emulators:start`, and `init`'s screen),
+// or the plain line protocol prints (pipes, CI, log files, `TERM=dumb`,
+// `--plain`, and `emulators:exec`, whose test command shares the terminal).
 export function interactive({stdout = process.stdout, stdin = process.stdin, env = process.env, mode = 'start', plain = false} = {}) {
-  if (plain || mode !== 'start') return false;
+  if (plain || (mode !== 'start' && mode !== 'init')) return false;
   if (!stdout.isTTY || !stdin.isTTY) return false;
   if (env.TERM === 'dumb' || truthy(env.CI) || truthy(env.FIRENOOK_PLAIN)) return false;
   return true;
 }
-const truthy = value => value !== undefined && value !== '' && value !== '0' && value.toLowerCase?.() !== 'false';
+// A switch in the environment is on unless unset, empty, `0` or `false`, as
+// the ecosystem reads CI.
+export const truthy = value => value !== undefined && value !== '' && value !== '0' && value.toLowerCase?.() !== 'false';
 
 // Colours, symbols and links, from the terminal's own variables. NO_COLOR
 // keeps the layout and drops the colour. Terminals that cannot draw the
@@ -274,6 +276,14 @@ export function createLayout(ink, size) {
     wrap(text, layout.bodyRoom()).map((part, i) => layout.cells(i === 0 ? label : '', '', paint(part)));
   // The log stream's columns: time, marker, name, duration, what it was.
   layout.streamRoom = () => layout.measure() - BODY;
+  // The card's opening: the mark beside up to five lines of words, or the
+  // words alone where the mark has no room or cannot be drawn.
+  layout.banner = words => {
+    if (size.columns() < 64 || ink.caps.ascii) return [layout.top(), ...layout.air(), ...words.map(text => layout.inside(layout.cells('', '', text))), ...layout.air()];
+    const art = ink.mark();
+    const offset = Math.floor((art.length - words.length) / 2);
+    return [layout.top(), ...layout.air(), ...art.map((line, i) => layout.inside(`${line}${' '.repeat(BODY - INSET - MARK_WIDTH)}${words[i - offset] ?? ''}`)), ...layout.air()];
+  };
   return layout;
 }
 

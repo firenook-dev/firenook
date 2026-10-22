@@ -108,64 +108,115 @@ at p50: order by a field with limit 20 went from 642 ms to 106 ms (official
 70 ms), an integer range from 630 ms to 107 ms (80 ms), `count()` from 737 ms
 to 91 ms (65 ms), `__name__ in` ten ids from 646 ms to 10 ms (403 ms), and
 `array-contains` from 257 ms to 50 ms (554 ms). The remaining gap on ordered
-scans is the read and copy of every candidate's bytes out of redb.
+scans was the read and copy of every candidate's bytes out of redb, which the
+field index's ordered walk (below) removes for one-field orders.
 
-### Equality field index
+### Batch reads on the wire
+
+A gRPC `BatchGetDocuments` that nothing but the wire reads (no rules to
+evaluate for the caller, no field mask, no transaction recording the read)
+never decodes its documents. Each stored document is walked as a flat list
+of tokens over its bincode encoding (`EncodedDocument::tokens`), and the
+`google.firestore.v1.Document` bytes are written from it in two passes: one
+measures every value once, bottom-up, the other writes. The response type is
+written by hand (`crates/grpc-front/src/wire.rs`) so a found document travels
+as those bytes; its wire and JSON forms are the generated type's, and the
+REST transport still receives decoded documents. Every other path that sends
+documents (`GetDocument`, `RunQuery`) goes through the service's codec, which
+writes the same bytes prost does with each nested length measured once
+rather than once per level of nesting. Tests compare both against prost and
+against the decoded path byte for byte. On 50 documents of many small nested
+values the engine's CPU per batch read went from 45 ms to 6.6 ms.
+
+### Field index
 
 Disk mode keeps one more derived table beside the scope indexes: for each
-direct collection, top-level field and value, the documents holding that value
-(`crates/core-store/src/disk/field_index.rs`). A query whose filter has
-top-level `==` or `in` conjuncts on top-level fields of one collection reads
-its candidates from that table instead of scanning the collection; several
-conjuncts are joined zig-zag, each seeking to the largest document id another
-is at, so the cost follows the most selective one. A queue query such as
-`owner == o AND kind == k AND status in [queued, running] ORDER BY
-claimableAt LIMIT 1` therefore reads the few active documents however many
-settled ones the collection holds, and so does a listener's refill of its
-`limit` window.
+direct collection and top-level field, every document holding the field,
+sorted by its value in the query engine's order and then by document name
+(`crates/core-store/src/disk/field_index.rs`, table `field_order_v1`). It
+answers two kinds of query without scanning the collection.
 
-The index narrows candidates and never decides a result: every filter, order,
-cursor and limit is still evaluated on each candidate, exactly as on a scan,
-so the only possible defect is a missed document. Two rules exclude it. Every
-pair of values the query engine compares as equal shares one key: integers
-and doubles share a numeric domain (`1` and `1.0`, `0` and `-0.0`), NaNs equal
-one another, strings and bytes key on the first 1,500 bytes the Standard
-edition compares (the Enterprise edition's whole-value equality implies it),
-references key on their resource path with numeric ids by value, and keys
-longer than 64 bytes become a 16-byte SHA-256 prefix, where a collision only
-adds a candidate. And every top-level field of every document is indexed
-except arrays, maps and vectors, which equal no indexed value; filters on
-them, on nested paths, under an `or`, `!=`, `not-in`, array membership,
-ranges and collection groups keep the scan. `in` drops `null` and NaN, which
-never match a membership.
+A query whose filter has top-level `==` or `in` conjuncts on top-level fields
+reads its candidates from that table; several conjuncts are joined zig-zag,
+each seeking to the largest document id another is at, so the cost follows
+the most selective one. A query whose normalized order is one top-level field
+followed by `__name__` in the same direction walks that field's entries in
+order, forwards or backwards, and stops as soon as its offset and limit are
+met: `orderBy(createdAt, desc).limit(20)` reads twenty documents of a
+collection of any size. Range, `==` and `in` filters on the field and the
+cursors set where the walk starts and stops, a cursor naming a document of
+the collection seeking inside its value; `==`/`in` conjuncts on other fields
+are checked by one point read of their entry per value before a document is
+read, so `where(theme == x).orderBy(rank).limit(20)` reads only documents of
+that theme. When those conjuncts leave few documents, reading them through
+their own index and sorting them is cheaper than a walk that passes every
+document they skip: the planner counts the lookup's documents from the index
+(up to 10,000) and walks only when a page's expected walk, `page × documents
+/ matches` point reads, costs less than reading the matches, each worth 16
+point reads (the store's document count standing in for the collection's). Collection groups, nested or `__name__` orders, several order
+fields, `limitToLast`, `findNearest` and pinned document names keep the old
+paths, and so do historical snapshots, whose overlay would have to be merged
+in value order.
+
+The index orders and narrows candidates and never decides a result: every
+filter, order, cursor and limit is still evaluated on each candidate. The
+value key gives the guarantee that leaves only correct results. Values the
+engine compares as equal share one key, and a value that orders before
+another has a smaller key: integers and doubles share one exact numeric domain
+(inside `[-2^63, 2^63)` an integer part truncated toward zero and a signed
+fraction, both exact, so `1` and `1.0`, `0` and `-0.0`, and `2^53 + 1` and
+`2^53` are all right; NaN first, then the infinities and the doubles beyond
+the integers in classes of their own), strings and bytes are escaped (`0x00`
+as `0x00 0xFF`, the end as `0x00 0x00`) so the document id after them cannot
+reorder them, and references key on their resource path with numeric ids by
+value. A key is exact when equal keys imply equal values. Strings and bytes
+longer than 64 bytes, references longer than 256, and non-empty arrays, maps
+and vectors are not: their key keeps an order-preserving group (the prefix,
+or the type and emptiness, or a vector's length), followed for a long value by
+a 16-byte SHA-256 digest of the bytes it compares (the first 1,500 in the
+Standard edition), so an equality still reads only that digest's documents.
+The walk marks each run of one group and the engine sorts it with its own
+comparator before the run takes its place in the results, keeping only the
+keys and order values of as many members as the limit can reach. Every
+top-level value of every type is indexed, so an order never misses a document
+holding its field.
 
 An entry is small: each `[database][collection path][field]` is named once in
-a prefix table by a 4-byte id, the entry key is `[prefix id][value key]
-[ordered document id]`, and its value is the document id as stored, from
-which the candidate's key is rebuilt. Entries are written in the redb
-transaction of the documents they describe, by the one mutation path that
-ordinary commits, bulk seed loads and journal replay share; the previous
-entries of a document are read from that same transaction, so all three paths
-account a document identically. A historical
-snapshot reads the newest index through its overlay: every overlay entry is
-also a candidate, carrying its historical state. The metadata key
-`field_equality_v1_revision` records the revision the index describes and is
-stamped with every commit. An open whose persisted revision differs (a store
-last written by an older release, or with the index switched off) decides so
-before replaying the journal and rebuilds the index from every stored
-document in one transaction; that pass also counts the documents for the
-memory accounting, so the open still reads the store once. `FIRENOOK_FIELD_INDEXES=0` (or `off`, `false`)
-opens the store without the index: commits skip it, queries scan, and the next
-open with it rebuilds. Memory mode has no field index: its documents are
-already decoded in memory.
+a prefix table of the index's own by a 4-byte id, the entry key is `[prefix
+id][value key][ordered document id]`, and its value is the document id as
+stored, from which the candidate's key is rebuilt. Entries are written in the
+redb transaction of the documents they describe, by the one mutation path
+that ordinary commits, bulk seed loads and journal replay share; the previous
+entries of a document are read from that same transaction, decoding its
+arrays and maps only as far as their emptiness, so all three paths account a
+document identically. The metadata key `field_order_v1_revision` records the
+revision the index describes and is stamped with every commit. An open whose
+persisted revision differs (a store last written by an older release, or with
+the index switched off) decides so before replaying the journal and rebuilds
+the index from every stored document in one transaction; that pass also
+counts the documents for the memory accounting, so the open still reads the
+store once. The same open drops the equality index releases before 0.2.0
+kept (`field_equality_v1`, its prefix table and its revision key), so an older
+release opening the store afterwards finds no revision and rebuilds its own
+index rather than trust an empty one. `FIRENOOK_FIELD_INDEXES=0` (or `off`,
+`false`) opens the store without the index: commits skip it, queries scan and
+sort, and the next open with it rebuilds. Memory mode has no field index: its
+documents are already decoded in memory.
 
-Tests: exhaustive `==`/`in` over a pool of values with equal-but-different
-encodings in both editions, and a randomized run of writes (set, patch,
-delete across collections and subcollections), queries (conjunctions, nested
-`and`, `or`, orders, limits, limit-to-last, offsets, projections, `count()`)
-and historical snapshots, each compared between a memory store, a disk store
-without the index and one with it. Breaking the numeric canonicalization,
-reference keys, the 1,500-byte prefix or update maintenance each fails them.
+Tests: the key is held to the comparator over every pair of a pool of edge
+values (both NaNs, both zeros, the integers' edges and the doubles beside
+them, strings and bytes around 64 and 1,500 bytes, numeric ids, arrays, maps,
+vectors) and a million random pairs, in both editions: equal values share a
+key, smaller values have smaller keys or share a group, exact keys are never
+shared by different values, and no key extends another. Then a randomized run
+of writes (set, patch, delete across collections and subcollections) and
+queries (orders in both directions over mixed-type fields with missing
+values, ranges, `==`/`in` on the field and on others, `!=`, `not-in`, cursors
+inclusive and exclusive with and without a document, offsets, limits,
+projections, `count()`) and historical snapshots, each compared between a
+memory store, a disk store without the index and one with it; and every cursor
+and range on every edge value. Breaking the numeric encoding, a cursor's
+inclusivity, a range's bound or the sorting of a group each fails them.
 
 ### Saved data and its seed
 
@@ -662,7 +713,13 @@ emulator), replayed by `npm run replay:functions:runtime`:
   grouping (`REGION_TBD` bucket first, then regions in first-appearance
   order), `secretEnvironmentVariables` and the shared-label rule for
   multi-region endpoints. dotenv files follow the official chain
-  (`.env`, `.env.<projectId>`, `.env.local`, every `.secret.local` key).
+  (`.env`, `.env.<projectId>`, `.env.<alias>` for the `.firebaserc` alias the
+  project was selected by, `.env.local`, every `.secret.local` key). Params
+  resolve before the options that reference them, as the official CLI
+  answers its prompts without a terminal: an env file value, else the
+  default, else the codebase does not load; nothing is written to
+  `.env.local`. A trigger on a service the suite does not run is listed and
+  warned about once; it is still called directly.
   The discovery client keeps no connection open: the SDK's
   `/__/quitquitquit` calls `server.close()`, which waits for every
   connection, so a kept one held the process (and the codebase's load) for
@@ -674,6 +731,14 @@ emulator), replayed by `npm run replay:functions:runtime`:
   control headers and become `FUNCTION_TARGET` / `FUNCTION_SIGNATURE_TYPE` /
   `K_SERVICE` per invocation (left unset in `--inspect-functions` debug mode,
   as the official single-process runtime does).
+- **Node**: every worker runs on the one `--node` (the npm CLI passes the
+  Node running it; the CLI starts on 22, 24 and 26, refuses older ones and
+  warns on untested newer ones). The worker uses only Node's standard
+  modules. A user codebase that asks for another Node (firebase.json
+  `runtime`, else package.json `engines.node`, read as an npm range) gets
+  one warning on the load that finds it, as the official emulator warns
+  when the majors differ; the version comes from one `node --version`
+  started beside the first loads.
 - **Routing** reproduces the official Express surface: `/backends`,
   `/functions/projects/{p}/triggers/{key}`, `trigger_multicast`, the
   `/{project}/{region}/{name}` HTTPS routes, the Eventarc router, the 404
@@ -912,9 +977,11 @@ The pinned Java REST GET adapter timed out on transaction query parameters and
 returned 400 for a valid readTime, while its gRPC transaction reads and REST JSON
 batch historical reads succeeded. Firenook deliberately provides finite native
 snapshot semantics for these GET selectors instead of reproducing that hang.
-This is a disclosed adapter deviation, not exact HTTP parity. Rolled-back and
-unknown transactions return a finite INVALID_ARGUMENT response; the official
-gRPC observation uses ABORTED. Tests compare projected payloads/status codes
+This is a disclosed adapter deviation, not exact HTTP parity. A transaction
+that has ended (committed, rolled back or expired) is ABORTED, "The referenced
+transaction has expired or is no longer valid.", as the official gRPC and REST
+answers are; a token never issued is INVALID_ARGUMENT, "Invalid transaction.",
+and rolling back an ended transaction succeeds. Tests compare projected payloads/status codes
 where directly observable, not exact human-readable error strings or dynamic
 timestamps. Replay covers both memory and disk/WAL, including anonymous denial.
 

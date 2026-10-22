@@ -116,7 +116,9 @@ function CreateForm({
       try {
         await commit(workbench.scope, [operation])
       } catch (failure) {
-        if (failure instanceof FirestoreError && failure.status === 412)
+        // A create refused because the document exists is ALREADY_EXISTS
+        // (409), as on the official emulator and in production.
+        if (failure instanceof FirestoreError && failure.status === 409)
           throw new Error(`${path} already exists; pick another id or open it instead`, {
             cause: failure,
           })

@@ -36,9 +36,10 @@ pub use trace::{
 
 pub use model::{
     AtomicEvaluationResult, Auth, ConstraintOperator, DocumentAccess, DocumentAccessError,
-    EmptyDocumentAccess, EvaluationRequest, EvaluationResult, FieldConstraint, LatLng, Query,
-    QueryFilter, QueryScope, RequestOperation, Resource, RulesDuration, RulesService, RuntimeError,
-    StorageObject, Timestamp, TimestampParseError, Value,
+    EmptyDocumentAccess, EvaluationRequest, EvaluationResult, FieldConstraint, LatLng,
+    MAXIMUM_REFUSALS, PRODUCTION_DENIAL, Query, QueryFilter, QueryScope, RefusingAllow,
+    RequestOperation, Resource, RulesDuration, RulesService, RuntimeError, StorageObject,
+    Timestamp, TimestampParseError, Value,
 };
 
 use std::collections::{BTreeMap, BTreeSet};

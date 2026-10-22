@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "syntheticOnly": true,
+  "capturedAt": "2026-10-21T18:01:21.844Z",
+  "captureSha256": "5dc1b8df4c1e74baa13077a68602e08d285c431a88759be40560abad9278daf2",
+  "oracle": {
+    "target": "java",
+    "firebaseTools": "15.34.0",
+    "node": "v24.20.0"
+  },
+  "rules": "rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /{all=**} { allow read, write: if false; }\n  }\n}\n",
+  "cases": [
+    {
+      "id": "no-firebaserc",
+      "project": "demo-media",
+      "targets": [
+        "media"
+      ],
+      "firebaserc": null,
+      "started": true,
+      "exitCode": 0,
+      "notices": [
+        "Detected demo project ID \"demo-media\", using a default (open) rules configuration. Storage targets in firebase.json will be ignored."
+      ],
+      "error": null,
+      "uploads": {
+        "demo-media-images": 200,
+        "demo-media.appspot.com": 200,
+        "anything-else": 200
+      }
+    },
+    {
+      "id": "mapped-then-unmapped",
+      "project": "demo-media",
+      "targets": [
+        "media",
+        "other"
+      ],
+      "firebaserc": {
+        "media": [
+          "demo-media-images"
+        ]
+      },
+      "started": true,
+      "exitCode": 0,
+      "notices": [
+        "Detected demo project ID \"demo-media\", using a default (open) rules configuration. Storage targets in firebase.json will be ignored."
+      ],
+      "error": null,
+      "uploads": {
+        "demo-media-images": 200,
+        "demo-media.appspot.com": 200,
+        "anything-else": 200
+      }
+    },
+    {
+      "id": "unmapped-then-mapped",
+      "project": "demo-media",
+      "targets": [
+        "other",
+        "media"
+      ],
+      "firebaserc": {
+        "media": [
+          "demo-media-images"
+        ]
+      },
+      "started": true,
+      "exitCode": 0,
+      "notices": [
+        "Detected demo project ID \"demo-media\", using a default (open) rules configuration. Storage targets in firebase.json will be ignored."
+      ],
+      "error": null,
+      "uploads": {
+        "demo-media-images": 200,
+        "demo-media.appspot.com": 200,
+        "anything-else": 200
+      }
+    },
+    {
+      "id": "every-target-mapped",
+      "project": "demo-media",
+      "targets": [
+        "media"
+      ],
+      "firebaserc": {
+        "media": [
+          "demo-media-images"
+        ]
+      },
+      "started": true,
+      "exitCode": 0,
+      "notices": [],
+      "error": null,
+      "uploads": {
+        "demo-media-images": 403,
+        "demo-media.appspot.com": 403,
+        "anything-else": 403
+      }
+    },
+    {
+      "id": "real-project-unmapped",
+      "project": "real-media-project",
+      "targets": [
+        "media"
+      ],
+      "firebaserc": null,
+      "started": false,
+      "exitCode": 1,
+      "notices": [],
+      "error": "Error: Deploy target media not configured for project real-media-project. Configure with:\n\n  firebase target:apply storage media <resources...>",
+      "uploads": null
+    }
+  ]
+}

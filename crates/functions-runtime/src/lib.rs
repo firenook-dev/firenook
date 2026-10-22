@@ -29,6 +29,8 @@ pub mod env_files;
 pub mod log;
 pub mod manifest;
 pub mod monitor;
+pub mod node;
+pub mod params;
 pub mod registry;
 mod server;
 pub mod watcher;
@@ -38,7 +40,7 @@ pub use console::{ConsoleError, ConsoleHandle};
 pub use log::{LogEvent, LogSink, LogStream};
 pub use manifest::{DeclaredParam, Definition, NotLoaded};
 pub use monitor::{LiveSink, Monitor, MonitorLimits};
-pub use registry::BlockingConfig;
+pub use registry::{BlockingConfig, RunningServices};
 
 /// What the suite's log sink receives from the runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,12 +78,17 @@ fn demo_gcloud_dir(state_dir: &Path) -> PathBuf {
     state_dir.join("gcloud")
 }
 
+/// The synthetic credential every worker holds.
+fn demo_credentials_file(state_dir: &Path) -> PathBuf {
+    demo_gcloud_dir(state_dir).join("application_default_credentials.json")
+}
+
 /// Writes the synthetic `application_default_credentials.json` (no real
 /// client id, secret or refresh token) that keeps the Admin SDK off the
 /// metadata server.
 fn materialize_demo_credentials(state_dir: &Path) -> Result<(), RuntimeError> {
     let directory = demo_gcloud_dir(state_dir);
-    let path = directory.join("application_default_credentials.json");
+    let path = demo_credentials_file(state_dir);
     if path.is_file() {
         return Ok(());
     }
@@ -104,6 +111,11 @@ fn materialize_demo_credentials(state_dir: &Path) -> Result<(), RuntimeError> {
 
 /// The embedded worker script.
 pub const WORKER_SOURCE: &str = include_str!("../../../support/functions-worker.mjs");
+/// The CLI's `emulators:exec` preload, which the worker loads from beside
+/// itself: it answers the synthetic credential's refresh at both of Google's
+/// token endpoints in the worker's process. One source for the npm package
+/// and the engine.
+pub const TOKEN_ANSWERER_SOURCE: &str = include_str!("../../../packages/cli/src/exec-token.cjs");
 /// Compatibility label reported in readiness receipts.
 pub const ORACLE_COMPATIBILITY: &str = "firebase-tools-15.22.0";
 const WORKER_READY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -172,7 +184,12 @@ pub struct ExtensionBackend {
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     pub project_id: String,
+    /// The `.firebaserc` alias the project was selected by (`--project
+    /// staging`), whose `.env.<alias>` file a codebase reads.
     pub project_alias: Option<String>,
+    /// The services running beside the runtime: a trigger on another is
+    /// ignored, with a warning that names it.
+    pub services: RunningServices,
     pub host: String,
     pub functions_port: u16,
     pub project_dir: PathBuf,
@@ -255,6 +272,11 @@ struct Loaded {
     env_hashes: BTreeMap<String, [u8; 32]>,
     /// The manifest's declared params.
     params: Vec<DeclaredParam>,
+    /// The params no env file sets that took their default.
+    param_defaults: BTreeMap<String, String>,
+    /// What the worker's environment holds for params beyond the env files
+    /// ([`params::ResolvedParams::environment`]).
+    param_env: BTreeMap<String, String>,
     /// Per function id, the options it declares that the emulator does not
     /// apply.
     declared: BTreeMap<String, Map<String, Value>>,
@@ -284,6 +306,9 @@ struct Backend {
     self_writes: std::sync::Mutex<BTreeMap<String, Option<[u8; 32]>>>,
     /// Requests on their way to the worker at once ([`WORKER_IN_FLIGHT`]).
     in_flight: Arc<tokio::sync::Semaphore>,
+    /// The Node warning the last load logged, so a reload that changes
+    /// nothing does not repeat it ([`RuntimeState::check_node`]).
+    node_warning: std::sync::Mutex<Option<String>>,
 }
 
 /// The most requests the runtime sends one worker at the same time; more
@@ -367,6 +392,9 @@ struct RuntimeState {
     monitor: Monitor,
     /// Cancelled when the runtime shuts down; ends its background tasks.
     stopping: CancellationToken,
+    /// The version of the Node the workers run on, asked once
+    /// ([`RuntimeState::node_version`]).
+    node_version: tokio::sync::OnceCell<Option<node::NodeVersion>>,
 }
 
 /// Readiness receipt printed by the suite (compatible with the previous
@@ -477,6 +505,7 @@ impl FunctionsRuntime {
                 edit: tokio::sync::Mutex::new(()),
                 self_writes: std::sync::Mutex::new(BTreeMap::new()),
                 in_flight: Arc::new(tokio::sync::Semaphore::new(WORKER_IN_FLIGHT)),
+                node_warning: std::sync::Mutex::new(None),
             }));
             order.push((backends.len() - 1, true));
         }
@@ -517,6 +546,7 @@ impl FunctionsRuntime {
                 edit: tokio::sync::Mutex::new(()),
                 self_writes: std::sync::Mutex::new(BTreeMap::new()),
                 in_flight: Arc::new(tokio::sync::Semaphore::new(WORKER_IN_FLIGHT)),
+                node_warning: std::sync::Mutex::new(None),
             }));
             order.push((backends.len() - 1, false));
         }
@@ -532,7 +562,10 @@ impl FunctionsRuntime {
             .map_err(|error| RuntimeError(format!("failed to build the worker client: {error}")))?;
         let (updates, _) = watch::channel(0);
         let state = Arc::new(RuntimeState {
-            registry: RwLock::new(registry::Registry::new(&config.project_id)),
+            registry: RwLock::new(registry::Registry::with_services(
+                &config.project_id,
+                config.services,
+            )),
             config,
             backends,
             triggers,
@@ -542,7 +575,16 @@ impl FunctionsRuntime {
             debug_mode,
             monitor,
             stopping: CancellationToken::new(),
+            node_version: tokio::sync::OnceCell::new(),
         });
+        // The Node's version is asked while the codebases load, so the
+        // check after each load does not wait for it.
+        if state.backends.iter().any(|backend| !backend.is_extension()) {
+            let state = Arc::clone(&state);
+            tokio::spawn(async move {
+                state.node_version().await;
+            });
+        }
         for backend in &state.backends {
             state
                 .monitor
@@ -926,9 +968,18 @@ impl RuntimeState {
         )
     }
 
-    /// Environment for the discovery process (`spawnFunctionsProcess`).
-    fn discovery_environment(&self, backend: &Backend) -> BTreeMap<String, String> {
-        let mut env = self.system_envs();
+    /// Environment for the discovery process (`spawnFunctionsProcess`): the
+    /// codebase's env file values under the emulator's own variables, as
+    /// `discoverBuild(runtimeConfig, {...userEnvs, ...environment})` passes
+    /// them. A param's default is not among them (it resolves after
+    /// discovery), nor is a secret.
+    fn discovery_environment(
+        &self,
+        backend: &Backend,
+        user_env: &BTreeMap<String, String>,
+    ) -> BTreeMap<String, String> {
+        let mut env = user_env.clone();
+        env.extend(self.system_envs());
         env.extend(self.emulator_envs());
         env.insert("FIREBASE_CONFIG".to_owned(), self.firebase_config());
         if let Some(extension) = &backend.read_source().extension {
@@ -960,21 +1011,32 @@ impl RuntimeState {
             .collect();
         env.insert("node".to_owned(), self.config.node.display().to_string());
         env.insert("METADATA_SERVER_DETECTION".to_owned(), "none".to_owned());
-        // The gcloud configuration directory the worker sees holds a
-        // synthetic authorized-user credential: the Admin SDK and the Google
-        // auth library then hold a refresh-token credential that fails fast
-        // against the real OAuth endpoint instead of falling back to the
-        // Compute Engine metadata server (169.254.169.254), which the
-        // task-queue client probes for a service-account email and which
-        // hangs for a minute off Google Cloud. The developer's own gcloud
-        // directory is never read.
+        // The worker holds a synthetic authorized-user credential, as its
+        // GOOGLE_APPLICATION_CREDENTIALS and in the gcloud configuration
+        // directory it sees: the Admin SDK and the Google auth library then
+        // hold a refresh-token credential, whose refresh the worker answers
+        // in its process, instead of falling back to the Compute Engine
+        // metadata server (169.254.169.254), which the task-queue client
+        // probes for a service-account email and which hangs for a minute
+        // off Google Cloud. The variable is what firebase-admin 12 and
+        // earlier read first: they never read CLOUDSDK_CONFIG, and without
+        // it they would find the developer's own gcloud login in
+        // $HOME/.config/gcloud (%APPDATA%\gcloud on Windows). A codebase's
+        // own .env may still set it.
         env.insert(
             "CLOUDSDK_CONFIG".to_owned(),
             demo_gcloud_dir(&self.config.state_dir)
                 .display()
                 .to_string(),
         );
+        env.insert(
+            "GOOGLE_APPLICATION_CREDENTIALS".to_owned(),
+            demo_credentials_file(&self.config.state_dir)
+                .display()
+                .to_string(),
+        );
         env.extend(loaded.user_env.clone());
+        env.extend(loaded.param_env.clone());
         env.extend(self.system_envs());
         env.extend(self.emulator_envs());
         env.insert("FIREBASE_CONFIG".to_owned(), self.firebase_config());
@@ -997,6 +1059,9 @@ impl RuntimeState {
         self.monitor.codebase_loading(&backend.id);
         let began = Instant::now();
         let loaded = self.discover(backend).await;
+        if !backend.is_extension() {
+            self.check_node(backend).await;
+        }
         let definitions = loaded.definitions.clone();
         let previous = {
             let mut current = backend.loaded.write().await;
@@ -1164,6 +1229,46 @@ impl RuntimeState {
         });
     }
 
+    /// The version of the Node the workers run on (`node --version`, once).
+    async fn node_version(&self) -> Option<node::NodeVersion> {
+        *self
+            .node_version
+            .get_or_init(|| node::probe(&self.config.node))
+            .await
+    }
+
+    /// Warns, as the official emulator does, when the functions of a user
+    /// codebase run on a Node it does not ask for (firebase.json's
+    /// `runtime`, else package.json's `engines.node`). Said on the load that
+    /// finds the difference, and again only when the warning changes.
+    async fn check_node(&self, backend: &Backend) {
+        let directory = backend.directory();
+        let runtime = self
+            .config
+            .codebases
+            .iter()
+            .find(|codebase| codebase.id == backend.id)
+            .and_then(|codebase| codebase.runtime.as_deref());
+        let warning = match node::NodeRequest::of(runtime, &directory) {
+            Some(request) => self
+                .node_version()
+                .await
+                .and_then(|version| request.mismatch(version, &self.relative(&directory))),
+            None => None,
+        };
+        let mut said = backend
+            .node_warning
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(text) = warning.as_ref().filter(|text| said.as_ref() != Some(*text)) {
+            self.log.record(
+                LogEvent::new("WARN", &backend.label(), text.clone())
+                    .with_codebase(backend.id.clone()),
+            );
+        }
+        *said = warning;
+    }
+
     async fn discover(&self, backend: &Backend) -> Loaded {
         if let Some(extension) = backend.extension() {
             return Loaded {
@@ -1239,41 +1344,95 @@ impl RuntimeState {
                         ..base
                     };
                 };
-                let environment = self.discovery_environment(backend);
+                let environment = self.discovery_environment(backend, &user_env);
                 discovery::discover_from_sdk(&self.config.node, &sdk_root, &directory, &environment)
                     .await
             }
             Err(error) => Err(error),
         };
-        match manifest {
-            Ok(manifest) => match manifest::convert_manifest(
-                &manifest,
-                &self.config.project_id,
-                &self.config.default_bucket,
-                &backend.id,
-                &user_env,
-            ) {
-                Ok(conversion) => Loaded {
-                    definitions: conversion.definitions,
+        let manifest = match manifest {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                return Loaded {
                     user_env,
                     secrets,
-                    error: None,
-                    params: conversion.params,
-                    declared: conversion.declared,
-                    dropped_endpoints: conversion.not_loaded,
+                    error: Some(error.0),
                     ..base
-                },
-                Err(error) => Loaded {
+                };
+            }
+        };
+        // The params resolve before the options that reference them, as
+        // the official `resolveBackend` does; a param no one can answer
+        // stops the load with the official question.
+        let declared = manifest::declared_params(&manifest);
+        let resolved = match params::resolve(
+            &declared,
+            &user_env,
+            &manifest::builtin_params(&self.config.project_id, &self.config.default_bucket),
+        ) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                // The official question names the prompt Firenook never
+                // shows; say where the answer goes instead.
+                let error = if error.0.starts_with("Question ") {
+                    format!(
+                        "{error}. Firenook never prompts: set the value in .env, .env.{} or .env.local, or give the param a default.",
+                        self.config.project_id
+                    )
+                } else {
+                    error.0
+                };
+                return Loaded {
                     user_env,
                     secrets,
-                    error: Some(format!("Failed to parse build specification: {error}")),
+                    error: Some(error),
+                    params: declared,
                     ..base
-                },
+                };
+            }
+        };
+        let defaulted: Vec<&str> = declared
+            .iter()
+            .filter(|param| resolved.defaults.contains_key(&param.name))
+            .map(|param| param.name.as_str())
+            .collect();
+        if !defaulted.is_empty() {
+            self.log.record(
+                LogEvent::new(
+                    "INFO",
+                    "functions",
+                    format!(
+                        "Params no env file sets take their default: {}.",
+                        defaulted.join(", ")
+                    ),
+                )
+                .with_codebase(backend.id.clone()),
+            );
+        }
+        match manifest::convert_manifest(
+            &manifest,
+            &self.config.project_id,
+            &self.config.default_bucket,
+            &backend.id,
+            &resolved.values,
+        ) {
+            Ok(conversion) => Loaded {
+                definitions: conversion.definitions,
+                user_env,
+                secrets,
+                error: None,
+                params: conversion.params,
+                param_defaults: resolved.defaults,
+                param_env: resolved.environment,
+                declared: conversion.declared,
+                dropped_endpoints: conversion.not_loaded,
+                ..base
             },
             Err(error) => Loaded {
                 user_env,
                 secrets,
-                error: Some(error.0),
+                error: Some(format!("Failed to parse build specification: {error}")),
+                params: declared,
                 ..base
             },
         }

@@ -25,7 +25,9 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use firenook_core_store::DatabaseName;
-use firenook_rules_engine::{EvaluationRequest, EvaluationResult, QueryScope, RequestOperation};
+use firenook_rules_engine::{
+    EvaluationRequest, EvaluationResult, QueryScope, RefusingAllow, RequestOperation,
+};
 use tokio::sync::broadcast;
 
 use crate::RulesRuntime;
@@ -71,6 +73,9 @@ pub struct Denial {
     pub uid: Option<String>,
     /// Why evaluating the rules failed, when they failed rather than denied.
     pub error: Option<String>,
+    /// The allows that refused it, with their lines; empty when no allow
+    /// applied ([`EvaluationResult::refused_by`]).
+    pub refused_by: Vec<RefusingAllow>,
     /// The id diagnostics keep this decision under (the Requests feed's
     /// `requestId` and the retained decision's id); `None` when diagnostics
     /// are off or kept neither.
@@ -140,6 +145,7 @@ impl DenyTap {
             path: denied_path(database, request),
             uid: request.auth.as_ref().and_then(|auth| auth.uid.clone()),
             error: result.error.as_ref().map(|error| error.message.clone()),
+            refused_by: result.refused_by.clone(),
             request_id: request_id.map(Arc::from),
             origin,
         };

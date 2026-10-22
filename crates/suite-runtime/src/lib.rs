@@ -36,7 +36,7 @@ use firenook_functions_runtime::{
     RuntimeConfig as FunctionsRuntimeConfig, codebases_from_config,
 };
 use firenook_grpc_front::FirestoreService;
-use firenook_pubsub_front::{SchedulerRuntime, router as pubsub_router};
+use firenook_pubsub_front::{SchedulerRuntime, router_with_printer as pubsub_router};
 use firenook_query_engine::{DatabaseEdition, IndexCatalog, QueryPolicy};
 use firenook_rest_front::router_with_shared_service as rest_router;
 use firenook_rules_engine::{DocumentAccess as _, DocumentAccessError, Resource};
@@ -122,6 +122,17 @@ pub struct ServiceSelection {
 }
 
 impl ServiceSelection {
+    /// The services a Functions trigger can need, as the runtime reads them.
+    #[must_use]
+    pub const fn running(self) -> firenook_functions_runtime::RunningServices {
+        firenook_functions_runtime::RunningServices {
+            firestore: self.firestore,
+            auth: self.auth,
+            storage: self.storage,
+            pubsub: self.pubsub,
+        }
+    }
+
     /// Every service.
     pub const ALL: Self = Self {
         firestore: true,
@@ -233,6 +244,10 @@ pub enum StorageRulesConfig {
     /// (`templates/emulators/default_storage.rules`) govern every bucket of a
     /// demo project.
     OpenDefault,
+    /// A demo project whose `storage` targets include one `.firebaserc` maps
+    /// to no bucket: as officially, every target is ignored and the default
+    /// open rules govern every bucket.
+    OpenDefaultIgnoringTargets,
 }
 
 /// The official `templates/emulators/default_storage.rules`.
@@ -278,6 +293,9 @@ pub struct SuiteConfig {
     /// Bound to a wildcard with none given, the console answers any host.
     pub allowed_hosts: Vec<String>,
     pub project_id: String,
+    /// `--project-alias`: the `.firebaserc` alias the project was selected
+    /// by, whose `.env.<alias>` file each Functions codebase reads.
+    pub project_alias: Option<String>,
     /// `--only` selection; `ServiceSelection::ALL` by default.
     pub services: ServiceSelection,
     /// `emulators.ui.enabled` / `--no-ui`: without the UI the logging
@@ -324,10 +342,33 @@ pub struct SuiteConfig {
 impl SuiteConfig {
     /// The address clients connect to: the listen host unless that is a
     /// wildcard (`0.0.0.0` → `127.0.0.1`, `::` → `::1`), as the official
-    /// CLI's `connectableHostname`.
+    /// CLI's `connectableHostname`, or `localhost`, whose first address is
+    /// what the official CLI advertises.
     #[must_use]
     pub fn connect_host(&self) -> String {
         connectable_hostname(&self.host)
+    }
+
+    /// The address every listener binds: the listen host, except
+    /// `localhost` (the official default host), which the official CLI
+    /// resolves to 127.0.0.1 first; see [`SuiteConfig::also_ipv6`].
+    #[must_use]
+    pub fn bind_host(&self) -> &str {
+        if self.host == "localhost" {
+            "127.0.0.1"
+        } else {
+            &self.host
+        }
+    }
+
+    /// Whether `listener` also listens on `::1`: the hub and the console
+    /// when the host is `localhost`, as the official CLI binds them. It
+    /// binds every other emulator on the first address only, so a client
+    /// that tries `[::1]` first (a browser, Node for `localhost`) falls back
+    /// to 127.0.0.1 for those as it would officially.
+    #[must_use]
+    pub fn also_ipv6(&self, listener: &str) -> bool {
+        self.host == "localhost" && matches!(listener, "hub" | "ui")
     }
 
     /// `host:port` (bracketed for IPv6) on the connect host.
@@ -353,7 +394,7 @@ impl SuiteConfig {
 #[must_use]
 pub fn connectable_hostname(host: &str) -> String {
     match host.trim_start_matches('[').trim_end_matches(']') {
-        "0.0.0.0" => "127.0.0.1".to_owned(),
+        "0.0.0.0" | "localhost" => "127.0.0.1".to_owned(),
         "::" => "::1".to_owned(),
         other => other.to_owned(),
     }
@@ -552,7 +593,8 @@ async fn verify_functions_readiness(
     let function_count = inventory.functions().count();
     if function_count < config.minimum_functions {
         return Err(failure(format!(
-            "Functions runtime discovered {function_count} functions; at least {} required",
+            "Functions runtime discovered {function_count} {}; at least {} required",
+            terminal::plural(function_count, "function", "functions"),
             config.minimum_functions
         )));
     }
@@ -607,6 +649,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
     let functions_requested = config.services.functions;
     let config = without_absent_functions(config)?;
     validate_config(&config)?;
+    let config = without_unimportable_seed(config)?;
     // From here a stop is a request: the start-up work that can end early
     // does, and the data is closed as it was opened.
     control::listen_for_shutdown()?;
@@ -823,9 +866,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             &inventory,
             &config.origin(config.ports.functions),
             Arc::new(move |level: &str, text: &str| {
-                if level != "DEBUG" {
-                    terminal::print(level, "tasks", text, &format!("firenook tasks: {text}"));
-                }
+                console_wiring::messaging::print_tasks_line(level, text);
                 tasks_logging.record(level, Some("tasks"), text.to_owned());
             }),
         );
@@ -863,6 +904,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             &inventory,
             delivery.queue(),
             triggers.clone(),
+            Arc::new(console_wiring::messaging::print_schedule_line),
         );
         schedule_count = runtime.schedules().len();
         scheduler = Some(
@@ -871,13 +913,10 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                 .map_err(|error| failure(format!("scheduler failed to start: {error}")))?,
         );
         pubsub_step.done(
-            &[(
+            &[terminal::counted(
                 u64::try_from(schedule_count).unwrap_or(u64::MAX),
-                if schedule_count == 1 {
-                    "schedule"
-                } else {
-                    "schedules"
-                },
+                "schedule",
+                "schedules",
             )],
             None,
         );
@@ -960,7 +999,10 @@ fn announce_ready(config: &SuiteConfig, logging: &LoggingRuntime, function_count
     logging.record(
         "INFO",
         Some("hub"),
-        format!("All emulators ready; {function_count} functions discovered"),
+        format!(
+            "All emulators ready; {function_count} {} discovered",
+            terminal::plural(function_count, "function", "functions")
+        ),
     );
     if terminal::enabled() {
         let console = config
@@ -1042,10 +1084,14 @@ async fn follow_functions_inventory(
         logging.record(
             "INFO",
             Some("functions"),
-            format!("Functions routing refreshed; {count} registered functions"),
+            format!(
+                "Functions routing refreshed; {count} registered {}",
+                terminal::plural(count, "function", "functions")
+            ),
         );
         // Announce completion on stdout so a supervisor or harness can wait
-        // for native delivery readiness after a reload.
+        // for native delivery readiness after a reload. The line is their
+        // contract (DESIGN.md), so its words stay as they are for any count.
         if !terminal::enabled() {
             println!("firenook functions routing refreshed: {count} registered functions");
         }
@@ -1206,7 +1252,7 @@ async fn prepare_suite(
     };
     let storage = if config.services.storage {
         Some(Arc::new(
-            start_storage(config, &delivery, &triggers, &store).await?,
+            start_storage(config, &delivery, &triggers, &store, &logging).await?,
         ))
     } else {
         None
@@ -1246,7 +1292,8 @@ async fn prepare_suite(
     let (background_sender, background_receiver) = mpsc::unbounded_channel();
     let hub = HubRuntime::start(HubConfig {
         directory: directory.clone(),
-        locator_file: locator_path(config),
+        locator_file: free_locator(config).await,
+        record: Some(suite_record(config)),
         pid: std::process::id(),
         exporter: export_sender.clone(),
         triggers: triggers.clone(),
@@ -1328,7 +1375,7 @@ fn prepare_firestore(
     if !config.services.firestore {
         return Ok(None);
     }
-    let query_policy = query_policy(config)?;
+    let query_policy = query_policy()?;
     let firestore_rules = firestore_rules(config)?;
     let request_history = firestore_rules.request_history();
     // The console's editor replaces a database's ruleset in the same
@@ -1382,7 +1429,7 @@ fn prepare_firestore(
             store,
             &config.project_id,
             DatabaseEdition::Standard,
-            index_catalogs(config)?,
+            index_catalogs(config),
         ),
         rules: RulesEditor::new(
             &rules_for_console,
@@ -1511,10 +1558,10 @@ async fn stopped_before_ready(prepared: Option<PreparedSuite>) -> SuiteOutcome {
         if let Some(storage) = storage
             && let Err(error) = close_storage(storage).await
         {
-            eprintln!("firenook: {error}");
+            terminal::print("ERROR", "firenook", &error, &format!("firenook: {error}"));
         }
         if let Err(error) = close_store(store).await {
-            eprintln!("firenook: {error}");
+            terminal::print("ERROR", "firenook", &error, &format!("firenook: {error}"));
         }
     }
     outcome
@@ -1570,7 +1617,7 @@ async fn finish_suite(
         // The same line the former Node host printed: harnesses read it as the
         // proof that Functions got an orderly stop even when export failed.
         if !terminal::enabled() {
-            println!("firenook functions host: stopping after the suite shutdown request");
+            terminal::out("firenook functions host: stopping after the suite shutdown request");
         }
         functions.shutdown().await;
     }
@@ -1659,6 +1706,27 @@ fn without_absent_functions(mut config: SuiteConfig) -> Result<SuiteConfig, Suit
         terminal::print("INFO", "firenook", message, &format!("firenook: {message}"));
         config.services.functions = false;
         config.minimum_functions = 0;
+    }
+    Ok(config)
+}
+
+/// An `--import` directory with nothing in it to import is no import: as
+/// the official CLI does, the start warns and goes on without one (and an
+/// `--export-on-exit` to it still writes it at the stop). A directory that
+/// does not exist is refused, as officially.
+fn without_unimportable_seed(mut config: SuiteConfig) -> Result<SuiteConfig, SuiteRuntimeError> {
+    let Some(root) = &config.import else {
+        return Ok(config);
+    };
+    if let ImportSource::Nothing(reason) = find_export_metadata(root)? {
+        let message = format!("{reason} (--import {})", root.display());
+        terminal::print(
+            "WARN",
+            "emulators",
+            &message,
+            &format!("firenook: {message}"),
+        );
+        config.import = None;
     }
     Ok(config)
 }
@@ -1884,35 +1952,44 @@ impl OpeningWatch {
 /// the composite index their query needs is one the project already declares.
 /// A database with no index file gets no entry, which is the same answer as
 /// an empty catalog: nothing is declared.
-fn index_catalogs(
-    config: &SuiteConfig,
-) -> Result<BTreeMap<String, Arc<IndexCatalog>>, SuiteRuntimeError> {
+///
+/// The official emulator never reads an index file, so one that cannot be
+/// read or parsed is no reason to refuse a start: it is said once, and that
+/// database's queries are explained as if it declared no index.
+fn index_catalogs(config: &SuiteConfig) -> BTreeMap<String, Arc<IndexCatalog>> {
     let mut catalogs = BTreeMap::new();
     for database in &config.firestore_databases {
         let Some(path) = &database.indexes else {
             continue;
         };
-        let source = std::fs::read_to_string(path).map_err(|error| {
-            failure(format!(
-                "failed to read Firestore indexes for database \"{}\": {error}",
-                database.database_id
-            ))
-        })?;
-        let catalog = IndexCatalog::from_json(&source).map_err(|error| {
-            failure(format!(
-                "database \"{}\": invalid Firestore indexes: {error}",
-                database.database_id
-            ))
-        })?;
-        catalogs.insert(database.database_id.clone(), Arc::new(catalog));
+        let catalog = std::fs::read_to_string(path)
+            .map_err(|error| error.to_string())
+            .and_then(|source| IndexCatalog::from_json(&source).map_err(|error| error.to_string()));
+        match catalog {
+            Ok(catalog) => {
+                catalogs.insert(database.database_id.clone(), Arc::new(catalog));
+            }
+            Err(error) => {
+                let message = format!(
+                    "the Firestore indexes in {} were not read ({error}); the console explains the queries of database \"{}\" as if it declared none",
+                    path.display(),
+                    database.database_id
+                );
+                terminal::print(
+                    "WARN",
+                    "firestore",
+                    &message,
+                    &format!("firenook: {message}"),
+                );
+            }
+        }
     }
-    Ok(catalogs)
+    catalogs
 }
 
-/// Validates every configured index file; the suite enforces none of them,
-/// as the official local emulator does not.
-fn query_policy(config: &SuiteConfig) -> Result<QueryPolicy, SuiteRuntimeError> {
-    index_catalogs(config)?;
+/// The suite enforces no index file, as the official local emulator does
+/// not.
+fn query_policy() -> Result<QueryPolicy, SuiteRuntimeError> {
     suite_query_policy(None)
 }
 
@@ -1928,8 +2005,10 @@ fn suite_query_policy(indexes: Option<&str>) -> Result<QueryPolicy, SuiteRuntime
 }
 
 /// Installs each configured database's rules under its own database id, so
-/// `projects/{p}/databases/{id}` evaluates its own ruleset; the project-wide
-/// hot-reload route then governs only databases without an entry.
+/// `projects/{p}/databases/{id}` evaluates its own ruleset, and makes one of
+/// them govern every database firebase.json does not list
+/// ([`stand_in`]); the project-wide hot-reload route then governs every
+/// database of the project.
 fn firestore_rules(config: &SuiteConfig) -> Result<RulesRuntime, SuiteRuntimeError> {
     let runtime = if config.diagnostics {
         if !terminal::enabled() {
@@ -1990,7 +2069,27 @@ fn install_firestore_rules(
             );
         }
     }
+    if let Some(entry) = stand_in(databases) {
+        let database = DatabaseName::new(project, entry.database_id.as_str()).map_err(|error| {
+            failure(format!(
+                "firebase.json names an invalid Firestore database: {error}"
+            ))
+        })?;
+        runtime.govern_unlisted_with(&database);
+    }
     Ok(())
+}
+
+/// The entry whose rules govern a database `firebase.json` does not list:
+/// the `(default)` entry, or the first entry when there is none. The
+/// official emulator loads one rules file and applies it to every database
+/// (`conformance/fixtures/request-identity-v1`), so an unlisted database is
+/// never left open while rules are configured.
+pub(crate) fn stand_in(databases: &[FirestoreDatabaseConfig]) -> Option<&FirestoreDatabaseConfig> {
+    let ruled = || databases.iter().filter(|entry| entry.rules.is_some());
+    ruled()
+        .find(|entry| entry.database_id == "(default)")
+        .or_else(|| ruled().next())
 }
 
 /// Latest committed Cloud Firestore state for `firestore.get` /
@@ -2016,11 +2115,29 @@ fn read_rules(path: &Path) -> Result<String, SuiteRuntimeError> {
     })
 }
 
+/// The official default open Storage rules, as the official emulator names
+/// them.
+fn open_default_rules() -> RulesSource {
+    RulesSource::Single(RulesFile {
+        name: "emulators/default_storage.rules".to_owned(),
+        content: DEFAULT_OPEN_STORAGE_RULES.to_owned(),
+    })
+}
+
+/// What the official emulator prints (an info line from `storage`) when a
+/// demo project's Storage targets are ignored.
+fn ignored_targets_notice(project: &str) -> String {
+    format!(
+        "Detected demo project ID \"{project}\", using a default (open) rules configuration. Storage targets in firebase.json will be ignored."
+    )
+}
+
 async fn start_storage(
     config: &SuiteConfig,
     delivery: &DeliveryRuntime,
     triggers: &TriggerRegistry,
     store: &Store,
+    logging: &LoggingRuntime,
 ) -> Result<StorageRuntime, SuiteRuntimeError> {
     let source = match &config.storage_rules {
         StorageRulesConfig::Single(path) => RulesSource::Single(RulesFile {
@@ -2038,10 +2155,19 @@ async fn start_storage(
                 &message,
                 &format!("firenook storage: {message}"),
             );
-            RulesSource::Single(RulesFile {
-                name: "emulators/default_storage.rules".to_owned(),
-                content: DEFAULT_OPEN_STORAGE_RULES.to_owned(),
-            })
+            open_default_rules()
+        }
+        StorageRulesConfig::OpenDefaultIgnoringTargets => {
+            let message = ignored_targets_notice(&config.project_id);
+            // An information line, as officially; the terminal UI shows no
+            // information before readiness, so there it is a start-up
+            // warning: rules a project configured are being ignored.
+            if terminal::enabled() {
+                terminal::line("WARN", "storage", &message);
+            } else {
+                terminal::out(&format!("firenook storage: {message}"));
+            }
+            open_default_rules()
         }
         StorageRulesConfig::PerBucket(buckets) => RulesSource::PerBucket(
             buckets
@@ -2064,7 +2190,9 @@ async fn start_storage(
         StorageRulesConfig::Single(path) => {
             firenook_storage_front::RulesFiles::Single(path.clone())
         }
-        StorageRulesConfig::OpenDefault => firenook_storage_front::RulesFiles::None,
+        StorageRulesConfig::OpenDefault | StorageRulesConfig::OpenDefaultIgnoringTargets => {
+            firenook_storage_front::RulesFiles::None
+        }
         StorageRulesConfig::PerBucket(buckets) => firenook_storage_front::RulesFiles::PerBucket(
             buckets
                 .iter()
@@ -2077,6 +2205,9 @@ async fn start_storage(
         default_bucket: Some(config.default_bucket.clone()),
         rules_files: Some(rules_files),
         diagnostics: config.diagnostics,
+        // From the opening on, so the staged uploads it removes are said
+        // as every later line is.
+        log: Some(console_wiring::storage::log_sink(logging)),
     };
     StorageRuntime::start_with(
         StorageConfig {
@@ -2142,14 +2273,116 @@ fn suite_directory(config: &SuiteConfig) -> Result<SuiteDirectory, SuiteRuntimeE
         if name == "pubsub" {
             service.pid = Some(std::process::id());
         }
+        if config.also_ipv6(name) {
+            match std::net::TcpListener::bind(("::1", port)) {
+                Ok(_) => service = service.also_on("::1"),
+                Err(error) => partly_available(name, port, &error),
+            }
+        }
         service
     });
     SuiteDirectory::new(&config.project_id, services)
         .map_err(|error| failure(format!("invalid suite directory: {error}")))
 }
 
+/// The host the Functions runtime names its own port by (its origin, and
+/// the inspector's address): the connect host, bracketed when it is an
+/// IPv6 literal, so `::1` makes `http://[::1]:5001`.
+fn functions_host(config: &SuiteConfig) -> String {
+    let host = config.connect_host();
+    if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host
+    }
+}
+
+/// `localhost`'s second address could not be bound for `name`: it answers
+/// on 127.0.0.1 only, which the official CLI accepts with this warning.
+fn partly_available(name: &str, port: u16, error: &std::io::Error) {
+    let message = format!(
+        "Port {port} is available on 127.0.0.1 but not ::1 ({error}), so the {} answers on 127.0.0.1 only. This may cause issues with some clients; if you encounter connectivity issues, consider switching to a different port or explicitly specifying \"host\": \"<ip address>\" instead of hostname in firebase.json.",
+        if name == "ui" { "console" } else { name }
+    );
+    terminal::print("WARN", name, &message, &format!("firenook: {message}"));
+}
+
 fn locator_path(config: &SuiteConfig) -> PathBuf {
     std::env::temp_dir().join(format!("hub-{}.json", config.project_id))
+}
+
+/// The Hub locator to write, or `None` when another suite for the project
+/// is running and holds it: the official CLI then warns and writes none,
+/// so the commands of either CLI keep reaching the suite that wrote it,
+/// and that suite's stop still finds its own file to remove. Running means
+/// that one of the file's origins answers with the pid the file records,
+/// as the official CLI checks that pid is alive.
+async fn free_locator(config: &SuiteConfig) -> Option<PathBuf> {
+    let path = locator_path(config);
+    if !locator_answers(&path).await {
+        return Some(path);
+    }
+    let message = format!(
+        "It seems that you are running multiple instances of the emulator suite for project {}. This may result in unexpected behavior. Firenook commands run in this project's folder still reach this suite (elsewhere, pass --hub-port {}); the official CLI reaches the other one.",
+        config.project_id, config.ports.hub
+    );
+    terminal::print(
+        "WARN",
+        "emulators",
+        &message,
+        &format!("firenook: {message}"),
+    );
+    None
+}
+
+async fn locator_answers(path: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    let Ok(locator) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return false;
+    };
+    let Some(pid) = locator["pid"].as_u64() else {
+        return false;
+    };
+    let Ok(client) = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(2))
+        .build()
+    else {
+        return false;
+    };
+    for origin in locator["origins"].as_array().into_iter().flatten() {
+        let Some(origin) = origin.as_str() else {
+            continue;
+        };
+        let Ok(response) = client.get(format!("{origin}/")).send().await else {
+            continue;
+        };
+        if let Ok(status) = response.json::<serde_json::Value>().await
+            && status["pid"].as_u64() == Some(pid)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// This suite's own record beside the locators (`firenook-hubs/hub-
+/// {project}-{pid}.json`): what the npm CLI reads to find the suite started
+/// from a project's folder when two run for one project id.
+fn suite_record(config: &SuiteConfig) -> (PathBuf, serde_json::Value) {
+    let path = std::env::temp_dir().join("firenook-hubs").join(format!(
+        "hub-{}-{}.json",
+        config.project_id,
+        std::process::id()
+    ));
+    let fields = serde_json::json!({
+        "projectId": config.project_id,
+        "projectDir": config.project_dir,
+        "config": config.firebase_json,
+    });
+    (path, fields)
 }
 
 fn startup_log_messages(config: &SuiteConfig) -> Vec<String> {
@@ -2165,7 +2398,12 @@ fn startup_log_messages(config: &SuiteConfig) -> Vec<String> {
         .collect()
 }
 
-struct ListenerSet(std::collections::BTreeMap<&'static str, TcpListener>);
+/// Every bound listener, and the second address of the ones that listen
+/// on two ([`SuiteConfig::also_ipv6`]).
+struct ListenerSet {
+    primary: std::collections::BTreeMap<&'static str, TcpListener>,
+    also: std::collections::BTreeMap<&'static str, TcpListener>,
+}
 
 struct StaticApplications {
     firestore: Option<tonic::service::Routes>,
@@ -2179,22 +2417,39 @@ struct StaticApplications {
 
 impl ListenerSet {
     fn take(&mut self, name: &'static str) -> Result<TcpListener, SuiteRuntimeError> {
-        self.0
+        self.primary
             .remove(name)
             .ok_or_else(|| failure(format!("missing bound {name} listener")))
+    }
+
+    /// `name`'s listener on its second address, when it has one.
+    fn take_also(&mut self, name: &'static str) -> Option<TcpListener> {
+        self.also.remove(name)
     }
 }
 
 async fn bind_listeners(config: &SuiteConfig) -> Result<ListenerSet, SuiteRuntimeError> {
-    let mut listeners = std::collections::BTreeMap::new();
+    let mut listeners = ListenerSet {
+        primary: std::collections::BTreeMap::new(),
+        also: std::collections::BTreeMap::new(),
+    };
     for (name, port) in listener_plan(config) {
-        let address = endpoint(&config.host, port);
+        let address = endpoint(config.bind_host(), port);
         let listener = TcpListener::bind(&address)
             .await
             .map_err(|error| failure(format!("cannot bind {name} at {address}: {error}")))?;
-        listeners.insert(name, listener);
+        listeners.primary.insert(name, listener);
+        if config.also_ipv6(name) {
+            // Taken since the directory was written: 127.0.0.1 only.
+            match TcpListener::bind(("::1", port)).await {
+                Ok(listener) => {
+                    listeners.also.insert(name, listener);
+                }
+                Err(error) => partly_available(name, port, &error),
+            }
+        }
     }
-    Ok(ListenerSet(listeners))
+    Ok(listeners)
 }
 
 fn spawn_static_servers(
@@ -2209,10 +2464,19 @@ fn spawn_static_servers(
     let mut servers = vec![spawn_axum(
         "hub",
         listeners.take("hub")?,
-        applications.hub,
+        applications.hub.clone(),
         shutdown.subscribe(),
         failed.clone(),
     )];
+    if let Some(also) = listeners.take_also("hub") {
+        servers.push(spawn_axum(
+            "hub",
+            also,
+            applications.hub,
+            shutdown.subscribe(),
+            failed.clone(),
+        ));
+    }
     if let Some(firestore) = applications.firestore {
         servers.push(spawn_firestore(
             "firestore",
@@ -2253,10 +2517,19 @@ fn spawn_static_servers(
         servers.push(spawn_axum(
             "ui",
             listeners.take("ui")?,
-            ui,
+            ui.clone(),
             shutdown.subscribe(),
             failed.clone(),
         ));
+        if let Some(also) = listeners.take_also("ui") {
+            servers.push(spawn_axum(
+                "ui",
+                also,
+                ui,
+                shutdown.subscribe(),
+                failed.clone(),
+            ));
+        }
         servers.push(spawn_axum(
             "logging",
             listeners.take("logging")?,
@@ -2277,7 +2550,13 @@ fn spawn_static_servers(
 pub fn no_delay(listener: TcpListener) -> TapIo<TcpListener, fn(&mut tokio::net::TcpStream)> {
     listener.tap_io(|stream| {
         if let Err(error) = stream.set_nodelay(true) {
-            eprintln!("firenook: TCP_NODELAY unavailable on an accepted connection: {error}");
+            let message = format!("TCP_NODELAY unavailable on an accepted connection: {error}");
+            terminal::print(
+                "WARN",
+                "firenook",
+                &message,
+                &format!("firenook: {message}"),
+            );
         }
     })
 }
@@ -2440,8 +2719,9 @@ async fn start_functions_runtime(
     let host = |port: u16| config.endpoint(port);
     let runtime_config = FunctionsRuntimeConfig {
         project_id: config.project_id.clone(),
-        project_alias: None,
-        host: config.host.clone(),
+        project_alias: config.project_alias.clone(),
+        services: config.services.running(),
+        host: functions_host(config),
         functions_port: config.ports.functions,
         project_dir: config.project_dir.clone(),
         node: config.node.clone(),
@@ -2526,13 +2806,9 @@ async fn load_extensions(
 pub fn extensions_config(
     config: &SuiteConfig,
 ) -> Result<firenook_extensions::ExtensionsConfig, SuiteRuntimeError> {
-    // The official emulator rewrites POSTINSTALL console links to the UI only
-    // when the UI is enabled in firebase.json (`unknown` otherwise).
-    let ui_enabled = std::fs::read_to_string(&config.firebase_json)
-        .ok()
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .and_then(|json| json.get("emulators")?.get("ui")?.get("enabled")?.as_bool())
-        .unwrap_or(true);
+    // The official emulator rewrites POSTINSTALL console links to the UI
+    // when the UI runs (`unknown` otherwise): firebase.json's
+    // `emulators.ui.enabled`, unless `--ui` started it anyway.
     extensions_config_from(&ExtensionsInputs {
         project_id: config.project_id.clone(),
         project_dir: config.project_dir.clone(),
@@ -2540,8 +2816,10 @@ pub fn extensions_config(
         default_bucket: config.default_bucket.clone(),
         node: config.node.clone(),
         offline: config.offline,
-        ui_origin: (ui_enabled && config.ui_enabled)
+        ui_origin: config
+            .ui_enabled
             .then(|| format!("{}/", config.origin(config.ports.ui))),
+        services: config.services.running(),
     })
 }
 
@@ -2556,6 +2834,9 @@ pub struct ExtensionsInputs {
     pub node: PathBuf,
     pub offline: bool,
     pub ui_origin: Option<String>,
+    /// The services the suite starts (`--only`); every one for a command
+    /// that starts none.
+    pub services: firenook_functions_runtime::RunningServices,
 }
 
 /// Builds the loader configuration from project inputs.
@@ -2602,6 +2883,7 @@ pub fn extensions_config_from(
         },
         offline: config.offline,
         ui_origin: config.ui_origin.clone(),
+        services: config.services,
     })
 }
 
@@ -2684,27 +2966,45 @@ fn finish_data_steps(
     storage: Option<&StorageRuntime>,
 ) {
     let held = |count: usize| u64::try_from(count).unwrap_or(u64::MAX);
-    let words = |imported: Option<u64>, held: &'static str, brought: &'static str| {
-        if imported.is_some() { brought } else { held }
+    // What the service holds, or what the import brought in: one noun each
+    // for one and for many.
+    let figure = |imported: Option<u64>,
+                  held: u64,
+                  [one, many, one_brought, many_brought]: [&'static str; 4]| {
+        imported.map_or_else(
+            || terminal::counted(held, one, many),
+            |count| terminal::counted(count, one_brought, many_brought),
+        )
     };
     if let Some(step) = firestore_step {
-        let count = imported.firestore.unwrap_or_else(|| store.document_total());
-        let words = words(imported.firestore, "documents", "documents imported");
-        step.done(&[(count, words)], None);
+        let nouns = [
+            "document",
+            "documents",
+            "document imported",
+            "documents imported",
+        ];
+        step.done(
+            &[figure(imported.firestore, store.document_total(), nouns)],
+            None,
+        );
     }
     if let (Some(step), Some(auth)) = (auth_step, auth) {
-        let count = imported.auth.unwrap_or_else(|| held(auth.user_count()));
+        let nouns = ["user", "users", "user imported", "users imported"];
         step.done(
-            &[(count, words(imported.auth, "users", "users imported"))],
+            &[figure(imported.auth, held(auth.user_count()), nouns)],
             None,
         );
     }
     if let (Some(step), Some(storage)) = (storage_step, storage) {
-        let count = imported
-            .storage
-            .unwrap_or_else(|| held(storage.object_count()));
-        let words = words(imported.storage, "objects", "objects imported");
-        step.done(&[(count, words)], None);
+        let nouns = ["object", "objects", "object imported", "objects imported"];
+        step.done(
+            &[figure(
+                imported.storage,
+                held(storage.object_count()),
+                nouns,
+            )],
+            None,
+        );
     }
 }
 
@@ -2742,7 +3042,8 @@ async fn import_suite(
             )?;
             imported.firestore = Some(count);
             if !terminal::enabled() {
-                eprintln!("firenook imported {count} Firestore documents");
+                let documents = terminal::plural(count, "document", "documents");
+                eprintln!("firenook imported {count} Firestore {documents}");
             }
         } else if !terminal::enabled() {
             eprintln!("firenook: firestore export not imported (service not started)");
@@ -2755,7 +3056,8 @@ async fn import_suite(
                 .map_err(|error| failure(format!("Auth import failed: {error}")))?;
             imported.auth = Some(u64::try_from(count).unwrap_or(u64::MAX));
             if !terminal::enabled() {
-                eprintln!("firenook imported {count} Auth users");
+                let users = terminal::plural(count, "user", "users");
+                eprintln!("firenook imported {count} Auth {users}");
             }
         } else if !terminal::enabled() {
             eprintln!("firenook: auth export not imported (service not started)");
@@ -2769,7 +3071,8 @@ async fn import_suite(
                 .map_err(|error| failure(format!("Storage import failed: {error}")))?;
             imported.storage = Some(u64::try_from(count).unwrap_or(u64::MAX));
             if !terminal::enabled() {
-                eprintln!("firenook imported {count} Storage objects");
+                let objects = terminal::plural(count, "object", "objects");
+                eprintln!("firenook imported {count} Storage {objects}");
             }
         } else if !terminal::enabled() {
             eprintln!("firenook: storage export not imported (service not started)");
@@ -2798,12 +3101,82 @@ struct ComponentMetadata {
     path: PathBuf,
 }
 
-fn read_export_metadata(root: &Path) -> Result<ExportMetadata, SuiteRuntimeError> {
+/// What an `--import` directory holds, found as the official CLI's
+/// `findExportMetadata` finds it.
+enum ImportSource {
+    /// A suite export (`firebase-export-metadata.json`), or a production
+    /// Firestore export (`*.overall_export_metadata`) imported as Firestore.
+    Export(ExportMetadata),
+    /// Nothing Firenook imports; the warning that says so.
+    Nothing(String),
+}
+
+const SKIPPED: &str = "Could not find import/export metadata file, skipping data import!";
+
+fn find_export_metadata(root: &Path) -> Result<ImportSource, SuiteRuntimeError> {
+    let kind = std::fs::metadata(root).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            failure(format!("Directory \"{}\" does not exist.", root.display()))
+        } else {
+            failure(format!("failed to read {}: {error}", root.display()))
+        }
+    })?;
+    if !kind.is_dir() {
+        return Ok(ImportSource::Nothing(SKIPPED.to_owned()));
+    }
     let path = root.join("firebase-export-metadata.json");
-    let bytes = std::fs::read(&path)
-        .map_err(|error| failure(format!("failed to read {}: {error}", path.display())))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| failure(format!("invalid suite export metadata: {error}")))
+    if path.is_file() {
+        let bytes = std::fs::read(&path)
+            .map_err(|error| failure(format!("failed to read {}: {error}", path.display())))?;
+        return serde_json::from_slice(&bytes)
+            .map(ImportSource::Export)
+            .map_err(|error| failure(format!("invalid suite export metadata: {error}")));
+    }
+    let mut names: Vec<String> = std::fs::read_dir(root)
+        .map_err(|error| failure(format!("failed to read {}: {error}", root.display())))?
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .collect();
+    names.sort();
+    if let Some(overall) = names
+        .iter()
+        .find(|name| name.ends_with(".overall_export_metadata"))
+    {
+        let message = format!(
+            "Detected non-emulator Firestore export at {}",
+            root.display()
+        );
+        terminal::print(
+            "INFO",
+            "firestore",
+            &message,
+            &format!("firenook: {message}"),
+        );
+        return Ok(ImportSource::Export(ExportMetadata {
+            firestore: Some(FirestoreMetadata {
+                metadata_file: PathBuf::from(overall),
+            }),
+            auth: None,
+            storage: None,
+        }));
+    }
+    // Case-sensitive, as the official CLI's `endsWith(".json")`.
+    if names
+        .iter()
+        .any(|name| Path::new(name).extension().is_some_and(|ext| ext == "json"))
+    {
+        return Ok(ImportSource::Nothing(
+            "Detected non-emulator Database export, which Firenook does not emulate, skipping data import!"
+                .to_owned(),
+        ));
+    }
+    Ok(ImportSource::Nothing(SKIPPED.to_owned()))
+}
+
+fn read_export_metadata(root: &Path) -> Result<ExportMetadata, SuiteRuntimeError> {
+    match find_export_metadata(root)? {
+        ImportSource::Export(metadata) => Ok(metadata),
+        ImportSource::Nothing(reason) => Err(failure(format!("{reason} ({})", root.display()))),
+    }
 }
 
 fn seed_store(
@@ -3192,6 +3565,24 @@ mod tests {
         std::fs::remove_dir_all(&staging).expect("test directory should clean up");
     }
 
+    /// The line the official emulator prints when a demo project's Storage
+    /// targets map to no bucket (`conformance/fixtures/storage-demo-targets-v1`).
+    #[test]
+    fn ignored_storage_targets_are_announced_as_officially() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../conformance/fixtures/storage-demo-targets-v1/fixture.json"
+        ))
+        .expect("fixture");
+        let case = &fixture["cases"][0];
+        assert_eq!(case["id"], "no-firebaserc");
+        assert_eq!(
+            case["notices"],
+            serde_json::json!([ignored_targets_notice(
+                case["project"].as_str().expect("project")
+            )])
+        );
+    }
+
     #[test]
     fn firestore_rules_are_installed_per_configured_database() {
         let unique = format!(
@@ -3212,33 +3603,49 @@ mod tests {
             indexes: None,
         };
 
-        let runtime = RulesRuntime::default();
-        install_firestore_rules(
-            &runtime,
-            project,
-            &[entry("(default)", &deny), entry("other", &allow)],
-        )
-        .expect("two databases");
         let access = SnapshotAccess::current(Store::default().snapshot(), project);
-        for (id, allowed) in [("(default)", false), ("other", true), ("third", true)] {
+        let allowed = |runtime: &RulesRuntime, id: &str| {
             let database = DatabaseName::new(project, id).expect("database");
             let request = firenook_rules_engine::EvaluationRequest::new(
                 firenook_rules_runtime::RequestOperation::Get,
                 format!("/databases/{id}/documents/items/one"),
                 firenook_rules_engine::Timestamp::new(0, 0),
             );
-            assert_eq!(
-                runtime
-                    .evaluate(
-                        &database,
-                        &firenook_rules_runtime::Authorization::Client(None),
-                        &request,
-                        &access,
-                    )
-                    .allowed,
-                allowed,
-                "{id}"
-            );
+            runtime
+                .evaluate(
+                    &database,
+                    &firenook_rules_runtime::Authorization::Client(None),
+                    &request,
+                    &access,
+                )
+                .allowed
+        };
+        // A database firebase.json does not list ("third") is never open: the
+        // official emulator's one rules file governs every database, so here
+        // the `(default)` entry's rules do, or the first entry's without one.
+        for (databases, expected) in [
+            (
+                vec![entry("(default)", &deny), entry("other", &allow)],
+                [("(default)", false), ("other", true), ("third", false)],
+            ),
+            (
+                vec![entry("other", &allow), entry("(default)", &deny)],
+                [("(default)", false), ("other", true), ("third", false)],
+            ),
+            (
+                vec![entry("orders", &deny)],
+                [("(default)", false), ("orders", false), ("third", false)],
+            ),
+            (
+                vec![entry("other", &allow), entry("audit", &deny)],
+                [("(default)", true), ("audit", false), ("third", true)],
+            ),
+        ] {
+            let runtime = RulesRuntime::default();
+            install_firestore_rules(&runtime, project, &databases).expect("databases");
+            for (id, verdict) in expected {
+                assert_eq!(allowed(&runtime, id), verdict, "{id} in {databases:?}");
+            }
         }
 
         // Only named databases is a valid configuration; a repeated one is not.
@@ -3291,5 +3698,89 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&root).expect("test directory should clean up");
+    }
+
+    #[test]
+    fn an_import_directory_is_read_as_the_official_cli_reads_it() {
+        let unique = format!(
+            "firenook-suite-import-source-{}-{}",
+            std::process::id(),
+            OffsetDateTime::now_utc().unix_timestamp_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&root).expect("root should exist");
+        let skipped = |path: &Path| match find_export_metadata(path).expect("no refusal") {
+            ImportSource::Nothing(reason) => reason,
+            ImportSource::Export(_) => panic!("{} imported", path.display()),
+        };
+        // A directory that is not there is refused.
+        let missing = root.join("missing");
+        let refused = find_export_metadata(&missing).err().expect("refused");
+        assert_eq!(
+            refused.to_string(),
+            format!("Directory \"{}\" does not exist.", missing.display())
+        );
+        // An empty directory, or a file, has nothing to import.
+        let empty = root.join("empty");
+        std::fs::create_dir_all(&empty).expect("empty");
+        assert_eq!(skipped(&empty), SKIPPED);
+        let file = root.join("seed.txt");
+        std::fs::write(&file, "x").expect("file");
+        assert_eq!(skipped(&file), SKIPPED);
+        // A Realtime Database export: Firenook emulates no database.
+        let database = root.join("database");
+        std::fs::create_dir_all(&database).expect("database");
+        std::fs::write(database.join("data.json"), "{}").expect("data");
+        assert!(skipped(&database).contains("Database export"));
+        // A production Firestore export is imported as Firestore.
+        let production = root.join("production");
+        std::fs::create_dir_all(&production).expect("production");
+        std::fs::write(production.join("data.json"), "{}").expect("data");
+        std::fs::write(
+            production.join("2026-10-01T00:00:00_1.overall_export_metadata"),
+            "",
+        )
+        .expect("metadata");
+        let ImportSource::Export(metadata) = find_export_metadata(&production).expect("found")
+        else {
+            panic!("the production export was skipped");
+        };
+        assert_eq!(
+            metadata.firestore.expect("firestore").metadata_file,
+            PathBuf::from("2026-10-01T00:00:00_1.overall_export_metadata")
+        );
+        assert!(metadata.auth.is_none() && metadata.storage.is_none());
+        std::fs::remove_dir_all(&root).expect("test directory should clean up");
+    }
+
+    #[test]
+    fn hosts_are_bound_and_named_as_the_official_cli_binds_them() {
+        let with = |host: &str| SuiteConfig {
+            host: host.to_owned(),
+            ..crate::diagnostics_tests::test_config()
+        };
+        // localhost: 127.0.0.1 for every emulator, and ::1 for the hub and
+        // the console as well; clients are told 127.0.0.1.
+        let localhost = with("localhost");
+        assert_eq!(localhost.bind_host(), "127.0.0.1");
+        assert_eq!(localhost.connect_host(), "127.0.0.1");
+        assert!(localhost.also_ipv6("hub") && localhost.also_ipv6("ui"));
+        assert!(!localhost.also_ipv6("firestore") && !localhost.also_ipv6("auth"));
+        assert_eq!(functions_host(&localhost), "127.0.0.1");
+        // An address is that address alone.
+        for (host, connect, functions) in [
+            ("127.0.0.1", "127.0.0.1", "127.0.0.1"),
+            ("::1", "::1", "[::1]"),
+            ("[::1]", "::1", "[::1]"),
+            ("0.0.0.0", "127.0.0.1", "127.0.0.1"),
+            ("::", "::1", "[::1]"),
+        ] {
+            let config = with(host);
+            assert_eq!(config.bind_host(), host);
+            assert_eq!(config.connect_host(), connect, "{host}");
+            assert_eq!(functions_host(&config), functions, "{host}");
+            assert!(!config.also_ipv6("hub"), "{host}");
+        }
+        assert_eq!(with("::1").endpoint(8080), "[::1]:8080");
     }
 }

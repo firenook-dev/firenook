@@ -493,19 +493,26 @@ async fn a_minted_token_carries_a_draft_and_the_inspection_judges_tokens() {
     assert_eq!(inspection["checks"][0]["consumer"], "rules");
     assert_eq!(inspection["checks"][0]["ok"], true, "{inspection}");
 
-    // Another project's token: the rules refuse it, and say why.
+    // Another project's token: the rules read it as the official emulator
+    // does, and say production would refuse it.
     let (_, inspection) = post(
         &api,
         "/api/v1/auth/token/inspect?project=demo-other",
         &json!({ "token": id_token }),
     )
     .await;
-    assert_eq!(inspection["checks"][0]["ok"], false);
+    assert_eq!(inspection["checks"][0]["ok"], true);
     assert!(
         inspection["checks"][0]["reason"]
             .as_str()
-            .is_some_and(|reason| reason.contains("`demo-console`")),
+            .is_some_and(|reason| reason.starts_with(
+                "Accepted, but production refuses it: it is for project `demo-console`; the emulator runs `demo-other`."
+            )),
         "{inspection}"
+    );
+    assert_eq!(
+        inspection["checks"][0]["fix"],
+        "Initialize the app with projectId `demo-other` (initializeApp({ projectId: 'demo-other' }))."
     );
     // A custom token is not what the rules read.
     let (_, inspection) = post(
@@ -548,13 +555,20 @@ async fn an_expired_token_is_explained() {
         &json!({ "token": token }),
     )
     .await;
+    // The rules read it, as the official emulator does: neither checks a
+    // token's times. The reason says production would not.
     let check = &inspection["checks"][0];
-    assert_eq!(check["ok"], false, "{inspection}");
+    assert_eq!(check["ok"], true, "{inspection}");
     assert!(
-        check["reason"]
-            .as_str()
-            .is_some_and(|reason| reason.starts_with("Expired 1 h ago")),
+        check["reason"].as_str().is_some_and(|reason| reason
+            .starts_with("Accepted, but production refuses it: it expired 1 h ago")
+            && reason
+                .ends_with("The rules see request.auth with uid `u_ada` and the token's claims.")),
         "{check}"
+    );
+    assert_eq!(
+        check["fix"],
+        "Get a fresh token: the app's SDK refreshes it on its own; sign in again otherwise."
     );
 }
 

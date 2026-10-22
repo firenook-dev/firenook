@@ -1,4 +1,4 @@
-# Installable emulator-preview release contract
+# Installable emulator release contract
 
 This is distribution and CLI integration work, not Phase 6. No registry publish,
 release tag, emulator feature expansion or acceptance rerun is authorized by a
@@ -6,13 +6,19 @@ passing packaging test. First publication and npm account configuration remain
 interactive release-owner operations.
 
 - Public packages: `firenook` (command `firenook`) and the `@firenook/cli-<platform>` engines.
-- The first package version is a prerelease, not a universal replacement claim.
+- The first package versions were prereleases (`0.1.0-next.N`, then
+  `0.2.0-next.N`); `0.2.0` is the first stable one. Neither is a universal
+  replacement claim.
 - Pin the native source revision in release.json. Application-specific accepted
   baselines and reports stay in private receipts, never in npm metadata.
   Package version and engine version/source are reported separately; old
   acceptance is never attributed to a changed engine.
-- Required platform matrix: macOS x64/arm64, Linux x64/arm64 glibc (Ubuntu 24.04),
-  and Windows x64. Every cell must pass before publication.
+- Required platform matrix: macOS x64/arm64, Linux x64/arm64 glibc (built and
+  tested on Ubuntu 24.04, linked against glibc 2.28 in the pinned
+  manylinux_2_28 image), and Windows x64. Every cell must pass before
+  publication. A Linux engine whose symbol versions ask for more than glibc
+  2.28, or which does not start on AlmaLinux 8, Debian 11, Ubuntu 22.04 and
+  node:24-slim, fails its cell (packaging/smoke-glibc.mjs).
   Reject other platforms; do not compile or download a replacement on install.
 - Registry platform packages contain executables and source/hash receipts.
   The launcher pins exact platform versions and verifies its installed binary.
@@ -53,8 +59,10 @@ interactive release-owner operations.
   the approver before approval, and a resume must repeat the one its receipt
   records. npm sets one tag per publish and OIDC cannot move tags, so the
   CLI's `next` then stays on the previous release until moved by hand; the
-  release notes say so. Afterwards `latest` is for a separately reviewed
-  stable release.
+  release notes say so. From the first stable release, `0.2.0`, on, `latest`
+  is for a separately reviewed stable release, dispatched with `latest` (the
+  native packages still go to `next`); a preview goes to `next` only, and
+  after a stable release the release owner moves the CLI's `next` to it.
   GitHub release notes carry compatibility, dependency, performance limitations,
   artifact checksums and reviewed generic compatibility evidence. Private
   application acceptance links and raw receipts are not release assets.

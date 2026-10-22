@@ -2114,6 +2114,62 @@ mod schedules {
     }
 
     #[tokio::test]
+    async fn the_printer_says_schedule_problems_until_a_sink_is_set() {
+        let mut inventory = inventory();
+        for function in &mut inventory.backends[0].function_triggers {
+            if let Some(schedule) = &mut function.schedule {
+                schedule.schedule = "not a schedule".to_owned();
+            }
+        }
+        let printed: Arc<Mutex<Vec<PubsubLogLine>>> = Arc::default();
+        let printer_lines = Arc::clone(&printed);
+        let background = TriggerRegistry::default();
+        let (observer, _deliveries) = TriggerObserver::channel(background.clone());
+        let mut runtime = crate::router_with_printer(
+            PROJECT,
+            &inventory,
+            observer.queue(),
+            background,
+            Arc::new(move |line: &PubsubLogLine| {
+                printer_lines.lock().expect("lines").push(line.clone());
+            }),
+        );
+        // Found while the runtime was built, before anything could set a sink.
+        let lines = printed.lock().unwrap().clone();
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert_eq!((lines[0].level, lines[0].kind), ("WARN", LOG_SCHEDULE));
+        assert!(
+            lines[0]
+                .text
+                .starts_with(&format!("schedule of {TICK} not run automatically"))
+        );
+        // A sink takes over, and the printer says nothing more.
+        let sunk: Arc<Mutex<Vec<PubsubLogLine>>> = Arc::default();
+        let sink_lines = Arc::clone(&sunk);
+        runtime.set_log_sink(Arc::new(move |line| {
+            sink_lines.lock().expect("lines").push(line);
+        }));
+        let mut scheduler = runtime.start_scheduler().expect("scheduler");
+        for function in &mut inventory.backends[0].function_triggers {
+            if let Some(schedule) = &mut function.schedule {
+                schedule.schedule = "every day 25:00".to_owned();
+            }
+        }
+        runtime
+            .refresh_inventory(PROJECT, &inventory, &mut scheduler)
+            .await
+            .expect("reload");
+        assert_eq!(printed.lock().unwrap().len(), 1);
+        assert_eq!(
+            sunk.lock().unwrap().len(),
+            2,
+            "the replay and the new problem"
+        );
+        scheduler.shutdown().await;
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn schedules_are_keyed_by_function_id() {
         let (runtime, mut deliveries, _background) = start(&two_regions());
         let us = runtime.schedule_view(TICK).expect("us-central1");

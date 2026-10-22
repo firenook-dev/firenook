@@ -31,8 +31,8 @@ npm install --save-dev firenook
 Same flags, same ports, and your `firebase.json`, rules, Functions code and app
 stay as they are. In a terminal, run it as `npx firenook emulators:start`. To
 keep your data between runs, add `--keep-data`.
-Firenook needs Node 24. Starting a new project? `npx firenook init` sets one
-up.
+Firenook needs Node 22, 24 or 26. Starting a new project? `npx firenook init`
+sets one up on one screen, installs it and starts the emulators.
 
 <p align="center">
   <img alt="firenook emulators:start: the start-up card, the ready summary and a live log of function calls" src="https://raw.githubusercontent.com/firenook-dev/firenook/main/docs/assets/terminal.gif" width="760">
@@ -123,14 +123,16 @@ filters over a large collection, batch gets).
 ## Commands
 
 ```sh
-firenook init [--adopt] [--dry-run]           # scaffold a project, or adapt an existing one
+firenook init [--yes]                         # a new project: choose, install, start
+firenook init --adopt [--dry-run]             # adapt an existing firebase.json
 firenook doctor                               # read-only checks, JSON
 firenook emulators:start [options]            # --only, --project, --import, --export-on-exit, --inspect-functions
 firenook emulators:start --keep-data [--import ./seed]   # keep data between runs, in .firenook/state
+firenook emulators:start --build              # compile TypeScript first and on every save
 firenook emulators:exec "npm test"            # start, run your tests, stop
 firenook emulators:export ./export            # snapshot a running suite
 firenook functions:invoke NAME [--data JSON | --event-data JSON]   # call any function, any trigger
-firenook ext:vendor                           # copy registry Extensions into the project
+firenook ext:vendor [--offline]               # copy registry Extensions into the project
 firenook mcp                                  # the running suite as tools for a coding agent
 firenook mcp add                              # give Claude Code, Cursor and VS Code that server
 firenook state:inspect | state:compact --state-dir DIR
@@ -140,10 +142,13 @@ Every command and option: [CLI reference](https://github.com/firenook-dev/fireno
 
 ## Requirements
 
-Node 24 on macOS (Apple silicon or Intel), Linux (x64 or arm64, glibc) or
-Windows x64. Keep optional dependencies enabled: they carry the native engine
-for your platform. Firenook is in preview (`0.2.0-next` releases): pin an exact
-version (`--save-exact`) and upgrade on purpose.
+Node 22, 24 or 26 on macOS (Apple silicon or Intel), Linux (x64 or arm64,
+glibc 2.28 or newer: RHEL 8, Debian 10, Ubuntu 20.04, node:24-slim and later;
+not Alpine) or Windows x64; your Functions run on it, and a codebase whose
+`engines.node` asks for another Node is warned about at start. Keep optional
+dependencies enabled: they carry the native engine for your platform. Firenook
+is in preview (`0.2.0-next` releases): pin an exact version (`--save-exact`)
+and upgrade on purpose.
 
 ## License
 

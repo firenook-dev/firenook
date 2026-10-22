@@ -58,6 +58,109 @@ pub(crate) fn decode_document_name(resource: &str) -> Result<DocumentKey, Status
         .map_err(|error| Status::invalid_argument(error.to_string()))
 }
 
+/// The longest collection or document id, in bytes.
+const MAXIMUM_ID_BYTES: usize = 1500;
+
+/// An automatic document id as the official emulator and the client SDKs make
+/// one: 20 characters drawn from the 62 ASCII letters and digits. Each id
+/// hashes a process-wide sequence number with keys the process draws at
+/// random once, so ids neither repeat nor follow one another.
+#[must_use]
+pub fn auto_id() -> String {
+    use std::hash::{BuildHasher as _, Hasher as _};
+    use std::sync::LazyLock;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    const ALPHABET: &[u8; 62] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    static KEYS: LazyLock<std::collections::hash_map::RandomState> =
+        LazyLock::new(std::collections::hash_map::RandomState::new);
+    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let mut id = String::with_capacity(20);
+    // 62^10 is below 2^64: each 64-bit hash gives ten characters.
+    for half in 0..2_u8 {
+        let mut hasher = KEYS.build_hasher();
+        hasher.write_u64(sequence);
+        hasher.write_u8(half);
+        let mut word = hasher.finish();
+        for _ in 0..10 {
+            id.push(char::from(
+                ALPHABET[usize::try_from(word % 62).unwrap_or(0)],
+            ));
+            word /= 62;
+        }
+    }
+    id
+}
+
+/// The key a `CreateDocument` writes, checked as the official emulator checks
+/// it and refused with its messages: the parent is the database's documents
+/// or a document under them, and neither id may contain `/`, be reserved
+/// (`__…__` other than a numeric `__id7__`, `.` or `..`) or pass 1,500
+/// bytes. An empty document id is replaced by [`auto_id`].
+pub fn created_document_key(
+    parent: &str,
+    collection_id: &str,
+    document_id: &str,
+) -> Result<DocumentKey, Status> {
+    let segments = parent.split('/').collect::<Vec<_>>();
+    if segments.len() < 5
+        || segments[0] != PROJECTS
+        || segments[2] != DATABASES
+        || segments[4] != DOCUMENTS
+    {
+        return Err(Status::invalid_argument(format!(
+            "invalid document parent resource name: {parent}"
+        )));
+    }
+    let path = &segments[5..];
+    if path.len() % 2 != 0 || path.iter().any(|segment| segment.is_empty()) {
+        return Err(Status::invalid_argument(format!(
+            "Document parent name \"{parent}\" lacks \"/\" at index {}.",
+            parent.len()
+        )));
+    }
+    let database = DatabaseName::new(segments[1], segments[3])
+        .map_err(|error| Status::invalid_argument(error.to_string()))?;
+    if collection_id.is_empty() {
+        return Err(Status::invalid_argument("invalid collection_id"));
+    }
+    check_created_id("Collection id", collection_id)?;
+    let document_id = if document_id.is_empty() {
+        auto_id()
+    } else {
+        check_created_id("Resource id", document_id)?;
+        document_id.to_owned()
+    };
+    let path = path
+        .iter()
+        .copied()
+        .chain([collection_id, document_id.as_str()])
+        .collect::<Vec<_>>()
+        .join("/");
+    DocumentKey::new(database, path).map_err(|error| Status::invalid_argument(error.to_string()))
+}
+
+/// One id of [`created_document_key`]; `kind` names it as the official
+/// messages do.
+fn check_created_id(kind: &str, id: &str) -> Result<(), Status> {
+    if id.contains('/') {
+        return Err(Status::invalid_argument(format!(
+            "{kind} \"{id}\" is invalid because it contains \"/\"."
+        )));
+    }
+    if id == "." || id == ".." || validate_resource_id(id).is_err() {
+        return Err(Status::invalid_argument(format!(
+            "{kind} \"{id}\" is invalid because it is reserved."
+        )));
+    }
+    if id.len() > MAXIMUM_ID_BYTES {
+        return Err(Status::invalid_argument(
+            "The key path element name is longer than 1500 bytes.",
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn decode_parent(resource: &str) -> Result<(DatabaseName, Option<String>), Status> {
     let segments = resource.split('/').collect::<Vec<_>>();
     if segments.len() < 5
@@ -92,19 +195,26 @@ pub fn decode_document(document: proto::Document) -> Result<(DocumentKey, Fields
     Ok((key, fields))
 }
 
-pub(crate) fn encode_document_masked(
+/// A document as a Firestore v1 message, with only the `mask`'s fields when
+/// one is given.
+pub fn encode_document_masked(
     key: &DocumentKey,
     document: &Document,
     mask: Option<&proto::DocumentMask>,
 ) -> Result<proto::Document, Status> {
-    let fields = if let Some(mask) = mask {
-        project_fields(document.fields(), &mask.field_paths)?
-    } else {
-        document.fields().clone()
+    // Without a mask the stored fields are encoded where they are: copying a
+    // large document first only to encode the copy doubled its cost.
+    let projected;
+    let fields = match mask {
+        Some(mask) => {
+            projected = project_fields(document.fields(), &mask.field_paths)?;
+            &projected
+        }
+        None => document.fields(),
     };
     Ok(proto::Document {
         name: key.to_string(),
-        fields: encode_fields(&fields)?,
+        fields: encode_fields(fields)?,
         create_time: Some(encode_timestamp(document.create_time())),
         update_time: Some(encode_timestamp(document.update_time())),
     })

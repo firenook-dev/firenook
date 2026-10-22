@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use crate::console::ConsoleError;
 use crate::write::Pending;
-use crate::{StorageData, StorageState, lock, now_millis};
+use crate::{StorageData, StorageLogLevel, StorageState, lock, now_millis};
 
 /// How long a session may sit idle before it is swept.
 pub(crate) const SESSION_IDLE: Duration = Duration::from_hours(24 * 7);
@@ -70,15 +70,21 @@ pub(crate) fn spawn_sweep(state: &StorageState) {
         tokio::pin!(stopped);
         loop {
             match sweep(&sweeper, now_millis()).await {
-                Ok((count, bytes)) if count > 0 => println!(
-                    "firenook storage: removed {count} upload {} idle for 7 days ({})",
-                    if count == 1 { "session" } else { "sessions" },
-                    crate::staging::format_bytes(bytes)
+                Ok((count, bytes)) if count > 0 => sweeper.log.emit(
+                    StorageLogLevel::Info,
+                    crate::log::UPLOADS,
+                    format!(
+                        "removed {count} upload {} idle for 7 days ({})",
+                        if count == 1 { "session" } else { "sessions" },
+                        crate::staging::format_bytes(bytes)
+                    ),
                 ),
                 Ok(_) => {}
-                Err(error) => {
-                    eprintln!("firenook storage: the upload session sweep failed: {error}");
-                }
+                Err(error) => sweeper.log.emit(
+                    StorageLogLevel::Warn,
+                    crate::log::UPLOADS,
+                    format!("the upload session sweep failed: {error}"),
+                ),
             }
             tokio::select! {
                 () = &mut stopped => return,

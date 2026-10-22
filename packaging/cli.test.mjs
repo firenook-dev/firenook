@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { manifest, platformKey, release, sha256, verifyBinary } from '../packages/cli/src/binary.mjs';
-import { canonical, inspectProject, launchContext, loadProject, parseOptions } from '../packages/cli/src/options.mjs';
-import { prepareLaunch, requireNode, supervise } from '../packages/cli/src/runtime.mjs';
+import { NODE_TESTED, manifest, nodeCheck, platformKey, release, sha256, verifyBinary } from '../packages/cli/src/binary.mjs';
+import { canonical, inspectProject, launchContext, loadProject, parseOptions, selectProject } from '../packages/cli/src/options.mjs';
+import { DEMO_TOKEN_PATH, EXEC_TOKEN_PRELOAD, diagnose, execEnvironment, prepareLaunch, supervise, vendorExtensions } from '../packages/cli/src/runtime.mjs';
+import { activeProjects, configstorePath } from '../packages/cli/src/configstore.mjs';
 
 function project() {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-cli-test-'));
@@ -38,6 +40,16 @@ function launchFor(dir, options, mode = 'start', typed = []) {
   } finally { console.error = original; }
 }
 const flagValue = (args, flag) => args[args.indexOf(flag) + 1];
+// Runs `body` with GOOGLE_APPLICATION_CREDENTIALS set to `value` (unset when undefined).
+function withoutCredentials(body, value) {
+  const saved = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (value === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  else process.env.GOOGLE_APPLICATION_CREDENTIALS = value;
+  try { return body(); } finally {
+    if (saved === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    else process.env.GOOGLE_APPLICATION_CREDENTIALS = saved;
+  }
+}
 
 test('CLI source oracle pins export conventions', () => {
   const oracle = JSON.parse(readFileSync(new URL('fixtures/firebase-cli-15.22.0.json', import.meta.url)));
@@ -49,13 +61,59 @@ test('registry-only exact dependencies; no lifecycle scripts or source-build ins
   for (const version of Object.values({...manifest.dependencies,...manifest.optionalDependencies})) assert.match(version,/^\d+\.\d+\.\d+(?:-[a-z]+\.\d+)?$/);
   assert.equal(manifest.bin.firenook,'bin/firenook.mjs');
 });
-test('npx gets this release on any Node npm runs on; the emulators ask for Node 24 themselves', () => {
+test('npx gets this release on any Node npm runs on; the emulators start on Node 22, 24 and 26', () => {
   // A release whose engines exclude the running Node is skipped for the
   // 0.0.0 placeholder by `npx firenook`, with no word about why.
   assert.equal(manifest.engines.node,'>=20');
-  requireNode('24.20.0');
-  assert.throws(()=>requireNode('26.9.0'),/need Node 24, since your Functions run on it; this is Node 26\.9\.0\. Switch to Node 24 \(with nvm: nvm install 24\)/);
-  assert.throws(()=>requireNode('22.20.0'),/this is Node 22\.20\.0/);
+  assert.deepEqual(NODE_TESTED,[22,24,26]);
+  const major = version => Number(version.split('.')[0]);
+  for (const version of ['22.23.3','24.20.0','26.9.0','22.0.0']) assert.deepEqual(nodeCheck(version),{version,major:major(version),tested:true});
+  // Older than the oldest tested line: refused, with the way to switch.
+  for (const version of ['20.20.2','21.7.3','18.20.8']) {
+    assert.deepEqual(nodeCheck(version),{version,major:major(version),tested:false,
+      problem:`the emulators need Node 22, 24 or 26, since your Functions run on it; this is Node ${version}. Switch to Node 24 (with nvm: nvm install 24) and run it again`});
+  }
+  // An odd or a newer major: started with a warning, as the official
+  // emulator runs on any Node from its floor up.
+  for (const version of ['23.11.1','25.2.1','27.0.0','28.1.0']) {
+    assert.deepEqual(nodeCheck(version),{version,major:major(version),tested:false,
+      note:`Node ${version} is not one the emulators are tested on (22, 24 and 26); they start on it, and your Functions run on it. If something behaves differently, switch to Node 24 (with nvm: nvm install 24)`});
+  }
+  assert.match(nodeCheck('unknown').problem,/this is Node unknown\./);
+});
+test('doctor reports the Node it runs on, a refused one among its problems, instead of stopping at it', async () => {
+  const {dir,options} = project();
+  const quietly = node => diagnose(options,dir,{report:true,quiet:true,node:nodeCheck(node),locate:()=>'/fake/firenook'});
+  for (const version of ['22.23.3','24.20.0','26.9.0']) {
+    const report = await quietly(version);
+    assert.deepEqual(report.node,{version,major:Number(version.split('.')[0]),tested:true,path:process.execPath});
+    assert.deepEqual(report.problems,[]);
+    assert.equal(report.binary,'/fake/firenook');
+  }
+  const refused = await quietly('20.20.2');
+  assert.equal(refused.node.tested,false);
+  assert.deepEqual(refused.problems,[nodeCheck('20.20.2').problem]);
+  assert.equal(refused.project.project,'demo-fixture');
+  const newer = await quietly('27.0.0');
+  assert.deepEqual(newer.problems,[]);
+  assert.equal(newer.node.note,nodeCheck('27.0.0').note);
+  assert.equal(newer.warnings[0],`Firenook: ${nodeCheck('27.0.0').note}`);
+  // A missing engine is a problem of the report too.
+  const missing = await diagnose(options,dir,{report:true,quiet:true,node:nodeCheck('26.9.0'),locate:()=>{ throw new Error('Missing @firenook/cli-darwin-arm64@0.0.0.'); }});
+  assert.equal(missing.binary,undefined);
+  assert.deepEqual(missing.problems,['Missing @firenook/cli-darwin-arm64@0.0.0.']);
+  // A start still stops at a refused Node, and warns on an untested one.
+  await assert.rejects(diagnose(options,dir,{quiet:true,node:nodeCheck('20.20.2'),locate:()=>'/fake/firenook'}),/need Node 22, 24 or 26/);
+  assert.equal((await diagnose(options,dir,{quiet:true,node:nodeCheck('25.2.1'),locate:()=>'/fake/firenook'})).warnings[0],`Firenook: ${nodeCheck('25.2.1').note}`);
+  // The command itself, on the Node running this test: its JSON, whatever
+  // else this checkout lacks (it has no platform package).
+  const cli = fileURLToPath(new URL('../packages/cli/bin/firenook.mjs',import.meta.url));
+  const run = spawnSync(process.execPath,[cli,'doctor'],{cwd:dir,encoding:'utf8'});
+  const printed = JSON.parse(run.stdout);
+  assert.equal(printed.node.version,process.versions.node);
+  assert.equal(printed.node.path,process.execPath);
+  assert.equal(run.status,printed.problems.length ? 1 : 0);
+  if (NODE_TESTED.includes(Number(process.versions.node.split('.')[0]))) assert.ok(printed.problems.every(problem => !problem.includes('Node')),printed.problems.join('\n'));
 });
 test('explicit supported platforms; untested architectures and musl rejected', () => {
   assert.equal(platformKey('linux','x64',{header:{glibcVersionRuntime:'2.39'}}),'linux-x64');
@@ -64,7 +122,8 @@ test('explicit supported platforms; untested architectures and musl rejected', (
     const [os, cpu] = key.split('-');
     assert.equal(platformKey(os,cpu,{header:{glibcVersionRuntime:'2.39'}}),key);
   }
-  for (const args of [['linux','x64',{}],['linux','arm64',{}],['win32','ia32',{}],['darwin','ia32',{}]]) assert.throws(()=>platformKey(...args),/Unsupported/);
+  for (const args of [['win32','ia32',{}],['darwin','ia32',{}]]) assert.throws(()=>platformKey(...args),/Unsupported/);
+  for (const args of [['linux','x64',{}],['linux','arm64',{}]]) assert.throws(()=>platformKey(...args),/needs glibc 2\.28 or newer, and this system has no glibc/);
 });
 test('binary checks identity, target, checksum and executable bit', () => {
   const {dir,receipt} = binaryPackage();
@@ -124,7 +183,95 @@ test('existing config, project aliases and full or partial --only selection', ()
   const {dir:bare,save} = project();
   save({firestore:{rules:'firestore.rules'}});
   assert.throws(()=>loadProject({...options,only:'auth'},bare),/No emulators to start, run firenook init/);
-  assert.match(inspectProject({...options,only:'auth'},bare).warnings.join('\n'),/not starting the auth emulator/);
+  // The advice is what configures the service, as firebase init writes it.
+  const skipped = inspectProject({...options,only:'auth,pubsub,functions'},bare).warnings.join('\n');
+  assert.match(skipped,/not starting the auth emulator; firebase\.json does not configure it \(add "auth": \{"port": 9099\} under "emulators" in firebase\.json, as firebase init emulators writes it\)/);
+  assert.match(skipped,/not starting the pubsub emulator; firebase\.json does not configure it \(add "pubsub": \{"port": 8085\} under "emulators"/);
+  assert.match(skipped,/not starting the functions emulator; firebase\.json has no Functions codebase \(add a "functions" section naming its source, as firebase init functions writes it\)/);
+  assert.doesNotMatch(skipped,/init --adopt/, 'adopt adds entries for the services firebase.json configures, never others');
+  // Following the advice is enough.
+  save({firestore:{rules:'firestore.rules'},emulators:{auth:{port:9099}}});
+  assert.deepEqual(loadProject({...options,only:'auth'},bare).services,['auth']);
+});
+test('the project alias is chosen like the official applyRC and handed to the engine', () => {
+  const {dir,options} = project();
+  // The fixture's .firebaserc: {default: demo-fixture, local: demo-local}.
+  assert.equal(loadProject(options,dir).alias,'default');
+  const local = loadProject({...options,project:'local'},dir);
+  assert.deepEqual([local.project,local.alias],['demo-local','local']);
+  const byId = loadProject({...options,project:'demo-local'},dir);
+  assert.deepEqual([byId.project,byId.alias],['demo-local',undefined]);
+  assert.equal(flagValue(launchFor(dir,{...options,project:'local'}).args,'--project-alias'),'local');
+  assert.ok(!launchFor(dir,{...options,project:'demo-local'}).args.includes('--project-alias'));
+  // Without --project, the only alias the file holds, else its default one.
+  writeFileSync(join(dir,'.firebaserc'),JSON.stringify({projects:{staging:'demo-staging'}}));
+  const only = loadProject(options,dir);
+  assert.deepEqual([only.project,only.alias],['demo-staging','staging']);
+  assert.deepEqual(selectProject(undefined,{staging:'demo-staging',prod:'demo-prod'}),{project:undefined});
+  assert.deepEqual(selectProject(undefined,{default:'demo-a',prod:'demo-p'}),{project:'demo-a',alias:'default',from:'.firebaserc'});
+  // A default naming another alias still names that alias's project.
+  assert.deepEqual(selectProject(undefined,{default:'prod',prod:'demo-p'}),{project:'demo-p',alias:'default',from:'.firebaserc'});
+  assert.deepEqual(selectProject('prod',{default:'demo-a',prod:'demo-p'}),{project:'demo-p',alias:'prod',from:'--project'});
+  assert.deepEqual(selectProject('demo-x',{}),{project:'demo-x',from:'--project'});
+});
+// Runs `body` with the Firebase CLI's configstore under a fresh XDG_CONFIG_HOME
+// holding `activeProjects`, as `firebase use` writes them.
+function withActiveProjects(activeProjects, body) {
+  const home = mkdtempSync(join(tmpdir(), 'firenook-configstore-'));
+  mkdirSync(join(home, 'configstore'));
+  writeFileSync(join(home, 'configstore', 'firebase-tools.json'), JSON.stringify({activeProjects, tokens:{refresh_token:'never-read'}}));
+  const previous = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = home;
+  try { return body(); } finally { if (previous === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = previous; }
+}
+test('the Firebase CLI configstore is read where configstore 5 keeps it, and only its active projects', () => {
+  assert.equal(configstorePath({XDG_CONFIG_HOME:'/xdg'},'/u/shop'),join('/xdg','configstore','firebase-tools.json'));
+  assert.equal(configstorePath({XDG_CONFIG_HOME:''},'/u/shop'),join('/u/shop','.config','configstore','firebase-tools.json'));
+  assert.equal(configstorePath({},''),undefined);
+  const dir = mkdtempSync(join(tmpdir(),'firenook-configstore-read-'));
+  const file = join(dir,'firebase-tools.json');
+  assert.deepEqual(activeProjects(file),{});
+  writeFileSync(file,'{not json');
+  assert.deepEqual(activeProjects(file),{});
+  writeFileSync(file,JSON.stringify({activeProjects:['x']}));
+  assert.deepEqual(activeProjects(file),{});
+  writeFileSync(file,JSON.stringify({activeProjects:{'/p':'staging'}}));
+  assert.deepEqual(activeProjects(file),{'/p':'staging'});
+});
+test('the Firebase CLI active project comes after --project and before .firebaserc, as officially', () => {
+  const {dir,options} = project();
+  // The fixture's .firebaserc: {default: demo-fixture, local: demo-local}.
+  const chosen = extra => { const p = loadProject({...options,...extra},dir); return [p.project,p.alias,p.projectFrom]; };
+  withActiveProjects({[dir]:'local'}, () => {
+    assert.deepEqual(chosen({}),['demo-local','local','firebase use']);
+    assert.equal(flagValue(launchFor(dir,options).args,'--project-alias'),'local');
+    assert.deepEqual(chosen({project:'default'}),['demo-fixture','default','--project']);
+  });
+  // Recorded for a parent directory, it still applies; an id is no alias.
+  withActiveProjects({[join(dir,'..')]:'demo-other'}, () => assert.deepEqual(chosen({}),['demo-other',undefined,'firebase use']));
+  // Keys match exactly as recorded: another spelling of the directory, or a
+  // child of it, does not.
+  withActiveProjects({[`${dir}/`]:'local', [join(dir,'nested')]:'local'}, () => assert.deepEqual(chosen({}),['demo-fixture','default','.firebaserc']));
+  withActiveProjects({}, () => assert.deepEqual(chosen({}),['demo-fixture','default','.firebaserc']));
+  // firebase.json's legacy `firebase` key comes after the active project.
+  const {dir:legacy,save} = project();
+  save({functions:{source:'functions'}, firebase:'demo-legacy', emulators:{functions:{}}});
+  withActiveProjects({}, () => assert.equal(loadProject(options,legacy).project,'demo-legacy'));
+  withActiveProjects({[legacy]:'local'}, () => assert.equal(loadProject(options,legacy).project,'demo-local'));
+});
+test('ext:vendor --offline reaches the engine', {skip: process.platform === 'win32' && 'the stand-in engine is a shell script'}, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-vendor-test-'));
+  const record = join(dir,'args.txt');
+  const binary = join(dir,'firenook');
+  writeFileSync(binary,`#!/bin/sh\nprintf '%s\\n' "$@" > '${record}'\n`,{mode:0o755});
+  const project = {config:join(dir,'firebase.json'),project:'demo-shop',directory:dir};
+  const args = () => readFileSync(record,'utf8').trim().split('\n');
+  assert.equal(vendorExtensions(binary,project,['stripe'],{offline:true}),0);
+  assert.deepEqual(args().slice(0,2),['extensions','vendor']);
+  assert.ok(args().includes('--offline'));
+  assert.deepEqual(args().slice(args().indexOf('--instance'),args().indexOf('--instance')+2),['--instance','stripe']);
+  assert.equal(vendorExtensions(binary,project),0);
+  assert.ok(!args().includes('--offline'));
 });
 test('services are derived from top-level sections and emulators entries like the official CLI', () => {
   const {dir,options,save} = project();
@@ -213,9 +360,11 @@ test('ui.enabled, --ui, exec mode and singleProjectMode map to engine flags', ()
   const launch = launchFor(dir,options);
   assert.ok(launch.args.includes('--no-ui'));
   assert.equal(flagValue(launch.args,'--single-project-mode'),'false');
+  // --ui comes before emulators.ui.enabled, as the official CLI decides.
   const forced = launchFor(dir,{...options,ui:true});
-  assert.ok(forced.args.includes('--no-ui'), 'the engine reads ui.enabled itself, so --ui cannot re-enable a disabled UI');
-  assert.match(forced.stderr,/--ui cannot enable the console/);
+  assert.ok(forced.args.includes('--ui') && !forced.args.includes('--no-ui'), '--ui starts a console firebase.json turns off');
+  assert.doesNotMatch(forced.stderr,/--ui cannot/);
+  assert.ok(launchFor(dir,{...options,ui:true},'exec').args.includes('--ui'), 'in exec too');
   const receipt = JSON.parse(readFileSync(join(launch.run,'launch.json'),'utf8'));
   assert.deepEqual(receipt.services,['firestore','auth','storage','functions','pubsub']);
   assert.deepEqual(receipt.project,{id:'demo-fixture',demo:true});
@@ -237,6 +386,28 @@ test('--debug and --log-verbosity DEBUG add a debug log under the run directory'
   assert.match(quiet.stderr,/--log-verbosity QUIET is accepted for compatibility/);
   assert.ok(!launchFor(dir,options).args.includes('--debug-log'));
 });
+test('the default host is localhost, as officially, and clients are told 127.0.0.1', () => {
+  const {dir,options} = project();
+  // The engine binds 127.0.0.1 for it, and ::1 as well for the hub and the
+  // console; every client address stays 127.0.0.1. Clients learn the
+  // addresses from the hub's listing (emulators:exec), whichever host the
+  // listing names.
+  const listing = host => ({firestore:{host,port:8080}, hub:{host,port:4400}, storage:{host,port:9199}});
+  for (const host of [undefined, 'localhost']) {
+    const launch = launchFor(dir, {...options, host});
+    assert.equal(flagValue(launch.args,'--host'),'localhost');
+    for (const listed of ['localhost', '127.0.0.1']) {
+      const env = execEnvironment(launch.env, listing(listed));
+      assert.equal(env.FIRESTORE_EMULATOR_HOST,'127.0.0.1:8080');
+      assert.equal(env.FIREBASE_EMULATOR_HUB,'127.0.0.1:4400');
+      assert.equal(env.STORAGE_EMULATOR_HOST,'http://127.0.0.1:9199');
+    }
+    assert.equal(inspectProject({...options, host},dir).warnings.length,0);
+  }
+  // An address is that address; IPv6 literals are bracketed for clients.
+  assert.equal(flagValue(launchFor(dir,{...options,host:'127.0.0.1'}).args,'--host'),'127.0.0.1');
+  for (const host of ['::1','[::1]']) assert.equal(execEnvironment({}, listing(host)).FIRESTORE_EMULATOR_HOST,'[::1]:8080', host);
+});
 test('host binding accepts any address with a warning; per-service conflicts still fail', () => {
   const {dir,config,options,save} = project();
   const lan = inspectProject({...options,host:'0.0.0.0'},dir);
@@ -244,8 +415,10 @@ test('host binding accepts any address with a warning; per-service conflicts sti
   assert.match(lan.warnings.join('\n'),/binding 0\.0\.0\.0; the emulators have no authentication/);
   const launch = launchFor(dir,{...options,host:'0.0.0.0'});
   assert.equal(flagValue(launch.args,'--host'),'0.0.0.0');
-  assert.equal(launch.env.FIRESTORE_EMULATOR_HOST,'127.0.0.1:8080', 'clients connect through the loopback address');
-  assert.equal(launchFor(dir,{...options,host:'::'}).env.FIREBASE_AUTH_EMULATOR_HOST,'[::1]:9099');
+  assert.equal(launch.hub,'http://127.0.0.1:4400', 'clients connect through the loopback address');
+  const tokenUrl = launch => JSON.parse(readFileSync(launch.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')).token_uri;
+  assert.equal(tokenUrl(withoutCredentials(() => launchFor(dir,{...options,host:'0.0.0.0'}))),'http://127.0.0.1:4400/firenook/oauth2/token');
+  assert.equal(tokenUrl(withoutCredentials(() => launchFor(dir,{...options,host:'::'}))),'http://[::1]:4400/firenook/oauth2/token');
   assert.equal(inspectProject(options,dir).warnings.length,0);
   config.emulators.auth.host = '192.0.2.10';
   save(config);
@@ -283,6 +456,16 @@ test('export default, parent/symlink safety and resume isolation', () => {
   assert.equal(canonical(join(dir,'alias','new')),canonical(join(dir,'new')));
   assert.throws(()=>loadProject({...options,'export-on-exit':'alias'},dir),/ancestor/);
   assert.throws(()=>loadProject({...options,import:'seed','state-dir':'seed/state'},dir),/separate/);
+  // As the official CLI: a seed directory not there yet, exported to at the
+  // stop, is no import; the stop creates it.
+  const first = loadProject({...options,import:'seed','export-on-exit':true},dir);
+  assert.equal(first.imported,undefined);
+  assert.equal(first.exported,canonical(join(dir,'seed')));
+  assert.equal(loadProject({...options,import:'seed','export-on-exit':'seed'},dir).imported,undefined);
+  // Without the export, or once it is there, it is the import.
+  assert.equal(loadProject({...options,import:'seed'},dir).imported,canonical(join(dir,'seed')));
+  mkdirSync(join(dir,'seed'));
+  assert.equal(loadProject({...options,import:'seed','export-on-exit':true},dir).imported,canonical(join(dir,'seed')));
   assert.throws(()=>loadProject({...options,import:'seed','state-dir':'work','resume-state':true,'export-on-exit':true},dir),/immutable seed/);
   assert.throws(()=>loadProject({...options,'resume-state':true},dir),/requires/);
   mkdirSync(join(dir,'existing'));
@@ -300,6 +483,7 @@ test('--keep-data keeps the data in .firenook/state, with or without a seed', ()
   assert.equal(loadProject({...options,'state-dir':'work','resume-state':true},dir).resume,true);
   assert.equal(loadProject({...options,'keep-data':true,'state-dir':'elsewhere'},dir).state,canonical(join(dir,'elsewhere')));
   assert.equal(loadProject({...options,'keep-data':true,import:'seed'},dir).imported,canonical(join(dir,'seed')));
+  mkdirSync(join(dir,'seed'));
   assert.throws(()=>loadProject({...options,'keep-data':true,import:'seed','export-on-exit':true},dir),/immutable seed/);
   assert.throws(()=>loadProject({...options,'resume-state':true},dir),/--resume-state requires --state-dir; --keep-data alone keeps the data in \.firenook\/state/);
   const launch = launchFor(dir,{...options,'keep-data':true});
@@ -329,8 +513,96 @@ test('state and credential isolation stay outside original config and seed', () 
   const perCommit = prepareLaunch(diagnostic, {...options, durability: 'per-commit'}).args;
   assert.equal(perCommit[perCommit.indexOf('--durability') + 1], 'per-commit');
   assert.equal(launch.env.GCLOUD_PROJECT,'demo-fixture');
-  assert.equal(launch.env.FIREBASE_AUTH_EMULATOR_HOST,'127.0.0.1:9099');
   assert.equal(launch.env.FIREBASE_TOKEN,undefined);
+});
+test('the demo credentials load in every Admin SDK and never send a token request to Google', () => {
+  const {dir,options} = project();
+  const launch = withoutCredentials(() => launchFor(dir,{...options,'hub-port':'31400'},'exec'));
+  assert.equal(launch.hub,'http://127.0.0.1:31400');
+  // authorized_user is the one kind every release of every Admin SDK reads
+  // (firebase-admin for Node 12 and earlier refuses any other kind at
+  // initializeApp). It carries the emulators' own token, which the Python
+  // SDK takes as it is, and the hub as its token_uri, which the Go and Java
+  // SDKs refresh from; the Node.js SDKs, which send any refresh to Google,
+  // have theirs answered in the process by the preload.
+  assert.deepEqual(JSON.parse(readFileSync(launch.env.GOOGLE_APPLICATION_CREDENTIALS,'utf8')),
+    {type:'authorized_user',client_id:'demo',client_secret:'demo',refresh_token:'demo',
+      token_uri:'http://127.0.0.1:31400/firenook/oauth2/token',token:'owner',expiry:'2999-12-31T23:59:59Z'});
+  assert.equal(DEMO_TOKEN_PATH,'/firenook/oauth2/token');
+  assert.equal(launch.preload,EXEC_TOKEN_PRELOAD);
+  assert.ok(existsSync(EXEC_TOKEN_PRELOAD),EXEC_TOKEN_PRELOAD);
+  // The engine runs no Node.js of the command's: the preload is the command's alone.
+  assert.equal(launch.env.NODE_OPTIONS,process.env.NODE_OPTIONS);
+  assert.equal(launch.env.CLOUDSDK_CONFIG,join(launch.run,'gcloud'));
+  // The engine is told its ports by its arguments; the emulators' variables
+  // are the command's, from the hub's listing once they run.
+  for (const name of ['FIRESTORE_EMULATOR_HOST','FIREBASE_AUTH_EMULATOR_HOST','FIREBASE_STORAGE_EMULATOR_HOST','STORAGE_EMULATOR_HOST','FIREBASE_EMULATOR_HUB','PUBSUB_EMULATOR_HOST'])
+    assert.equal(launch.env[name],undefined,name);
+});
+test('exec keeps a GOOGLE_APPLICATION_CREDENTIALS of your own, as the official exec passes it on', () => {
+  const {dir,options} = project();
+  const own = join(dir,'my-service-account.json');
+  const launch = withoutCredentials(() => launchFor(dir,options,'exec'),own);
+  assert.equal(launch.env.GOOGLE_APPLICATION_CREDENTIALS,own);
+  assert.equal(launch.preload,undefined);
+  assert.ok(!existsSync(join(launch.run,'demo-adc.json')),'no demo credentials are written');
+  assert.match(launch.stderr,/keeping your GOOGLE_APPLICATION_CREDENTIALS/);
+  const env = execEnvironment(launch.env,{},launch.preload);
+  assert.equal(env.GOOGLE_APPLICATION_CREDENTIALS,own);
+  assert.equal(env.NODE_OPTIONS,process.env.NODE_OPTIONS);
+  // An empty value is no credentials at all.
+  assert.notEqual(withoutCredentials(() => launchFor(dir,options,'exec'),'').env.GOOGLE_APPLICATION_CREDENTIALS,'');
+});
+test('the command’s Node.js processes load the token preload, after your own NODE_OPTIONS', () => {
+  assert.equal(execEnvironment({},{},'/opt/firenook/src/exec-token.cjs').NODE_OPTIONS,'--require "/opt/firenook/src/exec-token.cjs"');
+  assert.equal(execEnvironment({NODE_OPTIONS:'--max-old-space-size=4096'},{},'/a b/exec-token.cjs').NODE_OPTIONS,
+    '--max-old-space-size=4096 --require "/a b/exec-token.cjs"');
+  // NODE_OPTIONS reads a backslash or a quote inside quotes as escaping the next character.
+  assert.equal(execEnvironment({},{},'C:\\Program Files\\firenook\\exec-token.cjs').NODE_OPTIONS,
+    '--require "C:\\\\Program Files\\\\firenook\\\\exec-token.cjs"');
+  assert.equal(execEnvironment({NODE_OPTIONS:'--trace-warnings'},{}).NODE_OPTIONS,'--trace-warnings');
+});
+test('exec gives its command the official emulators:exec variables, for the emulators that run', () => {
+  // Captured from the official emulators:exec (setEnvVarsForEmulators over
+  // the running emulators, and runScript's GCLOUD_PROJECT and FIREBASE_CONFIG).
+  const oracle = JSON.parse(readFileSync(new URL('fixtures/firebase-cli-15.34.0-exec-env.json', import.meta.url)));
+  const shown = env => Object.fromEntries(Object.entries(env).filter(([name]) => /EMULATOR|GCLOUD|GOOGLE_CLOUD|FIREBASE_CONFIG|GOOGLE_APPLICATION|CLOUDSDK/.test(name)).sort(([a],[b]) => a.localeCompare(b)));
+  assert.deepEqual(oracle.runs.map(run => run.only),['auth,functions','storage,firestore','pubsub']);
+  for (const run of oracle.runs) assert.deepEqual(shown(execEnvironment({GCLOUD_PROJECT:'demo-shop',PATH:'/bin'},run.running)),run.env,run.only);
+  // A service that is not running gets no variable, whatever its port, and
+  // a variable the developer set for it is left as it was.
+  const firestoreOnly = execEnvironment({GCLOUD_PROJECT:'demo-shop',PUBSUB_EMULATOR_HOST:'127.0.0.1:1'},{hub:{host:'127.0.0.1',port:4400},firestore:{host:'127.0.0.1',port:8080},'firestore.websocket':{host:'127.0.0.1',port:9150}});
+  assert.deepEqual(Object.keys(shown(firestoreOnly)),['FIREBASE_CONFIG','FIREBASE_EMULATOR_HUB','FIREBASE_FIRESTORE_EMULATOR_ADDRESS','FIRESTORE_EMULATOR_HOST','GCLOUD_PROJECT','PUBSUB_EMULATOR_HOST']);
+  assert.equal(firestoreOnly.PUBSUB_EMULATOR_HOST,'127.0.0.1:1');
+  // The developer's own FIREBASE_CONFIG is kept, as officially; IPv6 is bracketed.
+  assert.equal(execEnvironment({GCLOUD_PROJECT:'demo-shop',FIREBASE_CONFIG:'{}'},{}).FIREBASE_CONFIG,'{}');
+  assert.equal(execEnvironment({},{}).FIREBASE_CONFIG,undefined);
+  assert.equal(execEnvironment({},{storage:{host:'::1',port:9199}}).STORAGE_EMULATOR_HOST,'http://[::1]:9199');
+});
+test('exec reads what runs from the hub before its command starts', async () => {
+  const listing = {hub:{name:'hub',host:'127.0.0.1',port:0},auth:{name:'auth',host:'127.0.0.1',port:9099},functions:{name:'functions',host:'127.0.0.1',port:5001},eventarc:{name:'eventarc',host:'127.0.0.1',port:9299},tasks:{name:'tasks',host:'127.0.0.1',port:9499}};
+  const hub = createServer((request, response) => {
+    response.setHeader('content-type','application/json');
+    response.end(JSON.stringify(request.url === '/emulators' ? listing : {}));
+  });
+  await new Promise(resolve => hub.listen(0,'127.0.0.1',resolve));
+  listing.hub.port = hub.address().port;
+  const out = join(mkdtempSync(join(tmpdir(),'firenook-exec-env-')),'env.json');
+  const engine = `const stop=()=>setTimeout(()=>process.exit(0),60); process.on('SIGINT',stop); if(process.platform==='win32') process.stdin.on('data',stop); console.log('All emulators ready'); setInterval(()=>{},1000)`;
+  const launch = {binary:process.execPath,args:['-e',engine],cwd:process.cwd(),env:{...process.env,GCLOUD_PROJECT:'demo-fixture'},hub:`http://127.0.0.1:${listing.hub.port}`};
+  try {
+    assert.equal(await supervise(launch,[process.execPath,'-e',`require('fs').writeFileSync(${JSON.stringify(out)}, JSON.stringify(process.env))`]),0);
+    const env = JSON.parse(readFileSync(out,'utf8'));
+    assert.equal(env.FIREBASE_AUTH_EMULATOR_HOST,'127.0.0.1:9099');
+    assert.equal(env.CLOUD_TASKS_EMULATOR_HOST,'127.0.0.1:9499');
+    assert.equal(env.CLOUD_EVENTARC_EMULATOR_HOST,'http://127.0.0.1:9299');
+    assert.equal(env.FIREBASE_EMULATOR_HUB,`127.0.0.1:${listing.hub.port}`);
+    for (const name of ['FIRESTORE_EMULATOR_HOST','FIREBASE_STORAGE_EMULATOR_HOST','PUBSUB_EMULATOR_HOST']) assert.equal(env[name],process.env[name],name);
+  } finally { hub.close(); }
+  // No listing, no command: it would run with a guessed environment.
+  const ran = join(mkdtempSync(join(tmpdir(),'firenook-exec-env-')),'ran');
+  await assert.rejects(supervise({...launch,hub:'http://127.0.0.1:9'},[process.execPath,'-e',`require('fs').writeFileSync(${JSON.stringify(ran)}, '')`]),/did not list the running emulators/);
+  assert.throws(() => readFileSync(ran),/ENOENT/);
 });
 test('the engine is told the release it ships as, since it cannot know it itself', () => {
   const {dir,options} = project();
@@ -433,6 +705,8 @@ test('emulators:exec argument forms are decided before any binary is touched', (
   assert.match(run('emulators:start','--project','demo-fixture','npm','test').stderr,/Unexpected argument npm/);
   assert.match(run('emulators:start','--recursive').stderr,/--recursive is not an option of firenook emulators:start/);
   assert.match(run('doctor','--only','database').stderr,/not implemented by Firenook/);
+  // doctor checks every Extension instance; --instance belongs to ext:vendor.
+  assert.match(run('doctor','--instance','greeter').stderr,/--instance is not an option of firenook doctor/);
   // One script string is accepted; the shell notice precedes the binary check.
   assert.match(run('emulators:exec','--project','demo-fixture','exit 3').stderr,/running the script through the shell as the official CLI does/);
 });

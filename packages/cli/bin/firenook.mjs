@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline/promises';
 import { resolve } from 'node:path';
 import { binaryPath, manifest, release } from '../src/binary.mjs';
 import { parseOptions } from '../src/options.mjs';
 import { adoptSeed, compactState, diagnose, inspectState, prepareLaunch, supervise, vendorExtensions } from '../src/runtime.mjs';
-import { runInteractive } from '../src/session.mjs';
+import { runInteractive, startInTerminal } from '../src/session.mjs';
 import { interactive } from '../src/terminal.mjs';
 import { nativeEnvironment, requestNativeStop } from '../src/processes.mjs';
 import { exportEmulators, firestoreDelete } from '../src/hub.mjs';
@@ -14,11 +13,12 @@ import { serveMcp } from '../src/mcp.mjs';
 import { mcpAdd } from '../src/agents.mjs';
 import { targetApply, targetClear, use } from '../src/rc.mjs';
 import { adopt, scaffold } from '../src/init.mjs';
+import { initInTerminal } from '../src/init-screen.mjs';
 
 const help = `Firenook ${manifest.version} — a faster drop-in replacement for the Firebase Local Emulator Suite
 
 Project
-  firenook init [--force] [--dry-run] [--no-functions]   Scaffold firebase.json, rules, a Functions codebase
+  firenook init [--yes] [--language typescript|javascript|none]   A new project; a screen of choices in a terminal
   firenook init --adopt [--dry-run]                       Check an existing firebase.json; add what Firenook needs
   firenook use [alias|projectId] [--add ID [--alias NAME]] [--unalias NAME] [--clear]   .firebaserc aliases
   firenook target:apply storage NAME BUCKET...            Map a Storage target to buckets in .firebaserc
@@ -31,13 +31,13 @@ Emulators
   firenook emulators:exec [options] "npm test"            Script through the shell, as the official CLI
   firenook emulators:exec [options] -- CMD [ARGS...]      Argv command, no shell interpretation
   firenook emulators:export DIR [--force] [--only firestore,auth,storage]
-  firenook firestore:delete PATH (-r | --shallow) [-f] [--database ID]
+  firenook firestore:delete PATH [-r | --shallow] [-f] [--database ID]
   firenook firestore:delete --all-collections -f [--database ID]
   firenook functions:invoke NAME [--data JSON] [--region us-central1] [--method POST]
   firenook functions:invoke NAME --event-data JSON [--resource PATH] [--params JSON] [--auth JSON]
                                                           Inject a background event (Firestore, Storage,
                                                           Pub/Sub, Auth, schedule, Eventarc, task queue)
-  firenook ext:vendor [--instance ID]...                  Copy registry Extensions into the project
+  firenook ext:vendor [--instance ID]... [--offline]      Copy registry Extensions into the project
   firenook mcp [--project ID] [--only firestore,auth,...] Model Context Protocol server over stdio for coding
                                                           agents; outside a project, the one running suite
   firenook mcp add [--agent claude,cursor,vscode] [--dry-run] [--force]   Give the project's coding agents
@@ -57,32 +57,32 @@ Advanced
 
 Common options: -P/--project ID, -c/--config firebase.json, --json (doctor, export, delete, init),
   --debug (engine log in .firenook/runs/session-*/firenook-debug.log), --log-verbosity LEVEL,
-  --non-interactive (accepted; only init asks a question, in a terminal; destructive commands need --force).
+  --non-interactive (accepted; only init asks, in a terminal; destructive commands need --force).
 Start/exec: --only auth,functions,firestore,storage,pubsub (extensions=functions; eventarc/tasks/hub/ui/
   logging follow their parent), --import DIR, --export-on-exit[=DIR], --keep-data (keep the data between
   runs in .firenook/state, with or without --import), --state-dir DIR, --resume-state,
   --storage-bucket target=bucket (repeatable), --host HOST, --allowed-hosts NAME,..., --ui,
   --minimum-functions N, --inspect-functions[=PORT], --offline, --durability write-behind|per-commit,
   --no-diagnostics, --firestore-websocket-port N, --hub-port N, --logging-port N, --eventarc-port N,
-  --tasks-port N, --plain (the plain log instead of the terminal UI, as a pipe or CI gets it).
+  --tasks-port N, --plain (the log a pipe or CI gets), --build (each Functions codebase's build:watch first).
 
 firebase.json service subsets, storage {rules} or targets, several Firestore databases, ui.enabled and
 singleProjectMode are honoured; database/hosting/dataconnect/apphosting entries are skipped with a
 warning. Any lowercase project id is accepted; demo-* ids never reach cloud services. Functions run on
-the owned runtime with Node 24 workers; Storage rules are evaluated natively. Not provided:
+the owned runtime with Node workers (22, 24, 26); Storage rules are evaluated natively. Not provided:
 functions:shell (Firenook never starts a second Functions runtime; use functions:invoke), and every
 deploy/login command (never intercepted). Disk/WAL state by default; runs are kept, never deleted.
 `;
 
 const common = ['project', 'config', 'help', 'non-interactive', 'json', 'debug', 'log-verbosity'];
-const launch = [...common, 'import', 'export-on-exit', 'only', 'state-dir', 'resume-state', 'keep-data', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'inspect-functions', 'offline', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'no-diagnostics', 'ui', 'plain'];
+const launch = [...common, 'import', 'export-on-exit', 'only', 'state-dir', 'resume-state', 'keep-data', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'inspect-functions', 'offline', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'no-diagnostics', 'ui', 'plain', 'build'];
 const accepted = {
-  doctor:[...launch, 'instance'], 'emulators:start':launch, 'emulators:exec':launch, 'ext:vendor':[...common, 'instance', 'offline'],
+  doctor:launch, 'emulators:start':launch, 'emulators:exec':launch, 'ext:vendor':[...common, 'instance', 'offline'],
   'emulators:export':[...common, 'force', 'only', 'hub-port'],
   'firestore:delete':[...common, 'recursive', 'shallow', 'all-collections', 'database', 'force', 'hub-port'],
   use:[...common, 'add', 'alias', 'unalias', 'clear'],
   'target:apply':common, 'target:clear':common,
-  init:[...common, 'adopt', 'dry-run', 'force', 'functions', 'no-functions'],
+  init:[...common, 'adopt', 'dry-run', 'force', 'functions', 'no-functions', 'language', 'only', 'agent', 'yes', 'no-install', 'no-pin'],
   'functions:invoke':[...common, 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'hub-port'],
   mcp:[...common, 'only', 'hub-port'],
   'mcp add':[...common, 'agent', 'dry-run', 'force'],
@@ -115,14 +115,6 @@ function execCommand(action, {command, positionals, flags}) {
   throw new Error('emulators:exec requires a script (one quoted string) or an argv command after --');
 }
 
-// A yes/no question on the terminal; Enter means yes, Ctrl-C or Ctrl-D no.
-async function confirm(question) {
-  const lines = createInterface({input:process.stdin, output:process.stderr});
-  try { return !/^\s*n/i.test(await lines.question(question)); }
-  catch { process.stderr.write('\n'); return false; }
-  finally { lines.close(); }
-}
-
 async function main() {
   const [action, ...args] = process.argv.slice(2);
   if (!action || ['--help', '-h', 'help'].includes(action)) { console.log(help); return 0; }
@@ -133,7 +125,8 @@ async function main() {
   if (action === 'setup') { if (args.length) throw new Error('setup takes no arguments'); binaryPath(); console.log('Nothing to set up: the console is part of the engine, and Firenook downloads nothing.'); return 0; }
   if (action === 'native') {
     if (!args.length) throw new Error('native requires a native command');
-    const child = spawn(binaryPath(), args, {env:nativeEnvironment(),detached:process.platform === 'win32',windowsHide:true,stdio:[process.platform === 'win32' ? 'pipe' : 'inherit','inherit','inherit']});
+    // stdin is the private pipe: a server it starts stops if this is killed.
+    const child = spawn(binaryPath(), args, {env:nativeEnvironment(),detached:process.platform === 'win32',windowsHide:true,stdio:['pipe','inherit','inherit']});
     child.stdin?.on('error', error => console.error(`Native control: ${error.message}`));
     const onInt = () => requestNativeStop(child, 'SIGINT');
     const onTerm = () => requestNativeStop(child, 'SIGTERM');
@@ -142,6 +135,8 @@ async function main() {
     finally { process.off('SIGINT', onInt); process.off('SIGTERM', onTerm); }
   }
   if (action === 'functions:invoke') {
+    // --help (anywhere) prints the help and calls nothing.
+    if (args.some(arg => arg === '--help' || arg === '-h')) { console.log(help); return 0; }
     const [name, ...rest] = args;
     if (!name || name.startsWith('-')) throw new Error('functions:invoke requires a function name');
     const {options, command, positionals} = parseOptions(rest);
@@ -169,10 +164,11 @@ async function run(action, args) {
   if (action === 'init') {
     noPositionals(action, positionals);
     if (options.adopt) return adopt(options);
-    // init asks one question, only in a terminal: whether to give the coding
-    // agents it found the MCP server.
-    const terminal = process.stdin.isTTY && process.stderr.isTTY && !options['non-interactive'] && !options.json;
-    return scaffold(options, process.cwd(), console, {ask:terminal ? confirm : undefined});
+    // In a terminal init asks for its choices on a screen of its own, and
+    // can start the emulators at the end; otherwise it takes the options.
+    const asked = !options.yes && !options['dry-run'] && !options.json && !options['non-interactive'] && interactive({mode:'init'});
+    if (asked) return initInTerminal(options, {version:manifest.version, start:(start, typed) => startInTerminal(start, typed, {version:manifest.version})});
+    return scaffold(options, process.cwd(), console, {version:manifest.version});
   }
   if (action === 'mcp') { noPositionals(action, positionals); return serveMcp(options); }
   if (action === 'mcp add') { noPositionals(action, positionals); return mcpAdd(options); }
@@ -191,9 +187,11 @@ async function run(action, args) {
   // In a terminal, emulators:start draws its own UI; everything else, and
   // any pipe, CI or log file, gets the plain line protocol.
   const drawn = action === 'emulators:start' && interactive({plain:Boolean(options.plain)});
-  const diagnostic = await diagnose(options, process.cwd(), {quiet:drawn});
-  if (action === 'doctor') { console.log(JSON.stringify(diagnostic, null, 2)); return 0; }
-  if (action === 'ext:vendor') return vendorExtensions(diagnostic.binary, diagnostic.project, options.instance);
+  // doctor reports every check, a refused Node or a missing engine among
+  // them, and exits 1 when any check found a problem.
+  const diagnostic = await diagnose(options, process.cwd(), {quiet:drawn, report:action === 'doctor'});
+  if (action === 'doctor') { console.log(JSON.stringify(diagnostic, null, 2)); return diagnostic.problems.length ? 1 : 0; }
+  if (action === 'ext:vendor') return vendorExtensions(diagnostic.binary, diagnostic.project, options.instance, {offline:Boolean(options.offline)});
   if (drawn) {
     const project = diagnostic.project;
     return runInteractive(prepareLaunch(diagnostic, options, 'start', args, {quiet:true}),

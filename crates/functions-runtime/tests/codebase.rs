@@ -160,3 +160,105 @@ async fn typescript_sources_newer_than_the_build_are_flagged_after_the_recheck()
     );
     harness.stop().await;
 }
+
+/// The warnings about the Node the functions run on.
+fn node_warnings(harness: &Harness) -> Vec<String> {
+    harness
+        .events()
+        .into_iter()
+        .filter(|event| {
+            event.level == "WARN" && event.message.contains(", but these functions run on Node ")
+        })
+        .map(|event| event.message)
+        .collect()
+}
+
+#[tokio::test]
+async fn functions_on_a_node_their_codebase_does_not_ask_for_are_warned_about_once() {
+    let Ok((node, _)) = support::requirements() else {
+        eprintln!("skipped: no Node or Functions SDK");
+        return;
+    };
+    let version = firenook_functions_runtime::node::probe(&node)
+        .await
+        .expect("the test Node prints its version");
+    let other = if version.major == 22 { 24 } else { 22 };
+    let package = |node: u64| {
+        format!(r#"{{"name":"dispatch","main":"index.js","engines":{{"node":"{node}"}}}}"#)
+    };
+    // engines.node names another major: the load says so, once.
+    let asks_other = package(other);
+    let harness =
+        Harness::start_with_runtime(INDEX, MANIFEST, &[("package.json", &asks_other)], None)
+            .await
+            .expect("the runtime starts");
+    assert_eq!(
+        node_warnings(&harness),
+        [format!(
+            "functions/package.json asks for Node {other} in engines.node, but these functions run on Node {version}, the Node running the emulators; start the emulators with Node {other} to run them on the Node they ask for (with nvm: nvm use {other})"
+        )]
+    );
+    let warning = harness
+        .events()
+        .into_iter()
+        .find(|event| event.message.contains(", but these functions run on Node "))
+        .expect("the warning");
+    assert_eq!(
+        (warning.label.as_str(), warning.codebase.as_deref()),
+        ("functions", Some("default"))
+    );
+    // A reload that changes nothing else does not repeat it.
+    let mut updates = harness.runtime.updates();
+    std::fs::write(
+        harness.directory.path().join("functions/index.js"),
+        format!("{INDEX}// saved again\n"),
+    )
+    .expect("written");
+    tokio::time::timeout(Duration::from_secs(15), updates.changed())
+        .await
+        .expect("a reload")
+        .expect("the runtime runs");
+    assert_eq!(
+        harness
+            .monitor
+            .codebase("default")
+            .expect("registered")
+            .loads,
+        2
+    );
+    assert_eq!(node_warnings(&harness).len(), 1);
+    harness.stop().await;
+
+    // engines.node names the running major, or a range that admits it.
+    for asks in [
+        package(version.major),
+        r#"{"name":"dispatch","main":"index.js","engines":{"node":">=22"}}"#.to_owned(),
+    ] {
+        let harness =
+            Harness::start_with_runtime(INDEX, MANIFEST, &[("package.json", &asks)], None)
+                .await
+                .expect("the runtime starts");
+        assert_eq!(node_warnings(&harness), Vec::<String>::new(), "{asks}");
+        harness.stop().await;
+    }
+
+    // firebase.json's runtime comes before engines.node, as in the
+    // official emulator.
+    let runtime = format!("nodejs{other}");
+    let asks_running = package(version.major);
+    let harness = Harness::start_with_runtime(
+        INDEX,
+        MANIFEST,
+        &[("package.json", &asks_running)],
+        Some(&runtime),
+    )
+    .await
+    .expect("the runtime starts");
+    assert_eq!(
+        node_warnings(&harness),
+        [format!(
+            "firebase.json asks for nodejs{other} for functions (its runtime), but these functions run on Node {version}, the Node running the emulators; start the emulators with Node {other} to run them on the Node they ask for (with nvm: nvm use {other})"
+        )]
+    );
+    harness.stop().await;
+}

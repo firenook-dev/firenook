@@ -195,10 +195,17 @@ test('a denied read says why where it happened, and opens the decision in Rules'
   await expect(page.getByTestId('decision-row').first()).toBeVisible()
   await page.getByRole('button', { name: 'Clear the list' }).click()
   await expect(page.getByTestId('decisions-empty')).toContainText('The Admin SDK')
-  // And a database with no rules file says nothing is checked at all.
+  // A database firebase.json does not list follows the (default) rules, as
+  // the official emulator applies its one rules file to every database, and
+  // says so: it is checked, not open.
   await page.goto(`${origin()}/console/firestore/rules?db=nobody-here`)
-  await expect(page.getByTestId('rules-not-enforced')).toBeVisible()
-  await expect(page.getByTestId('decisions-empty')).toContainText('no rules loaded')
+  const governed = page.getByTestId('rules-governed-by')
+  await expect(governed).toContainText('does not list this database')
+  await expect(governed).toContainText('(default)')
+  await expect(governed).toContainText('firestore.rules')
+  await expect(page.getByTestId('rules-not-enforced')).toHaveCount(0)
+  await expect(page.getByTestId('rules-source')).toContainText("rules_version = '2'")
+  await expect(page.getByTestId('decisions-empty')).toContainText('The Admin SDK')
 })
 
 test('every tab reads the decisions, and a denial hundreds of decisions old still says why', async ({

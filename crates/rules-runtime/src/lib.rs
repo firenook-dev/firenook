@@ -27,7 +27,8 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuar
 pub use versions::{InstalledVersion, MAXIMUM_VERSIONS, RulesEvent, RulesOrigin, source_hash};
 
 use base64::Engine as _;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::alphabet;
+use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 use firenook_core_store::{
     DatabaseName, Document, DocumentKey, Snapshot, Timestamp as StoreTimestamp,
     Value as StoreValue, Write, WritePreview,
@@ -39,11 +40,17 @@ use firenook_rules_engine::{
 use serde_json::Value as JsonValue;
 
 pub use firenook_rules_engine::{
-    AtomicEvaluationResult, EvaluationResult, Query as RulesQuery, RequestOperation,
+    AtomicEvaluationResult, EvaluationResult, PRODUCTION_DENIAL, Query as RulesQuery,
+    RefusingAllow, RequestOperation,
 };
 
 /// Owner/admin bypass token used by the emulator control plane and backend SDKs.
 pub const OWNER_BEARER_TOKEN: &str = "Bearer owner";
+
+const TOKEN_SEGMENT: GeneralPurposeConfig =
+    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent);
+const TOKEN_URL_SAFE: GeneralPurpose = GeneralPurpose::new(&alphabet::URL_SAFE, TOKEN_SEGMENT);
+const TOKEN_STANDARD: GeneralPurpose = GeneralPurpose::new(&alphabet::STANDARD, TOKEN_SEGMENT);
 
 /// Atomically replaceable rulesets, resolved per database.
 ///
@@ -60,7 +67,11 @@ pub const OWNER_BEARER_TOKEN: &str = "Bearer owner";
 ///    outright: it drops the database-specific rulesets installed at startup,
 ///    so a client reloading rules (rules unit testing) governs every database
 ///    of the project from then on, as on the official emulator;
-/// 3. the startup default ([`install_default`](Self::install_default)).
+/// 3. the ruleset of the project's stand-in database
+///    ([`govern_unlisted_with`](Self::govern_unlisted_with)), for a database
+///    `firebase.json` does not list: the official emulator applies its one
+///    rules file to every database (`conformance/fixtures/request-identity-v1`);
+/// 4. the startup default ([`install_default`](Self::install_default)).
 ///
 /// No ruleset at any level is the emulator's explicit open-with-warning
 /// mode.
@@ -89,8 +100,26 @@ struct RuntimeState {
     default: Option<Arc<InstalledRules>>,
     projects: BTreeMap<String, Arc<InstalledRules>>,
     databases: BTreeMap<DatabaseName, Arc<InstalledRules>>,
+    /// Per project, the database whose own ruleset governs the project's
+    /// databases that have none.
+    stand_ins: BTreeMap<String, DatabaseName>,
     /// What governed each database over time, and its rules file's problems.
     versions: versions::Versions,
+}
+
+impl RuntimeState {
+    /// The level that governs `database`, as a database whose own entry to
+    /// read: the database itself, or its project's stand-in when the
+    /// database has no ruleset of its own.
+    fn governed_as<'a>(&'a self, database: &'a DatabaseName) -> &'a DatabaseName {
+        if self.databases.contains_key(database) {
+            return database;
+        }
+        self.stand_ins
+            .get(database.project_id())
+            .filter(|stand_in| self.databases.contains_key(*stand_in))
+            .unwrap_or(database)
+    }
 }
 
 struct InstalledRules {
@@ -222,8 +251,35 @@ impl RulesRuntime {
             .databases
             .get(database)
             .or_else(|| state.projects.get(database.project_id()))
+            .or_else(|| state.databases.get(state.governed_as(database)))
             .or(state.default.as_ref())
             .cloned()
+    }
+
+    /// Makes `database`'s own ruleset govern every database of its project
+    /// that has none, as the rules of a database `firebase.json` does not
+    /// list. The stand-in follows that ruleset as it changes (a file reload,
+    /// the console's editor); a project-wide reload still governs every
+    /// database.
+    pub fn govern_unlisted_with(&self, database: &DatabaseName) {
+        write_lock(&self.state)
+            .stand_ins
+            .insert(database.project_id().to_owned(), database.clone());
+        self.events.installed(RulesOrigin::Startup);
+    }
+
+    /// The database whose own ruleset governs `database`, which has none of
+    /// its own: the stand-in [`govern_unlisted_with`](Self::govern_unlisted_with)
+    /// named. `None` when `database` has its own ruleset, a project-wide
+    /// reload governs it, or no stand-in has rules.
+    #[must_use]
+    pub fn stand_in_for(&self, database: &DatabaseName) -> Option<DatabaseName> {
+        let state = read_lock(&self.state);
+        if state.projects.contains_key(database.project_id()) {
+            return None;
+        }
+        let governing = state.governed_as(database);
+        (governing != database).then(|| governing.clone())
     }
 
     /// Serializes policy evaluation and installation of a store write across
@@ -491,6 +547,7 @@ fn allowed_result() -> EvaluationResult {
         document_accesses: 0,
         document_cache_hits: 0,
         matching_allows: 0,
+        refused_by: Vec::new(),
     }
 }
 
@@ -535,73 +592,50 @@ pub enum Authorization {
 }
 
 impl Authorization {
-    /// Parses an emulator Authorization header. Only unsigned `alg: none`
-    /// Firebase emulator JWTs are accepted; this is deliberately not a
-    /// general-purpose JWT verifier.
-    pub fn parse(
-        header: Option<&str>,
-        project: &str,
-        now_seconds: i64,
-    ) -> Result<Self, AuthorizationError> {
+    /// Reads an emulator Authorization header the way the official emulator
+    /// does (`conformance/fixtures/request-identity-v1`). No header is a
+    /// signed-out client. `Bearer owner`, in any letter case, is the
+    /// administrator. Any other `Bearer` credential is an ID token whose
+    /// claims are read, not verified: its times, its project (`aud`, `iss`),
+    /// its algorithm and signature, and which claims it carries are not
+    /// checked, so the token `@firebase/rules-unit-testing` mints at time 0
+    /// is read like one the Auth emulator issued a second ago. `request.auth.uid`
+    /// is the `sub` claim when it is a string, and null otherwise; the whole
+    /// payload is `request.auth.token`.
+    pub fn parse(header: Option<&str>) -> Result<Self, AuthorizationError> {
         let Some(header) = header else {
             return Ok(Self::Client(None));
         };
-        if header == OWNER_BEARER_TOKEN {
+        if header.eq_ignore_ascii_case(OWNER_BEARER_TOKEN) {
             return Ok(Self::Owner);
         }
         let token = header
-            .strip_prefix("Bearer ")
+            .split_once(' ')
+            .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("Bearer"))
+            .map(|(_, token)| token)
             .ok_or(AuthorizationError::MalformedBearer)?;
         let mut segments = token.split('.');
-        let encoded_header = segments.next().ok_or(AuthorizationError::MalformedJwt)?;
-        let encoded_payload = segments.next().ok_or(AuthorizationError::MalformedJwt)?;
-        let signature = segments.next().ok_or(AuthorizationError::MalformedJwt)?;
-        if segments.next().is_some() || !signature.is_empty() {
+        let (Some(encoded_header), Some(encoded_payload), Some(_signature), None) = (
+            segments.next(),
+            segments.next(),
+            segments.next(),
+            segments.next(),
+        ) else {
             return Err(AuthorizationError::MalformedJwt);
-        }
-        let jwt_header = decode_json(encoded_header)?;
-        if jwt_header.get("alg").and_then(JsonValue::as_str) != Some("none") {
-            return Err(AuthorizationError::UnsupportedAlgorithm);
-        }
+        };
+        decode_json(encoded_header)?;
         let payload = decode_json(encoded_payload)?;
-        let required = ["sub", "user_id", "iat", "exp", "iss", "aud"];
-        if required.iter().any(|claim| payload.get(claim).is_none()) {
-            return Err(AuthorizationError::MissingClaim);
-        }
         let uid = payload
             .get("sub")
             .and_then(JsonValue::as_str)
-            .filter(|uid| !uid.is_empty())
-            .ok_or(AuthorizationError::InvalidClaim)?
-            .to_owned();
-        let expected_issuer = format!("https://securetoken.google.com/{project}");
-        if payload.get("user_id").and_then(JsonValue::as_str) != Some(uid.as_str())
-            || payload.get("aud").and_then(JsonValue::as_str) != Some(project)
-            || payload.get("iss").and_then(JsonValue::as_str) != Some(expected_issuer.as_str())
-        {
-            return Err(AuthorizationError::InvalidClaim);
-        }
-        let issued_at = payload
-            .get("iat")
-            .and_then(JsonValue::as_i64)
-            .ok_or(AuthorizationError::InvalidClaim)?;
-        let expires_at = payload
-            .get("exp")
-            .and_then(JsonValue::as_i64)
-            .ok_or(AuthorizationError::InvalidClaim)?;
-        if issued_at > now_seconds || expires_at <= now_seconds {
-            return Err(AuthorizationError::ExpiredOrFutureToken);
-        }
+            .map(str::to_owned);
         let token = payload
             .as_object()
             .ok_or(AuthorizationError::InvalidEncoding)?
             .iter()
             .map(|(name, value)| Ok((name.clone(), json_to_rules_value(value)?)))
             .collect::<Result<BTreeMap<_, _>, AuthorizationError>>()?;
-        Ok(Self::Client(Some(Auth {
-            uid: Some(uid),
-            token,
-        })))
+        Ok(Self::Client(Some(Auth { uid, token })))
     }
 
     /// Whether this request bypasses Security Rules.
@@ -620,44 +654,42 @@ impl Authorization {
     }
 }
 
-/// Rejected emulator bearer token.
+/// An Authorization header the emulator cannot read. Every front answers it
+/// `INVALID_ARGUMENT`, as the official emulator answers an unreadable token
+/// ("invalid jwt"): a code the SDKs do not retry, where `UNAUTHENTICATED`
+/// would have them refresh a mock token that never changes, forever.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuthorizationError {
-    /// Header is not a Bearer credential.
+    /// The header is not a `Bearer` credential.
     MalformedBearer,
-    /// JWT does not contain exactly three segments or has a signature.
+    /// The token does not have exactly three dot-separated segments.
     MalformedJwt,
-    /// JWT JSON/base64 is malformed.
+    /// The token's header or payload is not a base64 JSON object.
     InvalidEncoding,
-    /// Only the emulator's unsigned algorithm is accepted.
-    UnsupportedAlgorithm,
-    /// A required Firebase emulator claim is absent.
-    MissingClaim,
-    /// Claim types or project scoping are invalid.
-    InvalidClaim,
-    /// Token is expired or has a future issued-at time.
-    ExpiredOrFutureToken,
 }
 
 impl Display for AuthorizationError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            Self::MalformedBearer => "authorization must use a Bearer credential",
-            Self::MalformedJwt => "emulator JWT must be unsigned and contain three segments",
-            Self::InvalidEncoding => "emulator JWT encoding is invalid",
-            Self::UnsupportedAlgorithm => "only unsigned emulator JWTs with alg none are accepted",
-            Self::MissingClaim => "emulator JWT is missing a required claim",
-            Self::InvalidClaim => "emulator JWT claims do not match this project",
-            Self::ExpiredOrFutureToken => "emulator JWT is expired or not yet valid",
+            Self::MalformedBearer => {
+                "invalid authorization: send `Bearer owner` or `Bearer <ID token>`"
+            }
+            Self::MalformedJwt => "invalid jwt: an ID token has three dot-separated segments",
+            Self::InvalidEncoding => {
+                "invalid jwt: an ID token's header and payload are base64 JSON objects"
+            }
         })
     }
 }
 
 impl Error for AuthorizationError {}
 
+/// One token segment: base64 in either alphabet, padded or not, as the
+/// official emulator reads it, holding a JSON object.
 fn decode_json(encoded: &str) -> Result<JsonValue, AuthorizationError> {
-    let bytes = URL_SAFE_NO_PAD
+    let bytes = TOKEN_URL_SAFE
         .decode(encoded)
+        .or_else(|_| TOKEN_STANDARD.decode(encoded))
         .map_err(|_| AuthorizationError::InvalidEncoding)?;
     let value: JsonValue =
         serde_json::from_slice(&bytes).map_err(|_| AuthorizationError::InvalidEncoding)?;
@@ -676,7 +708,7 @@ fn json_to_rules_value(value: &JsonValue) -> Result<Value, AuthorizationError> {
             .as_i64()
             .map(Value::Integer)
             .or_else(|| value.as_f64().map(Value::Float))
-            .ok_or(AuthorizationError::InvalidClaim),
+            .ok_or(AuthorizationError::InvalidEncoding),
         JsonValue::String(value) => Ok(Value::String(value.clone())),
         JsonValue::Array(values) => values
             .iter()
@@ -889,6 +921,7 @@ fn mutex_lock<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use firenook_core_store::{Fields, Precondition, Store, StoreOptions};
     use serde_json::json;
 
@@ -1024,30 +1057,118 @@ mod tests {
         }
     }
 
-    #[test]
-    fn parses_only_project_scoped_unsigned_emulator_tokens() {
-        let now = 1_788_200_100;
-        let header = json!({"alg":"none","typ":"JWT"});
-        let payload = json!({
-            "aud": PROJECT,
-            "exp": now + 100,
-            "iat": now - 100,
-            "iss": format!("https://securetoken.google.com/{PROJECT}"),
-            "role": "editor",
-            "sub": "alice",
-            "user_id": "alice"
-        });
-        let token = format!(
+    fn token(header: &JsonValue, payload: &JsonValue) -> String {
+        format!(
             "Bearer {}.{}.",
-            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&header).expect("json")),
-            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).expect("json"))
-        );
-        let auth = Authorization::parse(Some(&token), PROJECT, now).expect("valid token");
-        assert_eq!(auth.auth().expect("auth").uid.as_deref(), Some("alice"));
-        assert!(Authorization::parse(Some(&token), "wrong-project", now).is_err());
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(header).expect("json")),
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(payload).expect("json"))
+        )
+    }
+
+    fn uid(header: &str) -> Option<String> {
+        Authorization::parse(Some(header))
+            .expect("readable token")
+            .auth()
+            .expect("signed in")
+            .uid
+            .clone()
+    }
+
+    /// `conformance/fixtures/request-identity-v1`: the official emulator
+    /// reads a token's claims and checks none of them.
+    #[test]
+    fn reads_tokens_as_the_official_emulator_does() {
+        let unsigned = json!({"alg": "none", "type": "JWT"});
+        let mock = |issued_at: i64, project: &str| {
+            json!({
+                "aud": project, "iss": format!("https://securetoken.google.com/{project}"),
+                "iat": issued_at, "exp": issued_at + 3600, "auth_time": issued_at,
+                "sub": "alice", "user_id": "alice", "role": "editor",
+                "firebase": {"sign_in_provider": "custom", "identities": {}}
+            })
+        };
+        // What `createMockUserToken` builds without an `iat`: issued at 0,
+        // expired at 3600. A day in the future and another project read alike.
+        for payload in [
+            mock(0, PROJECT),
+            mock(1_788_200_100 + 86_400, PROJECT),
+            mock(1_788_200_100, "demo-other-project"),
+            json!({"sub": "alice"}),
+        ] {
+            assert_eq!(uid(&token(&unsigned, &payload)).as_deref(), Some("alice"));
+        }
+        let parsed =
+            Authorization::parse(Some(&token(&unsigned, &mock(0, PROJECT)))).expect("mock");
         assert_eq!(
-            Authorization::parse(Some(OWNER_BEARER_TOKEN), PROJECT, now),
-            Ok(Authorization::Owner)
+            parsed.auth().expect("auth").token.get("role"),
+            Some(&Value::String("editor".to_owned()))
+        );
+        // `uid` is `sub` alone: never `user_id`, null for a number.
+        assert_eq!(uid(&token(&unsigned, &json!({"user_id": "alice"}))), None);
+        assert_eq!(uid(&token(&unsigned, &json!({"sub": 7}))), None);
+        assert_eq!(uid(&token(&unsigned, &json!({}))), None);
+        // No algorithm, a signature nobody checks, standard padded base64
+        // and a lowercase scheme are all read.
+        assert_eq!(
+            uid(&token(&json!({}), &json!({"sub": "alice"}))).as_deref(),
+            Some("alice")
+        );
+        let signed = format!(
+            "{}c2lnbmF0dXJl",
+            token(&json!({"alg": "RS256", "kid": "x"}), &mock(0, PROJECT))
+        );
+        assert_eq!(uid(&signed).as_deref(), Some("alice"));
+        let padded = format!(
+            "Bearer {}.{}.",
+            base64::engine::general_purpose::STANDARD.encode(br#"{"alg":"none"}"#),
+            base64::engine::general_purpose::STANDARD.encode(br#"{"sub":"alice"}"#)
+        );
+        assert!(padded.contains('='));
+        assert_eq!(uid(&padded).as_deref(), Some("alice"));
+        assert_eq!(
+            uid(&token(&unsigned, &json!({"sub": "alice"})).replacen("Bearer", "bearer", 1))
+                .as_deref(),
+            Some("alice")
+        );
+        for owner in [
+            "Bearer owner",
+            "bearer owner",
+            "BEARER OWNER",
+            "Bearer Owner",
+        ] {
+            assert_eq!(
+                Authorization::parse(Some(owner)),
+                Ok(Authorization::Owner),
+                "{owner}"
+            );
+        }
+        assert_eq!(Authorization::parse(None), Ok(Authorization::Client(None)));
+    }
+
+    #[test]
+    fn refuses_what_is_not_a_bearer_token() {
+        let two_segments = token(&json!({"alg": "none"}), &json!({"sub": "alice"}));
+        let two_segments = two_segments.trim_end_matches('.');
+        for (header, error) in [
+            (
+                "Basic YWxpY2U6c2VjcmV0",
+                AuthorizationError::MalformedBearer,
+            ),
+            ("Firebase owner", AuthorizationError::MalformedBearer),
+            ("Bearer", AuthorizationError::MalformedBearer),
+            ("Bearer not-a-jwt", AuthorizationError::MalformedJwt),
+            ("Bearer  owner", AuthorizationError::MalformedJwt),
+            ("Bearer ", AuthorizationError::MalformedJwt),
+            (two_segments, AuthorizationError::MalformedJwt),
+            ("Bearer a.b.c.d", AuthorizationError::MalformedJwt),
+            ("Bearer !!!.e30.", AuthorizationError::InvalidEncoding),
+        ] {
+            assert_eq!(Authorization::parse(Some(header)), Err(error), "{header}");
+        }
+        let array = token(&json!({"alg": "none"}), &json!(["alice"]));
+        assert_eq!(
+            Authorization::parse(Some(&array)),
+            Err(AuthorizationError::InvalidEncoding)
         );
     }
 

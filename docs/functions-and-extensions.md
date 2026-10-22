@@ -12,8 +12,131 @@ firenook functions:invoke addMessage --project demo-my-app --data '{"text":"hi"}
 firenook functions:invoke onUserWritten --project demo-my-app --resource users/alice \
   --event-data '{"before":{"plan":"free"},"after":{"plan":"pro"}}'        # a Firestore document event
 firenook ext:vendor --project demo-my-app                                 # copy registry Extensions into the project
+firenook ext:vendor --project demo-my-app --offline                       # copy only what the shared cache holds
 firenook emulators:start --project demo-my-app --offline                  # never contact the Extensions registry
 ```
+
+## Params and env files
+
+Each codebase reads the official dotenv chain, later files winning: `.env`,
+`.env.<projectId>`, `.env.<alias>` and `.env.local`. The alias is the
+`.firebaserc` alias the project was selected by (see
+[Configuration](configuration.md)): `staging` for
+`--project staging`, or for `firebase use staging`, when `staging` is an
+alias; with neither, the file's only alias, else `default`. A project named
+by its id has no alias. Having both `.env.<projectId>` and `.env.<alias>` is
+refused, as officially. `.secret.local` holds the secrets a function
+declares.
+
+The discovery process (the SDK run that turns the code into the function
+list) gets the env file values too, as the official emulator passes them, so
+code that reads `process.env` while it loads (a `region` from
+`process.env.SHOP_REGION`) sees the same values there and in the worker. A
+param's default and the secrets are not there yet; the worker has them.
+
+Params (`defineString`, `defineInt`, `defineBoolean`, `defineList`,
+`defineSecret` ...) resolve as the official emulator resolves them when no
+terminal is attached, since Firenook never prompts:
+
+- A value in an env file wins.
+- Otherwise the param takes its default, in the function's options (`region`,
+  `memory`, `timeoutSeconds`, `minInstances` ...) and in `.value()`. A default
+  that is an expression (`{{ params.PROJECT_ID }}-shop`) is resolved first; a
+  default of the wrong type is refused.
+- A param with no value and no default stops its codebase loading, with the
+  official question and where to put the answer:
+  `Question "Enter a string value for API_URL:" does not have a default and
+  cannot be answered in non-interactive mode. Firenook never prompts: set the
+  value in .env, .env.demo-my-app or .env.local, or give the param a default.`
+  When it is the only codebase, the start then stops, as it does for any
+  codebase that does not load (see `--minimum-functions`).
+- A secret is never asked for: its value comes from `.secret.local` when the
+  function runs.
+
+Two deliberate differences: the official emulator writes the answers it
+took, defaults included, to `.env.local`; Firenook writes nothing and takes
+the default again at every load, so a changed default applies on the next
+reload (the console's Environment tab lists the default among the
+variables, marked `default`, and offers to write a value to `.env.local`). And a list param reaches `process.env` as the JSON array the
+SDK's `.value()` parses, as a deployed function gets it; the official
+emulator passes the text it wrote (`red,green`), which `.value()` cannot
+parse.
+
+## Triggers on a service that is not running
+
+A trigger on a service the suite does not run (Storage left out of `--only`,
+or the Realtime Database, which Firenook does not emulate) is loaded and
+listed but receives no event, and the first load says so with the official
+line, as a warning on the terminal screen and in the plain log (the
+console's page for the function says which service it needs; Run and
+functions:invoke still call it directly):
+
+```text
+functions[us-central1-onUpload]: function ignored because the storage emulator does not exist or is not running.
+```
+
+Firestore, Pub/Sub (and schedules), Storage, Auth (and blocking functions,
+which stay callable on their URL) are covered. The official emulator says
+this for Firestore, Pub/Sub and the Realtime Database only, and silently
+registers Storage and Auth triggers it cannot deliver. An Extension
+instance with such a trigger is left out whole, with the official
+`extensions[<instance>]` warning that names the service.
+
+## TypeScript
+
+```sh
+npx firenook emulators:start --build      # what `npm run emulators` runs in a project made by init
+```
+
+A TypeScript codebase loads from what its compiler writes (`main` is
+`lib/index.js`), so it has to be compiled before it loads and again after
+every save. With `--build`, Firenook runs the codebase's own `build:watch`
+script (`tsc --watch` in the official template), starts the emulators once
+the first compile is done, and keeps it running: save `src/index.ts`, the
+compiler writes `lib/`, and the codebase reloads, in one terminal. A compile
+with errors says them in the log, where they are and what the compiler said:
+
+```text
+22:30:29    ✕ build                   2 errors · functions
+            │ src/index.ts:7:33  Type 'string' is not assignable to type 'number'.
+22:30:34    ✓ build                   no errors · functions
+22:30:36    ↻ reloaded        168 ms  1 function · default
+```
+
+A codebase with a `build` script but no `build:watch` is built once, before
+the start. `emulators:exec --build` runs `build` once and runs no test when it
+fails. The scripts are the project's own, the ones a deploy's `predeploy`
+runs, so what loads locally is what a deploy builds.
+
+## Node
+
+Your functions run on the Node that runs Firenook, as the official emulator
+runs them on its own Node. Firenook is tested on Node 22, 24 and 26:
+
+- On Node 22, 24 or 26 the emulators start.
+- On a Node older than 22, `emulators:start` and `emulators:exec` stop at once
+  and say how to switch (`nvm install 24`); `firenook doctor` reports it with
+  its other findings and exits 1.
+- On an odd or a newer major (23, 25, 27 and up) the emulators start with a
+  warning, since nobody has tested that Node; the official CLI also runs on
+  any Node from its oldest supported one up.
+
+A codebase says which Node it deploys on with `engines.node` in its
+`package.json`, or with `runtime` (`nodejs22`) on its entry in `firebase.json`,
+which comes first. When the Node running the emulators is not the one it asks
+for, the start says so, as the official emulator does ("doesn't match your
+global version"), and goes on. In a terminal it is one of the start-up
+warnings on the card (`w` lists them); in plain output it is a line:
+
+```text
+firenook functions: functions/package.json asks for Node 22 in engines.node, but these functions run on Node 24.20.0, the Node running the emulators; start the emulators with Node 22 to run them on the Node they ask for (with nvm: nvm use 22)
+```
+
+A range in `engines.node` (`>=22`, `22 || 24`) is checked as npm reads it.
+The warning comes once per change: a reload that leaves the codebase asking
+for the same Node does not repeat it.
+
+## Invoking a function by hand
 
 `functions:invoke` finds the running suite through the hub locator (so a
 suite started on other ports is found) and, without `--event-data`, sends a
@@ -55,14 +178,35 @@ official precedence, defaults and `${param:X}` substitution.
 
 The registry (metadata and, on first use, the source archive) is contacted
 with the Firebase CLI's stored login or a `FIREBASE_TOKEN` refresh token, the
-same credential the official emulator uses; Firenook stores the registry
-objects next to the source (`firenook-registry.json`) so every later start is
-offline. Secret Manager is never contacted: provide secret parameters in
+same credential the official emulator uses. The login is read where the
+Firebase CLI's configstore writes it: `$XDG_CONFIG_HOME/configstore/firebase-tools.json`,
+else `<home>/.config/configstore/firebase-tools.json`, with `<home>` as Node
+sees it (`%USERPROFILE%` on Windows, even where a shell sets `HOME`; `$HOME`
+elsewhere); the shared cache is under the same home. Firenook stores the
+registry objects next to the source (`firenook-registry.json`) so every later
+start is offline; a source cached or vendored by a release published under
+the former name keeps its old sidecar name and still starts offline.
+Secret Manager is never contacted: provide secret parameters in
 `extensions/<instance>.secret.local`. `firenook ext:vendor` copies each
-resolved source into the project and records how unpinned refs resolved, which
-is the recommended path for CI and for teammates without a Firebase login;
-`--offline` (or `FIRENOOK_OFFLINE=1`) turns any remaining registry access into
-a startup error. `firenook doctor` lists every instance with its source and
+resolved source into the project with its `firenook-registry.json` and records
+how unpinned refs resolved, which is the recommended path for CI and for
+teammates without a Firebase login; `ext:vendor --offline` copies only what is
+already in the shared cache with its sidecar and never contacts the registry.
+`--offline` (or `FIRENOOK_OFFLINE=1`) on a start turns any remaining registry
+access into a startup error. `firenook doctor` lists every instance with its source and
 whether it starts offline. Dynamic (in-code) extensions, Python/Dart runtimes
 and the registry's `latest-approved` listing rules beyond version resolution
 are not supported.
+
+## Credentials
+
+Every Functions worker holds synthetic credentials, never yours: an
+`authorized_user` file with a `demo` client and refresh token, as its
+`GOOGLE_APPLICATION_CREDENTIALS` and in the gcloud directory it sees
+(`CLOUDSDK_CONFIG`). Your own `GOOGLE_APPLICATION_CREDENTIALS` and gcloud login
+never reach your Functions, whatever their firebase-admin release. A call that
+asks for an access token first (an Eventarc publish, a task enqueue) sends the
+demo refresh to Google's token endpoint, and the worker answers it in its own
+process with the emulators' token, so it never leaves the machine. A codebase's
+own `.env` may still set `GOOGLE_APPLICATION_CREDENTIALS`, and a request with
+those credentials goes to Google.

@@ -4,6 +4,22 @@
 
 How Firenook reads `firebase.json`, `.firebaserc` and the command line, and what it needs from your machine.
 
+- **Which `firebase.json`.** Every command uses the first `firebase.json` in
+  the current directory or a folder above it, up to the root of the file
+  system, as the official CLI finds it: run in `functions/` (where
+  `npm run serve` runs), it finds the project's. `.firebaserc` is the one
+  beside it. `--config` names another file, relative to the current
+  directory.
+
+- **Which project.** As the official CLI picks it: `--project` (or `-P`),
+  else the active project `firebase use` recorded for this directory or a
+  parent (in the Firebase CLI's own `configstore/firebase-tools.json`, under
+  `$XDG_CONFIG_HOME`, else `~/.config`; the directory as it was recorded,
+  links not followed), else `firebase.json`'s legacy `firebase` key, else
+  `.firebaserc`: its only alias, or `projects.default`. A choice that names
+  an alias selects it, and with it `.env.<alias>`. `firenook use` records
+  `projects.default` and says when a `firebase use` choice comes first; that
+  file is only read, never written.
 - **Services.** A service starts when `firebase.json` has its top-level
   section (`firestore`, `storage`, `functions`; `extensions` counts as
   functions) or an `emulators.<name>` entry (Auth and Pub/Sub have no section,
@@ -17,23 +33,40 @@ How Firenook reads `firebase.json`, `.firebaserc` and the command line, and what
   `.apphosting` entries are skipped with a warning; unknown keys are errors.
 - **Storage** accepts the `{rules}` object, the array of `{target, rules}`
   entries (with `.firebaserc` targets or `--storage-bucket target=bucket`), or
-  no section at all (open default rules for the project bucket).
+  no section at all (open default rules for the project bucket). A target's
+  rules govern every bucket `.firebaserc` maps it to, as officially; a bucket
+  no rules govern refuses every client request. A demo project with a target
+  `.firebaserc` maps to no bucket starts with the default open rules for every
+  bucket and every target ignored, as officially (`Detected demo project ID
+  "demo-…", using a default (open) rules configuration. Storage targets in
+  firebase.json will be ignored.`); a real project then refuses to start.
 - **Firestore** accepts the object form or an array of `{database, rules,
   indexes}` entries (one entry may omit `database` for `(default)`); the
-  engine serves every listed database.
+  engine serves every listed database. Index files are not enforced, as
+  officially; the console reads them to say whether a query's index is
+  declared. One that cannot be read or parsed is a warning, not a refusal
+  (the official emulator never reads it).
 - **Functions** need `--minimum-functions` at `1` only when a codebase or
   extensions are configured and selected; otherwise the CLI passes `0`, and
   the engine drops Functions (with Eventarc and Tasks) with a notice when
   `firebase.json` has no `functions` codebase and no `extensions`.
 - **UI.** `emulators.ui.enabled: false` turns off the UI port, and with it
   the console and the logging listener, as in the official suite; `--ui`
-  cannot re-enable it. `emulators:exec` keeps it off unless `--ui` is given or
+  turns it on all the same, as the official `--ui` comes before that
+  setting. `emulators:exec` keeps it off unless `--ui` is given or
   `ui.enabled` is explicitly `true`; `emulators:start` keeps it on unless
   disabled.
   `emulators.singleProjectMode` (default `true`) is passed through.
 - **Host.** `--host` or `emulators.<name>.host` binds every listener; clients
   are pointed at the connectable address (`0.0.0.0` → `127.0.0.1`, `::` →
-  `::1`). A non-loopback host prints a warning: the emulators have no
+  `::1`). The default is `localhost`, as officially: every emulator listens on
+  127.0.0.1, and the hub and the console on `::1` as well (the official CLI
+  binds the others on the first address only, so `http://[::1]:8080` is
+  refused there too); clients, the environment of `emulators:exec` and the
+  console's Connect snippets are told 127.0.0.1. A port free on 127.0.0.1 but
+  not on `::1` is a warning. `::1` (or `[::1]`, which the official CLI cannot
+  resolve) puts every listener on the IPv6 loopback, and an address is that
+  address alone. A non-loopback host prints a warning: the emulators have no
   authentication, so every service, the data and arbitrary Functions execution
   are reachable from any device that can reach that host. Per-service hosts
   that differ from the chosen host and are not loopback are errors.
@@ -56,8 +89,12 @@ contain document data and decoded auth claims, so keep them local.
 
 ## Requirements and boundaries
 
-- Node 24; macOS x64/arm64, Linux x64/arm64 glibc (Ubuntu 24.04 baseline),
-  or native Windows x64. Each platform requires passing native packaging CI.
+- Node 22, 24 or 26, which your Functions run on (see
+  [Functions and Extensions](functions-and-extensions.md#node)); macOS
+  x64/arm64, Linux x64/arm64 with glibc 2.28 or newer, or native Windows x64.
+  Each platform requires passing native packaging CI. The Linux engine is
+  linked against glibc 2.28 (the manylinux_2_28 image), and CI starts it on
+  AlmaLinux 8, Debian 11, Ubuntu 22.04 and node:24-slim.
   Windows builds statically link the C runtime; no separate C++ redistributable
   is required by the Firenook executable.
 - No Java: Storage Security Rules are compiled and evaluated natively
@@ -72,7 +109,8 @@ contain document data and decoded auth claims, so keep them local.
 - Nothing is downloaded: no postinstall step and no setup step; the console
   is part of the engine. `setup`, which fetched Google's Emulator UI until
   `0.2.0-next.3`, does nothing now, so scripts that still run it pass.
-  `doctor` is read-only and names missing dependencies.
+  `doctor` is read-only and names missing dependencies and a Node the
+  emulators do not start on, in its `problems`.
 - The existing `firebase.json`, `.firebaserc` (aliases, Storage targets) and
   rules/index files are read as the official CLI reads them; see
   [Configuration](configuration.md). No app SDK replacement is needed.
@@ -86,6 +124,8 @@ contain document data and decoded auth claims, so keep them local.
   password storage. Never commit real credentials or emulator user exports.
 - Firenook never prompts: destructive commands need `--force`, and
   `--non-interactive` is accepted as a no-op. Windows ARM64/32-bit and Linux
-  musl/Alpine are not claimed supported.
+  musl/Alpine are not claimed supported. On Alpine, or a glibc older than
+  2.28, the CLI says what the engine needs and what the system has, and
+  suggests a glibc image such as node:24-slim.
 - `firenook native ...` exposes the existing advanced native CLI explicitly.
   It does not receive the adapter's project, state or credential safeguards.

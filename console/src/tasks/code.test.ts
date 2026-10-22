@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type TaskForCode, quoteShell, taskAsCode } from './code'
+import { type TaskForCode, enqueueSnippet, quoteShell, taskAsCode } from './code'
 import { testDetail, testQueue } from './fixtures.test-support'
 
 const ORIGIN = 'http://127.0.0.1:9499'
@@ -18,6 +18,26 @@ function taskFor(detail = testDetail()): TaskForCode {
   }
 }
 
+describe('the enqueue an empty Tasks page shows', () => {
+  it('sets the emulator host itself, so a copied script never enqueues into Cloud Tasks', () => {
+    expect(enqueueSnippet('processOrder', '127.0.0.1:9499', 'demo-shop')).toBe(
+      [
+        "import { initializeApp } from 'firebase-admin/app'",
+        "import { getFunctions } from 'firebase-admin/functions'",
+        '',
+        '// The Admin SDK enqueues into this emulator while CLOUD_TASKS_EMULATOR_HOST is set',
+        '// (functions in it have it already), and into Cloud Tasks itself without it.',
+        "process.env.CLOUD_TASKS_EMULATOR_HOST ??= '127.0.0.1:9499'",
+        "initializeApp({ projectId: 'demo-shop' })",
+        '',
+        'await getFunctions()',
+        "  .taskQueue('processOrder')",
+        "  .enqueue({ orderId: 'o_1' })",
+      ].join('\n'),
+    )
+  })
+})
+
 describe('a task as code (U-14)', () => {
   it('writes the Admin SDK enqueue with its id, headers and data', () => {
     expect(taskAsCode(taskFor(), 'node', ORIGIN)).toBe(
@@ -25,8 +45,9 @@ describe('a task as code (U-14)', () => {
         "import { initializeApp } from 'firebase-admin/app'",
         "import { getFunctions } from 'firebase-admin/functions'",
         '',
-        '// The Admin SDK enqueues into this emulator when run with',
-        '// CLOUD_TASKS_EMULATOR_HOST=127.0.0.1:9499 (functions in it have it already).',
+        '// The Admin SDK enqueues into this emulator while CLOUD_TASKS_EMULATOR_HOST is set',
+        '// (functions in it have it already), and into Cloud Tasks itself without it.',
+        "process.env.CLOUD_TASKS_EMULATOR_HOST ??= '127.0.0.1:9499'",
         "initializeApp({ projectId: 'demo-console' })",
         '',
         'await getFunctions()',

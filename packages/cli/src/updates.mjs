@@ -2,18 +2,22 @@
 // registry for firenook's version tags at most once a day, in the
 // background, and the answer shows on the next start, so the check never
 // slows one. It follows the channel the installed version is from (`next`
-// for a preview, `latest` otherwise) and writes the command for the
-// project's own package manager. It stays off in CI, in the plain output and
+// for a preview, `latest` otherwise), and a preview also hears of a later
+// release on `latest`, which `next` may not name; it writes the command for
+// the project's own package manager. It stays off in CI, in the plain output and
 // with FIRENOOK_NO_UPDATE_CHECK=1 or NO_UPDATE_NOTIFIER=1.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { truthy } from './terminal.mjs';
 
 export const REGISTRY = 'https://registry.npmjs.org/-/package/firenook/dist-tags';
 const DAY = 24 * 60 * 60 * 1000;
 
+// Off when any of these is set to something other than empty, 0 or false:
+// CI=false is no CI.
 export function updatesOff(env = process.env) {
-  return ['CI', 'FIRENOOK_NO_UPDATE_CHECK', 'NO_UPDATE_NOTIFIER'].some(name => env[name] !== undefined && env[name] !== '' && env[name] !== '0');
+  return ['CI', 'FIRENOOK_NO_UPDATE_CHECK', 'NO_UPDATE_NOTIFIER'].some(name => truthy(env[name]));
 }
 
 // Where the last answer is kept: the platform's cache directory.
@@ -64,13 +68,19 @@ function readCache(file) {
 }
 
 // The update the last answer names, or undefined: `{version, command, tag}`.
+// A preview install looks at `next` and `latest` and takes the later: a
+// release published to `latest` leaves `next` on the last preview.
 export function pendingUpdate(installed, directory, {env = process.env, platform = process.platform} = {}) {
   if (updatesOff(env)) return undefined;
   const cached = readCache(cacheFile(env, platform));
-  const tag = channelOf(installed);
-  const candidate = cached?.tags?.[tag];
-  if (typeof candidate !== 'string' || !newer(candidate, installed)) return undefined;
-  return {version: candidate, tag, command: installCommand(directory, tag)};
+  const tags = channelOf(installed) === 'next' ? ['next', 'latest'] : ['latest'];
+  let found;
+  for (const tag of tags) {
+    const candidate = cached?.tags?.[tag];
+    if (typeof candidate !== 'string' || !newer(candidate, installed)) continue;
+    if (!found || newer(candidate, found.version)) found = {version: candidate, tag};
+  }
+  return found && {...found, command: installCommand(directory, found.tag)};
 }
 
 // Asks the registry again when the last answer is a day old. Never throws,

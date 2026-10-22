@@ -48,9 +48,14 @@ test("partitionQuery returns ordered document-name split cursors", async (contex
     partitionCount: 4,
   };
 
+  // The Admin SDKs send the owner; nobody else may partition a query.
+  const callOptions = configuration.host === undefined
+    ? {}
+    : { otherArgs: { headers: { authorization: "Bearer owner" } } };
+
   if (configuration.name === "java") {
     await assert.rejects(
-      rawFirestore.partitionQuery(request),
+      rawFirestore.partitionQuery(request, callOptions),
       (error: unknown) => grpcCode(error) === 12,
     );
     return;
@@ -68,7 +73,7 @@ test("partitionQuery returns ordered document-name split cursors", async (contex
   await writer.close();
   seeded = true;
 
-  const [partitions] = await rawFirestore.partitionQuery(request);
+  const [partitions] = await rawFirestore.partitionQuery(request, callOptions);
   const references = partitions.map((partition) => {
     assert.equal(partition.values?.length, 1);
     const reference = partition.values?.[0]?.referenceValue;

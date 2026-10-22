@@ -32,7 +32,10 @@ async fn suite_listener_assembly_shares_real_evaluations_and_closes_idle_debug_c
         let logging = LoggingRuntime::new();
         let servers = spawn_static_servers(
             &config,
-            &mut ListenerSet(listeners),
+            &mut ListenerSet {
+                primary: listeners,
+                also: std::collections::BTreeMap::new(),
+            },
             applications,
             &logging,
             &firenook_console_front::ForeignProjects::default(),
@@ -146,6 +149,7 @@ pub(super) fn test_config() -> SuiteConfig {
         host: "127.0.0.1".into(),
         allowed_hosts: Vec::new(),
         project_id: "demo-diagnostics".into(),
+        project_alias: None,
         services: ServiceSelection::ALL,
         ui_enabled: true,
         single_project_mode: true,

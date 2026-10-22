@@ -45,7 +45,7 @@ Same flags, same ports, and your `firebase.json`, rules, Functions code and app
 stay as they are. In a terminal, run it as `npx firenook emulators:start`. To
 keep your data between runs, with no export at every stop, add `--keep-data`.
 
-Firenook needs Node 24, on macOS, Linux or Windows. Starting a new project?
+Firenook needs Node 22, 24 or 26, on macOS, Linux or Windows. Starting a new project?
 `npx firenook init` sets one up. [Get started](#get-started) covers both.
 
 ## Why Firenook
@@ -221,16 +221,29 @@ export.
 ### Starting a new project
 
 ```sh
-npm install --save-dev --save-exact firenook
-npx firenook init                       # firebase.json, rules, indexes and a Functions codebase
-cd functions && npm install && cd ..
-npx firenook emulators:start --keep-data
+npx firenook init
 ```
 
-`init` sets up every emulator on its usual port with a `demo-<folder>` project,
-so nothing can reach a real Firebase project, and adds `.firenook/` to your
-`.gitignore`. A new project keeps its data from the first start, and `init`
-offers to connect the coding agent it finds. Point your app at it:
+<p align="center">
+  <img alt="firenook init: a screen of choices already made, the set-up as it runs, and the emulators started in the same terminal" src="docs/assets/init.gif" width="760">
+</p>
+
+In a terminal, `init` opens on one screen with every choice already made:
+a `demo-<folder>` project, so nothing can reach a real Firebase project,
+every emulator on its usual port (one already in use is named, with what
+holds it), Functions in TypeScript, JavaScript or none, and the coding agents
+it finds. Enter takes them all. It then writes the official templates,
+installs the packages, pins Firenook in `package.json`, builds the
+TypeScript once, and starts the emulators in the same terminal. From then on:
+
+```sh
+npm run emulators            # firenook emulators:start --keep-data --build
+```
+
+A new project keeps its data between runs from the first start, and
+`--build` compiles your TypeScript as you save, with the errors in the log.
+In a script or CI, `npx firenook init --yes` does the same with no questions.
+Point your app at it:
 
 ```js
 connectFirestoreEmulator(db, '127.0.0.1', 8080);
@@ -239,8 +252,10 @@ connectStorageEmulator(storage, '127.0.0.1', 9199);
 connectFunctionsEmulator(functions, '127.0.0.1', 5001);
 ```
 
-Firenook needs Node 24 on macOS, Linux (glibc) or Windows x64. The
-[getting started guide](docs/getting-started.md) covers each step in more
+Firenook needs Node 22, 24 or 26 on macOS, Linux (glibc 2.28 or newer, so
+RHEL 8, Debian 10, Ubuntu 20.04, node:24-slim and later; not Alpine) or
+Windows x64. The [getting started guide](docs/getting-started.md) covers each
+step in more
 depth, including tests and keeping data.
 
 ## Documentation

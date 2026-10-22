@@ -7,6 +7,7 @@ import { manifest } from './binary.mjs';
 import { suiteFetch } from './client.mjs';
 import { encodeValue } from './firestore-values.mjs';
 import { discoverProject, findHub, needsDiscovery, resolveProject, runningServices, serviceOrigin } from './hub.mjs';
+import { findConfig } from './options.mjs';
 
 export const CLIENT = `firenook-mcp/${manifest.version}`;
 export const OWNER = {authorization:'Bearer owner'};
@@ -55,7 +56,7 @@ export function projectSource(options, cwd) {
   if (options.config) return {by:'--config', config:resolve(cwd, options.config)};
   if (needsDiscovery(options, cwd)) return {by:'locator'};
   if (options.project) return {by:'--project'};
-  return {by:'firebase.json', config:resolve(cwd, 'firebase.json')};
+  return {by:'firebase.json', config:findConfig(options, cwd)};
 }
 
 // The project a call addresses, resolved on every call so a suite started or
@@ -64,7 +65,7 @@ export function projectSource(options, cwd) {
 // running suite whose hub locator answers.
 export async function target(context) {
   if (!needsDiscovery(context.options, context.cwd)) return resolveProject(context.options, context.cwd);
-  try { return await discoverProject(context.cwd, 'firenook mcp'); }
+  try { return await discoverProject(context.cwd, 'firenook mcp', context.options); }
   catch (error) { throw new ToolError(error.message); }
 }
 // The options for code that resolves the project itself (functions:invoke,
@@ -92,7 +93,7 @@ export async function suite(context, name) {
 // Emulator UI port.
 export function consoleBase(project, listing, options = {}) {
   if (listing && !listing.ui) {
-    throw new ToolError(`This tool uses the console API, which the suite serves on the Emulator UI port, and the running suite for ${project.project} was started without the UI (no ui in the hub's /emulators listing). Restart it with the UI on: emulators.ui.enabled in firebase.json, or firenook emulators:start --ui.`);
+    throw new ToolError(`This tool uses the console API, which the suite serves on the Emulator UI port, and the running suite for ${project.project} was started without the UI (no ui in the hub's /emulators listing). Restart it with --ui (firenook emulators:start --ui, or emulators:exec --ui), which starts the UI even where firebase.json sets emulators.ui.enabled to false; or set that to true.`);
   }
   return `${serviceOrigin(project, 'ui', listing, options)}/console/api/v1`;
 }

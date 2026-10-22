@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { gunzipSync } from 'node:zlib';
 
 export const cliFiles = ['LICENSE', 'NOTICE', 'README.md', 'package.json', 'release.json',
-  'bin/firenook.mjs', 'src/agents.mjs', 'src/binary.mjs', 'src/client.mjs', 'src/firestore-values.mjs', 'src/hub.mjs', 'src/init.mjs', 'src/invoke.mjs', 'src/mcp-console.mjs', 'src/mcp-suite.mjs', 'src/mcp.mjs', 'src/options.mjs', 'src/processes.mjs', 'src/rc.mjs', 'src/runtime.mjs', 'src/session.mjs', 'src/terminal.mjs', 'src/updates.mjs'];
+  'bin/firenook.mjs', 'src/agents.mjs', 'src/binary.mjs', 'src/build.mjs', 'src/client.mjs', 'src/configstore.mjs', 'src/exec-token.cjs', 'src/firestore-values.mjs', 'src/form.mjs', 'src/hub.mjs', 'src/init-screen.mjs', 'src/init.mjs', 'src/invoke.mjs', 'src/json-text.mjs', 'src/mcp-console.mjs', 'src/mcp-suite.mjs', 'src/mcp.mjs', 'src/options.mjs', 'src/processes.mjs', 'src/rc.mjs', 'src/runtime.mjs', 'src/session.mjs', 'src/setup.mjs', 'src/terminal.mjs', 'src/updates.mjs'];
 const licenses = ['LICENSE', 'NOTICE'];
 
 function octal(bytes) {

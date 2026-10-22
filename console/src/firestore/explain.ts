@@ -96,6 +96,10 @@ export function describeCandidates(candidates: ExplainCandidates, target: string
         : `Reads ${candidates.names} documents by name`
     case 'equalityIndex':
       return `Narrows ${target} by the ${candidates.fields.join(' and ')} index`
+    case 'orderIndex':
+      return candidates.lookups.length > 0
+        ? `Reads ${target} in ${candidates.field} order from its index, checking ${candidates.lookups.join(' and ')} there first`
+        : `Reads ${target} in ${candidates.field} order from its index`
     case 'collectionScan':
       return `Reads every document in ${target}`
     case 'collectionGroupScan':
@@ -107,6 +111,7 @@ export function describeCandidates(candidates: ExplainCandidates, target: string
 
 export const STRATEGY_LABELS: Record<Explanation['strategy'], string> = {
   streaming: 'streamed',
+  indexOrder: 'read in index order',
   orderedDisk: 'sorted on disk keys',
   buffered: 'sorted in memory',
 }
@@ -114,6 +119,8 @@ export const STRATEGY_LABELS: Record<Explanation['strategy'], string> = {
 export const STRATEGY_DETAIL: Record<Explanation['strategy'], string> = {
   streaming:
     'Filtered and limited while reading, decoding only the fields a filter or an order looks at.',
+  indexOrder:
+    'Read already in order from a field index, so reading stops as soon as the limit is met.',
   orderedDisk: 'Disk keys are sorted on their order values before any document payload is decoded.',
   buffered: 'The whole result set is materialized and sorted in memory.',
 }

@@ -75,8 +75,8 @@ pub struct OverviewEnvVariable {
     pub name: String,
     pub value: String,
     /// The service it points at (`firestore`, `auth`, `storage`, `pubsub`,
-    /// `hub`, `tasks`, `eventarc`), or `project` for the project id and
-    /// credentials.
+    /// `hub`, `tasks`, `eventarc`), or `project` for the project id, the
+    /// Firebase configuration and the credentials.
     pub service: String,
     /// Who sets it for you.
     pub set_by: OverviewEnvSource,
@@ -93,7 +93,9 @@ pub enum OverviewEnvSource {
     /// `firenook emulators:exec` sets it for the command it runs (and
     /// Functions workers get it too).
     Exec,
-    /// Functions workers get it; `emulators:exec` does not set it.
+    /// Only Functions workers get it. No variable is listed so at present:
+    /// `emulators:exec` sets the Tasks and Eventarc hosts too, as the
+    /// official one does.
     Functions,
 }
 

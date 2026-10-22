@@ -5,11 +5,13 @@
  */
 export type FunctionParam = { name: string, type: string, label: string | null, default: string | null, description: string | null, 
 /**
- * Null for a secret param.
+ * The value the codebase loaded with: an env file's, or the param's
+ * default when no file sets it (`file` is then null). Null for a
+ * secret param.
  */
 value: string | null, secret: boolean, file: string | null, 
 /**
- * No value in any env file: the official emulator would prompt and
- * write .env.local.
+ * No value in any env file: the official emulator would prompt (with
+ * the default, if any, filled in) and write .env.local.
  */
 unresolved: boolean, };

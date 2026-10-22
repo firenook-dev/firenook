@@ -3,12 +3,15 @@
 // directory; no network, no login.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { UNIMPLEMENTED, validProjectId } from './options.mjs';
+import { activeProject } from './configstore.mjs';
+import { UNIMPLEMENTED, findConfig, selectProject, validProjectId } from './options.mjs';
 
 const TARGET_TYPES = {storage:'bucket', database:'instance', hosting:'site'};
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-export const rcPath = (options, cwd = process.cwd()) => join(dirname(resolve(cwd, options.config || 'firebase.json')), '.firebaserc');
+// Next to the project's firebase.json (found as findConfig finds it), or in
+// the current directory when there is none.
+export const rcPath = (options, cwd = process.cwd()) => join(dirname(findConfig(options, cwd) ?? resolve(cwd, 'firebase.json')), '.firebaserc');
 
 export function readRc(path) {
   if (!existsSync(path)) return {};
@@ -22,6 +25,15 @@ export const writeRc = (path, data) => writeFileSync(path, `${JSON.stringify(dat
 const projects = rc => (isObject(rc.projects) ? rc.projects : (rc.projects = {}));
 const assertId = id => { if (!validProjectId(id)) throw new Error(`Invalid project id ${id}: use lowercase letters, digits and hyphens (6 to 30 characters, starting with a letter), or a demo- prefix.`); };
 
+// The project `firebase use` made active for the directory holding the
+// .firebaserc, said when there is one: it comes before projects.default,
+// as in the official CLI.
+function cliActive(path, log) {
+  const active = activeProject(dirname(path));
+  if (active) log.log(`The Firebase CLI's active project for this directory is ${active} (set by firebase use); it is used before projects.default. Pass --project, or run firebase use, to change it.`);
+  return active;
+}
+
 function listAliases(rc, path, log) {
   const entries = Object.entries(projects(rc));
   const active = projects(rc).default;
@@ -31,6 +43,7 @@ function listAliases(rc, path, log) {
     for (const [alias, id] of entries) log.log(`${id === active ? '*' : ' '} ${alias} (${id})`);
   }
   log.log(active ? `Active project: ${active}` : 'No active project (projects.default is unset).');
+  cliActive(path, log);
   log.log('Run firenook use --add <projectId> --alias <name> to define an alias, firenook use <alias|projectId> to activate one.');
 }
 
@@ -74,18 +87,18 @@ export function use(selection, options, cwd = process.cwd(), log = console) {
     table.default = id;
     writeRc(path, rc);
     log.log(aliased ? `Now using alias ${selection} (${id})` : `Now using project ${id} (recorded as a project id, not an alias)`);
+    cliActive(path, log);
     return 0;
   }
-  if (options.json) { log.log(JSON.stringify({path, projects:table, active:table.default ?? null})); return 0; }
+  if (options.json) { log.log(JSON.stringify({path, projects:table, active:table.default ?? null, cliActive:activeProject(dirname(path)) ?? null})); return 0; }
   listAliases(rc, path, log);
   return 0;
 }
 
-// The project key targets are stored under: --project or the active default.
-function targetProject(rc, options) {
-  const table = projects(rc);
-  const selection = options.project || table.default;
-  const id = (selection !== undefined && table[selection]) || selection;
+// The project key targets are stored under, chosen as for a start: --project,
+// the Firebase CLI's active project for the directory, then .firebaserc.
+function targetProject(rc, options, path) {
+  const {project:id} = selectProject(options.project, projects(rc), {active:activeProject(dirname(path))});
   if (!id) throw new Error('Must have an active project to set deploy targets. Try firenook use --add <projectId>, or pass --project');
   assertId(id);
   return id;
@@ -130,7 +143,7 @@ export function targetApply([type, name, ...resources], options, cwd = process.c
   assertType(type);
   const path = rcPath(options, cwd);
   const rc = readRc(path);
-  const project = targetProject(rc, options);
+  const project = targetProject(rc, options, path);
   const changed = applyTarget(rc, project, type, name, resources);
   writeRc(path, rc);
   log.log(`Applied ${type} target ${name} to ${resources.join(', ')} for ${project}`);
@@ -144,7 +157,7 @@ export function targetClear([type, name, ...extra], options, cwd = process.cwd()
   assertType(type);
   const path = rcPath(options, cwd);
   const rc = readRc(path);
-  const project = targetProject(rc, options);
+  const project = targetProject(rc, options, path);
   const existed = clearTarget(rc, project, type, name);
   if (existed) { writeRc(path, rc); log.log(`Cleared ${type} target ${name} for ${project}`); }
   else log.log(`No action taken. No ${type} target found named ${name} for ${project}`);

@@ -1,3 +1,5 @@
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { StorageRulesObjectView } from '@/api/generated/storage/StorageRulesObjectView'
 import { EMPTY_FORM, type PlaygroundForm } from './requests'
@@ -135,5 +137,73 @@ describe('the saved tests as a rules-unit-testing file', () => {
       { project: 'demo', bucket: BUCKET, rulesFile: 'storage.rules' },
     )
     expect(recorded).toContain('env.authenticatedContext("u9", {"plan":"pro"})')
+  })
+})
+
+// The exported file the conformance suite runs with `@firebase/rules-unit-testing`
+// against the engine and the official emulator
+// (`conformance/src/rules/run-rules-unit-testing.ts`). Rewrite it after a
+// deliberate change to the export with UPDATE_CONFORMANCE_EXPORTS=1.
+// This file's folder, under `console/src` (the test DOM gives `import.meta.url` an http scheme).
+const CONFORMANCE_EXPORT = join(
+  import.meta.dirname,
+  '../../../../conformance/fixtures/rules-unit-testing-v1/console-storage.test.ts',
+)
+const CONFORMANCE_BUCKET = 'demo-firenook-rules-testing.appspot.com'
+
+function object(name: string): StorageRulesObjectView {
+  return { ...SEED, name, bucket: CONFORMANCE_BUCKET, size: 16, metadata: {} }
+}
+
+describe('the Storage tests the conformance suite runs', () => {
+  const alice = { kind: 'custom', uid: 'alice', claims: {} } as const
+  const bob = { kind: 'custom', uid: 'bob', claims: {} } as const
+  const file = exportTests(
+    [
+      test(
+        'alice uploads to her folder',
+        {
+          method: 'create',
+          path: 'users/alice/notes.txt',
+          size: '16',
+          unit: 'B',
+          contentType: 'text/plain',
+          who: { kind: 'as', viewAs: alice },
+        },
+        'allow',
+      ),
+      test(
+        'bob reads alice',
+        { method: 'get', path: 'users/alice/notes.txt', who: { kind: 'as', viewAs: bob } },
+        'deny',
+        object('users/alice/notes.txt'),
+      ),
+      test(
+        'signed out reads alice',
+        { method: 'get', path: 'users/alice/notes.txt' },
+        'deny',
+        object('users/alice/notes.txt'),
+      ),
+      test('signed out reads a public file', { method: 'get', path: 'public/logo.png' }, 'allow', {
+        ...object('public/logo.png'),
+        contentType: 'image/png',
+      }),
+      test(
+        'alice lists her folder',
+        { method: 'list', path: 'users/alice', who: { kind: 'as', viewAs: alice } },
+        'allow',
+      ),
+      test('signed out lists alice', { method: 'list', path: 'users/alice' }, 'deny'),
+    ],
+    {
+      project: 'demo-firenook-rules-testing',
+      bucket: CONFORMANCE_BUCKET,
+      rulesFile: 'storage.rules',
+    },
+  )
+
+  it('is the file the conformance suite runs against the engine', () => {
+    if (process.env.UPDATE_CONFORMANCE_EXPORTS === '1') writeFileSync(CONFORMANCE_EXPORT, file)
+    expect(file).toBe(readFileSync(CONFORMANCE_EXPORT, 'utf8'))
   })
 })

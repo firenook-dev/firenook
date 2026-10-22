@@ -135,12 +135,16 @@ fn compact_disk_order_matches_buffered_oracle_semantics() {
             }
             for limit in [Limit::First(3), Limit::Last(3)] {
                 let limited = query.clone().limit(limit);
-                assert!(matches!(
+                // A first page walks the field index; a last page sorts.
+                assert_eq!(
                     execute_iter(&snapshot, &db, &limited, edition)
                         .unwrap()
-                        .inner,
-                    QueryDocumentIteratorInner::Buffered(_)
-                ));
+                        .strategy(),
+                    match limit {
+                        Limit::First(_) => QueryStrategy::IndexOrder,
+                        Limit::Last(_) => QueryStrategy::Buffered,
+                    }
+                );
                 compare(&snapshot, &db, &limited, edition);
             }
         }
@@ -247,7 +251,15 @@ fn ordered_disk_results_keep_original_snapshot_and_historical_overlay() {
 #[test]
 fn ordered_disk_iterator_retains_keys_not_unrelated_document_payloads() {
     let dir = TestDirectory::new();
-    let store = Store::open_disk(&dir.0, DiskOptions::default()).unwrap();
+    // Without the field index, which would stream these in order instead.
+    let store = Store::open_disk(
+        &dir.0,
+        DiskOptions {
+            field_indexes: false,
+            ..DiskOptions::default()
+        },
+    )
+    .unwrap();
     let db = DatabaseName::new("demo", "(default)").unwrap();
     store
         .commit(

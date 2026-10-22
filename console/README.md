@@ -10,9 +10,11 @@ kit every section is made from: the Overview, Firestore (data and rules),
 Authentication, Storage (files and rules), Functions, Extensions, Eventarc,
 Pub/Sub, Cloud Tasks and Logs, linked to each other wherever one names what
 another shows. A section the engine does not run is behind its gate, which
-says why and how to turn it on. The Google Emulator UI keeps answering at
-`/` on the same port until every row of `support/console-parity.md` is
-ticked.
+says why and how to turn it on. Google's Emulator UI is gone since
+`0.2.0-next.3`: `/` on the same port redirects to `/console`, and the
+addresses the Google UI answered at (`/firestore`, `/auth`, `/storage`,
+`/functions`, `/extensions`, `/logs?q=…`) redirect to the console's page
+for the same thing, so a bookmark or a link a tool prints still lands.
 
 ## Working on it
 
@@ -25,8 +27,10 @@ npm run build --prefix console     # console/dist, read at runtime by debug engi
 
 `npm run engine` prints the origin to give the dev server. Profiles are
 `data`, `auth`, `storage`, `compute`, `messaging`, `observe` and `all`
-(`scripts/profiles/`); `FIRENOOK_BINARY` points at the engine to run, and
-`FIRENOOK_SEED_SCALE=large` asks the seeders for their perf datasets.
+(`scripts/profiles/`); `FIRENOOK_BINARY` points at the engine to run,
+`FIRENOOK_NODE` at the Node it runs Functions on (default: the Node running
+the script), and `FIRENOOK_SEED_SCALE=large` asks the seeders for their perf
+datasets.
 
 Checks, all run in CI:
 

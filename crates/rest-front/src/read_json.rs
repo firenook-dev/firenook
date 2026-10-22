@@ -1,7 +1,9 @@
 //! REST's captured null/special-double spelling and the browser SDK's UTC form.
 //! Traverse typed values, never arbitrary user map names or string contents.
 use firenook_grpc_front::google::firestore::v1::{
-    BatchGetDocumentsResponse, CommitResponse, Document, Value, value::ValueType,
+    BatchGetDocumentsResponse, BatchWriteResponse, CommitResponse, Document,
+    PartitionQueryResponse, RunAggregationQueryResponse, RunQueryResponse, Value, WriteResult,
+    value::ValueType,
 };
 use serde::Serialize;
 use serde_json::{Value as JsonValue, json};
@@ -19,9 +21,11 @@ fn utc(object: &mut JsonValue, key: &str) -> Result<(), RestError> {
     Ok(())
 }
 
-fn fields(values: &std::collections::BTreeMap<String, Value>) -> Result<JsonValue, RestError> {
+fn fields<'a>(
+    values: impl IntoIterator<Item = (&'a String, &'a Value)>,
+) -> Result<JsonValue, RestError> {
     values
-        .iter()
+        .into_iter()
         .map(|(name, item)| Ok((name.clone(), value(item)?)))
         .collect::<Result<serde_json::Map<_, _>, _>>()
         .map(JsonValue::Object)
@@ -85,7 +89,10 @@ pub(super) fn batch(response: &BatchGetDocumentsResponse) -> Result<JsonValue, R
     use firenook_grpc_front::google::firestore::v1::batch_get_documents_response::Result;
     let mut encoded = encode(response)?;
     if let Some(Result::Found(found)) = &response.result {
-        encoded["found"] = document(found)?;
+        let found = found
+            .document()
+            .map_err(|error| RestError::internal(error.to_string()))?;
+        encoded["found"] = document(&found)?;
     }
     utc(&mut encoded, "readTime")?;
     Ok(encoded)
@@ -94,8 +101,19 @@ pub(super) fn batch(response: &BatchGetDocumentsResponse) -> Result<JsonValue, R
 pub(super) fn commit(response: &CommitResponse) -> Result<JsonValue, RestError> {
     let mut encoded = encode(response)?;
     utc(&mut encoded, "commitTime")?;
-    if let Some(results) = encoded["writeResults"].as_array_mut() {
-        for (result, typed) in results.iter_mut().zip(&response.write_results) {
+    write_results(&mut encoded, &response.write_results)?;
+    Ok(encoded)
+}
+
+/// The write results of a commit or a batch write, their times in UTC and
+/// their transform results in REST's value spelling. (Indexing a missing
+/// `writeResults` would insert a `null` one.)
+fn write_results(encoded: &mut JsonValue, typed: &[WriteResult]) -> Result<(), RestError> {
+    if let Some(results) = encoded
+        .get_mut("writeResults")
+        .and_then(JsonValue::as_array_mut)
+    {
+        for (result, typed) in results.iter_mut().zip(typed) {
             utc(result, "updateTime")?;
             if !typed.transform_results.is_empty() {
                 result["transformResults"] = typed
@@ -105,6 +123,53 @@ pub(super) fn commit(response: &CommitResponse) -> Result<JsonValue, RestError> 
                     .collect::<Result<Vec<_>, _>>()?
                     .into();
             }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn batch_write(response: &BatchWriteResponse) -> Result<JsonValue, RestError> {
+    let mut encoded = encode(response)?;
+    write_results(&mut encoded, &response.write_results)?;
+    Ok(encoded)
+}
+
+pub(super) fn query(response: &RunQueryResponse) -> Result<JsonValue, RestError> {
+    let mut encoded = encode(response)?;
+    if let Some(found) = &response.document {
+        encoded["document"] = document(found)?;
+    }
+    utc(&mut encoded, "readTime")?;
+    Ok(encoded)
+}
+
+pub(super) fn aggregation(response: &RunAggregationQueryResponse) -> Result<JsonValue, RestError> {
+    let mut encoded = encode(response)?;
+    if let Some(result) = &response.result {
+        // Sorted by alias, as every other answer's fields are.
+        let sorted = result
+            .aggregate_fields
+            .iter()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        encoded["result"] = object("aggregateFields", fields(sorted)?);
+    }
+    utc(&mut encoded, "readTime")?;
+    Ok(encoded)
+}
+
+pub(super) fn partition(response: &PartitionQueryResponse) -> Result<JsonValue, RestError> {
+    let mut encoded = encode(response)?;
+    if let Some(partitions) = encoded
+        .get_mut("partitions")
+        .and_then(JsonValue::as_array_mut)
+    {
+        for (cursor, typed) in partitions.iter_mut().zip(&response.partitions) {
+            cursor["values"] = typed
+                .values
+                .iter()
+                .map(value)
+                .collect::<Result<Vec<_>, _>>()?
+                .into();
         }
     }
     Ok(encoded)

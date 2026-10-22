@@ -1,7 +1,7 @@
 //! JSON/HTTP transcoding into the existing native read and transaction service.
 use super::{
-    AUTHORIZATION, DatabasePath, DocumentPath, HeaderMap, Json, JsonValue, Path, RestError,
-    RestState, State, json, request_authorization,
+    AUTHORIZATION, DatabasePath, DocumentPath, HeaderMap, Json, JsonValue, PAYLOAD_INVALID, Path,
+    RestBody, RestError, RestState, State, json, request_authorization,
 };
 use firenook_grpc_front::google::firestore::v1::{
     BatchGetDocumentsRequest, BeginTransactionRequest, CommitRequest, GetDocumentRequest,
@@ -9,7 +9,7 @@ use firenook_grpc_front::google::firestore::v1::{
 };
 use serde::{Serialize, de::DeserializeOwned};
 
-fn authorization(headers: &HeaderMap) -> Result<Option<String>, RestError> {
+pub(super) fn authorization(headers: &HeaderMap) -> Result<Option<String>, RestError> {
     headers
         .get(AUTHORIZATION)
         .map(|header| header.to_str().map(str::to_owned))
@@ -17,8 +17,10 @@ fn authorization(headers: &HeaderMap) -> Result<Option<String>, RestError> {
         .map_err(|_| RestError::unauthenticated("invalid authorization"))
 }
 
+/// A request message from its REST body; a body the message cannot hold is
+/// the payload's fault, as the official emulator says.
 fn decode<T: DeserializeOwned>(value: JsonValue) -> Result<T, RestError> {
-    serde_json::from_value(value).map_err(|error| RestError::invalid(error.to_string()))
+    serde_json::from_value(value).map_err(|_| RestError::invalid(PAYLOAD_INVALID))
 }
 
 fn encode<T: Serialize>(value: T) -> Result<Json<JsonValue>, RestError> {
@@ -100,9 +102,9 @@ pub(super) async fn begin(
     State(state): State<RestState>,
     Path(path): Path<DatabasePath>,
     headers: HeaderMap,
-    Json(body): Json<JsonValue>,
+    RestBody(body): RestBody,
 ) -> Result<Json<JsonValue>, RestError> {
-    request_authorization(&headers, &path.project)?;
+    request_authorization(&headers)?;
     let input: BeginTransactionRequest = decode(database_input(&path, body)?)?;
     let result = state
         .service
@@ -116,9 +118,9 @@ pub(super) async fn rollback(
     State(state): State<RestState>,
     Path(path): Path<DatabasePath>,
     headers: HeaderMap,
-    Json(body): Json<JsonValue>,
+    RestBody(body): RestBody,
 ) -> Result<Json<JsonValue>, RestError> {
-    request_authorization(&headers, &path.project)?;
+    request_authorization(&headers)?;
     let input: RollbackRequest = decode(database_input(&path, body)?)?;
     let result = state
         .service
@@ -135,11 +137,16 @@ pub(super) async fn commit(
     body: JsonValue,
 ) -> Result<Json<JsonValue>, RestError> {
     let input: CommitRequest = decode(database_input(&path, body)?)?;
+    let empty = input.writes.is_empty();
     let result = state
         .service
         .commit_for_client(input, authorization(&headers)?)
         .await
         .map_err(|error| super::listing::status(&error))?;
+    // As without a transaction: a commit without writes answers `{}`.
+    if empty {
+        return Ok(Json(json!({})));
+    }
     super::read_json::commit(&result).map(Json)
 }
 

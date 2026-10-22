@@ -174,6 +174,14 @@ async fn a_function_detail_holds_its_environment_params_and_kind_facts() {
         .expect("API_KEY");
     assert_eq!(secret["value"], Value::Null);
     assert_eq!(secret["secret"], true);
+    // A param no env file sets: its default, from no file.
+    let batch = variables
+        .iter()
+        .find(|variable| variable["key"] == "BATCH")
+        .expect("BATCH");
+    assert_eq!(batch["source"], "paramDefault");
+    assert_eq!(batch["value"], "50");
+    assert_eq!(batch["fileName"], Value::Null);
     assert!(
         variables
             .iter()
@@ -189,6 +197,13 @@ async fn a_function_detail_holds_its_environment_params_and_kind_facts() {
     assert_eq!(greeting["value"], "hello");
     assert_eq!(greeting["default"], "hi");
     assert_eq!(greeting["unresolved"], false);
+    let batch = params
+        .iter()
+        .find(|param| param["name"] == "BATCH")
+        .expect("BATCH");
+    assert_eq!(batch["value"], "50");
+    assert_eq!(batch["file"], Value::Null);
+    assert_eq!(batch["unresolved"], true);
     let declared = api["declared"].as_array().expect("declared");
     let min = declared
         .iter()

@@ -272,6 +272,23 @@ struct RegistryInner {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
 }
 
+/// The router is gone (the server stopped): every session ends with it. A
+/// page that is closed or navigated away never terminates its sessions, and
+/// each one's response task keeps it, and the Firestore stream behind it,
+/// alive until then; that stream holds the store, which a stop must close.
+impl Drop for RegistryInner {
+    fn drop(&mut self) {
+        let sessions = std::mem::take(
+            self.sessions
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        for session in sessions.into_values() {
+            session.terminate();
+        }
+    }
+}
+
 struct Session {
     sid: String,
     gsession_id: String,
@@ -1911,5 +1928,51 @@ mod tests {
         })
         .await
         .expect("terminate should close the live streaming response");
+    }
+
+    /// A backend whose streams say when their requests end: the Firestore
+    /// stream behind a session holds the store until then.
+    #[derive(Clone, Default)]
+    struct EndingBackend {
+        ended: Arc<Mutex<Vec<tokio::sync::oneshot::Receiver<()>>>>,
+    }
+
+    impl Backend for EndingBackend {
+        fn open(&self, _kind: ChannelKind, _request: &OpenRequest) -> BackendChannel {
+            let (request_sender, mut requests) = mpsc::channel::<JsonValue>(8);
+            let (response_sender, responses) = mpsc::channel(8);
+            let (ended, waiting) = tokio::sync::oneshot::channel();
+            mutex_lock(&self.ended).push(waiting);
+            tokio::spawn(async move {
+                // Answers nothing, as an idle Listen stream does.
+                let _responses = response_sender;
+                while requests.recv().await.is_some() {}
+                let _ = ended.send(());
+            });
+            BackendChannel {
+                requests: request_sender,
+                responses,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn the_end_of_the_router_ends_every_session() {
+        // A page that is closed or navigated away never terminates its
+        // sessions; the suite's stop ends them, so the Firestore streams
+        // behind them let the store close.
+        let backend = EndingBackend::default();
+        let application = router(backend.clone());
+        open_session(&application, LISTEN_CHANNEL_PATH).await;
+        open_session(&application, WRITE_CHANNEL_PATH).await;
+        drop(application);
+        let ended = std::mem::take(&mut *mutex_lock(&backend.ended));
+        assert_eq!(ended.len(), 2);
+        for stream in ended {
+            tokio::time::timeout(Duration::from_secs(2), stream)
+                .await
+                .expect("the session outlived the router")
+                .expect("the stream ended");
+        }
     }
 }

@@ -11,9 +11,10 @@ mod pipeline;
 mod query_codec;
 mod service;
 mod timestamp_json;
+mod wire;
 mod write_stream;
 
-pub use codec::decode_document;
+pub use codec::{auto_id, created_document_key, decode_document, encode_document_masked};
 pub use service::{FirestoreService, ResponseStream};
 pub use timestamp_json::utc_as_z;
 
@@ -51,6 +52,9 @@ pub mod google {
         pub mod v1 {
             tonic::include_proto!("google.firestore.v1");
             include!(concat!(env!("OUT_DIR"), "/google.firestore.v1.serde.rs"));
+            pub use crate::wire::{
+                BatchGetDocumentsResponse, FoundDocument, batch_get_documents_response,
+            };
         }
     }
 

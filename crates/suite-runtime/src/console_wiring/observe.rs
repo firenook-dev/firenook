@@ -22,7 +22,7 @@ use firenook_rules_runtime::{
     Denial, DenialOrigin, RequestOperation, RulesEvent, RulesOrigin, RulesRuntime,
 };
 use firenook_suite_front::{
-    Audience, EntityRef, LogInput, LogLevel, LoggingRuntime, OverviewConnection,
+    Audience, DEMO_TOKEN_PATH, EntityRef, LogInput, LogLevel, LoggingRuntime, OverviewConnection,
     OverviewEngineConfig, OverviewEngineDetails, OverviewEnvSource, OverviewEnvVariable,
     OverviewNotice, OverviewNoticeLevel, SnapshotPort, kinds,
 };
@@ -184,7 +184,8 @@ pub(crate) fn engine_details(
 
 /// The environment variables the SDKs read, for the running services:
 /// those `firenook emulators:exec` sets for its command (the npm CLI's
-/// `prepareLaunch`), then those only Functions workers get.
+/// `execEnvironment`), which are the official `emulators:exec`'s set, and
+/// the demo credentials Firenook adds. Functions workers get them too.
 pub(crate) fn connection_env(
     config: &SuiteConfig,
     credentials: Option<(String, String)>,
@@ -200,22 +201,40 @@ pub(crate) fn connection_env(
             note: None,
         };
     let exec = OverviewEnvSource::Exec;
+    let project = &config.project_id;
     let mut env = vec![
-        variable("GCLOUD_PROJECT", config.project_id.clone(), "project", exec),
-        variable(
-            "GOOGLE_CLOUD_PROJECT",
-            config.project_id.clone(),
-            "project",
-            exec,
-        ),
+        variable("GCLOUD_PROJECT", project.clone(), "project", exec),
+        variable("GOOGLE_CLOUD_PROJECT", project.clone(), "project", exec),
+        // The official runScript's, in its key order, unless the
+        // environment has one: the bucket named after the project, not the
+        // engine's default bucket.
+        OverviewEnvVariable {
+            note: Some("unless your environment sets it".to_owned()),
+            ..variable(
+                "FIREBASE_CONFIG",
+                format!(
+                    "{{\"projectId\":{},\"storageBucket\":{},\"databaseURL\":{}}}",
+                    Value::String(project.clone()),
+                    Value::String(format!("{project}.appspot.com")),
+                    Value::String(format!("https://{project}.firebaseio.com")),
+                ),
+                "project",
+                exec,
+            )
+        },
     ];
     if services.firestore {
-        env.push(variable(
+        for name in [
             "FIRESTORE_EMULATOR_HOST",
-            address(config.ports.firestore),
-            "firestore",
-            exec,
-        ));
+            "FIREBASE_FIRESTORE_EMULATOR_ADDRESS",
+        ] {
+            env.push(variable(
+                name,
+                address(config.ports.firestore),
+                "firestore",
+                exec,
+            ));
+        }
     }
     if services.auth {
         env.push(variable(
@@ -253,33 +272,33 @@ pub(crate) fn connection_env(
             exec,
         ));
     }
+    if services.functions {
+        env.push(variable(
+            "CLOUD_TASKS_EMULATOR_HOST",
+            address(config.ports.tasks),
+            "tasks",
+            exec,
+        ));
+        env.push(variable(
+            "CLOUD_EVENTARC_EMULATOR_HOST",
+            config.origin(config.ports.eventarc),
+            "eventarc",
+            exec,
+        ));
+    }
     if let Some((path, content)) = credentials {
         env.push(OverviewEnvVariable {
             note: Some(content),
             ..variable("GOOGLE_APPLICATION_CREDENTIALS", path, "project", exec)
         });
     }
-    if services.functions {
-        let functions = OverviewEnvSource::Functions;
-        env.push(variable(
-            "CLOUD_TASKS_EMULATOR_HOST",
-            address(config.ports.tasks),
-            "tasks",
-            functions,
-        ));
-        env.push(variable(
-            "CLOUD_EVENTARC_EMULATOR_HOST",
-            config.origin(config.ports.eventarc),
-            "eventarc",
-            functions,
-        ));
-    }
     env
 }
 
 /// The demo credentials file at `path` (its path and compact content),
-/// when it is the authorized-user stub `emulators:exec` writes; any other
-/// file is a developer's real credentials and is never shown.
+/// when it is the stub `emulators:exec` writes: the emulators' own token,
+/// and a hub's [`DEMO_TOKEN_PATH`] to refresh it from. Any other file is a
+/// developer's real credentials and is never shown.
 pub(crate) fn demo_credentials(path: &std::path::Path) -> Option<(String, String)> {
     let text = std::fs::read_to_string(path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
@@ -287,7 +306,12 @@ pub(crate) fn demo_credentials(path: &std::path::Path) -> Option<(String, String
         && value["client_id"] == "demo"
         && value["client_secret"] == "demo"
         && value["refresh_token"] == "demo"
-        && value.as_object().is_some_and(|fields| fields.len() == 4);
+        && value["token"] == "owner"
+        && value["expiry"].is_string()
+        && value["token_uri"]
+            .as_str()
+            .is_some_and(|url| url.starts_with("http://") && url.ends_with(DEMO_TOKEN_PATH))
+        && value.as_object().is_some_and(|fields| fields.len() == 7);
     demo.then(|| (path.display().to_string(), value.to_string()))
 }
 
@@ -350,7 +374,12 @@ pub(crate) fn prepared(context: &HookContext<'_>) {
         return;
     };
     if let Some(rules) = context.firestore_rules {
-        spawn_denial_log(rules.subscribe_denials(), context.logging, shutdown);
+        spawn_denial_log(
+            rules.subscribe_denials(),
+            RulesFiles::new(context.config, rules),
+            context.logging,
+            shutdown,
+        );
         spawn_rules_applied_log(rules, context.logging, shutdown);
     }
     spawn_background_log(context.triggers, context.logging, shutdown);
@@ -626,7 +655,87 @@ const fn operation_name(operation: RequestOperation) -> &'static str {
 /// One refused request as a console line: `rules.denied` (a warning, a
 /// problem) for an app's request, `rules.denied.console` (info, never a
 /// problem) for one the console made while viewing as someone.
-pub(crate) fn denial_input(denial: &Denial) -> LogInput {
+/// Which configured rules file a denial's lines refer to: the database's
+/// own `firebase.json` entry, or the entry that governs the databases it
+/// does not list, while the rules in force came from that file (at start-up
+/// or reloaded from it) rather than the console's editor or the reload
+/// route.
+#[derive(Clone, Default)]
+pub(crate) struct RulesFiles {
+    rules: Option<RulesRuntime>,
+    project: String,
+    /// Each listed database with rules, and its file as the log names it.
+    files: Vec<(String, String)>,
+    /// The file governing the databases `firebase.json` does not list.
+    unlisted: Option<String>,
+}
+
+impl RulesFiles {
+    pub(crate) fn new(config: &SuiteConfig, rules: &RulesRuntime) -> Self {
+        let project_dir = std::fs::canonicalize(&config.project_dir)
+            .unwrap_or_else(|_| config.project_dir.clone());
+        let shown = |path: &std::path::Path| {
+            let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+            path.strip_prefix(&project_dir)
+                .unwrap_or(&path)
+                .display()
+                .to_string()
+        };
+        Self {
+            rules: Some(rules.clone()),
+            project: config.project_id.clone(),
+            files: config
+                .firestore_databases
+                .iter()
+                .filter_map(|entry| Some((entry.database_id.clone(), shown(entry.rules.as_ref()?))))
+                .collect(),
+            unlisted: crate::stand_in(&config.firestore_databases)
+                .and_then(|entry| entry.rules.as_deref())
+                .map(shown),
+        }
+    }
+
+    /// The file whose lines `database`'s rules are, when they came from it.
+    fn file(&self, database: &firenook_core_store::DatabaseName) -> Option<&str> {
+        let version = self.rules.as_ref()?.current_version(database)?;
+        if database.project_id() != self.project
+            || !matches!(version.origin, RulesOrigin::Startup | RulesOrigin::File)
+        {
+            return None;
+        }
+        self.files
+            .iter()
+            .find(|(id, _)| id == database.database_id())
+            .map(|(_, file)| file.as_str())
+            .or(self.unlisted.as_deref())
+    }
+}
+
+/// Where in the rules a denial was decided, as ` at firestore.rules:4`:
+/// each allow that refused it, by file and line when the file is known, by
+/// line otherwise; `: no allow statement matches` when none applied.
+fn refused_at(denial: &Denial, file: Option<&str>) -> String {
+    let mut lines: Vec<usize> = Vec::new();
+    for refusal in &denial.refused_by {
+        if !lines.contains(&refusal.line) {
+            lines.push(refusal.line);
+        }
+    }
+    if lines.is_empty() {
+        return if denial.error.is_some() {
+            String::new()
+        } else {
+            ": no allow statement matches".to_owned()
+        };
+    }
+    let places = lines
+        .iter()
+        .map(|line| file.map_or_else(|| format!("line {line}"), |file| format!("{file}:{line}")))
+        .collect::<Vec<_>>();
+    format!(" at {}", places.join(", "))
+}
+
+pub(crate) fn denial_input(denial: &Denial, file: Option<&str>) -> LogInput {
     let operation = operation_name(denial.operation);
     let path = denial.relative_path();
     let database = denial.database.database_id();
@@ -634,6 +743,7 @@ pub(crate) fn denial_input(denial: &Denial) -> LogInput {
         .uid
         .as_deref()
         .map_or_else(|| "an unauthenticated client".to_owned(), str::to_owned);
+    let at = refused_at(denial, file);
     let reason = denial
         .error
         .as_deref()
@@ -643,13 +753,13 @@ pub(crate) fn denial_input(denial: &Denial) -> LogInput {
         DenialOrigin::App => (
             kinds::RULES_DENIED,
             LogLevel::Warn,
-            format!("Rules denied {operation} on {path} for {who}{reason}"),
+            format!("Rules denied {operation} on {path} for {who}{at}{reason}"),
         ),
         DenialOrigin::Console => (
             kinds::RULES_DENIED_CONSOLE,
             LogLevel::Info,
             format!(
-                "Rules denied {operation} on {path} from the console (viewing as {who}){reason}"
+                "Rules denied {operation} on {path} from the console (viewing as {who}){at}{reason}"
             ),
         ),
     };
@@ -673,6 +783,8 @@ pub(crate) fn denial_input(denial: &Denial) -> LogInput {
             "uid": denial.uid,
             "requestId": denial.request_id.as_deref(),
             "origin": denial.origin.as_str(),
+            "lines": denial.refused_by.iter().map(|refusal| refusal.line).collect::<Vec<_>>(),
+            "rulesFile": file,
         })),
         refs,
         audience: Audience::Console,
@@ -742,6 +854,7 @@ fn held_back_input(origin: DenialOrigin, held: u64) -> LogInput {
 /// tap and denials were lost.
 pub(crate) fn spawn_denial_log(
     mut denials: broadcast::Receiver<Arc<Denial>>,
+    files: RulesFiles,
     logging: &LoggingRuntime,
     shutdown: &Shutdown,
 ) {
@@ -763,7 +876,7 @@ pub(crate) fn spawn_denial_log(
                             .entry(denial.origin)
                             .or_insert_with(|| Bucket::new(now));
                         if bucket.take(now) {
-                            logging.emit(denial_input(&denial));
+                            logging.emit(denial_input(&denial, files.file(&denial.database)));
                         }
                     }
                     Err(RecvError::Lagged(missed)) => logging.emit(LogInput {

@@ -797,6 +797,7 @@ mod tests {
                     default_bucket: None,
                     rules_files: Some(firenook_storage_front::RulesFiles::Single(file.clone())),
                     diagnostics: false,
+                    log: None,
                 },
                 observer.queue(),
                 registry,

@@ -7,8 +7,8 @@ Firenook is not yet a universal Firebase Emulator Suite replacement.
 | Firestore | Native/Admin and browser SDK paths, rules, realtime targets, disk/WAL, official-format import/export, named databases with per-database rules | Every production feature, edition or arbitrary client version |
 | Auth | Every operation the official Auth emulator implements (61), replayed from a 1068-step oracle corpus and an 18-step custom-claims-limit corpus with parity: password, anonymous, custom token, email link, phone, fake IdP (Google/Apple/SAML/OIDC-shaped credentials), account update/delete, OOB and phone codes, session cookies, tenants, SMS MFA, passkeys, Admin batch create/get/delete/query, project and tenant configuration, emulator inspection routes, legacy `relyingparty` routes, blocking functions and lifecycle triggers, official-format export/import, the local popup/redirect helper pages | Anything the official emulator itself answers with 501 (IdP/SAML/OIDC provider configuration, `initializeAuth`, IAM on tenants, Game Center, reCAPTCHA enforcement, TOTP MFA); real email/SMS delivery; production token verification |
 | Storage | Captured Firebase/GCS paths, metadata, gzip, pagination, single-file and multi-bucket rules, export/import; Security Rules evaluated natively (no Java) with the recorded official request model and production expression semantics, including `firestore.get`/`exists` and `/internal/setRules` | All GCS features; the official emulator's prefix-template `list` matching and missing `request.method` (production semantics are followed and recorded as divergences) |
-| Functions | Firenook runtime with one Node worker per codebase: discovery through the pinned SDK control API or `functions.yaml`, HTTP/callable/streaming, Firestore/Storage/Auth/Pub/Sub/Eventarc/schedule/task-queue triggers, blocking Auth functions, dotenv/secret files, reload, background controls, `--inspect-functions`; every invocation kept with its request or event, its answer, its timing and the log lines it printed (the last 2,000, at most 64 MiB) | Pure Rust JavaScript execution, a network sandbox, Python/Dart runtimes, Secret Manager access, Firebase Alerts delivery (an alert function is listed and receives nothing), request headers named `x-firenook-*` (the engine's own, removed before a function sees them) |
-| Extensions | Resolved and run by Firenook with the recorded parameter, spec and trigger semantics from local, vendored, cached or registry sources; an instance whose triggers need a service the suite does not emulate is left out and named; an instance's parameter files are watched and a change reloads that instance | Dynamic (in-code) extensions, lifecycle tasks (onInstall/onUpdate/onConfigure: an extension's task-queue functions are not delivered, as on the official emulator), Secret Manager access |
+| Functions | Firenook runtime with one Node worker per codebase: discovery through the pinned SDK control API or `functions.yaml`, HTTP/callable/streaming, Firestore/Storage/Auth/Pub/Sub/Eventarc/schedule/task-queue triggers (one on a service the suite does not run is listed and warned about), blocking Auth functions, params resolved as the official CLI answers them without a terminal, dotenv files including `.env.<alias>`, secret files, reload, background controls, `--inspect-functions`; every invocation kept with its request or event, its answer, its timing and the log lines it printed (the last 2,000, at most 64 MiB) | Pure Rust JavaScript execution, a network sandbox, Python/Dart runtimes, Secret Manager access, Firebase Alerts delivery (an alert function is listed and receives nothing), request headers named `x-firenook-*` (the engine's own, removed before a function sees them) |
+| Extensions | Resolved and run by Firenook with the recorded parameter, spec and trigger semantics from local, vendored, cached or registry sources; an instance whose triggers need a service the suite does not emulate or does not start is left out and named; an instance's parameter files are watched and a change reloads that instance | Dynamic (in-code) extensions, lifecycle tasks (onInstall/onUpdate/onConfigure: an extension's task-queue functions are not delivered, as on the official emulator), Secret Manager access |
 | Eventarc | Trigger registration, `getTriggers` and `publishEvents` on the `google` and named channels, delivery to `onCustomEventPublished` handlers by event type and filters; every event kept with what each subscription did, including events that could not be read or that nothing listens for (the last 1,000, at most 16 MiB) | Firebase Alerts on the native channel |
 | Cloud Tasks | The official emulator's four routes (queue registration, enqueue, delete, `/queueStats`), a queue per `onTaskDispatched` export, and its dispatcher (token bucket, dispatch slots, the `X-CloudTasks-*` headers, the retry ladder and backoff formula, execution count on non-5xx failures, `dispatchDeadline`), replayed from a 61-step oracle corpus with parity; the Admin SDK's `taskQueue().enqueue()`/`delete()` under `CLOUD_TASKS_EMULATOR_HOST`. The console lists queues and tasks, pauses, resumes and purges queues, runs, stops and deletes tasks, holds scheduled tasks until their time, and records what a re-registration drops; the Tasks port is unchanged | Everything the official emulator does not do either, on the Tasks port: `scheduleTime` as a delay, OIDC tokens, queue pause/resume/purge and task listing (the console's controls are not an API), the Cloud Tasks v2 API surface, persistence |
 | Pub/Sub | Every RPC of the official emulator (`google.pubsub.v1` Publisher, Subscriber, SchemaService and `google.iam.v1` IAMPolicy) over gRPC and HTTP/JSON on one port, replayed from a 916-step oracle corpus with parity: topics, publish, subscriptions with ack deadlines, redelivery, dead-letter and retry policies, ordering keys, filters, retention, seek, snapshots, pull, streaming pull, push delivery with retries, Avro schemas with revisions and topic binding, function delivery through `emulator-sub-<topic>`; dead-lettered messages reach functions on the dead-letter topic; schedules run in their declared time zone. The console's history, backlog peeking, force acknowledge and release, publish jobs, schedule pause and run now are console-only: no client protocol reaches them | Protocol Buffer schemas, IAM, `detachSubscription` and `updateSnapshot` (the official emulator answers 501 too); BigQuery/Cloud Storage/Bigtable export subscriptions; persistence across restarts (the official emulator has none) |
@@ -48,11 +48,47 @@ exports every database of the project into the one `firestore_export`, which
 an import restores in full. A `firebase.json` `firestore` array lists one
 entry per database (`database`, `rules`, `indexes`; an entry without
 `database` is `(default)`, and a project may list only named databases); each
-entry's rules govern that database alone until a project-wide
+entry's rules govern that database until a project-wide
 `PUT /emulator/v1/projects/{project}:securityRules` hot reload, which replaces
-the project's rules for every database as it does on the official emulator. The official emulator refuses more than one
+the project's rules for every database as it does on the official emulator. A
+database `firebase.json` does not list is governed by the `(default)` entry's
+rules, or by the first entry's when there is no `(default)` entry, and follows
+them as they change: the official emulator applies its one rules file to
+every database, an unlisted one included
+(`conformance/fixtures/request-identity-v1`), so an unlisted database is never
+open while rules are configured. The official emulator refuses more than one
 database (`Cloud Firestore Emulator does not support multiple databases yet.`)
 and then loads no rules at all.
+
+Who a Firestore request is from follows the official emulator on gRPC, REST
+and WebChannel alike (`conformance/fixtures/request-identity-v1`). A request
+without an `Authorization` header is a signed-out client, which is what the
+client SDKs send while nobody is signed in, and the rules decide it;
+`Bearer owner`, in any letter case, which the Admin SDKs send, skips them.
+Any other `Bearer` token is read, not verified: its times, its project
+(`aud`, `iss`), its algorithm, its signature and its claims are not checked,
+`request.auth.uid` is its `sub` claim when that is a string (null otherwise)
+and `request.auth.token` is its payload, so the tokens
+`@firebase/rules-unit-testing` mints, issued at time 0, are read like any
+other. A header that is not three base64 JSON segments is `INVALID_ARGUMENT`,
+as on the official emulator, which answers a credential that is not `Bearer`
+with an empty `UNKNOWN` instead. `ListCollectionIds` needs the owner, with
+rules or without, as officially; so does `PartitionQuery`, which the
+official emulator does not implement, and Enterprise pipelines are ruled as
+the query they run. Since `0.2.0`; before it, a gRPC request without a
+header was the owner and skipped the rules, and an expired token or one for
+another project was `UNAUTHENTICATED`.
+
+A request the rules refuse is `PERMISSION_DENIED` with production's text,
+`Missing or insufficient permissions.`, followed on the next line by what the
+official emulator adds: each allow that refused it (`false for 'get' @ L4`,
+or the condition's failure in place of `false`), or `No matching allow
+statements` when no allow applies. The console log's line for the refusal
+names the rules file and line (`firestore.rules:4`), and the console's
+request view marks the lines in the rules. The REST front reads a body typed
+`text/plain` (with any parameters) or not typed at all as JSON, as the
+official emulator does, so the reload route takes the rules
+`@firebase/rules-unit-testing` sends.
 
 Firestore timestamp values are stored to the microsecond, as production
 stores them ("any additional precision is rounded down") and as the official
@@ -61,6 +97,31 @@ a finer value in a document, a map or array in it, or a transform's operand
 is rounded down before rules see the write, on REST, gRPC and WebChannel
 alike. Since `0.2.0-next.7`; an export of data saved earlier with a finer
 value rounds it down too, where it used to refuse the whole export.
+
+Every Firestore REST v1 method the official emulator answers is answered with
+its status and body (most error messages are Firenook's own words), checked by
+`conformance/test/rest-methods.test.ts` and `rest-rules.test.ts`, which run
+against both emulators: get, list (`pageSize`,
+`pageToken`, `orderBy`, `mask`, `showMissing`), createDocument (`documentId`
+or a 20-character automatic id, `mask`, ALREADY_EXISTS, Security Rules as a
+create), patch (`updateMask`, `mask`, `currentDocument`), delete, batchGet,
+beginTransaction, commit, rollback, runQuery and runAggregationQuery at the
+root or under a document with a transaction, a new transaction or a read time,
+listCollectionIds and batchWrite. An empty body is `{}`, and a body that is not
+a JSON object is "Payload isn't valid for request.". A transaction that has
+ended is ABORTED. Since `0.2.0`. Firenook keeps production's behaviour where
+the official REST adapter departs from it: it answers partitionQuery (the
+official emulator: UNIMPLEMENTED), compares a `currentDocument.updateTime`
+given in the query string (the official adapter reads it as 0 and refuses
+every one), reads `readTime` and `transaction` given to get and list (the
+official adapter refuses the first and never answers the second), applies
+`mask` with `showMissing`, refuses two `currentDocument` preconditions at once,
+refuses writes and reads naming another project, ends a runQuery stream without
+`"done": true` (as production does), and answers ExecutePipeline on a Standard
+edition database with FAILED_PRECONDITION (the official emulator:
+INVALID_ARGUMENT). Its transactions are optimistic: a write that conflicts
+with a read-write transaction succeeds and the transaction's commit is
+ABORTED, where the official emulator holds a lock and aborts the write.
 
 Each configured Firestore rules file is watched while the suite runs and
 reloaded on change, as the official CLI watches the configured rules file
@@ -73,7 +134,10 @@ file.
 
 Storage rules files are watched and reloaded on change the same way, whether
 or not Firestore runs: a `storage: { rules }` file governs every bucket, and
-each `storage` target's file governs its bucket. A file that does not compile
+each `storage` target's file governs every bucket `.firebaserc` maps the
+target to (a demo project with a target mapped to no bucket ignores every
+target for the default open rules, as officially:
+`conformance/fixtures/storage-demo-targets-v1`). A file that does not compile
 leaves the previous rules in force, as the official watcher keeps its previous
 ruleset. (`/internal/setRules` keeps the official semantics: a body that does
 not compile leaves no ruleset until the next valid one.)

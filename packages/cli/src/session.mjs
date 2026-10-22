@@ -3,23 +3,28 @@
 // footer, and answers the keys. Only `emulators:start` in a terminal comes
 // here; everything else gets the plain line protocol (`supervise`).
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import {
-  BODY, INSET, MARK_WIDTH, ago, capabilities, clock, count, createInk, createLayout, createScreen, pad, spread, took, width, wrap,
+  BODY, INSET, ago, capabilities, clock, count, createInk, createLayout, createScreen, pad, spread, took, width, wrap,
 } from './terminal.mjs';
 import { requestNativeStop } from './processes.mjs';
+import { errorPlace, startBuild } from './build.mjs';
+import { diagnose, prepareLaunch } from './runtime.mjs';
+import { connectHost } from './options.mjs';
 import { pendingUpdate, refreshUpdates } from './updates.mjs';
 
 export const EVENT_PREFIX = 'FIRENOOK_EVENT ';
 const RELEASES = 'https://github.com/firenook-dev/firenook/releases';
 
-const LABELS = {data: 'Saved data', firestore: 'Firestore', auth: 'Auth', storage: 'Storage', functions: 'Functions', pubsub: 'Pub/Sub'};
-const ROWS = ['data', 'firestore', 'auth', 'storage', 'functions', 'pubsub'];
-// What a running row counts, when it says how far it has got.
-const UNITS = {firestore: 'documents', auth: 'users', storage: 'objects', functions: 'codebases'};
+const LABELS = {data: 'Saved data', build: 'Build', firestore: 'Firestore', auth: 'Auth', storage: 'Storage', functions: 'Functions', pubsub: 'Pub/Sub'};
+const ROWS = ['data', 'build', 'firestore', 'auth', 'storage', 'functions', 'pubsub'];
+// What a running row counts, when it says how far it has got: one, many.
+const UNITS = {firestore: ['document', 'documents'], auth: ['user', 'users'], storage: ['object', 'objects'], functions: ['codebase', 'codebases']};
+// A count with its noun: `1 line`, `2 lines`.
+const counted = (n, one, many) => `${count(n)} ${n === 1 ? one : many}`;
 const PORTS = [['firestore', 'Firestore'], ['auth', 'Auth'], ['storage', 'Storage'], ['functions', 'Functions'], ['pubsub', 'Pub/Sub'], ['hub', 'Hub']];
 // The service a listener belongs to, for its row and its firebase.json key.
 const LISTENERS = {
@@ -106,6 +111,17 @@ export function loadError(error) {
   return {message: named === -1 ? first : lines[named].trim(), where: at === -1 ? undefined : lines[at].trim().replace(/^\.\//, ''), frame: frame.slice(0, 8)};
 }
 
+// Whether the engine will skip an --import, with a warning, as the
+// official CLI does: a file, or a directory with no export in it (neither
+// suite metadata nor a production Firestore export). One that is not there
+// at all the engine refuses.
+const skippedSeed = seed => {
+  try {
+    if (!statSync(seed).isDirectory()) return true;
+    return !readdirSync(seed).some(name => name === 'firebase-export-metadata.json' || name.endsWith('.overall_export_metadata'));
+  } catch { return false; }
+};
+
 // How the data starts, as the wrapper can tell before the engine says:
 // saved state with a complete receipt is picked up, a seed is imported,
 // otherwise it is a fresh start.
@@ -123,7 +139,7 @@ export function expectedOpening(args) {
       }
     } catch { /* not saved state: an import or a fresh start */ }
   }
-  if (seed) return {kind: 'import', seed};
+  if (seed && !skippedSeed(seed)) return {kind: 'import', seed};
   return {kind: 'fresh'};
 }
 
@@ -168,7 +184,7 @@ async function freePort(host, port, taken = new Set()) {
     const free = await new Promise(done => {
       const server = createServer();
       server.once('error', () => done(false));
-      server.listen(next, host, () => server.close(() => done(true)));
+      server.listen(next, host.replace(/^\[|\]$/g, ''), () => server.close(() => done(true)));
     });
     if (free) return next;
   }
@@ -199,7 +215,9 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   // which no later start reads.
   const ephemeral = !stateDir || /[\\/]\.firenook[\\/]runs[\\/]session-[^\\/]+[\\/]state$/.test(stateDir);
   const exportDir = value('--export-on-exit');
-  const host = value('--host') || '127.0.0.1';
+  // Where this process reaches the suite (the hub for an export, the
+  // console's address): the host clients are told.
+  const host = connectHost(value('--host') || '127.0.0.1');
   const update = pendingUpdate(version, cwd, {env, platform});
   // The next start's answer; this one never waits for it.
   void refreshUpdates({env, platform});
@@ -224,6 +242,14 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   for (const id of ROWS) {
     if (id === 'data' ? model.opening.kind === 'resume' : selected.has(id)) model.steps.set(id, {id, state: 'waiting'});
   }
+  // --build: the codebases whose own build runs first, and then beside the
+  // engine; each one's latest errors, and what a build said before the
+  // emulators were ready.
+  const builds = (launch.builds ?? []).filter(entry => entry.script);
+  for (const entry of (launch.builds ?? []).filter(entry => !entry.script)) model.warnings.push(`${entry.shown} has no build or build:watch script, so --build builds nothing there`);
+  if (builds.length) model.steps.set('build', {id: 'build', state: 'waiting'});
+  const compiled = new Map();
+  const heldBuildLines = [];
 
   // ── Drawing ─────────────────────────────────────────────────────────
   const bannerWords = () => {
@@ -236,20 +262,27 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     const where = ephemeral ? `data in ${shortPath(dirname(stateDir ?? ''), cwd)}, for this run` : `data in ${shortPath(stateDir, cwd)}`;
     return [`${bold('firenook')}  ${dim(version)}`, `${project}${DOT}${dim(how)}`, dim([`Node ${process.versions.node}`, where].join(G.dot))];
   };
-  const banner = () => {
-    const words = bannerWords();
-    if (size.columns() < 64 || caps.ascii) return [top(), ...air(), ...words.map(text => inside(cells('', '', text))), ...air()];
-    const art = ink.mark();
-    const offset = Math.floor((art.length - words.length) / 2);
-    return [top(), ...air(), ...art.map((line, i) => inside(`${line}${' '.repeat(BODY - INSET - MARK_WIDTH)}${words[i - offset] ?? ''}`)), ...air()];
-  };
+  const banner = () => t.banner(bannerWords());
 
   function functionsProgress() {
     const all = [...model.codebases.values()];
     const loading = all.find(codebase => codebase.state === 'loading');
     return {done: all.filter(codebase => codebase.state !== 'loading').length, total: all.length || undefined, detail: loading ? codebaseName(loading.id) : undefined};
   }
+  const compileErrors = () => [...compiled.values()].reduce((sum, errors) => sum + errors.length, 0);
+  function buildRow(step) {
+    const row = (marker, ms, about) => cells(LABELS.build, marker, timed(ms, about));
+    const where = dim(builds.map(entry => entry.shown).join(', '));
+    if (step.state === 'running') return row(spinner(), Date.now() - step.began, `${dim('compiling')}  ${where}`);
+    if (step.state === 'waiting') return row(dim(G.wait), null, dim('waiting'));
+    if (step.state === 'stopped') return row(dim(G.wait), null, dim('stopped'));
+    const errors = compileErrors();
+    if (errors) return row(red(G.fail), step.ms, `${red(`${count(errors)} ${errors === 1 ? 'error' : 'errors'}`)}${DOT}${where}`);
+    if (step.failed) return row(red(G.fail), step.ms, `${red(step.failed)}${DOT}${where}`);
+    return row(green(G.ok), step.ms, `${where}${DOT}${dim([...new Set(builds.map(entry => entry.script))].join(', '))}${step.slow ? `${DOT}${yellow('still compiling')}` : ''}`);
+  }
   function serviceRow(step) {
+    if (step.id === 'build') return buildRow(step);
     const label = LABELS[step.id];
     const row = (marker, ms, about) => cells(label, marker, timed(ms, about));
     if (step.state === 'done') {
@@ -274,7 +307,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     // A step that finishes quickly shows only its spinner: a bar appears
     // once it has run for 400 ms, so a resumed start never flashes one.
     if (spent < 400 || done == null) return row(spinner(), spent, `${verb}${detail ? `  ${dim(detail)}` : ''}`);
-    if (!total) return row(spinner(), spent, `${verb}  ${count(done)} ${dim(UNITS[step.id] ?? '')}`);
+    if (!total) return row(spinner(), spent, `${verb}  ${count(done)} ${dim(UNITS[step.id]?.[done === 1 ? 0 : 1] ?? '')}`);
     const figure = step.unit === 'percent' ? `${step.verb}  ${Math.floor((done / total) * 100)}%` : `${count(done)} / ${count(total)}`;
     // A narrow window drops the step's name before the bar shrinks too far.
     const room = t.bodyRoom() - 6 - 4 - figure.length;
@@ -299,7 +332,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     if (ports.length) rows.push(...flow(dim('Ports'), ports, room));
     const warned = model.warnings.length;
     if (warned === 1 && width(model.warnings[0]) <= room) rows.push(cells(yellow('Warning'), '', model.warnings[0]));
-    else if (warned) rows.push(cells(yellow('Warnings'), '', `${count(warned)} start-up warnings${DOT}${dim('press')} ${bold('w')} ${dim('to list them')}`));
+    else if (warned) rows.push(cells(yellow(warned === 1 ? 'Warning' : 'Warnings'), '', `${counted(warned, 'start-up warning', 'start-up warnings')}${DOT}${dim('press')} ${bold('w')} ${dim(warned === 1 ? 'to show it' : 'to list them')}`));
     // Magenta is the update's own colour: nothing else on the page uses it.
     if (update) rows.push(cells(magenta('Update'), '', `${bold(magenta(update.version))} is out${DOT}${bold(update.command)}${DOT}${link(RELEASES, "what's new")}`));
     return rows;
@@ -315,6 +348,25 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     return [...section(heading, readyRows(t.bodyRoom()).map(inside)), bottom()];
   }
 
+  // What the compiler said, under the line that says how many.
+  const compileLines = errors => [
+    ...errors.slice(0, 8).flatMap(error => {
+      const place = errorPlace(error);
+      const [first, ...rest] = wrap(error.message, Math.max(20, t.streamRoom() - width(place) - 4));
+      return [under(red(G.thread), `${dim(place)}  ${red(first)}`), ...rest.map(part => under(red(G.thread), `${' '.repeat(width(place) + 2)}${red(part)}`))];
+    }),
+    ...(errors.length > 8 ? [under(red(G.thread), dim(`+ ${count(errors.length - 8)} more`))] : []),
+  ];
+  function compileSection() {
+    const failing = [...compiled.entries()].filter(([, errors]) => errors.length);
+    return failing.flatMap(([shown, errors]) => section(divider(`${red(G.fail)} ${bold(red(failing.length > 1 ? `${shown} did not compile` : 'Your code did not compile'))}`), [
+      ...errors.slice(0, 6).flatMap((error, at) => wrap(`${errorPlace(error)}  ${error.message}`, t.bodyRoom()).map((part, i) => cells(at === 0 && i === 0 ? dim('Errors') : '', '', i === 0 ? `${dim(errorPlace(error))}  ${red(part.slice(errorPlace(error).length + 2))}` : red(part)))),
+      ...(errors.length > 6 ? [cells('', '', dim(`+ ${count(errors.length - 6)} more`))] : []),
+      ...space(),
+      ...field(dim('Next'), 'fix it and save: Firenook compiles it and loads it again by itself, and every emulator keeps running', dim),
+    ].map(inside)));
+  }
+
   // The code frame Node prints: the source line, and a caret under the spot.
   const frameLines = frame => frame.map(line => (/^\s*\^+\s*$/.test(line) ? red(line) : dim(line)));
   function brokenSection() {
@@ -325,7 +377,8 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
       cells(dim('Where'), '', error.where ?? codebase.directory),
       ...(error.frame.length ? [...space(), ...frameLines(error.frame).map(line => cells('', '', line))] : []),
       ...space(),
-      ...field(dim('Next'), `fix it and save: Firenook loads it again by itself.${codebaseCount('extension') ? ` The ${codebaseCount('extension')} extension codebase${codebaseCount('extension') === 1 ? '' : 's'} and` : ''} every emulator keep running`, dim),
+      ...field(dim('Next'), `fix it and save: Firenook loads it again by itself. ${{0: 'Every emulator keeps running', 1: 'The extension codebase and every emulator keep running'}[codebaseCount('extension')]
+        ?? `The ${codebaseCount('extension')} extension codebases and every emulator keep running`}`, dim),
       ].map(inside));
     });
   }
@@ -365,11 +418,18 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     lines.push(...space(), ...field(dim('Data'), `nothing was deleted: ${shortPath(stateDir, cwd)} is untouched`, dim));
     return lines;
   };
-  const dataLine = () => (model.opening.kind === 'resume' ? `nothing was changed: ${shortPath(stateDir, cwd)} is as you left it`
-    : model.opening.kind === 'import' && launch.args.includes('--resume-state') ? `the seed was imported into ${shortPath(stateDir, cwd)}; the next start picks it up`
-      : ephemeral ? 'nothing of yours was changed'
-        : model.opening.kind === 'fresh' && launch.args.includes('--resume-state') ? `the data is saved in ${shortPath(stateDir, cwd)}; the next start picks it up`
-          : `the data in ${shortPath(stateDir, cwd)} is kept`);
+  // What became of the data. Before readiness nothing was served, so
+  // nothing of the developer's was written; once ready, anything may have
+  // been, and is kept.
+  const dataLine = () => (model.ready ? (ephemeral ? `this run's data stays in ${shortPath(dirname(stateDir ?? ''), cwd)}` : `everything is kept in ${shortPath(stateDir, cwd)}`)
+    : model.opening.kind === 'resume' ? `nothing was changed: ${shortPath(stateDir, cwd)} is as you left it`
+      : model.opening.kind === 'import' && launch.args.includes('--resume-state') ? `the seed was imported into ${shortPath(stateDir, cwd)}; the next start picks it up`
+        : ephemeral ? 'nothing of yours was changed'
+          : model.opening.kind === 'fresh' && launch.args.includes('--resume-state') ? `the data is saved in ${shortPath(stateDir, cwd)}; the next start picks it up`
+            : `the data in ${shortPath(stateDir, cwd)} is kept`);
+  // An engine that ended without finishing a stop (killed, or crashed) may
+  // have left the files open: the next start checks them first.
+  const uncheckedLine = () => (stateDir && !ephemeral ? `the next start checks ${shortPath(stateDir, cwd)} first, and repairs it if it needs to` : dataLine());
   async function problemLines(failure) {
     if (failure.kind === 'port') {
       const listener = LISTENERS[failure.service] ?? {label: failure.service, key: `"${failure.service}": { "port": PORT }`};
@@ -445,7 +505,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     const room = t.streamRoom();
     const paint = LEVELS[level] ?? LEVELS.info;
     let parts = wrap(text, room);
-    if (parts.length > LONGEST) parts = [...parts.slice(0, LONGEST), dim(`+ ${count(parts.length - LONGEST)} more lines`)];
+    if (parts.length > LONGEST) parts = [...parts.slice(0, LONGEST), dim(`+ ${counted(parts.length - LONGEST, 'more line', 'more lines')}`)];
     const lines = parts.map(part => paint(part));
     if (fields) {
       const listed = Object.entries(fields).map(([key, field]) => `${dim(key)} ${typeof field === 'string' ? field : JSON.stringify(field)}`).join(DOT);
@@ -467,7 +527,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     return [
       ...wrap(message, t.streamRoom()).map(part => under(red(G.thread), red(part))),
       ...own.map(frame => under(red(G.thread), dim(`  ${frame.trim()}`))),
-      ...(hidden > 0 || consoleLink ? [under(red(G.thread), `${hidden > 0 ? `${dim(`+ ${hidden} more lines`)}${consoleLink ? DOT : ''}` : ''}${consoleLink ? link(consoleLink, 'open in console') : ''}`)] : []),
+      ...(hidden > 0 || consoleLink ? [under(red(G.thread), `${hidden > 0 ? `${dim(`+ ${counted(hidden, 'more line', 'more lines')}`)}${consoleLink ? DOT : ''}` : ''}${consoleLink ? link(consoleLink, 'open in console') : ''}`)] : []),
     ];
   }
   const lineOf = event => {
@@ -606,6 +666,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     const state = [`${green(G.live)} running ${dim(uptime())}`];
     if (selected.has('functions')) state.push(`${count(model.stats.calls)} ${model.stats.calls === 1 ? 'call' : 'calls'}`);
     if (model.stats.failed) state.push(red(`${count(model.stats.failed)} failed`));
+    if (compileErrors()) state.push(red(`${G.fail} build errors`));
     if (broken().length) state.push(red(`${G.fail} functions not loaded`));
     else if ([...model.codebases.values()].some(codebase => codebase.servingPrevious)) state.push(yellow(`${G.warn} last save failed`));
     const left = state.join(DOT);
@@ -687,7 +748,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     try {
       mkdirSync(destination, {recursive: true});
       // No Origin header: the hub refuses requests that carry one.
-      const response = await fetch(`http://${host === '0.0.0.0' ? '127.0.0.1' : host === '::' ? '[::1]' : host}:${hub}/_admin/export`, {method: 'POST', headers: {'content-type': 'application/json'},
+      const response = await fetch(`http://${host}:${hub}/_admin/export`, {method: 'POST', headers: {'content-type': 'application/json'},
         body: JSON.stringify({path: destination, targets, initiatedBy: 'firenook terminal'}), signal: AbortSignal.timeout(30 * 60_000)});
       model.task = undefined;
       if (response.ok) happened(green(G.ok), 'exported', Date.now() - began, dim(shortPath(destination, cwd)));
@@ -700,20 +761,53 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
 
   // ── The engine ──────────────────────────────────────────────────────
   const args = [...launch.args, '--terminal-events'];
-  const child = spawner(launch.binary, args, {cwd: launch.cwd, env: launch.env, detached: platform === 'win32', windowsHide: true, stdio: ['pipe', 'pipe', 'pipe']});
-  child.stdin?.on('error', () => {});
+  // Spawned once the builds are done.
+  let child;
+  const running = [];
   let requestedStop = false;
   let lastHeard = Date.now();
   const stop = signal => {
     if (requestedStop) return;
     requestedStop = true;
     model.stopping = {since: Date.now()};
-    try { if (child.exitCode === null) requestNativeStop(child, signal, platform); } catch { /* already gone */ }
+    for (const build of running) build.stop();
+    try { if (child && child.exitCode === null) requestNativeStop(child, signal, platform); } catch { /* already gone */ }
     if (!screen.closed) screen.live(stoppingLive);
   };
-  const stoppingWhat = () => (!model.ready ? 'closing the data cleanly first'
+  const stoppingWhat = () => (!child ? 'stopping the build' : !model.ready ? 'closing the data cleanly first'
     : exportDir ? `exporting to ${shortPath(exportDir, cwd)}` : 'saving your data');
   const stoppingLive = () => ['', open(cells('', spinner(), `${nameCell('stopping')}${timed(Date.now() - model.stopping.since, dim(stoppingWhat()))}`))];
+
+  // A build's news: its errors as they change, its other lines in the log,
+  // and the build itself ending while the emulators run.
+  function buildEvent(entry, event) {
+    if (event.type === 'compiling') {
+      if (model.ready && !model.task) model.task = {label: 'compiling', detail: entry.shown, since: Date.now()};
+      return;
+    }
+    if (event.type === 'compiled' || (event.type === 'ended' && !entry.watch)) {
+      if (model.task?.label === 'compiling') model.task = undefined;
+      const before = compiled.get(entry.shown)?.length ?? 0;
+      const errors = event.errors ?? [];
+      compiled.set(entry.shown, errors);
+      if (!model.ready) return;
+      const at = clock();
+      if (errors.length) screen.emit(() => [stream(at, red(G.fail), 'build', null, `${red(`${count(errors.length)} ${errors.length === 1 ? 'error' : 'errors'}`)}${DOT}${dim(entry.shown)}`), ...compileLines(errors)]);
+      else if (before) screen.emit(() => [stream(at, green(G.ok), 'build', null, dim(`no errors${G.dot}${entry.shown}`))]);
+      return;
+    }
+    if (event.type === 'text') {
+      if (!model.ready) { heldBuildLines.push([entry, event.text, event.error]); return; }
+      const at = clock();
+      screen.emit(() => [stream(at, event.error ? red(G.fail) : dim(G.wait), 'build', null, event.error ? red(event.text) : dim(event.text))]);
+      return;
+    }
+    if (event.type === 'ended' && entry.watch && !requestedStop && model.ready) {
+      const at = clock();
+      screen.emit(() => [stream(at, red(G.fail), 'build', null, red(`${entry.script} ended${event.code ? ` (exit code ${event.code})` : ''}`)),
+        under(red(G.thread), dim('saves are no longer compiled; stop Firenook and start it again to compile them'))]);
+    }
+  }
 
   let resolveFailure;
   const failureShown = new Promise(done => { resolveFailure = done; });
@@ -764,7 +858,9 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     for (const step of model.steps.values()) if (step.state === 'running' || step.state === 'waiting') Object.assign(step, {state: 'done'});
     clearInterval(startupTicker);
     const tookAll = model.readyAt - model.began;
-    screen.emit(() => [...section(startup(dim(took(tookAll))), startupRows()), ...brokenSection(), ...readySection(), '', rule(bold('Logs')), ...space()]);
+    screen.emit(() => [...section(startup(dim(took(tookAll))), startupRows()), ...compileSection(), ...brokenSection(), ...readySection(), '', rule(bold('Logs')), ...space()]);
+    // What a build printed before the emulators were ready.
+    for (const [entry, text, error] of heldBuildLines.splice(0)) buildEvent(entry, {type: 'text', text, error});
     screen.pin(true);
     screen.live(runningLive);
     runningTicker = setInterval(() => { releaseHeld(); screen.frame(); }, 250);
@@ -796,7 +892,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   // border is printed: the banner, and the ready rows as the launch's own
   // ports and console address foretell them.
   const port = name => Number(value(`--${name}-port`)) || undefined;
-  const foretold = {console: launch.args.includes('--no-ui') ? undefined : `http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port('ui') ?? 4000}/console`,
+  const foretold = {console: launch.args.includes('--no-ui') ? undefined : `http://${host}:${port('ui') ?? 4000}/console`,
     ports: Object.fromEntries(PORTS.map(([name]) => [name, selected.has(name) || name === 'hub' ? port(name) : undefined]).filter(([, number]) => number)), ms: 0};
   model.ready = foretold;
   for (const row of readyRows(Infinity)) t.claim(row);
@@ -868,10 +964,30 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     };
   };
   let queue = Promise.resolve();
-  child.stdout.on('data', reader());
-  child.stderr.on('data', reader());
 
   try {
+    // The builds come first, so the engine loads what they wrote.
+    if (builds.length) {
+      const step = model.steps.get('build');
+      Object.assign(step, {state: 'running', began: Date.now()});
+      running.push(...builds.map(entry => startBuild(entry, {env, platform, spawner, onEvent: event => buildEvent(entry, event)})));
+      const firsts = await Promise.all(running.map(build => build.first));
+      const failed = firsts.findIndex(first => first.ended && first.code !== 0 && !first.count);
+      Object.assign(step, {state: requestedStop ? 'stopped' : 'done', ms: Date.now() - step.began, slow: firsts.some(first => first.slow),
+        failed: failed === -1 ? undefined : `${running[failed].command} failed${firsts[failed].code == null ? '' : ` (exit code ${firsts[failed].code})`}`});
+    }
+    if (requestedStop) {
+      clearInterval(startupTicker);
+      screen.live(() => []);
+      const at = clock();
+      screen.emit(() => [...section(startup(red('stopped')), startupRows()), bottom(), open(cells(dim(at), green(G.ok), `${nameCell('stopped')}${timed(Date.now() - model.stopping.since, dim('before the emulators started; nothing of yours was changed'))}`)), '']);
+      screen.end();
+      return 130;
+    }
+    child = spawner(launch.binary, args, {cwd: launch.cwd, env: launch.env, detached: platform === 'win32', windowsHide: true, stdio: ['pipe', 'pipe', 'pipe']});
+    child.stdin?.on('error', () => {});
+    child.stdout.on('data', reader());
+    child.stderr.on('data', reader());
     const outcome = await new Promise((done, reject) => {
       child.once('error', reject);
       child.once('close', (code, signal) => done({code, signal}));
@@ -906,12 +1022,15 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     screen.live(() => []);
     const lines = model.raw.slice(-12);
     const title = requestedStop ? 'Firenook did not finish stopping' : model.ready ? 'Firenook stopped unexpectedly' : 'Firenook could not start';
-    const data = requestedStop && stateDir && !ephemeral ? `the next start checks ${shortPath(stateDir, cwd)} first, and repairs it if it needs to` : dataLine();
+    // Ended by a signal, or by itself with no stop and nothing it could
+    // describe: either way it may not have closed the data.
+    const data = requestedStop || outcome.signal || model.ready ? uncheckedLine() : dataLine();
     screen.emit(() => ['', ...section(divider(`${red(G.fail)} ${bold(red(title))}`, dim(outcome.signal ? `signal ${outcome.signal}` : `exit code ${outcome.code}`)),
       [...lines.flatMap(line => field('', line, dim)), ...field(dim('Data'), data, dim)].map(inside)), bottom(), '']);
     screen.end();
     return outcome.code === 0 ? 1 : (outcome.code ?? (outcome.signal === 'SIGINT' ? 130 : 1));
   } finally {
+    for (const build of running) build.stop();
     clearInterval(timeout);
     clearInterval(startupTicker);
     clearInterval(runningTicker);
@@ -927,4 +1046,13 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
     restore();
     process.off('exit', restore);
   }
+}
+
+// emulators:start in a terminal, as `firenook emulators:start` runs it and
+// `firenook init` hands over to it.
+export async function startInTerminal(options, typed, {version, cwd = process.cwd()} = {}) {
+  const diagnostic = await diagnose(options, cwd, {quiet: true});
+  const project = diagnostic.project;
+  return runInteractive(prepareLaunch(diagnostic, options, 'start', typed, {quiet: true}),
+    {version, projectId: project.project, demo: project.demo, warnings: project.warnings, cwd});
 }

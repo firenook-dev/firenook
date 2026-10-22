@@ -66,6 +66,10 @@ pub enum ExplainCandidates {
     },
     /// An equality field index narrows the collection first.
     EqualityIndex { fields: Vec<String> },
+    /// The index of `field` is read in the query's order until the limit is
+    /// met; the `lookups` fields' equality filters are checked in their own
+    /// index before a document is read.
+    OrderIndex { field: String, lookups: Vec<String> },
     /// Every document of the collection is read.
     CollectionScan,
     /// Every document of the collection group is read.
@@ -79,6 +83,8 @@ pub enum ExplainStrategy {
     /// Filtered and limited while reading, decoding only the fields a filter
     /// or an order looks at.
     Streaming,
+    /// Read already in order from a field index and stopped at the limit.
+    IndexOrder,
     /// Disk keys are sorted on their order values before any payload is
     /// decoded.
     OrderedDisk,
@@ -250,6 +256,9 @@ fn candidates(candidates: QueryCandidates) -> ExplainCandidates {
     match candidates {
         QueryCandidates::DocumentNames { names } => ExplainCandidates::DocumentNames { names },
         QueryCandidates::EqualityIndex { fields } => ExplainCandidates::EqualityIndex { fields },
+        QueryCandidates::OrderIndex { field, lookups } => {
+            ExplainCandidates::OrderIndex { field, lookups }
+        }
         QueryCandidates::CollectionScan => ExplainCandidates::CollectionScan,
         QueryCandidates::CollectionGroupScan { ancestor } => {
             ExplainCandidates::CollectionGroupScan { ancestor }
@@ -260,6 +269,7 @@ fn candidates(candidates: QueryCandidates) -> ExplainCandidates {
 const fn strategy(strategy: QueryStrategy) -> ExplainStrategy {
     match strategy {
         QueryStrategy::Streaming => ExplainStrategy::Streaming,
+        QueryStrategy::IndexOrder => ExplainStrategy::IndexOrder,
         QueryStrategy::OrderedDisk => ExplainStrategy::OrderedDisk,
         QueryStrategy::Buffered => ExplainStrategy::Buffered,
     }
@@ -423,6 +433,42 @@ mod tests {
             body["index"]["declared"], true,
             "declaring the printed entry must satisfy the query: {body}"
         );
+    }
+
+    #[tokio::test]
+    async fn an_order_on_disk_state_reads_the_field_index_in_order() {
+        let directory = std::env::temp_dir().join(format!(
+            "firenook-explain-order-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let disk = Store::open_disk(&directory, firenook_core_store::DiskOptions::default())
+            .expect("disk store");
+        let writes = (0..5)
+            .map(|index| Write::Create {
+                key: DocumentKey::new(database(), format!("teams/t1/orders/o{index}"))
+                    .expect("path"),
+                fields: Fields::from([
+                    ("status".to_owned(), Value::String("open".into())),
+                    ("total".to_owned(), Value::Integer(i64::from(index))),
+                ]),
+            })
+            .collect::<Vec<_>>();
+        disk.commit(&writes).expect("commit");
+        let explainer =
+            QueryExplainer::new(&disk, PROJECT, DatabaseEdition::Standard, BTreeMap::new());
+        let (status, body) = ask(explainer, composite_body()).await;
+        drop(disk);
+        let _ = std::fs::remove_dir_all(&directory);
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["candidates"]["kind"], "orderIndex", "{body}");
+        assert_eq!(body["candidates"]["field"], "total");
+        assert_eq!(body["candidates"]["lookups"][0], "status");
+        assert_eq!(body["strategy"], "indexOrder");
+        assert_eq!(body["documentsMatched"], 5);
     }
 
     #[tokio::test]

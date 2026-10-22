@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use firenook_core_store::{
     CommitError, CommitObservation, CommitObserver, CommitResult, DatabaseName, Document,
-    DocumentKey, FieldTransform, Snapshot, SnapshotError, Store, Timestamp,
+    DocumentKey, FieldTransform, LazyDocument, Snapshot, SnapshotError, Store, Timestamp,
     TransactionMemoryRegistration, TransformOperation, Value, Write, compare_resource_paths,
     database_name_logical_bytes, document_key_logical_bytes,
 };
@@ -26,9 +26,9 @@ use tonic::metadata::MetadataMap;
 use tonic::{Request, Response, Status};
 
 use crate::codec::{
-    DecodedWrite, decode_database_name, decode_document_name, decode_fields, decode_parent,
-    decode_read_time, decode_write, encode_document_masked, encode_fields, encode_system_read_time,
-    encode_timestamp, encode_value, nested_value,
+    DecodedWrite, created_document_key, decode_database_name, decode_document_name, decode_fields,
+    decode_parent, decode_read_time, decode_write, encode_document_masked, encode_fields,
+    encode_system_read_time, encode_timestamp, encode_value, nested_value,
 };
 use crate::google::firestore::v1::batch_get_documents_request;
 use crate::google::firestore::v1::batch_get_documents_response;
@@ -46,7 +46,7 @@ use crate::google::firestore::v1::{
     self as proto, BatchGetDocumentsRequest, BatchGetDocumentsResponse, BatchWriteRequest,
     BatchWriteResponse, BeginTransactionRequest, BeginTransactionResponse, CommitRequest,
     CommitResponse, CreateDocumentRequest, DeleteDocumentRequest, ExecutePipelineRequest,
-    ExecutePipelineResponse, GetDocumentRequest, ListCollectionIdsRequest,
+    ExecutePipelineResponse, FoundDocument, GetDocumentRequest, ListCollectionIdsRequest,
     ListCollectionIdsResponse, ListDocumentsRequest, ListDocumentsResponse, ListenRequest,
     ListenResponse, PartitionQueryRequest, PartitionQueryResponse, RollbackRequest,
     RunAggregationQueryRequest, RunAggregationQueryResponse, RunQueryRequest, RunQueryResponse,
@@ -55,6 +55,7 @@ use crate::google::firestore::v1::{
 use crate::google::rpc;
 use crate::pipeline::{decode_pipeline, encode_pipeline_document};
 use crate::query_codec::{decode_aggregation, decode_query, query_status};
+use crate::wire::encode_stored_document;
 
 const MAXIMUM_REQUEST_BYTES: usize = 10 * 1024 * 1024;
 
@@ -74,13 +75,13 @@ pub(crate) enum AuthorizationSource {
 }
 
 impl AuthorizationSource {
-    pub(crate) fn resolve(&self, project: &str) -> Result<Authorization, Status> {
+    /// The identity a header names. A header the emulator cannot read is
+    /// `INVALID_ARGUMENT`, as on the official emulator.
+    pub(crate) fn resolve(&self) -> Result<Authorization, Status> {
         match self {
             Self::Owner => Ok(Authorization::Owner),
-            Self::ClientHeader(header) => {
-                Authorization::parse(header.as_deref(), project, now().seconds())
-                    .map_err(|error| Status::unauthenticated(error.to_string()))
-            }
+            Self::ClientHeader(header) => Authorization::parse(header.as_deref())
+                .map_err(|error| Status::invalid_argument(error.to_string())),
         }
     }
 }
@@ -232,9 +233,9 @@ impl FirestoreService {
     }
 
     /// REST client listing with explicit client authentication, including an
-    /// anonymous caller. Unlike the native gRPC administrator convention, a
-    /// missing REST header must not become owner bypass. The extension is local
-    /// to this call and cannot be supplied through network gRPC metadata.
+    /// anonymous caller: a missing header is a signed-out client, as it is on
+    /// gRPC. The extension is local to this call and cannot be supplied
+    /// through network gRPC metadata.
     pub async fn list_documents_for_client(
         &self,
         message: ListDocumentsRequest,
@@ -284,6 +285,54 @@ impl FirestoreService {
         self.commit(client_request(message, authorization_header))
             .await
             .map(Response::into_inner)
+    }
+
+    /// REST `CreateDocument` with explicit client authentication, so Security
+    /// Rules see an anonymous caller as one.
+    pub async fn create_document_for_client(
+        &self,
+        message: CreateDocumentRequest,
+        authorization_header: Option<String>,
+    ) -> Result<proto::Document, Status> {
+        self.create_document(client_request(message, authorization_header))
+            .await
+            .map(Response::into_inner)
+    }
+
+    /// REST `RunQuery` with explicit client authentication: the whole stream,
+    /// so its consistency selectors share the gRPC transaction state.
+    pub async fn run_query_for_client(
+        &self,
+        message: RunQueryRequest,
+        authorization_header: Option<String>,
+    ) -> Result<Vec<RunQueryResponse>, Status> {
+        let mut stream = self
+            .run_query(client_request(message, authorization_header))
+            .await?
+            .into_inner();
+        let mut responses = Vec::new();
+        while let Some(response) = stream.next().await {
+            responses.push(response?);
+        }
+        Ok(responses)
+    }
+
+    /// REST `RunAggregationQuery` with explicit client authentication: the
+    /// whole stream, as [`Self::run_query_for_client`].
+    pub async fn run_aggregation_query_for_client(
+        &self,
+        message: RunAggregationQueryRequest,
+        authorization_header: Option<String>,
+    ) -> Result<Vec<RunAggregationQueryResponse>, Status> {
+        let mut stream = self
+            .run_aggregation_query(client_request(message, authorization_header))
+            .await?
+            .into_inner();
+        let mut responses = Vec::new();
+        while let Some(response) = stream.next().await {
+            responses.push(response?);
+        }
+        Ok(responses)
     }
 
     /// Opens an in-process Listen channel backed by the same engine as the
@@ -375,7 +424,7 @@ impl FirestoreService {
             }
         };
         let sequence = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut token = b"firenook-txn-".to_vec();
+        let mut token = TRANSACTION_PREFIX.to_vec();
         token.extend_from_slice(&sequence.to_be_bytes());
         let accounting = self.store.runtime_memory_accounting().register_transaction(
             database_name_logical_bytes(&database)
@@ -403,7 +452,7 @@ impl FirestoreService {
         let transactions = self.transaction_states();
         let transaction = transactions
             .get(token)
-            .ok_or_else(|| Status::invalid_argument("unknown transaction"))?;
+            .ok_or_else(|| self.transaction_gone(token))?;
         if &transaction.database != database {
             return Err(Status::invalid_argument(
                 "transaction belongs to a different database",
@@ -412,6 +461,23 @@ impl FirestoreService {
         // Capture diagnostic mode with the validated snapshot, so concurrent
         // rollback cannot relabel an already-admitted read as non-transactional.
         Ok((transaction.snapshot.clone(), !transaction.read_only))
+    }
+
+    /// Why `token` names no open transaction, as the official emulator says
+    /// it: a token this server issued belongs to a transaction that has
+    /// ended (committed, rolled back or expired), which is ABORTED so a
+    /// client retries the transaction; any other token is `INVALID_ARGUMENT`.
+    fn transaction_gone(&self, token: &[u8]) -> Status {
+        let issued = token
+            .strip_prefix(TRANSACTION_PREFIX)
+            .and_then(|sequence| <[u8; 8]>::try_from(sequence).ok())
+            .map(u64::from_be_bytes)
+            .is_some_and(|sequence| sequence < self.next_id.load(Ordering::Relaxed));
+        if issued {
+            Status::aborted(TRANSACTION_ENDED)
+        } else {
+            Status::invalid_argument(INVALID_TRANSACTION)
+        }
     }
 
     fn record_read(&self, token: &[u8], key: &DocumentKey, document: Option<&Document>) {
@@ -483,7 +549,7 @@ impl FirestoreService {
     ) -> Result<(), Status> {
         let current = snapshot.get(key);
         let request = evaluation_request(operation, key, now(), current.as_deref(), None, query);
-        require_rules_allowed(self.rules.evaluate_with_read_transaction(
+        require_rules_allowed(&self.rules.evaluate_with_read_transaction(
             key.database(),
             authorization,
             &request,
@@ -502,7 +568,7 @@ impl FirestoreService {
     ) -> Result<(), Status> {
         let request =
             evaluation_request(RequestOperation::List, candidate, now(), None, None, query);
-        require_rules_allowed(self.rules.evaluate_with_read_transaction(
+        require_rules_allowed(&self.rules.evaluate_with_read_transaction(
             candidate.database(),
             authorization,
             &request,
@@ -527,7 +593,7 @@ impl FirestoreService {
             .rules
             .evaluate_writes(database, authorization, &writes, snapshot, request_time)
             .map_err(commit_status)?;
-        require_atomic_rules_allowed(verdict)
+        require_atomic_rules_allowed(&verdict)
     }
 
     pub(crate) async fn apply_stream_writes(
@@ -739,39 +805,58 @@ impl Default for FirestoreService {
     }
 }
 
+/// Who a network gRPC request is from. A request without `authorization`
+/// metadata is a signed-out client, as on REST and `WebChannel` and as on the
+/// official emulator: the client SDKs send no header when nobody is signed
+/// in, and the Admin SDKs send `Bearer owner`
+/// (`conformance/fixtures/request-identity-v1`).
 fn grpc_authorization_source(metadata: &MetadataMap) -> Result<AuthorizationSource, Status> {
     let header = metadata
         .get("authorization")
         .map(|value| value.to_str())
         .transpose()
-        .map_err(|_| Status::unauthenticated("Authorization metadata is not valid text"))?;
-    Ok(header.map_or(AuthorizationSource::Owner, |header| {
-        AuthorizationSource::ClientHeader(Some(header.to_owned()))
-    }))
+        .map_err(|_| Status::invalid_argument("Authorization metadata is not valid text"))?;
+    Ok(AuthorizationSource::ClientHeader(header.map(str::to_owned)))
 }
 
-pub(crate) fn require_rules_allowed(verdict: EvaluationResult) -> Result<(), Status> {
+/// The official emulator's answer to a metadata read from anyone but the
+/// owner, with rules or without (`conformance/fixtures/request-identity-v1`).
+const METADATA_NEEDS_OWNER: &str = "Metadata operations require admin authentication.";
+
+/// The answer to a partition query from anyone but the owner.
+const PARTITIONS_NEED_OWNER: &str = "Partition queries require admin authentication.";
+
+/// Refuses a read no rule governs unless the owner asks for it.
+fn require_owner<T>(request: &Request<T>, refusal: &str) -> Result<(), Status> {
+    if client_or_grpc_authorization(request)?.resolve()?.is_owner() {
+        Ok(())
+    } else {
+        Err(Status::permission_denied(refusal))
+    }
+}
+
+/// A refusal is `PERMISSION_DENIED` with production's text, followed by the
+/// allows that refused it as the official emulator names them
+/// ([`EvaluationResult::denial_message`]).
+pub(crate) fn require_rules_allowed(verdict: &EvaluationResult) -> Result<(), Status> {
     if verdict.allowed {
         return Ok(());
     }
-    Err(Status::permission_denied(verdict.error.map_or_else(
-        || "Security Rules denied the request".to_owned(),
-        |error| error.message,
-    )))
+    Err(Status::permission_denied(verdict.denial_message()))
 }
 
-pub(crate) fn require_atomic_rules_allowed(verdict: AtomicEvaluationResult) -> Result<(), Status> {
+/// An atomic request is refused for its first refused operation.
+pub(crate) fn require_atomic_rules_allowed(verdict: &AtomicEvaluationResult) -> Result<(), Status> {
     if verdict.allowed {
         return Ok(());
     }
     let message = verdict
         .operations
-        .into_iter()
+        .iter()
         .find(|operation| !operation.allowed)
-        .and_then(|operation| operation.error)
         .map_or_else(
-            || "Security Rules denied the request".to_owned(),
-            |error| error.message,
+            || firenook_rules_runtime::PRODUCTION_DENIAL.to_owned(),
+            EvaluationResult::denial_message,
         );
     Err(Status::permission_denied(message))
 }
@@ -808,7 +893,7 @@ impl Firestore for FirestoreService {
         let authorization_source = client_or_grpc_authorization(&request)?;
         let request = request.into_inner();
         let key = decode_document_name(&request.name)?;
-        let authorization = authorization_source.resolve(key.database().project_id())?;
+        let authorization = authorization_source.resolve()?;
         let token = match request.consistency_selector {
             None => Vec::new(),
             Some(get_document_request::ConsistencySelector::Transaction(token)) => token,
@@ -870,7 +955,7 @@ impl Firestore for FirestoreService {
         };
         let request = request.into_inner();
         let (database, parent) = decode_parent(&request.parent)?;
-        let authorization = authorization_source.resolve(database.project_id())?;
+        let authorization = authorization_source.resolve()?;
         let (token, historical) = match request.consistency_selector.as_ref() {
             None => (Vec::new(), None),
             Some(list_documents_request::ConsistencySelector::Transaction(token)) => {
@@ -896,6 +981,21 @@ impl Firestore for FirestoreService {
             return Err(Status::invalid_argument(
                 "show_missing cannot be combined with order_by",
             ));
+        }
+        if request.page_size < 0 {
+            return Err(Status::invalid_argument("Page size must be nonnegative."));
+        }
+        // A page token is the name of the last document of the page before,
+        // in the collection being listed; anything else was not written here.
+        if !request.page_token.is_empty()
+            && !page_token_lists(
+                &request.page_token,
+                &database,
+                parent.as_deref(),
+                &request.collection_id,
+            )
+        {
+            return Err(Status::invalid_argument("invalid page token"));
         }
         let orders = parse_list_order(&request.order_by)?;
         if request.collection_id.is_empty()
@@ -1012,7 +1112,7 @@ impl Firestore for FirestoreService {
         };
         let decoded = decode_write(write)?;
         let key = decoded.key.clone();
-        let authorization = authorization_source.resolve(key.database().project_id())?;
+        let authorization = authorization_source.resolve()?;
         self.run_write(move |service| {
             let _guard = service.write_lock();
             let snapshot = service.store.snapshot();
@@ -1048,7 +1148,7 @@ impl Firestore for FirestoreService {
             operation: Some(Operation::Delete(request.name)),
             ..proto::Write::default()
         })?;
-        let authorization = authorization_source.resolve(decoded.key.database().project_id())?;
+        let authorization = authorization_source.resolve()?;
         self.run_write(move |service| {
             let _guard = service.write_lock();
             let snapshot = service.store.snapshot();
@@ -1073,9 +1173,12 @@ impl Firestore for FirestoreService {
         request: Request<BatchGetDocumentsRequest>,
     ) -> Result<Response<Self::BatchGetDocumentsStream>, Status> {
         let authorization_source = client_or_grpc_authorization(&request)?;
+        // The REST transport calls in with its own authorization source and
+        // reads the documents themselves; a gRPC caller gets them on the wire.
+        let over_grpc = request.extensions().get::<AuthorizationSource>().is_none();
         let request = request.into_inner();
         let database = decode_database_name(&request.database)?;
-        let authorization = authorization_source.resolve(database.project_id())?;
+        let authorization = authorization_source.resolve()?;
         let (token, new_transaction, historical) = match request.consistency_selector {
             None => (Vec::new(), false, None),
             Some(batch_get_documents_request::ConsistencySelector::Transaction(token)) => {
@@ -1105,6 +1208,14 @@ impl Firestore for FirestoreService {
         };
         let read_time = Some(encode_system_read_time(now()));
         let request_time = now();
+        // Rules decide nothing for the owner, nor where none are installed:
+        // the documents are then not converted for an evaluation that never
+        // runs, which cost as much as encoding them.
+        let evaluated = !authorization.is_owner() && self.rules.rules_for(&database).is_some();
+        // When nothing reads a document but the wire (no rules, no mask, no
+        // transaction recording it), a stored document is transcoded straight
+        // into its response bytes, never decoded.
+        let transcoded = over_grpc && !evaluated && request.mask.is_none() && token.is_empty();
         // Decoding, masking and the atomic rules check of every requested
         // document run on the read pool.
         let (responses, reads) = {
@@ -1128,22 +1239,43 @@ impl Firestore for FirestoreService {
                             "batch document belongs to a different database",
                         ));
                     }
+                    if transcoded {
+                        let result = match snapshot.get_lazy(&key) {
+                            Some(LazyDocument::Encoded(encoded)) => {
+                                batch_get_documents_response::Result::Found(FoundDocument::Encoded(
+                                    encode_stored_document(&name, &encoded)?,
+                                ))
+                            }
+                            Some(LazyDocument::Decoded(document)) => {
+                                batch_get_documents_response::Result::Found(FoundDocument::Decoded(
+                                    encode_document_masked(&key, &document, None)?,
+                                ))
+                            }
+                            None => batch_get_documents_response::Result::Missing(name),
+                        };
+                        responses.push(BatchGetDocumentsResponse {
+                            transaction: Vec::new(),
+                            read_time,
+                            result: Some(result),
+                        });
+                        continue;
+                    }
                     let document = snapshot.get(&key);
-                    evaluations.push(evaluation_request(
-                        RequestOperation::Get,
-                        &key,
-                        request_time,
-                        document.as_deref(),
-                        None,
-                        RulesQuery::default(),
-                    ));
+                    if evaluated {
+                        evaluations.push(evaluation_request(
+                            RequestOperation::Get,
+                            &key,
+                            request_time,
+                            document.as_deref(),
+                            None,
+                            RulesQuery::default(),
+                        ));
+                    }
                     reads.push((key.clone(), document.clone()));
                     let result = if let Some(document) = document {
-                        batch_get_documents_response::Result::Found(encode_document_masked(
-                            &key,
-                            &document,
-                            mask.as_ref(),
-                        )?)
+                        batch_get_documents_response::Result::Found(FoundDocument::Decoded(
+                            encode_document_masked(&key, &document, mask.as_ref())?,
+                        ))
                     } else {
                         batch_get_documents_response::Result::Missing(name)
                     };
@@ -1157,13 +1289,15 @@ impl Firestore for FirestoreService {
                         result: Some(result),
                     });
                 }
-                require_atomic_rules_allowed(service.rules.evaluate_atomic_with_read_transaction(
-                    &database,
-                    &authorization,
-                    &evaluations,
-                    &SnapshotAccess::current(snapshot, database.project_id()),
-                    read_write_transaction,
-                ))?;
+                require_atomic_rules_allowed(
+                    &service.rules.evaluate_atomic_with_read_transaction(
+                        &database,
+                        &authorization,
+                        &evaluations,
+                        &SnapshotAccess::current(snapshot, database.project_id()),
+                        read_write_transaction,
+                    ),
+                )?;
                 Ok((responses, reads))
             })
             .await?
@@ -1199,7 +1333,7 @@ impl Firestore for FirestoreService {
         let authorization_source = client_or_grpc_authorization(&request)?;
         let request = request.into_inner();
         let database = decode_database_name(&request.database)?;
-        let authorization = authorization_source.resolve(database.project_id())?;
+        let authorization = authorization_source.resolve()?;
         let decoded = request
             .writes
             .into_iter()
@@ -1221,7 +1355,7 @@ impl Firestore for FirestoreService {
                 let transaction = service
                     .transaction_states()
                     .remove(&request.transaction)
-                    .ok_or_else(|| Status::invalid_argument("unknown transaction"))?;
+                    .ok_or_else(|| service.transaction_gone(&request.transaction))?;
                 if transaction.database != database {
                     return Err(Status::invalid_argument(
                         "transaction belongs to a different database",
@@ -1253,10 +1387,14 @@ impl Firestore for FirestoreService {
     ) -> Result<Response<pbjson_types::Empty>, Status> {
         let request = request.into_inner();
         let database = decode_database_name(&request.database)?;
-        let transaction = self
-            .transaction_states()
-            .remove(&request.transaction)
-            .ok_or_else(|| Status::invalid_argument("unknown transaction"))?;
+        // Rolling back a transaction that has already ended does nothing,
+        // as in the official emulator; only a token never issued is refused.
+        let Some(transaction) = self.transaction_states().remove(&request.transaction) else {
+            return match self.transaction_gone(&request.transaction).code() {
+                tonic::Code::Aborted => Ok(Response::new(pbjson_types::Empty {})),
+                _ => Err(Status::invalid_argument(INVALID_TRANSACTION)),
+            };
+        };
         if transaction.database != database {
             return Err(Status::invalid_argument(
                 "transaction belongs to a different database",
@@ -1272,11 +1410,11 @@ impl Firestore for FirestoreService {
         &self,
         request: Request<RunQueryRequest>,
     ) -> Result<Response<Self::RunQueryStream>, Status> {
-        let authorization_source = grpc_authorization_source(request.metadata())?;
+        let authorization_source = client_or_grpc_authorization(&request)?;
         let request = request.into_inner();
         let explain_options = request.explain_options;
         let (database, parent) = decode_parent(&request.parent)?;
-        let authorization = authorization_source.resolve(database.project_id())?;
+        let authorization = authorization_source.resolve()?;
         let Some(run_query_request::QueryType::StructuredQuery(structured)) = request.query_type
         else {
             return Err(Status::invalid_argument("structured query is required"));
@@ -1484,8 +1622,10 @@ impl Firestore for FirestoreService {
                 "Pipeline Operations are only available for Firestore databases in Enterprise edition.\n\nPlease switch to an Enterprise edition database to take advantage of such functionality.",
             ));
         }
+        let authorization_source = grpc_authorization_source(request.metadata())?;
         let request = request.into_inner();
         let database = decode_database_name(&request.database)?;
+        let authorization = authorization_source.resolve()?;
         if request.consistency_selector.is_some() {
             return Err(Status::unimplemented(
                 "pipeline consistency selectors are not supported yet",
@@ -1506,6 +1646,17 @@ impl Firestore for FirestoreService {
             .validate(&plan.query)
             .map_err(|error| index_status(&error))?;
         let snapshot = self.store.snapshot();
+        // A pipeline is ruled as the query it runs, a `list`, as the
+        // official emulator rules it.
+        let rules_candidate = firenook_rules_runtime::query_candidate(&database, &plan.query)
+            .map_err(Status::invalid_argument)?;
+        self.authorize_query(
+            &authorization,
+            &rules_candidate,
+            &snapshot,
+            firenook_rules_runtime::query_policy(&plan.query),
+            false,
+        )?;
         let results = {
             let edition = self.query_policy.edition();
             self.run_read(move || {
@@ -1533,11 +1684,11 @@ impl Firestore for FirestoreService {
         &self,
         request: Request<RunAggregationQueryRequest>,
     ) -> Result<Response<Self::RunAggregationQueryStream>, Status> {
-        let authorization_source = grpc_authorization_source(request.metadata())?;
+        let authorization_source = client_or_grpc_authorization(&request)?;
         let request = request.into_inner();
         let explain_options = request.explain_options;
         let (database, parent) = decode_parent(&request.parent)?;
-        let authorization = authorization_source.resolve(database.project_id())?;
+        let authorization = authorization_source.resolve()?;
         let Some(run_aggregation_query_request::QueryType::StructuredAggregationQuery(
             aggregation_query,
         )) = request.query_type
@@ -1644,6 +1795,10 @@ impl Firestore for FirestoreService {
         &self,
         request: Request<PartitionQueryRequest>,
     ) -> Result<Response<PartitionQueryResponse>, Status> {
+        // No rule governs a partition's cursors, which carry document
+        // values: the Admin SDKs' `getPartitions()` sends the owner, and no
+        // client SDK partitions a query.
+        require_owner(&request, PARTITIONS_NEED_OWNER)?;
         let request = request.into_inner();
         let snapshot = match request.consistency_selector {
             None => self.store.snapshot(),
@@ -1755,6 +1910,7 @@ impl Firestore for FirestoreService {
         &self,
         request: Request<ListCollectionIdsRequest>,
     ) -> Result<Response<ListCollectionIdsResponse>, Status> {
+        require_owner(&request, METADATA_NEEDS_OWNER)?;
         let request = request.into_inner();
         let snapshot = match request.consistency_selector {
             None => self.store.snapshot(),
@@ -1798,19 +1954,24 @@ impl Firestore for FirestoreService {
         let authorization_source = grpc_authorization_source(request.metadata())?;
         let request = request.into_inner();
         let database = decode_database_name(&request.database)?;
-        let authorization = authorization_source.resolve(database.project_id())?;
+        let authorization = authorization_source.resolve()?;
         let decoded = request
             .writes
             .into_iter()
             .map(decode_write)
             .collect::<Result<Vec<_>, _>>()?;
-        let mut keys = BTreeSet::new();
         if decoded
             .iter()
-            .any(|write| write.key.database() != &database || !keys.insert(write.key.clone()))
+            .any(|write| write.key.database() != &database)
         {
             return Err(Status::invalid_argument(
-                "batch writes must target distinct documents in one database",
+                "batch write belongs to a different database",
+            ));
+        }
+        let mut keys = BTreeSet::new();
+        if !decoded.iter().all(|write| keys.insert(write.key.clone())) {
+            return Err(Status::invalid_argument(
+                "the same document cannot be written more than once in a single request",
             ));
         }
 
@@ -1850,39 +2011,20 @@ impl Firestore for FirestoreService {
         &self,
         request: Request<CreateDocumentRequest>,
     ) -> Result<Response<proto::Document>, Status> {
-        let authorization_source = grpc_authorization_source(request.metadata())?;
+        let authorization_source = client_or_grpc_authorization(&request)?;
         let request = request.into_inner();
-        let (database, parent) = decode_parent(&request.parent)?;
-        let authorization = authorization_source.resolve(database.project_id())?;
-        if request.collection_id.is_empty() || request.collection_id.contains('/') {
-            return Err(Status::invalid_argument("invalid collection_id"));
-        }
-        let document_id = if request.document_id.is_empty() {
-            format!(
-                "firenook-{:016x}",
-                self.next_id.fetch_add(1, Ordering::Relaxed)
-            )
-        } else {
-            request.document_id
-        };
-        if document_id.contains('/') {
-            return Err(Status::invalid_argument("invalid document_id"));
-        }
-        let document = request
-            .document
-            .ok_or_else(|| Status::invalid_argument("document is required"))?;
+        // The ids are checked, and an empty one made, as the official
+        // emulator does; its 20-character automatic ids are the SDKs' too.
+        let key = created_document_key(
+            &request.parent,
+            &request.collection_id,
+            &request.document_id,
+        )?;
+        let authorization = authorization_source.resolve()?;
+        let document = request.document.unwrap_or_default();
         if !document.name.is_empty() {
-            return Err(Status::invalid_argument(
-                "document name must be empty for CreateDocument",
-            ));
+            return Err(Status::invalid_argument("document.name must not be set"));
         }
-        let path = [parent, Some(request.collection_id), Some(document_id)]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join("/");
-        let key = DocumentKey::new(database, path)
-            .map_err(|error| Status::invalid_argument(error.to_string()))?;
         let fields = decode_fields(document.fields)?;
         let write = DecodedWrite {
             key: key.clone(),
@@ -2364,6 +2506,37 @@ struct KeyPage<T> {
     keys: Vec<T>,
     next_page_token: String,
 }
+
+/// Whether a listing's page token names a document of the listed collection
+/// (without a collection id, a direct child of the parent), as every token
+/// this server writes does.
+fn page_token_lists(
+    token: &str,
+    database: &DatabaseName,
+    parent: Option<&str>,
+    collection_id: &str,
+) -> bool {
+    let Ok(key) = decode_document_name(token) else {
+        return false;
+    };
+    let Some((collection, _)) = key.path().rsplit_once('/') else {
+        return false;
+    };
+    let (container, id) = collection
+        .rsplit_once('/')
+        .map_or((None, collection), |(container, id)| (Some(container), id));
+    key.database() == database
+        && container == parent
+        && (collection_id.is_empty() || id == collection_id)
+}
+
+/// The prefix of every transaction token this server issues; the sequence
+/// number after it says whether a token was issued at all.
+const TRANSACTION_PREFIX: &[u8] = b"firenook-txn-";
+/// The official emulator's message for a transaction that has ended.
+const TRANSACTION_ENDED: &str = "The referenced transaction has expired or is no longer valid.";
+/// The official emulator's message for a token that names no transaction.
+const INVALID_TRANSACTION: &str = "Invalid transaction.";
 
 fn paginate_keys(
     mut sorted: Vec<(DocumentKey, bool)>,
@@ -2905,13 +3078,29 @@ mod tests {
     async fn security_rules_enforce_grpc_clients_and_preserve_admin_bypass() {
         let service = rules_service();
 
-        service
+        // A client SDK sends no header while nobody is signed in; the
+        // official emulator rules it as a signed-out client.
+        let signed_out = service
             .get_document(Request::new(GetDocumentRequest {
                 name: rules_document("users/alice"),
                 ..GetDocumentRequest::default()
             }))
             .await
-            .expect("missing gRPC auth is the backend/admin owner policy");
+            .expect_err("missing gRPC auth is a signed-out client");
+        assert_eq!(signed_out.code(), tonic::Code::PermissionDenied);
+        for owner in ["Bearer owner", "bearer owner"] {
+            let mut admin = Request::new(GetDocumentRequest {
+                name: rules_document("users/alice"),
+                ..GetDocumentRequest::default()
+            });
+            admin
+                .metadata_mut()
+                .insert("authorization", owner.parse().expect("metadata"));
+            service
+                .get_document(admin)
+                .await
+                .expect("the Admin SDKs' owner credential skips the rules");
+        }
 
         service
             .get_document(authenticated(
@@ -2942,11 +3131,13 @@ mod tests {
         malformed
             .metadata_mut()
             .insert("authorization", "Bearer broken".parse().expect("metadata"));
-        let unauthenticated = service
+        let unreadable = service
             .get_document(malformed)
             .await
             .expect_err("malformed emulator auth must be rejected");
-        assert_eq!(unauthenticated.code(), tonic::Code::Unauthenticated);
+        // INVALID_ARGUMENT, as the official emulator answers ("invalid
+        // jwt"): an SDK retries UNAUTHENTICATED forever with a mock token.
+        assert_eq!(unreadable.code(), tonic::Code::InvalidArgument);
 
         service
             .update_document(authenticated(
@@ -3004,6 +3195,126 @@ mod tests {
             panic!("unbounded query must be denied");
         };
         assert_eq!(denied_query.code(), tonic::Code::PermissionDenied);
+    }
+
+    fn owner<T>(message: T) -> Request<T> {
+        let mut request = Request::new(message);
+        request
+            .metadata_mut()
+            .insert("authorization", "Bearer owner".parse().expect("metadata"));
+        request
+    }
+
+    #[tokio::test]
+    async fn reads_no_rule_governs_need_the_owner_with_rules_and_without() {
+        for (service, project) in [
+            (rules_service(), RULES_PROJECT),
+            (FirestoreService::default(), "demo-open"),
+        ] {
+            let ids = ListCollectionIdsRequest {
+                parent: format!("projects/{project}/databases/(default)/documents"),
+                ..ListCollectionIdsRequest::default()
+            };
+            let partitions = PartitionQueryRequest {
+                parent: format!("projects/{project}/databases/(default)/documents"),
+                query_type: Some(partition_query_request::QueryType::StructuredQuery(
+                    StructuredQuery {
+                        from: vec![CollectionSelector {
+                            collection_id: "public".to_owned(),
+                            all_descendants: true,
+                        }],
+                        order_by: vec![Order {
+                            field: Some(FieldReference {
+                                field_path: "__name__".to_owned(),
+                            }),
+                            direction: Direction::Ascending as i32,
+                        }],
+                        ..StructuredQuery::default()
+                    },
+                )),
+                partition_count: 2,
+                ..PartitionQueryRequest::default()
+            };
+            for request in [
+                Request::new(ids.clone()),
+                authenticated(ids.clone(), "alice"),
+            ] {
+                let refused = service
+                    .list_collection_ids(request)
+                    .await
+                    .expect_err("collection ids are the owner's");
+                assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+                assert_eq!(
+                    refused.message(),
+                    "Metadata operations require admin authentication."
+                );
+            }
+            service
+                .list_collection_ids(owner(ids))
+                .await
+                .expect("the owner lists collection ids");
+            for request in [
+                Request::new(partitions.clone()),
+                authenticated(partitions.clone(), "alice"),
+            ] {
+                let refused = service
+                    .partition_query(request)
+                    .await
+                    .expect_err("partition cursors are the owner's");
+                assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+            }
+            service
+                .partition_query(owner(partitions))
+                .await
+                .expect("the owner partitions a query");
+        }
+    }
+
+    #[tokio::test]
+    async fn pipelines_are_ruled_as_the_query_they_run() {
+        use crate::google::firestore::v1::{Pipeline, StructuredPipeline, pipeline};
+        let rules = rules_service();
+        let service = FirestoreService::new_with_query_policy_and_rules(
+            rules.store().clone(),
+            QueryPolicy::new(DatabaseEdition::Enterprise),
+            rules.rules().clone(),
+        );
+        let request = |collection: &str| ExecutePipelineRequest {
+            database: RULES_DATABASE.to_owned(),
+            pipeline_type: Some(execute_pipeline_request::PipelineType::StructuredPipeline(
+                StructuredPipeline {
+                    pipeline: Some(Pipeline {
+                        stages: vec![pipeline::Stage {
+                            name: "collection".to_owned(),
+                            args: vec![proto::Value {
+                                value_type: Some(proto::value::ValueType::ReferenceValue(format!(
+                                    "/{collection}"
+                                ))),
+                            }],
+                            options: std::collections::HashMap::new(),
+                        }],
+                    }),
+                    options: std::collections::HashMap::new(),
+                },
+            )),
+            ..ExecutePipelineRequest::default()
+        };
+        for refused in [
+            Request::new(request("users")),
+            authenticated(request("users"), "alice"),
+        ] {
+            let Err(error) = service.execute_pipeline(refused).await else {
+                panic!("no rule allows listing users");
+            };
+            assert_eq!(error.code(), tonic::Code::PermissionDenied);
+        }
+        assert!(
+            service
+                .execute_pipeline(owner(request("users")))
+                .await
+                .is_ok(),
+            "the owner skips the rules"
+        );
     }
 
     #[tokio::test]
@@ -3590,7 +3901,7 @@ mod tests {
         let service = seeded_query_service().await;
 
         let partition = service
-            .partition_query(Request::new(PartitionQueryRequest {
+            .partition_query(owner(PartitionQueryRequest {
                 parent: format!("{DATABASE}/documents"),
                 partition_count: 1,
                 query_type: Some(partition_query_request::QueryType::StructuredQuery(
@@ -3615,5 +3926,222 @@ mod tests {
             .into_inner();
         assert_eq!(partition.partitions.len(), 1);
         assert!(!partition.partitions[0].before);
+    }
+
+    #[tokio::test]
+    async fn create_document_makes_and_checks_ids_as_the_official_emulator() {
+        let service = FirestoreService::default();
+        let create = |collection: &str, id: &str, document: proto::Document| {
+            service.create_document(Request::new(CreateDocumentRequest {
+                parent: format!("{DATABASE}/documents"),
+                collection_id: collection.to_owned(),
+                document_id: id.to_owned(),
+                document: Some(document),
+                ..CreateDocumentRequest::default()
+            }))
+        };
+        let mut ids = BTreeSet::new();
+        for _ in 0..50 {
+            let created = create("cities", "", integer_document("", 1))
+                .await
+                .expect("an automatic id")
+                .into_inner();
+            let id = created.name.rsplit('/').next().expect("an id").to_owned();
+            assert_eq!(id.len(), 20, "{id}");
+            assert!(id.bytes().all(|byte| byte.is_ascii_alphanumeric()), "{id}");
+            assert!(ids.insert(id), "automatic ids never repeat");
+        }
+        let long = "x".repeat(1501);
+        for (collection, id, message) in [
+            (
+                "cities",
+                "a/b",
+                "Resource id \"a/b\" is invalid because it contains \"/\".",
+            ),
+            (
+                "cities",
+                "__x__",
+                "Resource id \"__x__\" is invalid because it is reserved.",
+            ),
+            (
+                "cities",
+                ".",
+                "Resource id \".\" is invalid because it is reserved.",
+            ),
+            (
+                "cities",
+                "..",
+                "Resource id \"..\" is invalid because it is reserved.",
+            ),
+            (
+                "cities",
+                long.as_str(),
+                "The key path element name is longer than 1500 bytes.",
+            ),
+            (
+                "__c__",
+                "x",
+                "Collection id \"__c__\" is invalid because it is reserved.",
+            ),
+        ] {
+            let refused = create(collection, id, integer_document("", 1))
+                .await
+                .expect_err("an invalid id");
+            assert_eq!(
+                (refused.code(), refused.message()),
+                (tonic::Code::InvalidArgument, message)
+            );
+        }
+        let named = create("cities", "named", integer_document(DOCUMENT, 1))
+            .await
+            .expect_err("a named document");
+        assert_eq!(named.message(), "document.name must not be set");
+        let under_collection = service
+            .create_document(Request::new(CreateDocumentRequest {
+                parent: format!("{DATABASE}/documents/cities"),
+                collection_id: "towns".to_owned(),
+                document: Some(integer_document("", 1)),
+                ..CreateDocumentRequest::default()
+            }))
+            .await
+            .expect_err("a collection as the parent");
+        assert_eq!(
+            under_collection.message(),
+            format!(
+                "Document parent name \"{DATABASE}/documents/cities\" lacks \"/\" at index {}.",
+                DATABASE.len() + "/documents/cities".len()
+            )
+        );
+        for id in ["__id7__", "a b"] {
+            create("cities", id, integer_document("", 1))
+                .await
+                .expect("an id the official emulator accepts");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_ended_transaction_is_aborted_and_a_foreign_token_invalid() {
+        let service = FirestoreService::default();
+        let begin = || async {
+            service
+                .begin_transaction(Request::new(BeginTransactionRequest {
+                    database: DATABASE.to_owned(),
+                    ..BeginTransactionRequest::default()
+                }))
+                .await
+                .expect("a transaction")
+                .into_inner()
+                .transaction
+        };
+        let commit = |transaction: Vec<u8>| {
+            service.commit(Request::new(CommitRequest {
+                database: DATABASE.to_owned(),
+                transaction,
+                ..CommitRequest::default()
+            }))
+        };
+        let rollback = |transaction: Vec<u8>| {
+            service.rollback(Request::new(RollbackRequest {
+                database: DATABASE.to_owned(),
+                transaction,
+                ..RollbackRequest::default()
+            }))
+        };
+        let ended = "The referenced transaction has expired or is no longer valid.";
+        let committed = begin().await;
+        commit(committed.clone()).await.expect("the commit");
+        let again = commit(committed.clone())
+            .await
+            .expect_err("an ended transaction");
+        assert_eq!(
+            (again.code(), again.message()),
+            (tonic::Code::Aborted, ended)
+        );
+        let read = service
+            .get_document(Request::new(GetDocumentRequest {
+                name: DOCUMENT.to_owned(),
+                consistency_selector: Some(get_document_request::ConsistencySelector::Transaction(
+                    committed,
+                )),
+                ..GetDocumentRequest::default()
+            }))
+            .await
+            .expect_err("a read in an ended transaction");
+        assert_eq!((read.code(), read.message()), (tonic::Code::Aborted, ended));
+
+        // A rollback of an ended transaction does nothing; a token this
+        // server never issued, or none, is invalid.
+        let rolled = begin().await;
+        rollback(rolled.clone()).await.expect("the rollback");
+        rollback(rolled.clone()).await.expect("a second rollback");
+        let after = commit(rolled).await.expect_err("a rolled-back transaction");
+        assert_eq!(after.code(), tonic::Code::Aborted);
+        for token in [
+            Vec::new(),
+            vec![0; 9],
+            b"firenook-txn-\xff\xff\xff\xff\xff\xff\xff\xff".to_vec(),
+        ] {
+            let invalid = rollback(token.clone()).await.expect_err("an invalid token");
+            assert_eq!(
+                (invalid.code(), invalid.message()),
+                (tonic::Code::InvalidArgument, "Invalid transaction.")
+            );
+            if !token.is_empty() {
+                let invalid = commit(token).await.expect_err("an invalid token");
+                assert_eq!(invalid.code(), tonic::Code::InvalidArgument);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn batch_writes_name_a_repeated_document_and_listings_check_their_page() {
+        let service = FirestoreService::default();
+        let update = |name: &str| proto::Write {
+            operation: Some(Operation::Update(integer_document(name, 1))),
+            ..proto::Write::default()
+        };
+        let repeated = service
+            .batch_write(Request::new(BatchWriteRequest {
+                database: DATABASE.to_owned(),
+                writes: vec![update(DOCUMENT), update(DOCUMENT)],
+                ..BatchWriteRequest::default()
+            }))
+            .await
+            .expect_err("the same document twice");
+        assert_eq!(
+            repeated.message(),
+            "the same document cannot be written more than once in a single request"
+        );
+        let list = |page_size: i32, page_token: &str| {
+            service.list_documents(Request::new(ListDocumentsRequest {
+                parent: format!("{DATABASE}/documents"),
+                collection_id: "cities".to_owned(),
+                page_size,
+                page_token: page_token.to_owned(),
+                ..ListDocumentsRequest::default()
+            }))
+        };
+        let negative = list(-1, "").await.expect_err("a negative page size");
+        assert_eq!(
+            (negative.code(), negative.message()),
+            (
+                tonic::Code::InvalidArgument,
+                "Page size must be nonnegative."
+            )
+        );
+        for token in [
+            "garbage",
+            "projects/demo/databases/tenant-a/documents/towns/kl",
+            "projects/demo/databases/(default)/documents/cities/kl",
+        ] {
+            let refused = list(0, token).await.expect_err("a token not written here");
+            assert_eq!(
+                (refused.code(), refused.message()),
+                (tonic::Code::InvalidArgument, "invalid page token")
+            );
+        }
+        list(0, DOCUMENT)
+            .await
+            .expect("a token of the listed collection");
     }
 }

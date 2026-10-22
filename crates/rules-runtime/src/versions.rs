@@ -114,13 +114,16 @@ pub(crate) struct Versions {
     file_problems: BTreeMap<DatabaseName, LoadError>,
 }
 
-impl Versions {
-    /// The history of the level governing `database`.
+impl RuntimeState {
+    /// The history of the level governing `database`, the same resolution
+    /// as the rulesets'.
     fn governing(&self, database: &DatabaseName) -> &History {
-        self.databases
+        self.versions
+            .databases
             .get(database)
-            .or_else(|| self.projects.get(database.project_id()))
-            .unwrap_or(&self.default)
+            .or_else(|| self.versions.projects.get(database.project_id()))
+            .or_else(|| self.versions.databases.get(self.governed_as(database)))
+            .unwrap_or(&self.versions.default)
     }
 }
 
@@ -188,7 +191,7 @@ impl RuntimeState {
         version: &Arc<InstalledVersion>,
     ) {
         if !self.versions.databases.contains_key(database) {
-            let before = self.versions.governing(database).clone();
+            let before = self.governing(database).clone();
             self.versions.databases.insert(database.clone(), before);
         }
         if let Some(history) = self.versions.databases.get_mut(database) {
@@ -205,7 +208,6 @@ impl RulesRuntime {
     pub fn rules_history(&self, database: &DatabaseName) -> Vec<InstalledVersion> {
         let state = read_lock(&self.state);
         state
-            .versions
             .governing(database)
             .0
             .iter()
@@ -219,7 +221,6 @@ impl RulesRuntime {
     pub fn current_version(&self, database: &DatabaseName) -> Option<InstalledVersion> {
         let state = read_lock(&self.state);
         state
-            .versions
             .governing(database)
             .0
             .back()
@@ -440,5 +441,68 @@ mod tests {
         runtime.set_file_problems(&default, None);
         assert!(runtime.file_problems(&default).is_none());
         assert!(events.try_recv().is_ok());
+    }
+
+    /// A database `firebase.json` does not list is governed by its stand-in's
+    /// ruleset, as the official emulator's one rules file governs every
+    /// database, and follows it as it changes.
+    #[test]
+    fn an_unlisted_database_follows_its_stand_in() {
+        let runtime = RulesRuntime::default();
+        let default = database("(default)");
+        let named = database("named");
+        let unlisted = database("unlisted");
+        let in_force = |database: &DatabaseName| {
+            runtime
+                .rules_for(database)
+                .map(|rules| source_hash(rules.source()))
+        };
+        runtime
+            .install_database(&default, &rules("false"))
+            .expect("default");
+        runtime
+            .install_database(&named, &rules("true"))
+            .expect("named");
+        assert_eq!(in_force(&unlisted), None, "without a stand-in it is open");
+        assert_eq!(runtime.stand_in_for(&unlisted), None);
+        runtime.govern_unlisted_with(&default);
+        assert_eq!(runtime.stand_in_for(&unlisted), Some(default.clone()));
+        assert_eq!(runtime.stand_in_for(&named), None, "it has its own");
+        assert_eq!(runtime.stand_in_for(&default), None, "it is the stand-in");
+        assert_eq!(in_force(&unlisted), Some(source_hash(&rules("false"))));
+        assert_eq!(in_force(&named), Some(source_hash(&rules("true"))));
+        assert_eq!(
+            runtime
+                .current_version(&unlisted)
+                .map(|version| version.hash),
+            Some(source_hash(&rules("false")))
+        );
+
+        runtime
+            .install_database_from(&default, &rules("1 == 1"), RulesOrigin::File)
+            .expect("file reload");
+        let current = runtime.current_version(&unlisted).expect("governed");
+        assert_eq!(current.origin, RulesOrigin::File);
+        assert_eq!(in_force(&unlisted), Some(current.hash));
+        assert_eq!(
+            origins(&runtime.rules_history(&unlisted)),
+            [RulesOrigin::File, RulesOrigin::Startup]
+        );
+
+        runtime
+            .install_project(PROJECT, &rules("2 == 2"))
+            .expect("reload");
+        assert_eq!(
+            runtime.stand_in_for(&unlisted),
+            None,
+            "the reload governs it"
+        );
+        for database in [&default, &named, &unlisted] {
+            assert_eq!(
+                in_force(database),
+                Some(source_hash(&rules("2 == 2"))),
+                "{database}"
+            );
+        }
     }
 }

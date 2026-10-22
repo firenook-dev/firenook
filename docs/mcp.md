@@ -89,8 +89,8 @@ only JSON-RPC lines; diagnostics go to stderr.
 
 The tools marked *console* use the engine's Console API, which the suite
 serves on the Emulator UI port: they need the UI on (the default; a suite
-started with `emulators.ui.enabled: false` answers them with an error that
-says so). Every request the server makes carries
+started with `emulators.ui.enabled: false`, or by `emulators:exec` without
+`--ui`, answers them with an error that says so, and `--ui` turns it on). Every request the server makes carries
 `x-firenook-client: firenook-mcp/<version>`, and after each call it tells the
 console which tool ran (the Connect dialog's Coding agent tab shows when an
 agent last called); nothing else is recorded.

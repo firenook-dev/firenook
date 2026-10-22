@@ -328,7 +328,8 @@ async fn one_record_per_call_says_who_called_and_how() {
 
 #[test]
 fn every_dispatched_operation_has_a_kind() {
-    let source = include_str!("lib.rs");
+    // A Windows checkout may give the source CRLF line ends.
+    let source = include_str!("lib.rs").replace("\r\n", "\n");
     let start = source.find("async fn dispatch(").expect("dispatch");
     let end = source[start..]
         .find("\n}\n")

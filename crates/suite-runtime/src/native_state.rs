@@ -133,7 +133,9 @@ impl NativeState {
 
         let seed = seed_path(config)?;
         let mut buckets = match &config.storage_rules {
-            crate::StorageRulesConfig::Single(_) | crate::StorageRulesConfig::OpenDefault => {
+            crate::StorageRulesConfig::Single(_)
+            | crate::StorageRulesConfig::OpenDefault
+            | crate::StorageRulesConfig::OpenDefaultIgnoringTargets => {
                 vec![config.default_bucket.clone()]
             }
             crate::StorageRulesConfig::PerBucket(buckets) => buckets
@@ -241,7 +243,14 @@ impl NativeState {
         )?;
         self.first_start = false;
         if let Some(step) = waiting {
-            step.done(&[(record.files() as u64, "seed files")], None);
+            step.done(
+                &[terminal::counted(
+                    record.files() as u64,
+                    "seed file",
+                    "seed files",
+                )],
+                None,
+            );
         }
         Ok(())
     }
@@ -441,7 +450,7 @@ fn seed_path(config: &SuiteConfig) -> Result<Option<PathBuf>, SuiteRuntimeError>
 /// The seed's canonical path, once its manifest is known to point inside it.
 fn validate_seed(seed: &Path) -> Result<PathBuf, SuiteRuntimeError> {
     let seed = fs::canonicalize(seed).map_err(io_error)?;
-    require_file(&seed.join("firebase-export-metadata.json"))?;
+    // Its suite metadata, or the production Firestore export it holds.
     let manifest = crate::read_export_metadata(&seed)?;
     for path in [
         manifest.firestore.map(|value| value.metadata_file),

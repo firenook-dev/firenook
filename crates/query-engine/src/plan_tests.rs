@@ -116,6 +116,20 @@ fn queries() -> Vec<(&'static str, Query)> {
         ),
         ("the collection group", group()),
         (
+            "the group ordered by a field",
+            group().order_by(field("total"), Direction::Ascending),
+        ),
+        (
+            "a range on the ordered field",
+            orders()
+                .filter(Filter::Field(FieldFilter {
+                    path: field("total"),
+                    operator: FieldOperator::GreaterThan,
+                    value: Value::Integer(1),
+                }))
+                .limit(Limit::First(2)),
+        ),
+        (
             "the group under one ancestor",
             group().under_ancestor("teams/t1").unwrap(),
         ),
@@ -152,7 +166,7 @@ fn a_plan_names_the_strategy_the_query_actually_runs_with() {
     // A matrix that only ever produced one strategy would prove nothing.
     assert_eq!(
         seen,
-        ["Buffered", "OrderedDisk", "Streaming"]
+        ["Buffered", "IndexOrder", "OrderedDisk", "Streaming"]
             .map(str::to_owned)
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>(),
@@ -181,6 +195,36 @@ fn a_plan_names_where_the_candidates_come_from() {
         "an equality filter goes through the field index"
     );
     assert_eq!(
+        candidates(&orders().order_by(field("total"), Direction::Descending)),
+        QueryCandidates::OrderIndex {
+            field: "total".to_owned(),
+            lookups: Vec::new(),
+        },
+        "an order on one field walks that field's index"
+    );
+    assert_eq!(
+        candidates(
+            &orders()
+                .filter(equality("status", "open"))
+                .order_by(field("total"), Direction::Ascending)
+                .limit(Limit::First(2))
+        ),
+        QueryCandidates::OrderIndex {
+            field: "total".to_owned(),
+            lookups: vec!["status".to_owned()],
+        },
+        "an equality on another field is checked in its index during the walk"
+    );
+    assert_eq!(
+        candidates(
+            &orders()
+                .order_by(field("total"), Direction::Ascending)
+                .limit(Limit::Last(2))
+        ),
+        QueryCandidates::CollectionScan,
+        "a last page reads the collection"
+    );
+    assert_eq!(
         candidates(&group()),
         QueryCandidates::CollectionGroupScan { ancestor: None }
     );
@@ -198,6 +242,55 @@ fn a_plan_names_where_the_candidates_come_from() {
         candidates(&named),
         QueryCandidates::DocumentNames { names: 2 },
         "pinned names are read directly, not scanned"
+    );
+}
+
+#[test]
+fn a_selective_equality_reads_its_documents_instead_of_walking_the_order() {
+    // One open order among many closed ones: walking `total` would pass
+    // every closed order to find it, reading the one open order is enough.
+    let directory = TestDirectory::new();
+    let disk = Store::open_disk(&directory.0, DiskOptions::default()).unwrap();
+    let writes = (0..400)
+        .map(|index| Write::Set {
+            key: DocumentKey::new(database(), format!("teams/t1/orders/o{index}")).unwrap(),
+            fields: Fields::from([
+                (
+                    "status".to_owned(),
+                    Value::String(if index == 7 { "open" } else { "closed" }.into()),
+                ),
+                ("total".to_owned(), Value::Integer(i64::from(index))),
+            ]),
+            transforms: Vec::new(),
+            precondition: Precondition::None,
+        })
+        .collect::<Vec<_>>();
+    disk.commit(&writes).unwrap();
+    let snapshot = disk.snapshot();
+    let page = |status: &str| {
+        orders()
+            .filter(equality("status", status))
+            .order_by(field("total"), Direction::Ascending)
+            .limit(Limit::First(20))
+    };
+    assert_eq!(
+        plan(&snapshot, &database(), &page("open"))
+            .unwrap()
+            .candidates,
+        QueryCandidates::EqualityIndex {
+            fields: vec!["status".to_owned()]
+        },
+        "one matching document is read, not 400 entries walked"
+    );
+    assert_eq!(
+        plan(&snapshot, &database(), &page("closed"))
+            .unwrap()
+            .candidates,
+        QueryCandidates::OrderIndex {
+            field: "total".to_owned(),
+            lookups: vec!["status".to_owned()],
+        },
+        "an equality most documents hold is checked during the walk"
     );
 }
 

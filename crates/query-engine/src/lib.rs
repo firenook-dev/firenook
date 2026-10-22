@@ -235,6 +235,10 @@ fn compare_maps(
 }
 
 #[cfg(test)]
+#[path = "order_key_tests.rs"]
+mod order_key_tests;
+
+#[cfg(test)]
 mod tests {
     use std::sync::Arc;
 

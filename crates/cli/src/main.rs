@@ -254,6 +254,10 @@ struct ExtensionsVendorArgs {
     /// Vendor only these instance ids (default: every registry instance).
     #[arg(long = "instance")]
     instances: Vec<String>,
+    /// Never contact the Extensions registry (as `FIRENOOK_OFFLINE=1` does):
+    /// vendor only what the shared cache holds with its registry sidecar.
+    #[arg(long)]
+    offline: bool,
 }
 
 /// When acknowledged writes reach stable storage in disk mode.
@@ -413,8 +417,12 @@ struct SuiteArgs {
     only: Option<String>,
     /// Do not start the Emulator UI (nor the logging emulator), as
     /// `emulators.ui.enabled: false` does officially.
-    #[arg(long = "no-ui")]
+    #[arg(long = "no-ui", conflicts_with = "ui")]
     no_ui: bool,
+    /// Start the Emulator UI even when `emulators.ui.enabled` is false, as
+    /// the official `--ui` does.
+    #[arg(long)]
+    ui: bool,
     /// `emulators.singleProjectMode`: warn about requests naming another
     /// project (default true).
     #[arg(long = "single-project-mode", value_name = "BOOL")]
@@ -436,6 +444,10 @@ struct SuiteArgs {
     storage_buckets: Vec<String>,
     #[arg(long = "project-id")]
     project_id: String,
+    /// The `.firebaserc` alias the project was selected by (`--project
+    /// staging`): each Functions codebase also reads `.env.<alias>`.
+    #[arg(long = "project-alias")]
+    project_alias: Option<String>,
     /// Accepted for compatibility with earlier launchers; the owned Functions
     /// runtime no longer loads firebase-tools.
     #[arg(long = "firebase-tools-root", hide = true)]
@@ -524,10 +536,11 @@ fn run_state_command(arguments: &StateArgs) -> ExitCode {
     match firenook_suite_runtime::adopt_seed(&adopt.state_dir, &adopt.import) {
         Ok(adopted) => {
             println!(
-                "Recorded {} as the seed of {} ({} files).",
+                "Recorded {} as the seed of {} ({} {}).",
                 adopted.seed.display(),
                 adopt.state_dir.display(),
-                adopted.files
+                adopted.files,
+                if adopted.files == 1 { "file" } else { "files" }
             );
             if adopted.previous_seed != adopted.seed {
                 println!("It was imported from {}.", adopted.previous_seed.display());
@@ -572,13 +585,15 @@ fn grouped(count: u64) -> String {
 
 /// The store's own tables, in the order `state inspect` lists them, with
 /// their names for people; anything else follows under its own name.
-const LABELS: [(&str, &str); 7] = [
+const LABELS: [(&str, &str); 9] = [
     ("documents_v2", "Documents"),
-    ("field_equality_v1", "Field index"),
-    ("field_equality_v1_prefixes", "Field index names"),
+    ("field_order_v1", "Field index"),
+    ("field_order_v1_prefixes", "Field index names"),
     ("collections_v2", "Collection index"),
     ("collection_groups_v2", "Collection-group index"),
     ("metadata_v1", "Store metadata"),
+    ("field_equality_v1", "Old field index"),
+    ("field_equality_v1_prefixes", "Old field index names"),
     ("documents_v1", "Old documents table"),
 ];
 
@@ -678,7 +693,22 @@ fn extensions_inputs(
         node,
         offline,
         ui_origin: None,
+        services: firenook_functions_runtime::RunningServices::ALL,
     })
+}
+
+/// What `extensions vendor` loads with: offline when asked, so nothing
+/// absent from the shared cache is fetched.
+fn vendor_inputs(
+    vendor: &ExtensionsVendorArgs,
+) -> Result<firenook_suite_runtime::ExtensionsInputs, String> {
+    extensions_inputs(&vendor.project, offline_requested(vendor.offline))
+}
+
+/// `--offline`, or `FIRENOOK_OFFLINE=1` (or `true`) in the environment.
+fn offline_requested(flag: bool) -> bool {
+    flag || std::env::var("FIRENOOK_OFFLINE")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true"))
 }
 
 /// Resolves a bare command name through `PATH`.
@@ -730,7 +760,7 @@ fn run_extensions_command(arguments: &ExtensionsArgs) -> ExitCode {
             }
         }
         ExtensionsAction::Vendor(vendor) => {
-            let inputs = match extensions_inputs(&vendor.project, false) {
+            let inputs = match vendor_inputs(vendor) {
                 Ok(inputs) => inputs,
                 Err(error) => {
                     eprintln!("extensions vendor failed: {error}");
@@ -916,21 +946,24 @@ fn run_suite_runtime_inner(arguments: &SuiteArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // The lines of the outcome never panic: the launcher may be gone, and
+    // the exit code still says how the stop went.
+    let say = firenook_suite_runtime::terminal::err;
     match runtime.block_on(run_suite(config)) {
         Ok(outcome) if firenook_suite_runtime::terminal::enabled() => {
             match serde_json::to_value(&outcome) {
                 Ok(outcome) => firenook_suite_runtime::terminal::stopped(&outcome),
-                Err(error) => eprintln!("suite outcome failed to encode: {error}"),
+                Err(error) => say(&format!("suite outcome failed to encode: {error}")),
             }
             ExitCode::SUCCESS
         }
         Ok(outcome) => match serde_json::to_string(&outcome) {
             Ok(outcome) => {
-                eprintln!("firenook suite stopped cleanly: {outcome}");
+                say(&format!("firenook suite stopped cleanly: {outcome}"));
                 ExitCode::SUCCESS
             }
             Err(error) => {
-                eprintln!("suite outcome failed to encode: {error}");
+                say(&format!("suite outcome failed to encode: {error}"));
                 ExitCode::FAILURE
             }
         },
@@ -938,7 +971,7 @@ fn run_suite_runtime_inner(arguments: &SuiteArgs) -> ExitCode {
             if firenook_suite_runtime::terminal::enabled() {
                 firenook_suite_runtime::terminal::failed(&error.to_string());
             } else {
-                eprintln!("suite failed: {error}");
+                say(&format!("suite failed: {error}"));
             }
             ExitCode::FAILURE
         }
@@ -977,13 +1010,15 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
     let firestore_databases =
         resolve_firestore_databases(&config_dir, raw_config.firestore.as_ref())?;
     let ports = resolve_suite_ports(arguments, &raw_config.emulators);
-    let ui_enabled = !arguments.no_ui
-        && raw_config
-            .emulators
-            .ui
-            .as_ref()
-            .and_then(|ui| ui.enabled)
-            .unwrap_or(true);
+    // As the official CLI decides: --ui first, then emulators.ui.enabled.
+    let ui_enabled = arguments.ui
+        || (!arguments.no_ui
+            && raw_config
+                .emulators
+                .ui
+                .as_ref()
+                .and_then(|ui| ui.enabled)
+                .unwrap_or(true));
     Ok(SuiteConfig {
         host: arguments.host.clone(),
         allowed_hosts: arguments
@@ -993,6 +1028,10 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
             .filter(|name| !name.is_empty())
             .collect(),
         project_id: arguments.project_id.clone(),
+        project_alias: arguments
+            .project_alias
+            .clone()
+            .filter(|alias| !alias.is_empty()),
         services,
         ui_enabled,
         single_project_mode: arguments
@@ -1015,9 +1054,7 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
                 })?),
             }),
         },
-        offline: arguments.offline
-            || std::env::var("FIRENOOK_OFFLINE")
-                .is_ok_and(|value| matches!(value.as_str(), "1" | "true")),
+        offline: offline_requested(arguments.offline),
         node: absolute_path(&arguments.node)?,
         state_dir: absolute_path(&arguments.state_dir)?,
         resume_state: arguments.resume_state,
@@ -1122,29 +1159,42 @@ fn resolve_storage_rules(
     };
     let project_targets = firebase_rc.targets.get(project);
     let mut buckets = Vec::with_capacity(storage.len());
+    let mut default_bucket = None;
     for entry in storage {
-        let bucket = overrides.get(&entry.target).or_else(|| {
-            project_targets
+        // Every bucket `.firebaserc` names for the target gets its rules, as
+        // the official emulator gives them; `--storage-bucket` names one.
+        let named = match overrides.get(&entry.target) {
+            Some(bucket) => std::slice::from_ref(bucket),
+            None => project_targets
                 .and_then(|targets| targets.storage.get(&entry.target))
-                .and_then(|buckets| buckets.first())
-        });
-        let bucket = bucket.ok_or_else(|| {
-            format!(
-                "storage target {} has no bucket for {project}; pass --storage-bucket {}=<bucket>",
-                entry.target, entry.target
-            )
-        })?;
-        buckets.push(StorageBucketConfig {
+                .map_or(&[][..], Vec::as_slice),
+        };
+        if named.is_empty() {
+            // As officially, a demo project then ignores every target, those
+            // before this one included, for the default open rules; a real
+            // project cannot start.
+            if project.starts_with("demo-") {
+                return Ok((
+                    StorageRulesConfig::OpenDefaultIgnoringTargets,
+                    format!("{project}.appspot.com"),
+                ));
+            }
+            // The official `requireTarget` error, naming this CLI's command.
+            return Err(format!(
+                "Deploy target {target} not configured for project {project}. Configure with:\n\n  firenook target:apply storage {target} <resources...>\n\nor pass --storage-bucket {target}=<bucket>.",
+                target = entry.target
+            ));
+        }
+        if entry.target == "default" && default_bucket.is_none() {
+            default_bucket = named.first().cloned();
+        }
+        buckets.extend(named.iter().map(|bucket| StorageBucketConfig {
             bucket: bucket.clone(),
             rules: project_path(config_dir, &entry.rules),
-        });
+        }));
     }
-    let default_bucket = storage
-        .iter()
-        .position(|entry| entry.target == "default")
-        .and_then(|index| buckets.get(index))
-        .or_else(|| buckets.first())
-        .map(|bucket| bucket.bucket.clone())
+    let default_bucket = default_bucket
+        .or_else(|| buckets.first().map(|bucket| bucket.bucket.clone()))
         .ok_or_else(|| "firebase.json configures no Storage buckets".to_owned())?;
     Ok((StorageRulesConfig::PerBucket(buckets), default_bucket))
 }
@@ -1675,7 +1725,8 @@ fn open_seeded_store(arguments: &FirestoreArgs) -> Result<Store, String> {
         let count = seed_store_from_export(&store, path, arguments.project_id.as_deref())
             .map_err(|error| format!("Firestore import failed: {error}"))?;
         eprintln!(
-            "firenook imported {count} documents from {}",
+            "firenook imported {count} {} from {}",
+            if count == 1 { "document" } else { "documents" },
             path.display()
         );
     }
@@ -2203,6 +2254,131 @@ mod tests {
     }
 
     #[test]
+    fn the_project_alias_reaches_the_functions_runtime() {
+        let project = std::env::temp_dir().join(format!(
+            "firenook-cli-alias-{}-{}",
+            std::process::id(),
+            TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&project).expect("project");
+        fs::write(project.join("firebase.json"), "{}").expect("firebase.json");
+        let project_dir = project.display().to_string();
+        let state = project.join("state").display().to_string();
+        let base = [
+            "firenook",
+            "suite",
+            "--project-dir",
+            &project_dir,
+            "--project-id",
+            "demo-alias",
+            "--node",
+            "node",
+            "--state-dir",
+            &state,
+        ];
+        let resolve = |extra: &[&str]| {
+            let cli = Cli::try_parse_from(base.iter().copied().chain(extra.iter().copied()))
+                .expect("suite command should parse");
+            let Command::Suite(arguments) = cli.command else {
+                panic!("expected suite command");
+            };
+            resolve_suite_config(&arguments).expect("resolved")
+        };
+        assert_eq!(
+            resolve(&["--project-alias", "staging"])
+                .project_alias
+                .as_deref(),
+            Some("staging")
+        );
+        assert_eq!(resolve(&[]).project_alias, None);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn extensions_vendor_takes_offline() {
+        let parse = |extra: &[&str]| {
+            let cli = Cli::try_parse_from(
+                [
+                    "firenook",
+                    "extensions",
+                    "vendor",
+                    "--project-id",
+                    "demo-shop",
+                ]
+                .into_iter()
+                .chain(extra.iter().copied()),
+            )
+            .expect("vendor should parse");
+            let Command::Extensions(ExtensionsArgs {
+                action: ExtensionsAction::Vendor(vendor),
+            }) = cli.command
+            else {
+                panic!("expected extensions vendor");
+            };
+            vendor
+        };
+        let offline = parse(&["--offline"]);
+        assert!(offline.offline);
+        assert!(vendor_inputs(&offline).expect("inputs").offline);
+        assert!(!parse(&[]).offline);
+        assert_eq!(parse(&["--instance", "stripe"]).instances, ["stripe"]);
+    }
+
+    #[test]
+    fn ui_starts_the_console_that_firebase_json_turns_off() {
+        let project = std::env::temp_dir().join(format!(
+            "firenook-cli-ui-{}-{}",
+            std::process::id(),
+            TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&project).expect("project");
+        fs::write(
+            project.join("firebase.json"),
+            r#"{"emulators":{"ui":{"enabled":false}}}"#,
+        )
+        .expect("firebase.json");
+        let project_dir = project.display().to_string();
+        let state = project.join("state").display().to_string();
+        let parse = |extra: &[&str]| {
+            Cli::try_parse_from(
+                [
+                    "firenook",
+                    "suite",
+                    "--project-dir",
+                    &project_dir,
+                    "--project-id",
+                    "demo-ui",
+                    "--node",
+                    "node",
+                    "--state-dir",
+                    &state,
+                ]
+                .into_iter()
+                .chain(extra.iter().copied()),
+            )
+        };
+        let resolve = |extra: &[&str]| {
+            let Command::Suite(arguments) = parse(extra).expect("parsed").command else {
+                panic!("expected suite command");
+            };
+            resolve_suite_config(&arguments).expect("resolved")
+        };
+        assert!(!resolve(&[]).ui_enabled, "firebase.json turns it off");
+        assert!(
+            resolve(&["--ui"]).ui_enabled,
+            "--ui comes first, as officially"
+        );
+        assert!(
+            parse(&["--ui", "--no-ui"]).is_err(),
+            "the two are exclusive"
+        );
+        fs::write(project.join("firebase.json"), "{}").expect("firebase.json");
+        assert!(resolve(&[]).ui_enabled);
+        assert!(!resolve(&["--no-ui"]).ui_enabled);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
     fn duplicate_suite_storage_targets_are_rejected() {
         let values = vec!["default=a".to_owned(), "default=b".to_owned()];
         assert!(parse_storage_overrides(&values).is_err());
@@ -2503,6 +2679,119 @@ mod tests {
             targets.storage,
             Some(FirebaseStorageSection::Targets(ref entries)) if entries.len() == 1
         ));
+    }
+
+    /// `.firebaserc` may map a Storage target to several buckets; the
+    /// official emulator gives every one of them the target's rules
+    /// (`getStorageRulesConfig` maps each resource of the target).
+    #[test]
+    fn a_storage_target_governs_every_bucket_it_names() {
+        let config: FirebaseProjectConfig = serde_json::from_str(
+            r#"{ "storage": [
+                { "target": "media", "rules": "media.rules" },
+                { "target": "default", "rules": "storage.rules" }
+            ] }"#,
+        )
+        .expect("targets storage config");
+        let firebase_rc: FirebaseRc = serde_json::from_str(
+            r#"{ "targets": { "demo-media": { "storage": {
+                "media": ["demo-media-images", "demo-media-video"],
+                "default": ["demo-media.appspot.com"]
+            } } } }"#,
+        )
+        .expect(".firebaserc with targets parses");
+        let resolve = |overrides: &BTreeMap<String, String>| {
+            resolve_storage_rules(
+                std::path::Path::new("/project"),
+                config.storage.as_ref(),
+                &firebase_rc,
+                "demo-media",
+                overrides,
+                true,
+            )
+            .expect("targets resolve")
+        };
+        let bucket = |bucket: &str, rules: &str| StorageBucketConfig {
+            bucket: bucket.to_owned(),
+            rules: PathBuf::from(format!("/project/{rules}")),
+        };
+        let (rules, default_bucket) = resolve(&BTreeMap::new());
+        assert_eq!(
+            rules,
+            StorageRulesConfig::PerBucket(vec![
+                bucket("demo-media-images", "media.rules"),
+                bucket("demo-media-video", "media.rules"),
+                bucket("demo-media.appspot.com", "storage.rules"),
+            ])
+        );
+        assert_eq!(default_bucket, "demo-media.appspot.com");
+        // `--storage-bucket target=bucket` names the one bucket instead.
+        let (rules, _) = resolve(&BTreeMap::from([(
+            "media".to_owned(),
+            "demo-media-local".to_owned(),
+        )]));
+        assert_eq!(
+            rules,
+            StorageRulesConfig::PerBucket(vec![
+                bucket("demo-media-local", "media.rules"),
+                bucket("demo-media.appspot.com", "storage.rules"),
+            ])
+        );
+    }
+
+    /// A demo project whose Storage target `.firebaserc` maps to no bucket
+    /// starts on the official emulator: every target is ignored and the
+    /// default open rules govern every bucket (`getStorageRulesConfig`
+    /// returns them at the first unmapped target, whatever came before).
+    /// A real project refuses to start, officially too.
+    #[test]
+    fn a_demo_project_ignores_storage_targets_without_buckets() {
+        let config: FirebaseProjectConfig = serde_json::from_str(
+            r#"{ "storage": [
+                { "target": "media", "rules": "media.rules" },
+                { "target": "other", "rules": "other.rules" }
+            ] }"#,
+        )
+        .expect("targets storage config");
+        let resolve = |rc: &str, project: &str, overrides: &BTreeMap<String, String>| {
+            let firebase_rc: FirebaseRc = serde_json::from_str(rc).expect(".firebaserc parses");
+            resolve_storage_rules(
+                std::path::Path::new("/project"),
+                config.storage.as_ref(),
+                &firebase_rc,
+                project,
+                overrides,
+                true,
+            )
+        };
+        let ignored = Ok((
+            StorageRulesConfig::OpenDefaultIgnoringTargets,
+            "demo-media.appspot.com".to_owned(),
+        ));
+        let none = BTreeMap::new();
+        // No `.firebaserc` targets at all; one target mapped and the other
+        // not, in either order.
+        assert_eq!(resolve("{}", "demo-media", &none), ignored);
+        for mapped in ["media", "other"] {
+            let rc = format!(
+                r#"{{ "targets": {{ "demo-media": {{ "storage": {{ "{mapped}": ["demo-media-images"] }} }} }} }}"#
+            );
+            assert_eq!(resolve(&rc, "demo-media", &none), ignored, "{mapped}");
+        }
+        // Every target has a bucket, from `.firebaserc` or `--storage-bucket`.
+        let both = BTreeMap::from([
+            ("media".to_owned(), "demo-media-images".to_owned()),
+            ("other".to_owned(), "demo-media-other".to_owned()),
+        ]);
+        assert!(matches!(
+            resolve("{}", "demo-media", &both),
+            Ok((StorageRulesConfig::PerBucket(ref buckets), _)) if buckets.len() == 2
+        ));
+        let refused = resolve("{}", "real-media-project", &none).expect_err("a real project");
+        assert!(
+            refused.starts_with("Deploy target media not configured for project real-media-project. Configure with:\n\n  firenook target:apply storage media <resources...>"),
+            "{refused}"
+        );
     }
 
     #[test]

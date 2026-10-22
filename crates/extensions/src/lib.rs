@@ -6,10 +6,13 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use firenook_functions_runtime::{Definition, ExtensionBackend, LogEvent, LogSink, dotenv};
+use firenook_functions_runtime::{
+    Definition, ExtensionBackend, LogEvent, LogSink, RunningServices, dotenv,
+};
 use serde_json::{Map, Value};
 
 pub mod control;
+pub mod home;
 pub mod params;
 pub mod refs;
 pub mod registry;
@@ -64,6 +67,9 @@ pub struct ExtensionsConfig {
     /// console links in POSTINSTALL content are rewritten to it, or to
     /// `unknown` like the official emulator without a UI.
     pub ui_origin: Option<String>,
+    /// The services the suite starts: an instance with a trigger on another
+    /// is left out, as officially (`checkForUnemulatedTriggerTypes`).
+    pub services: RunningServices,
 }
 
 /// One resolved instance before it becomes a backend.
@@ -150,7 +156,7 @@ pub async fn load_outcome(
         loaded.push(to_backend(config, &client, instance, log).await?);
     }
     warn_unemulated_apis(config, &loaded, log);
-    let (loaded, dropped) = filter_unemulated_triggers(loaded, log);
+    let (loaded, dropped) = filter_unemulated_triggers(loaded, config.services, log);
     Ok(LoadOutcome { loaded, dropped })
 }
 
@@ -180,7 +186,7 @@ pub async fn load_instance(
     );
     let instance = want_one(config, &client, &project_params, instance_id, &written, log).await?;
     let loaded = to_backend(config, &client, &instance, log).await?;
-    let services = unemulated_services(&loaded);
+    let services = unemulated_services(&loaded, config.services);
     if !services.is_empty() {
         let list = services.join(", ");
         return Err(ExtensionsError(format!(
@@ -191,8 +197,8 @@ pub async fn load_instance(
 }
 
 /// `Constants.getServiceName` of each service an instance triggers on that
-/// the suite does not emulate.
-fn unemulated_services(extension: &LoadedExtension) -> Vec<String> {
+/// the suite does not emulate, or does not start (`--only`).
+fn unemulated_services(extension: &LoadedExtension, running: RunningServices) -> Vec<String> {
     let mut services: Vec<String> = Vec::new();
     for definition in &extension.backend.definitions {
         if definition.https_trigger().is_some() || definition.event_trigger().is_none() {
@@ -203,8 +209,11 @@ fn unemulated_services(extension: &LoadedExtension) -> Vec<String> {
             "firestore.googleapis.com"
             | "pubsub.googleapis.com"
             | "firebaseauth.googleapis.com"
-            | "storage.googleapis.com"
-            | "eventarc.googleapis.com" => continue,
+            | "storage.googleapis.com" => match running.missing(&service) {
+                Some(name) => name.to_owned(),
+                None => continue,
+            },
+            "eventarc.googleapis.com" => continue,
             "firebaseio.com" => "database".to_owned(),
             "app-measurement.com" => "analytics".to_owned(),
             "crashlytics.googleapis.com" => "crashlytics".to_owned(),
@@ -222,15 +231,17 @@ fn unemulated_services(extension: &LoadedExtension) -> Vec<String> {
 
 /// `filterUnemulatedTriggers`: an instance with a trigger on a service the
 /// suite does not emulate (Realtime Database, or anything outside the
-/// emulated set) is dropped whole, with the official warnings.
+/// emulated set) or does not start is dropped whole, with the official
+/// warnings.
 fn filter_unemulated_triggers(
     loaded: Vec<LoadedExtension>,
+    running: RunningServices,
     log: &LogSink,
 ) -> (Vec<LoadedExtension>, Vec<DroppedExtension>) {
     let mut kept = Vec::with_capacity(loaded.len());
     let mut dropped = Vec::new();
     for extension in loaded {
-        let services = unemulated_services(&extension);
+        let services = unemulated_services(&extension, running);
         if services.is_empty() {
             kept.push(extension);
             continue;
@@ -814,7 +825,8 @@ fn warn_unemulated_apis(config: &ExtensionsConfig, loaded: &[LoadedExtension], l
 }
 
 /// Vendors one ref into the project: copies the cached source (downloading
-/// it first when absent), writes the sidecar and records the resolution.
+/// it first when absent, unless `config.offline`), writes the sidecar and
+/// records the resolution.
 pub async fn vendor(
     config: &ExtensionsConfig,
     instance_id: &str,
@@ -835,8 +847,13 @@ pub async fn vendor(
     let target = source::source_path(&source::vendor_directory(&config.project_dir), &reference)?;
     if origin != SourceOrigin::Vendored {
         source::copy_tree(&directory, &target)?;
+    }
+    // The copy holds the sidecar under its current name only, whatever the
+    // cache or an earlier vendoring wrote.
+    if origin != SourceOrigin::Vendored || !target.join(source::REGISTRY_SIDECAR).is_file() {
         source::write_sidecar(&target, &sidecar)?;
     }
+    source::remove_legacy_sidecar(&target)?;
     source::record_vendored_version(&config.project_dir, written, &resolved)?;
     Ok(target)
 }
@@ -1000,6 +1017,7 @@ mod tests {
             credential: None,
             offline: true,
             ui_origin: None,
+            services: RunningServices::ALL,
         }
     }
 
@@ -1175,6 +1193,130 @@ mod tests {
             error.0,
             "Errors while reading 'extensions' in 'firebase.json'\n- No params file found for synthetic"
         );
+    }
+
+    /// A registry source for `invertase/firestore-stripe-payments@0.3.12`
+    /// (one Auth trigger) under `root`, with its sidecar under `sidecar`.
+    fn stripe_source(root: &Path, sidecar: &str) -> PathBuf {
+        let directory = root.join("invertase/firestore-stripe-payments@0.3.12");
+        std::fs::create_dir_all(directory.join("functions")).unwrap();
+        std::fs::write(
+            directory.join("extension.yaml"),
+            "name: firestore-stripe-payments\n",
+        )
+        .unwrap();
+        std::fs::write(directory.join("functions/package.json"), "{}").unwrap();
+        let text = serde_json::json!({
+            "extension": { "name": "publishers/invertase/extensions/firestore-stripe-payments" },
+            "extensionVersion": {
+                "name": "publishers/invertase/extensions/firestore-stripe-payments/versions/0.3.12",
+                "spec": { "name": "firestore-stripe-payments", "version": "0.3.12", "resources": [
+                    { "name": "createCustomer", "type": "firebaseextensions.v1beta.function", "propertiesYaml": "location: ${param:LOCATION}\neventTrigger:\n  eventType: providers/firebase.auth/eventTypes/user.create\n  resource: projects/${param:PROJECT_ID}\n" }
+                ], "params": [{ "param": "LOCATION", "type": "select" }] }
+            }
+        });
+        std::fs::write(directory.join(sidecar), text.to_string()).unwrap();
+        directory
+    }
+
+    fn stripe_project(directory: &Path) -> ExtensionsConfig {
+        std::fs::create_dir_all(directory.join("extensions")).unwrap();
+        std::fs::write(
+            directory.join("extensions/stripe.env"),
+            "LOCATION=us-central1\n",
+        )
+        .unwrap();
+        config(
+            directory,
+            vec![(
+                "stripe".to_owned(),
+                "invertase/firestore-stripe-payments@0.3.12".to_owned(),
+            )],
+        )
+    }
+
+    #[tokio::test]
+    async fn an_instance_triggering_on_a_service_the_suite_does_not_start_is_left_out() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = stripe_project(directory.path());
+        stripe_source(&config.cache_dir, source::REGISTRY_SIDECAR);
+        let (log, events) = LogSink::recording();
+        let outcome = load_outcome(&config, &log).await.unwrap();
+        assert_eq!(outcome.loaded.len(), 1);
+        // `--only functions,firestore`: the Auth emulator is not started.
+        config.services = RunningServices {
+            auth: false,
+            ..RunningServices::ALL
+        };
+        let outcome = load_outcome(&config, &log).await.unwrap();
+        assert!(outcome.loaded.is_empty());
+        assert_eq!(
+            outcome.dropped,
+            [DroppedExtension {
+                instance_id: "stripe".to_owned(),
+                written: "invertase/firestore-stripe-payments@0.3.12".to_owned(),
+                services: vec!["auth".to_owned()],
+            }]
+        );
+        let warnings: Vec<String> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event.level == "WARN")
+            .map(|event| format!("{}:{}", event.label, event.message))
+            .collect();
+        assert!(
+            warnings.contains(&"extensions[stripe]: ignored becuase it includes auth triggered functions, and the auth emulator does not exist or is not running.".to_owned()),
+            "{warnings:#?}"
+        );
+        let refused = load_instance(&config, "stripe", &log).await.unwrap_err();
+        assert!(
+            refused
+                .0
+                .contains("the auth emulator does not exist or is not running")
+        );
+    }
+
+    #[tokio::test]
+    async fn vendoring_offline_copies_the_cache_and_writes_only_the_current_sidecar() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = stripe_project(directory.path());
+        config.offline = true;
+        let (log, _events) = LogSink::recording();
+        let written = "invertase/firestore-stripe-payments@0.3.12";
+        // Nothing cached: offline never asks the registry, and says so.
+        let error = vendor(&config, "stripe", written, &log).await.unwrap_err();
+        assert!(
+            error.0.contains("is not vendored under") && error.0.contains("with network access"),
+            "{}",
+            error.0
+        );
+        // A source cached under the former name of the sidecar is read,
+        // vendored, and the copy holds the sidecar under its current name.
+        let cached = stripe_source(&config.cache_dir, source::LEGACY_REGISTRY_SIDECAR);
+        assert!(source::read_sidecar(&cached).is_some());
+        let target = vendor(&config, "stripe", written, &log).await.unwrap();
+        assert!(target.join(source::REGISTRY_SIDECAR).is_file());
+        assert!(!target.join(source::LEGACY_REGISTRY_SIDECAR).exists());
+        assert!(
+            cached.join(source::LEGACY_REGISTRY_SIDECAR).is_file(),
+            "the cache is left as it is"
+        );
+        let loaded = load(&config, &log).await.unwrap();
+        assert_eq!(loaded[0].origin, SourceOrigin::Vendored);
+        // A project vendored under the former name is brought up to date.
+        std::fs::remove_dir_all(&target).unwrap();
+        stripe_source(
+            &source::vendor_directory(directory.path()),
+            source::LEGACY_REGISTRY_SIDECAR,
+        );
+        assert_eq!(
+            load(&config, &log).await.unwrap()[0].origin,
+            SourceOrigin::Vendored
+        );
+        let target = vendor(&config, "stripe", written, &log).await.unwrap();
+        assert!(target.join(source::REGISTRY_SIDECAR).is_file());
+        assert!(!target.join(source::LEGACY_REGISTRY_SIDECAR).exists());
     }
 
     #[tokio::test]
