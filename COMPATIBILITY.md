@@ -1,8 +1,8 @@
-# Preview compatibility
+# Compatibility
 
 Firenook is not yet a universal Firebase Emulator Suite replacement.
 
-| Surface | Current preview | Not claimed |
+| Surface | 0.2.0 | Not claimed |
 | --- | --- | --- |
 | Firestore | Native/Admin and browser SDK paths, rules, realtime targets, disk/WAL, official-format import/export, named databases with per-database rules | Every production feature, edition or arbitrary client version |
 | Auth | Every operation the official Auth emulator implements (61), replayed from a 1068-step oracle corpus and an 18-step custom-claims-limit corpus with parity: password, anonymous, custom token, email link, phone, fake IdP (Google/Apple/SAML/OIDC-shaped credentials), account update/delete, OOB and phone codes, session cookies, tenants, SMS MFA, passkeys, Admin batch create/get/delete/query, project and tenant configuration, emulator inspection routes, legacy `relyingparty` routes, blocking functions and lifecycle triggers, official-format export/import, the local popup/redirect helper pages | Anything the official emulator itself answers with 501 (IdP/SAML/OIDC provider configuration, `initializeAuth`, IAM on tenants, Game Center, reCAPTCHA enforcement, TOTP MFA); real email/SMS delivery; production token verification |

@@ -1,7 +1,7 @@
 # Security boundaries
 
-This is a local development emulator preview, not a production database or
-network sandbox. Use synthetic accounts and demo projects. Do not expose its
+This is a local development emulator, not a production database or network
+sandbox. Use synthetic accounts and demo projects. Do not expose its
 ports publicly or import production credentials. User Functions may make
 outbound requests independently of the emulator.
 
@@ -68,7 +68,7 @@ The oracle versions have not been silently changed or force-downgraded to make
 an audit summary green. Updates require a separate pinned compatibility check.
 Before publication, refresh both audits and review remaining findings. The
 registry's suggested automatic fixes included breaking version changes; none
-was applied. This preview does not claim a zero-advisory dependency closure.
+was applied. This release does not claim a zero-advisory dependency closure.
 Relevant advisories:
 [OpenTelemetry](https://github.com/advisories/GHSA-8988-4f7v-96qf),
 [qs](https://github.com/advisories/GHSA-4mjr-xmp4-gh2g),

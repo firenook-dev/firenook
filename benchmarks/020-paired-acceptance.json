@@ -1,0 +1,325 @@
+{
+  "schemaVersion": 1,
+  "name": "020-paired-acceptance",
+  "frozen": true,
+  "frozenAt": "2026-10-22",
+  "release": "0.2.0",
+  "engine": "bbd437e754a4c14c5ab5d37e01843930f5a9bade",
+  "releaseCommit": "the merge of the 0.2.0 release pull request, tagged npm-v0.2.0",
+  "candidate": "firenook 0.2.0 built from bbd437e754a4c14c5ab5d37e01843930f5a9bade as a local package (installed-package launcher, the release's own build and packing scripts), linux-x64 binary sha256 95c187e2835fb95cbdd3920d6476eefcbdc5d1386114798c876b99bea42d26c1; the published 0.2.0 is built from the same tree",
+  "harness": "0bfe1e06f22400aa89db33e471007b1036c3b79d (private harness; the attempt-14 harness unchanged, run as listed under harnessChanges)",
+  "host": "the private acceptance host (AMD Ryzen 5 3600, 12 cpu, 64 GiB, NVMe RAID1/ext4, Ubuntu 24.04, Linux 6.8.0-139-generic); one emulator at a time; official emulator on untuned HotSpot defaults (JAVA_TOOL_OPTIONS empty, heap up to a quarter of RAM) with Java 26.0.2.1 and firebase-tools 15.22.0; the Firenook stack ran without Java and without firebase-tools; Node 24.20.0",
+  "pairedAcceptance": {
+    "attempt": 17,
+    "completedAt": "2026-10-22T10:46:19.518Z",
+    "result": "PASS (result.passed, controller/smoke/full exit 0; 95 evidence checksums re-verified by an independent audit that re-derives every percentile and memory peak from the raw samples and asserts the candidate, binary, seed and consumer pins)",
+    "workload": "sequential official then Firenook: cheap smoke, 7,200 s app-shaped soak (two busy sessions plus an idle observer), export/restart, nine browser journeys before and after restart, then a fresh checkout on the default backend and on the documented official fallback; the attempt-14 workload unchanged",
+    "stableStateParity": "1 Auth user, 211,205 Firestore documents and 33,352 stable Storage objects (6,688,940,031 bytes) on both stacks after every soak, journey set and restart",
+    "soakCounts": "both soaks exact: 480 catalogue reads, 240 function dispatches, 1,440 gateway writes, 960 status writes, 2,880 token batches (57,600 token writes), 240 Storage cycles, observer 240 + 120; 0 errors, 0 stalls, 0 acknowledged-state mismatches, 0 duplicate effects",
+    "soakP50P99Milliseconds": {
+      "writeCommit": {
+        "official": "208.2 / 279.8",
+        "firenook": "5.1 / 50.6",
+        "samples": 5280
+      },
+      "listenerDelivery": {
+        "official": "209 / 258",
+        "firenook": "11 / 60",
+        "samples": 60000,
+        "gaps": 0
+      },
+      "functionDelivery": {
+        "official": "3.80 / 8.02",
+        "firenook": "3.11 / 4.49",
+        "samples": 240
+      },
+      "catalogRead": {
+        "official": "33.1 / 44.1",
+        "firenook": "6.6 / 31.0",
+        "samples": 480
+      },
+      "storageCycle": {
+        "official": "17.8 / 26.8",
+        "firenook": "8.6 / 11.8",
+        "samples": 240
+      },
+      "observerCatalogRead": {
+        "official": "32.6 / 43.8",
+        "firenook": "7.1 / 30.9",
+        "samples": 240
+      },
+      "observerStorageCycle": {
+        "official": "20.3 / 31.5",
+        "firenook": "7.6 / 11.6",
+        "samples": 120
+      }
+    },
+    "storageStagesP50P99Milliseconds": {
+      "upload": {
+        "official": "6.00 / 14.70",
+        "firenook": "2.90 / 4.43"
+      },
+      "metadata": {
+        "official": "2.88 / 12.80",
+        "firenook": "1.50 / 2.21"
+      },
+      "download": {
+        "official": "2.12 / 4.31",
+        "firenook": "2.30 / 5.01"
+      },
+      "delete": {
+        "official": "2.27 / 3.47",
+        "firenook": "1.96 / 2.65"
+      }
+    },
+    "memory": {
+      "peakEmulatorPssGiB": {
+        "official": 22.57,
+        "firenook": 2.11,
+        "reductionPercent": 90.7,
+        "process": "the emulator by name: java (official) and firenook; the consumer's web server is the largest process of the Firenook stack, so the top process is not the emulator"
+      },
+      "emulatorPssFirstToLastSampleGiB": {
+        "official": "15.42 -> 22.57",
+        "firenook": "1.64 -> 1.67"
+      },
+      "peakStackPssGiB": {
+        "official": 38.83,
+        "firenook": 17.43,
+        "reductionPercent": 55.1
+      },
+      "consumerWebServerPssGiB": {
+        "official": 12.13,
+        "firenook": 12.09,
+        "note": "the same on both stacks; 7.4 GiB in the attempt-14 run, at an earlier consumer revision"
+      },
+      "stackGrowthGiBPerHour": {
+        "official": 3.16,
+        "firenook": 0.04
+      },
+      "swap": "swap emptied before each stack started; the official stack then held 7.7 GB of swap at the start of its soak and paged out 765,740 more pages during it; the Firenook stack held 1.6 GB and paged out 0"
+    },
+    "cpuAndDisk": {
+      "emulatorCpuSeconds": {
+        "official": 1586,
+        "firenook": 616
+      },
+      "emulatorAverageCores": {
+        "official": 0.22,
+        "firenook": 0.09
+      },
+      "hostBytesWrittenDuringSoak": {
+        "official": 3662090240,
+        "firenook": 1828802560,
+        "note": "whole host; the official emulator keeps its data in memory until it exports, Firenook makes every acknowledged write durable within a second"
+      }
+    },
+    "lifecycleSeconds": {
+      "initialReadiness": {
+        "official": 86.48,
+        "firenook": 55.69,
+        "note": "application readiness including the consumer's own builds and probes; both stacks import the seed"
+      },
+      "restartReadiness": {
+        "official": 86.78,
+        "firenook": 42.85,
+        "note": "both stacks import the export taken after the soak"
+      },
+      "lastEmulatorPortOpen": {
+        "official": "45.7 / 66.8",
+        "firenook": "43.3 / 34.7",
+        "note": "initial / restart; Firenook binds every listener once ready, after the import and its ordered index; the consumer's web server compiles at the same time"
+      },
+      "exportAndShutdownAfterSoak": {
+        "official": 79.75,
+        "firenook": 29.61
+      },
+      "exportAndShutdownAfterRestart": {
+        "official": 68.11,
+        "firenook": 28.07
+      },
+      "freshCheckoutReadiness": {
+        "officialFallback": 100.62,
+        "firenookDefault": 64.84
+      }
+    },
+    "browserJourneys": "36/36 passes (nine journeys, both stacks, before and after restart), 0 page errors, 0 request failures; the catalogue journey still ends on the watcher's heartbeat on Firenook (89.6 / 97.2 s against 31.5 / 31.6 official) because the frozen runner's synthetic stimulus lacks the observer's filter field: the official emulator notifies a listener for a document its filter excludes, Firenook does not (recorded since the next.4 qualification; not an emulator latency)",
+    "regressions": "11/11 harness, engine (cargo fmt, clippy --all-features --all-targets, cargo test), packaging and consumer build commands exit 0",
+    "comparedWithAttempt14": "official medians agree within noise (write 202.8 -> 208.2 ms, listener 203 -> 209 ms). Firenook (0.2.0-next.6 -> 0.2.0): write p50 5.3 -> 5.1 ms, listener p50 11 -> 11 ms, catalogue read p50 6.9 -> 6.6 ms, emulator peak 2.16 -> 2.11 GiB"
+  },
+  "harnessChanges": {
+    "unchangedFromAttempt14": "the harness revision, contract, workload, seed and runner of the 0.2.0-next.6 run (attempt 14); the consumer application moved to a later revision, the same on both stacks",
+    "emptyBuildCache": "every stack starts the consumer's web server with an empty build cache before the smoke and again before the full run, after attempt 15 failed on a stale cache (the official stack's login page answered 404)",
+    "hostDisk": "attempt 16 passed both soaks and restarts, then the fresh-checkout preflight found 66.9 GB free against the manifest's 80 GB minimum; the host was given room and the run repeated unchanged as attempt 17",
+    "stopSignal": "the harness stops Firenook with SIGINT to the engine, so the launcher reports an unexpected exit (code 1) after a clean stop; the data closes cleanly and the next start needs no repair (follow-up below)",
+    "criteriaWeakened": false
+  },
+  "standalone": {
+    "scope": "after the paired run, on the same host: Firestore, Auth and Storage only, the same seed, no consumer application, one emulator at a time",
+    "lifecycle": {
+      "firenook": {
+        "firstStartImportSeconds": 28.25,
+        "resumedStartSeconds": [
+          0.59,
+          0.59,
+          0.59
+        ],
+        "stopSeconds": [
+          0.263,
+          0.072,
+          0.053,
+          0.056
+        ],
+        "pssAtReadyGiB": "0.48 first, 0.16 resumed",
+        "repairNeededAfterStop": false
+      },
+      "official": {
+        "firstStartImportSeconds": 56.73,
+        "startAgainImportingItsExportSeconds": [
+          30.8,
+          31.7,
+          30.67
+        ],
+        "stopWithExportSeconds": [
+          54.3,
+          57.75,
+          54.94,
+          58.15
+        ],
+        "pssAtReadyGiB": "6.93 first, 11.91 after the query shapes",
+        "exportBytes": 8181403866
+      },
+      "next8FirstStartImportSeconds": 29.38
+    },
+    "upgradeFromNext8": {
+      "store": "211,202 documents written by 0.2.0-next.8 (3.3 GB)",
+      "firstStartSeconds": 8,
+      "startsAfterSeconds": [
+        0.61,
+        0.61
+      ],
+      "note": "the first start builds the ordered index once (7.4 s of the 8.0 s); 0.2.0-next.8 opens a store 0.2.0 wrote and builds its own index again"
+    },
+    "queryShapes": {
+      "runs": "26 shapes, one warm-up and 25 timed runs each, over gRPC against Firestore holding the seed; three rounds on 0.2.0 (median shown), one on the official emulator and one on 0.2.0-next.8",
+      "identicalAnswers": "28/28 (each shape's documents in the same order with the same data, plus four walks over a whole collection that the ordered index serves)",
+      "firenookFaster": 25,
+      "ties": 1,
+      "officialFaster": 0,
+      "shapesTheOfficialEmulatorWonInTheNext6RunP50Milliseconds": {
+        "orderBy an integer field limit 20": {
+          "official": 96.27,
+          "next8": 177.355,
+          "firenook": 12.02
+        },
+        "orderBy a timestamp desc limit 20": {
+          "official": 109.44,
+          "next8": 198.195,
+          "firenook": 24.7
+        },
+        "range on an integer field limit 20": {
+          "official": 95.53,
+          "next8": 174.37,
+          "firenook": 13.22
+        },
+        "equality plus orderBy on another field": {
+          "official": 99.32,
+          "next8": 107.03,
+          "firenook": 14.71
+        },
+        "five cursor pages of 20 ordered by an integer field": {
+          "official": 488.83,
+          "next8": 874.52,
+          "firenook": 74.77
+        },
+        "batch get 50 ids": {
+          "official": 80.64,
+          "next8": 115.34,
+          "firenook": 43.8
+        }
+      },
+      "note": "the tie reads 500 document ids with no fields; each document is read whole before its fields are dropped"
+    },
+    "grownStore": {
+      "documentsWritten": 2500000,
+      "writtenBy": "0.2.0-next.8",
+      "writeSeconds": 551.4,
+      "totalDocuments": 2711202,
+      "firestoreFileBytes": 7398756352,
+      "firenookFirstStartSeconds": 49.94,
+      "firenookReadySeconds": [
+        0.62,
+        0.61,
+        0.62
+      ],
+      "next8ReadySeconds": [
+        0.57,
+        0.55
+      ],
+      "eventQueriesP50Milliseconds": {
+        "events orderBy createdAt desc limit 20": {
+          "firenook": 4.3,
+          "next8": 5128.15,
+          "officialXmx24g": 8549.83
+        },
+        "events where sequence > 2,000,000 limit 20": {
+          "firenook": 3.19,
+          "next8": 4023,
+          "officialXmx24g": 8204.63
+        },
+        "events where sessionId == + orderBy sequence desc limit 20": {
+          "firenook": 5.62,
+          "next8": 5.42,
+          "officialXmx24g": 14123.64
+        },
+        "events where sessionId == limit 20": {
+          "firenook": 3.36,
+          "next8": 4.28,
+          "officialXmx24g": 27562.11
+        }
+      },
+      "officialDefaults": "ready in 50.34 s at 14.98 GiB, then out of memory loading the data at the first query, which failed after 3 minutes",
+      "officialXmx24g": "ready in 55.18 s, 21.21 -> 25.02 GiB",
+      "officialExportBytes": 9813406336
+    },
+    "writeAB": {
+      "rounds": "next.8, 0.2.0, next.8, 0.2.0, each on a fresh copy of the seeded store: 2,000 sequential writes each confirmed by a listener, then 4,000 writes from eight concurrent writers",
+      "commitP50P99Milliseconds": {
+        "next8": [
+          "0.67 / 1.33",
+          "0.61 / 1.32"
+        ],
+        "v020": [
+          "0.67 / 1.17",
+          "0.62 / 1.12"
+        ]
+      },
+      "listenerP50Milliseconds": {
+        "next8": [
+          0.74,
+          0.66
+        ],
+        "v020": [
+          0.73,
+          0.68
+        ]
+      },
+      "eightWritersPerSecond": {
+        "next8": [
+          2919,
+          3139
+        ],
+        "v020": [
+          3078,
+          3374
+        ]
+      },
+      "result": "keeping the ordered index did not slow writes"
+    }
+  },
+  "followUps": [
+    "a clean engine exit (code 0) without a launcher signal is reported as unexpected; the launcher should treat it as a stop",
+    "select() with no fields still reads each document whole (the one query shape that ties)"
+  ],
+  "evidence": "private acceptance report, attempt 17 (audit summary, per-lane timelines, 95 checksummed evidence files) and the standalone results (lifecycle, upgrade, query shapes and answers, grown store, write A/B)"
+}

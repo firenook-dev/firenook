@@ -60,9 +60,10 @@ for more, and starts it in AlmaLinux 8, Debian 11, Ubuntu 22.04 and
 node:24-slim containers. Behaviour is pinned to the official emulator by
 recorded conformance fixtures that every pull request replays. Releases are
 also run side by side with the official emulator under a real application's
-workload (the [benchmarks](benchmarks.md) come from the 0.2.0-next.6 run). Publication needs
-reviewed source, public npm provenance and a protected release-owner approval;
-see [security boundaries](../SECURITY.md) for local-only use and disclosure.
+workload (the [benchmarks](benchmarks.md) come from the 0.2.0 run). Publication
+needs reviewed source, public npm provenance and a protected release-owner
+approval; see [security boundaries](../SECURITY.md) for local-only use and
+disclosure.
 
 ## History
 

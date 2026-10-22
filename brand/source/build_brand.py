@@ -45,9 +45,9 @@ WHITE = '#FFFFFF'
 NIGHT = '#141416'      # social-image background, a shade under charcoal
 MUTED_ON_DARK = '#A8A29E'
 
-# The social card. Figures are from benchmarks/next6-paired-acceptance.json.
+# The social card. Figures are from benchmarks/020-paired-acceptance.json.
 HEADLINE = ('A faster drop-in replacement for', 'the Firebase Local Emulator Suite')
-STATS = (('38×', 'faster writes'), ('9×', 'less memory'))
+STATS = (('40×', 'faster writes'), ('10×', 'less memory'))
 POINTS = ('No Java', 'Data survives restarts', 'Same firebase.json, SDKs and ports')
 LABEL_ON_DARK = '#D6D3D1'
 TRACKING = -0.025      # em, wordmark

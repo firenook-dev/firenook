@@ -5,8 +5,8 @@
 <h3 align="center">A faster drop-in replacement for the Firebase Local Emulator Suite</h3>
 
 <p align="center">
-  Keep your <code>firebase.json</code>, SDKs and ports. Get 38× faster writes,
-  9× less memory, no Java, and data that survives restarts.
+  Keep your <code>firebase.json</code>, SDKs and ports. Get 40× faster writes,
+  10× less memory, no Java, and data that survives restarts.
 </p>
 
 <p align="center">
@@ -45,9 +45,9 @@ sets one up on one screen, installs it and starts the emulators.
   same ports, and your client and Admin SDKs connect unchanged. It imports and
   exports the official format.
 - **Fast and light.** Native Rust services with the data on disk. On a real
-  application's two-hour workload, Firenook peaked at 2.16 GiB of memory where
-  the official emulator reached 19.56 GiB, answered writes in 5.3 ms against
-  203 ms at the median, and used 61% less CPU.
+  application's two-hour workload, Firenook peaked at 2.11 GiB of memory where
+  the official emulator reached 22.57 GiB, answered writes in 5.1 ms against
+  208 ms at the median, and used 61% less CPU.
 - **Your data stays.** Add `--keep-data` and Firestore, Auth and Storage come
   back with all your data in about half a second, even with millions of
   documents. A crash loses at most the last second of writes.
@@ -111,13 +111,12 @@ with a warning. See [compatibility](https://github.com/firenook-dev/firenook/blo
 ## Benchmarks
 
 <p align="center">
-  <img alt="Firenook against the official emulator: 9 times less memory, writes 38 times faster, listener updates 18 times faster, restarts 39 times sooner, 80 times sooner on 2.5 million documents, 61% less CPU" src="https://raw.githubusercontent.com/firenook-dev/firenook/main/docs/assets/benchmark-light.svg" width="880">
+  <img alt="Firenook against the official emulator: 10 times less memory, writes 40 times faster, listener updates 19 times faster, restarts 52 times sooner, orderBy with a limit 8 times faster, 61% less CPU" src="https://raw.githubusercontent.com/firenook-dev/firenook/main/docs/assets/benchmark-light.svg" width="880">
 </p>
 
 One real application with 211,205 documents and 6.7 GB in Storage, and two
-hours of its traffic against each emulator in turn on one server. The official
-emulator answered 6 of 26 query shapes faster (ordering and range
-filters over a large collection, batch gets).
+hours of its traffic against each emulator in turn on one server. Firenook
+answered 25 of the 26 query shapes faster and tied on the last.
 [The method and every figure.](https://github.com/firenook-dev/firenook/blob/main/docs/benchmarks.md)
 
 ## Commands
@@ -146,9 +145,8 @@ Node 22, 24 or 26 on macOS (Apple silicon or Intel), Linux (x64 or arm64,
 glibc 2.28 or newer: RHEL 8, Debian 10, Ubuntu 20.04, node:24-slim and later;
 not Alpine) or Windows x64; your Functions run on it, and a codebase whose
 `engines.node` asks for another Node is warned about at start. Keep optional
-dependencies enabled: they carry the native engine for your platform. Firenook
-is in preview (`0.2.0-next` releases): pin an exact version (`--save-exact`)
-and upgrade on purpose.
+dependencies enabled: they carry the native engine for your platform. Pin an
+exact version (`--save-exact`) and upgrade on purpose.
 
 ## License
 
