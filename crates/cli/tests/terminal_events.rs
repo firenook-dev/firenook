@@ -109,20 +109,22 @@ fn read(mut child: Child) -> (Engine, mpsc::Receiver<()>) {
         );
         std::thread::spawn(move || {
             for line in BufReader::new(stream).lines().map_while(Result::ok) {
+                // Each line is kept before `ready` is said, so a test that
+                // looks for the ready event once started always finds it.
+                let mut became_ready = line == "All emulators ready";
                 if let Some(event) = line.strip_prefix("FIRENOOK_EVENT ")
                     && let Ok(event) = serde_json::from_str::<Value>(event)
                 {
-                    if event["type"] == "ready" {
-                        let _ = ready.send(());
-                    }
+                    became_ready = event["type"] == "ready";
                     events.lock().expect("events").push(event);
-                } else if line == "All emulators ready" {
-                    let _ = ready.send(());
                 }
                 if stderr {
                     errors.lock().expect("errors").push(line.clone());
                 }
                 output.lock().expect("output").push(line);
+                if became_ready {
+                    let _ = ready.send(());
+                }
             }
         });
     }

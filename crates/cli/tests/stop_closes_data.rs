@@ -110,10 +110,12 @@ fn start(project: &Project, only: &str, ports: [u16; 11]) -> Engine {
         let (output, ready) = (Arc::clone(&output), ready.clone());
         std::thread::spawn(move || {
             for line in BufReader::new(stream).lines().map_while(Result::ok) {
-                if line.contains("All emulators ready") {
+                // Kept before `ready` is said, so the ready line is in the output.
+                let became_ready = line.contains("All emulators ready");
+                output.lock().expect("output").push(line);
+                if became_ready {
                     let _ = ready.send(());
                 }
-                output.lock().expect("output").push(line);
             }
         });
     }
