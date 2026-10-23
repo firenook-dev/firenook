@@ -94,7 +94,7 @@
     "test:tasks-fixtures": "node --test test/tasks-fixtures.test.mjs"
   },
   "devDependencies": {
-    "@firebase/rules-unit-testing": "5.0.2",
+    "@firebase/rules-unit-testing": "6.0.0",
     "@google-cloud/firestore": "9.3.1",
     "@grpc/grpc-js": "1.14.6",
     "@types/node": "26.6.5",
