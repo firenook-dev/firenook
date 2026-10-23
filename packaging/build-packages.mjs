@@ -43,7 +43,7 @@ for (const name of [key, 'cli']) {
       ...(localRevision ? {private:true} : {}),
       description:`Prebuilt Firenook engine for ${key}; install firenook`,
       os:[os], cpu:[cpu], ...(os === 'linux' ? {libc:['glibc']} : {}),
-      license:manifest.license, repository:{...manifest.repository, directory:'packaging'},
+      license:manifest.license, homepage:manifest.homepage, repository:{...manifest.repository, directory:'packaging'},
       publishConfig:manifest.publishConfig, files:['bin','receipt.json','LICENSE','NOTICE'],
     };
     writeFileSync(join(dir, 'package.json'), JSON.stringify(platformManifest, null, 2) + '\n');

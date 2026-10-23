@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "description": "A faster drop-in replacement for the Firebase Local Emulator Suite: keep your firebase.json, SDKs and ports, and get 40× faster writes, 10× less memory, no Java, and data that survives restarts",
   "keywords": ["firebase", "firebase-emulator", "emulator", "firestore", "firebase-auth", "cloud-functions", "cloud-storage", "pubsub", "cloud-tasks", "local-development", "testing", "rust"],
-  "homepage": "https://github.com/firenook-dev/firenook#readme",
+  "homepage": "https://firenook.dev",
   "type": "module",
   "bin": {"firenook": "bin/firenook.mjs"},
   "exports": {"./binary": "./src/binary.mjs"},

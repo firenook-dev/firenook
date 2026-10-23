@@ -3005,6 +3005,11 @@ mod tests {
 
     static TEST_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+    /// How long a test's close waits for other handles. The write-behind
+    /// flusher holds one for the moment it flushes, once a second, so a
+    /// close that waits for none fails whenever a slow run reaches it.
+    const CLOSE_WAIT: Duration = Duration::from_secs(5);
+
     /// What an open told its watch.
     #[derive(Default)]
     struct Watched {
@@ -3097,7 +3102,7 @@ mod tests {
             }])
             .unwrap();
         assert!(!opens_without_repair(&directory));
-        store.close(Duration::ZERO).unwrap();
+        store.close(CLOSE_WAIT).unwrap();
         assert!(opens_without_repair(&directory));
         let reopened = DiskStore::open(directory.path(), DiskOptions::default()).unwrap();
         assert!(reopened.snapshot().get(&key("items/unflushed")).is_some());
@@ -3122,9 +3127,10 @@ mod tests {
         let directory = TestDirectory::new();
         let store = written_and_flushed(&directory);
         let held = store.clone();
+        // The held handle, and the flusher's if it is flushing just then.
         assert!(matches!(
             store.close(Duration::from_millis(20)),
-            Err(DiskError::StillOpen { handles: 1 })
+            Err(DiskError::StillOpen { handles: 1..=2 })
         ));
         // Still durable: the held handle keeps the file open until it goes.
         drop(held);
@@ -3140,7 +3146,7 @@ mod tests {
         let directory = TestDirectory::new();
         let store = crate::Store::open_disk(directory.path(), DiskOptions::default()).unwrap();
         store.add_commit_observer(Arc::new(Holding(store.clone())));
-        store.close(Duration::from_millis(20)).unwrap();
+        store.close(CLOSE_WAIT).unwrap();
         assert!(opens_without_repair(&directory));
     }
 
@@ -3149,7 +3155,7 @@ mod tests {
         let directory = TestDirectory::new();
         let store = written_and_flushed(&directory);
         let copy = crashed_copy(&directory);
-        store.close(Duration::ZERO).unwrap();
+        store.close(CLOSE_WAIT).unwrap();
         let size = maintenance::inspect(directory.path()).unwrap();
         assert!(!size.repaired);
         let documents = size
@@ -3185,7 +3191,7 @@ mod tests {
                 .collect();
             store.commit(&deletes).unwrap();
         }
-        store.close(Duration::ZERO).unwrap();
+        store.close(CLOSE_WAIT).unwrap();
         let compaction = maintenance::compact(directory.path(), DiskOptions::default()).unwrap();
         assert!(
             compaction.after_bytes < compaction.before_bytes,
@@ -3348,7 +3354,7 @@ mod tests {
         .unwrap();
         bulk.finish().unwrap();
         let before = usage(&store);
-        store.close(Duration::ZERO).unwrap();
+        store.close(CLOSE_WAIT).unwrap();
         let reopened = open_without_counting(&directory).unwrap();
         assert_eq!(usage(&reopened), before);
         assert_eq!(reopened.document_total(), 2);
