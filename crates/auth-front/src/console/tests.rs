@@ -387,7 +387,9 @@ async fn the_index_follows_every_mutation_path() {
         before,
         "a refresh moves nothing"
     );
-    // A sign-in moves the sign-in time.
+    // A sign-in moves the sign-in time. The time is in milliseconds, and a
+    // release build gets here within the one Ada signed up in.
+    std::thread::sleep(Duration::from_millis(2));
     let (status, body) = call(
         &runtime,
         Method::POST,
