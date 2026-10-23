@@ -1802,7 +1802,8 @@ behaviour was the question.
   `ui.enabled: false`; counts agree with their nouns; schedule, Cloud Tasks,
   Auth and Storage lines reach the screen; `CI=false` is not CI; six docs
   that disagreed with the code are corrected.
-- [ ] `npm deprecate firenook@0.0.0` (needs the maintainer's npm login).
+- [x] `npm deprecate firenook@0.0.0`, done by the maintainer on 2026-10-23: the
+  placeholder now says to install `firenook@latest`.
 
 ## 0.2.0, the first stable release
 
@@ -1827,5 +1828,5 @@ behaviour was the question.
   its trigger on the same Node on Node 22.23, 24.11 and 26.9; Node 20.20 was
   refused with the way to switch. The GitHub release is the repository's
   latest.
-- [ ] Move the CLI's `next` to 0.2.0 by hand (`npm dist-tag add
-  firenook@0.2.0 next`; trusted publishing cannot move a tag).
+- [x] The CLI's `next` moved to 0.2.0 by hand on 2026-10-23 (trusted
+  publishing cannot move a tag), so `latest` and `next` are both 0.2.0.
