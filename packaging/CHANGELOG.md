@@ -66,7 +66,7 @@
 - Data 0.2.0 saves opens in 0.2.0-next.8, which rebuilds its own field index
   first; no emulator protocol or port changed, except that `localhost` now
   binds `::1` as well for the hub and the console, as officially.
-- [Benchmarked](docs/benchmarks.md) against the official emulator on one
+- [Benchmarked](../docs/benchmarks.md) against the official emulator on one
   application's two hours of traffic: 10 times less emulator memory (2.11
   against 22.57 GiB), writes 40 times faster (5.1 against 208 ms at the
   median), listener updates 19 times faster and 61% less CPU; a restart with

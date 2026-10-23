@@ -5,7 +5,7 @@
   "frozenAt": "2026-10-22",
   "release": "0.2.0",
   "engine": "bbd437e754a4c14c5ab5d37e01843930f5a9bade",
-  "releaseCommit": "the merge of the 0.2.0 release pull request, tagged npm-v0.2.0",
+  "releaseCommit": "78a1171e34c4dd68cb6ab8f15db76e198f18170c",
   "candidate": "firenook 0.2.0 built from bbd437e754a4c14c5ab5d37e01843930f5a9bade as a local package (installed-package launcher, the release's own build and packing scripts), linux-x64 binary sha256 95c187e2835fb95cbdd3920d6476eefcbdc5d1386114798c876b99bea42d26c1; the published 0.2.0 is built from the same tree",
   "harness": "0bfe1e06f22400aa89db33e471007b1036c3b79d (private harness; the attempt-14 harness unchanged, run as listed under harnessChanges)",
   "host": "the private acceptance host (AMD Ryzen 5 3600, 12 cpu, 64 GiB, NVMe RAID1/ext4, Ubuntu 24.04, Linux 6.8.0-139-generic); one emulator at a time; official emulator on untuned HotSpot defaults (JAVA_TOOL_OPTIONS empty, heap up to a quarter of RAM) with Java 26.0.2.1 and firebase-tools 15.22.0; the Firenook stack ran without Java and without firebase-tools; Node 24.20.0",
