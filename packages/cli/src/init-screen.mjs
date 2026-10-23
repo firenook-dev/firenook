@@ -160,7 +160,7 @@ export async function initInTerminal(options, {cwd = process.cwd(), out = proces
     value: [...(options['no-install'] ? [] : ['install']), ...(options['no-pin'] || enclosing ? [] : ['pin'])], hint: field => {
       const on = setUpOptions[field.cursor].id;
       if (on === 'pin') {
-        if (enclosing) return {text: `${shown(directory, enclosing)} is the package here: add Firenook there instead (npm i -D -E firenook)`, tone: field.value.has('pin') ? 'warn' : 'dim'};
+        if (enclosing) return {text: `${shown(directory, enclosing)} is the package here: add Firenook there instead (npm i -D firenook)`, tone: field.value.has('pin') ? 'warn' : 'dim'};
         return {text: `package.json gets firenook ${version}, exactly, and an emulators script`};
       }
       return {text: language.value === 'none' ? 'npm install for Firenook, here' : `npm install in functions/${language.value === 'typescript' ? ', then the first build' : ''}`};
