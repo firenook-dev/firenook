@@ -12,8 +12,9 @@ platform (`@firenook/cli-<platform>`) that npm or Bun selects for you. Install
 `latest`; `next` carries a preview when one is ahead of it. The
 [releases](https://github.com/firenook-dev/firenook/releases) page lists each
 version with its engine revision, platform checks and publication receipt.
-Pin an exact version (`--save-exact`) when you need a reproducible install;
-Firenook never upgrades itself, and its start-up screen tells you when a newer
+Commit your lockfile for a reproducible install: npm records the release as
+`^0.2.0`, which an update can move to a later `0.2` release but never to
+`0.3` or a preview. Firenook never upgrades itself, and its start-up screen tells you when a newer
 release is out on your channel (on a preview, also a later release on
 `latest`).
 

@@ -12,10 +12,10 @@ three steps; starting fresh, see [a new project](#a-new-project).
 ## Install
 
 ```sh
-npm install --save-dev --save-exact firenook
+npm install --save-dev firenook
 ```
 
-With Bun: `bun add --dev --exact firenook`. The package is a small launcher;
+With Bun: `bun add --dev firenook`. The package is a small launcher;
 npm or Bun picks the native engine for your machine from its optional
 dependencies, so keep optional dependencies enabled. Nothing else is
 downloaded, at install or at start: no Java, no firebase-tools, no emulator
@@ -26,7 +26,7 @@ offline.
 Firenook needs Node 22, 24 or 26 (it runs your Functions) on macOS (Apple
 silicon or Intel), Linux (x64 or arm64, glibc 2.28 or newer: RHEL 8, Debian
 10, Ubuntu 20.04, the node:24 and node:24-slim images and later, but not
-Alpine) or Windows x64. Pin an exact version and upgrade on purpose.
+Alpine) or Windows x64. Commit your lockfile and upgrade on purpose.
 
 ## Switching from the official emulator
 

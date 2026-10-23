@@ -167,11 +167,11 @@ both gave the same answers. The method, every figure and the limits are in
 deploying):
 
 ```sh
-npm install --save-dev --save-exact firenook    # or: bun add --dev --exact firenook
+npm install --save-dev firenook    # or: bun add --dev firenook
 ```
 
-`--save-exact` keeps you on the release you installed until you upgrade on
-purpose, so every machine and CI run uses the same engine.
+Commit the lockfile: it keeps every machine and CI run on the release you
+installed, and the same engine, until you upgrade.
 
 Every run keeps its working data under `.firenook/`, so add that folder to
 your `.gitignore`.
@@ -275,7 +275,7 @@ Firenook 0.2.0 is the first stable release. Every release passes conformance
 replays against the official emulator and packed installs on all five
 platforms, and releases are measured against the official emulator with a
 real application (most recently 0.2.0, in the
-[benchmarks](docs/benchmarks.md)). Pin an exact version and upgrade on
+[benchmarks](docs/benchmarks.md)). Commit your lockfile and upgrade on
 purpose; [the releases](https://github.com/firenook-dev/firenook/releases) list
 what each one carries.
 

@@ -145,8 +145,8 @@ Node 22, 24 or 26 on macOS (Apple silicon or Intel), Linux (x64 or arm64,
 glibc 2.28 or newer: RHEL 8, Debian 10, Ubuntu 20.04, node:24-slim and later;
 not Alpine) or Windows x64; your Functions run on it, and a codebase whose
 `engines.node` asks for another Node is warned about at start. Keep optional
-dependencies enabled: they carry the native engine for your platform. Pin an
-exact version (`--save-exact`) and upgrade on purpose.
+dependencies enabled: they carry the native engine for your platform. Commit
+your lockfile and upgrade on purpose.
 
 ## License
 
