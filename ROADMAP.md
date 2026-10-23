@@ -1725,7 +1725,15 @@ re-measured every document. Built on 2026-10-22.
   127 / 14 / 46; `orderBy slideNumber limit 20` 135 / 12 / 83; a range with a
   limit 141 / 12 / 69; five cursor pages 656 / 59 / 348; a batch get of 50
   58 / 27 / 29; `==` with `orderBy` on another field 15 / 11 / 64.
-- [ ] The paired benchmark on the acceptance host with the 0.2.0 candidate.
+- [x] The paired benchmark on the acceptance host with the 0.2.0 candidate
+  (attempt 17, `bbd437e`, 2026-10-22; `benchmarks/020-paired-acceptance.json`):
+  the six shapes the official emulator answered faster in the next.6 run walk
+  the index now, 1.8 to 8 times faster than it (`orderBy` an integer, limit
+  20: 12.0 ms against 96.3 ms), with the same answers on all 28 checks;
+  Firenook is faster on 25 of 26 shapes and ties on the last. On a store
+  grown to 2.7 million documents the ordered queries answer in 3 to 6 ms,
+  where the official emulator runs out of memory on Java defaults and takes 8
+  to 28 s with a 24 GiB heap. Keeping the index did not slow writes.
 
 ## Node 22 and 26, and older Linux (`0.2.0`)
 
@@ -1798,7 +1806,26 @@ behaviour was the question.
 
 ## 0.2.0, the first stable release
 
-- [ ] The paired acceptance against the official emulator on the acceptance
-  host, with the exact candidate.
-- [ ] Release PR (version `0.2.0`, the changelog), tag `npm-v0.2.0`, publish
-  the CLI to `latest`; move `next` to 0.2.0 by hand.
+- [x] The paired acceptance against the official emulator on the acceptance
+  host, with the exact candidate (attempt 17, `bbd437e`, passed 2026-10-22):
+  both two-hour soaks exact with no error, stall or lost update, 36/36
+  browser journeys, identical data after every stage, 11/11 regression
+  commands, 95 evidence files re-verified by an independent audit. Emulator
+  memory peaked at 2.11 GiB against 22.57 GiB, writes took 5.1 ms against
+  208 ms and listener updates 11 ms against 209 ms at the median, and CPU
+  time was 616 s against 1,586 s; Firenook was faster at the median and the
+  99th percentile on every lane.
+- [x] Published as `firenook@0.2.0` with `@firenook/cli-<platform>` ×5 (PR
+  #117, release PR #118, tag `npm-v0.2.0` on 78a1171, engine 7a9614b, whose
+  tree is the benchmarked `bbd437e`). Release run 39784727606, dispatched
+  with `latest` on 2026-10-22 and approved on 2026-10-23, passed every gate
+  and published all six packages in one go: the CLI on `latest`, the native
+  packages on `next`. Registry integrity equals the release assets for all
+  six, and registry signatures and provenance attestations verify on a fresh
+  install. From the registry, a bare `npm install firenook` got 0.2.0, and
+  under `emulators:exec` an HTTP function answered and a Firestore write ran
+  its trigger on the same Node on Node 22.23, 24.11 and 26.9; Node 20.20 was
+  refused with the way to switch. The GitHub release is the repository's
+  latest.
+- [ ] Move the CLI's `next` to 0.2.0 by hand (`npm dist-tag add
+  firenook@0.2.0 next`; trusted publishing cannot move a tag).
