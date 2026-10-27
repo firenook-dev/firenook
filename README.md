@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <img alt="firenook emulators:start: the start-up card, the ready summary and a live log of function calls, including a failed webhook with its stack trace" src="docs/assets/terminal.gif" width="760">
+  <img alt="npx firebase emulators:start becomes npx firenook emulators:start --keep-data: the start-up card picks up 1.2 million kept documents, then the ready summary and a live log of function calls, including a failed webhook with its stack trace" src="docs/assets/terminal.gif" width="760">
 </p>
 
 **Already using the Firebase emulators?** Install Firenook and change one word:

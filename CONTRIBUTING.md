@@ -1,5 +1,30 @@
 # Contributing
 
+## Issues
+
+Open an [issue](https://github.com/firenook-dev/firenook/issues/new/choose)
+with one of its forms: a bug, a difference from the official emulator, or a
+feature request. [Report a problem](https://firenook.dev/docs/help/report)
+says what to include. A security problem goes privately through
+[vulnerability reporting](https://github.com/firenook-dev/firenook/security/advisories/new),
+never in an issue.
+
+## Pull requests
+
+For more than a small fix, open an issue first, so the change is agreed
+before you write it. A pull request makes one change, with a test that fails
+without it, and passes the checks under [Building and testing](#building-and-testing).
+
+## AI tools
+
+AI tools are welcome, in issues and in code. Say in the issue or pull request
+which tool helped and how much. A person must have seen the problem a report
+describes, and must understand every line of a change they submit; an issue
+or pull request that reads as unreviewed AI output is closed. Coding agents
+working in this repository follow [AGENTS.md](AGENTS.md).
+
+## Changing the engine
+
 1. Reproduce a protocol issue against a pinned official emulator, authorized
    synthetic cloud project, or readable official client implementation.
 2. Commit the independent synthetic fixture before a behavior change. Preserve
