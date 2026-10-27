@@ -1,0 +1,37 @@
+name: Feature request
+description: Something Firenook should do that it does not do yet.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        What you are trying to do matters more than the feature you have in mind. The [roadmap](https://github.com/firenook-dev/firenook/blob/main/ROADMAP.md) shows what is planned, and [COMPATIBILITY.md](https://github.com/firenook-dev/firenook/blob/main/COMPATIBILITY.md) what is not emulated (Realtime Database, Hosting, App Hosting and Data Connect).
+  - type: textarea
+    id: goal
+    attributes:
+      label: What you are trying to do
+    validations:
+      required: true
+  - type: textarea
+    id: blocker
+    attributes:
+      label: What gets in the way today
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: A command, an option, a console page, an MCP tool. Optional.
+  - type: textarea
+    id: workaround
+    attributes:
+      label: How you manage now
+      description: Optional.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you send it
+      options:
+        - label: I searched the open and closed issues and the roadmap.
+          required: true

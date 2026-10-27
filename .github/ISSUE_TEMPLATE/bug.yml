@@ -1,0 +1,87 @@
+name: Bug report
+description: Firenook fails, crashes or gives a wrong result.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search the [open and closed issues](https://github.com/firenook-dev/firenook/issues?q=is%3Aissue) and [troubleshooting](https://firenook.dev/docs/help/troubleshooting) first. [Report a problem](https://firenook.dev/docs/help/report) explains each field below.
+
+        Never paste secrets, service account keys, `.env` or `.secret.local` files, real user data or production exports. Report a security problem [privately](https://github.com/firenook-dev/firenook/security/advisories/new) instead.
+
+        A coding agent can gather most of this: ask it to run the commands below and paste their output, then read what it pasted.
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: The error, the wrong result, or what stopped. Paste error messages as text.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: From `npx firenook emulators:start` to the wrong result. The smallest project that shows it is best, with a `demo-` project id, only the services involved, and the rules, indexes or function that show the problem.
+      placeholder: |
+        1. firebase.json with only Firestore
+        2. npx firenook emulators:start --project demo-shop
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Firenook version
+      description: The whole line `npx firenook --version` prints, with the engine revision.
+      placeholder: 0.2.0 (engine source 7a9614b...)
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Operating system and version, processor, `node --version`, and the package manager you installed with.
+      placeholder: macOS 26.1, Apple silicon, Node 24.20.0, npm 12.0.2
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: npx firenook doctor
+      description: How Firenook reads your project. It includes your firebase.json and full paths, which contain your user name; shorten what you want to keep private. If doctor itself fails, paste its error.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Run the failing command again with `--plain --debug`, then attach the `firenook-debug.log` it names (drag the file here) or paste the part around the problem.
+  - type: dropdown
+    id: official
+    attributes:
+      label: The official emulator
+      description: On the same project, what does the Firebase Local Emulator Suite do?
+      options:
+        - It does what I expected
+        - It fails the same way
+        - I have not tried it
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you send it
+      options:
+        - label: I searched the open and closed issues.
+          required: true
+        - label: I saw the problem myself, and if an AI tool helped write this report, I read what it wrote.
+          required: true
+        - label: Nothing above is a secret, a key or real user data.
+          required: true

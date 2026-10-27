@@ -35,7 +35,7 @@ Firenook needs Node 22, 24 or 26. Starting a new project? `npx firenook init`
 sets one up on one screen, installs it and starts the emulators.
 
 <p align="center">
-  <img alt="firenook emulators:start: the start-up card, the ready summary and a live log of function calls" src="https://raw.githubusercontent.com/firenook-dev/firenook/main/docs/assets/terminal.gif" width="760">
+  <img alt="npx firebase emulators:start becomes npx firenook emulators:start --keep-data: the start-up card picks up 1.2 million kept documents, then the ready summary and a live log of function calls" src="https://raw.githubusercontent.com/firenook-dev/firenook/main/docs/assets/terminal.gif" width="760">
 </p>
 
 ## Why Firenook

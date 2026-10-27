@@ -1,0 +1,78 @@
+name: Works differently from the official emulator
+description: Firenook answers, fails or behaves differently from the Firebase Local Emulator Suite on the same project.
+labels: [compatibility]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Firenook aims to answer as the official emulators do, so a difference is a bug in itself, even when Firenook's answer looks better. [COMPATIBILITY.md](https://github.com/firenook-dev/firenook/blob/main/COMPATIBILITY.md) lists the known differences; check it first.
+
+        Use a `demo-` project and made-up data. Never paste secrets, keys or real user data.
+  - type: dropdown
+    id: service
+    attributes:
+      label: Service
+      options:
+        - Firestore
+        - Authentication
+        - Cloud Storage
+        - Cloud Functions
+        - Extensions
+        - Pub/Sub
+        - Cloud Tasks
+        - Eventarc
+        - Security Rules
+        - Import and export
+        - The CLI or firebase.json
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: official
+    attributes:
+      label: What the official emulator does
+      description: The response, the error or the event, as exactly as you can.
+    validations:
+      required: true
+  - type: textarea
+    id: firenook
+    attributes:
+      label: What Firenook does
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: The request, rules or code that shows it
+      description: The smallest piece that answers differently, and how you run it.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Firenook version
+      description: The whole line `npx firenook --version` prints.
+    validations:
+      required: true
+  - type: input
+    id: official-version
+    attributes:
+      label: firebase-tools version
+      description: "`firebase --version`, where you ran the official emulator."
+    validations:
+      required: true
+  - type: input
+    id: sdk
+    attributes:
+      label: SDK and version
+      description: The client or Admin SDK that sent the request, if one did.
+      placeholder: "firebase 12.x (web), firebase-admin 13.x"
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you send it
+      options:
+        - label: The difference is not already listed in COMPATIBILITY.md or an open issue.
+          required: true
+        - label: I ran both myself, and if an AI tool helped write this report, I read what it wrote.
+          required: true

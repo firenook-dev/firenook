@@ -4,7 +4,7 @@
 
 What `firenook emulators:start` and `firenook init` draw in a terminal, the keys they answer, and the plain output pipes and CI get.
 
-![The terminal: the start-up card, the ready summary and a live log of function calls](assets/terminal.gif)
+![The terminal: the start-up card picks up 1.2 million kept documents, then the ready summary and a live log of function calls](assets/terminal.gif)
 
 In a terminal, `firenook emulators:start` draws its own screen:
 
