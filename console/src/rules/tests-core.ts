@@ -12,6 +12,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { type StoreApi, createStore, useStore } from 'zustand'
 import type { RulesOutcome } from '@/api/generated/RulesOutcome'
+import { randomId } from '@/lib/random-id'
 import { RulesCompileError } from './text'
 
 /** What every saved case carries; a page adds the request form and anything its export needs. */
@@ -111,7 +112,7 @@ export function createTestsStore<C extends TestCaseBase, R extends { outcome: Ru
           failure: undefined,
         })
       },
-      add: (test) => save([...get().cases, { ...test, id: crypto.randomUUID() } as C]),
+      add: (test) => save([...get().cases, { ...test, id: randomId() } as C]),
       update: (id, patch) =>
         save(get().cases.map((test) => (test.id === id ? Object.assign({}, test, patch) : test))),
       remove: (id) => save(get().cases.filter((test) => test.id !== id)),
