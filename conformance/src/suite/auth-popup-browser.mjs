@@ -12,7 +12,12 @@ const importedUid = 'imported-google-popup-user';
 const importedName = 'Popup 中文 😀';
 const importedEmail = 'popup@example.test';
 
-export async function observePopup(origin, project = popupProject) {
+// With `browserHost` the browser reaches the app and the peer by that name, which it
+// resolves to loopback. Over plain HTTP a name other than localhost is not a secure
+// context, as with an emulator reached on a LAN address or a container name. Node
+// still seeds the peer on `origin`.
+export async function observePopup(origin, project = popupProject, { browserHost } = {}) {
+  const browserOrigin = (url => { if (browserHost) url.hostname = browserHost; return url.origin; })(new URL(origin));
   const seed = { users: [
     { localId: importedUid, email: importedEmail, displayName: importedName,
       emailVerified: true, providerUserInfo: [{ providerId: 'google.com', rawId: 'google-popup-subject',
@@ -37,7 +42,7 @@ export async function observePopup(origin, project = popupProject) {
       import { getAuth, connectAuthEmulator, GoogleAuthProvider, signInWithPopup,
         signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
       const auth = getAuth(initializeApp({apiKey:'synthetic-api-key',authDomain:'${project}.firebaseapp.com',projectId:${JSON.stringify(project)}}, 'popup-regression'));
-      connectAuthEmulator(auth, ${JSON.stringify(origin)}, {disableWarnings:true});
+      connectAuthEmulator(auth, ${JSON.stringify(browserOrigin)}, {disableWarnings:true});
       const summarize = user => user && ({uid:user.uid,email:user.email,displayName:user.displayName,
         providers:user.providerData.map(p=>p.providerId)});
       window.popupResult = null;
@@ -63,10 +68,11 @@ export async function observePopup(origin, project = popupProject) {
     res.end(req.url === '/app.js' ? bundle.outputFiles[0].text : '<button id="popup">Google popup</button><button id="redirect">Google redirect</button><script type="module" src="/app.js"></script>');
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
-  const appOrigin = `http://127.0.0.1:${server.address().port}`;
+  const appOrigin = `http://${browserHost ?? '127.0.0.1'}:${server.address().port}`;
   const executablePath = [process.env.PHASE4_BROWSER_EXECUTABLE,
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome', '/usr/bin/chromium'].find(p=>p && existsSync(p));
-  const browser = await chromium.launch({ headless: true, ...(executablePath ? {executablePath} : {}) });
+  const browser = await chromium.launch({ headless: true, ...(executablePath ? {executablePath} : {}),
+    ...(browserHost ? {args:[`--host-resolver-rules=MAP ${browserHost} 127.0.0.1`]} : {}) });
   const pageErrors = [], events = [], exchanges = [], pending = [], stages = [], requestFailures = [];
   try {
     const context = await browser.newContext();
@@ -113,6 +119,7 @@ export async function observePopup(origin, project = popupProject) {
       });
       await popup.waitForURL('**/emulator/auth/handler?**');
       await popup.locator('.js-reuse-account').first().waitFor();
+      assert.equal(await popup.evaluate('isSecureContext'), !browserHost, 'the account picker runs where the test means it to');
       return popup;
     };
     let popup = await openPopup();

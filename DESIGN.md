@@ -652,7 +652,10 @@ and durable bucket metadata are not claimed by this UI inventory adapter.
 
 Auth browser helpers implement the fixture-tested local Google popup/redirect
 account selection and token return flow. Disabled users and account isolation
-are tested. This is not real provider OAuth or a general tenant-support claim.
+are tested. The pages need no secure context: an emulator reached over plain
+HTTP by a LAN address or a container name completes the popup, the new account
+and the redirect, as the official one does (`auth-popup-insecure-origin`).
+This is not real provider OAuth or a general tenant-support claim.
 
 Storage retains uploaded bytes and standard metadata. Gzip downloads follow
 the observed Accept-Encoding/range behavior; uploads are not transcoded.
