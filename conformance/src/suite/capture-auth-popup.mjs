@@ -16,13 +16,18 @@ const server = createServer(await createApp(popupProject, 0));
 server.listen(0, '127.0.0.1'); await once(server, 'listening');
 try {
   const safety = process.argv.includes('--account-safety');
-  const observation = await (safety ? observePopupAccountSafety : observePopup)(`http://127.0.0.1:${server.address().port}`);
+  // `--browser-host=<name>`: the same flow with the page and the emulator outside a secure context.
+  const browserHost = process.argv.find(arg=>arg.startsWith('--browser-host='))?.slice('--browser-host='.length);
+  assert.ok(!(safety && browserHost), 'the account-safety calls never run in a browser');
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const observation = await (safety ? observePopupAccountSafety(origin) : observePopup(origin, popupProject, {browserHost}));
   const sourceHashes = Object.fromEntries(await Promise.all(['handlers.js','widget_ui.js','operations.js'].map(async name=>[
     name, createHash('sha256').update(await readFile(join(root,'lib/emulator/auth',name))).digest('hex')])));
   const sdk = JSON.parse(await readFile(new URL('../../node_modules/firebase/package.json',import.meta.url)));
   const fixture = {schemaVersion:1,oracle:'firebase-tools Auth emulator',version:'15.22.0',sdkVersion:sdk.version,
-    capturedAt:new Date().toISOString(),syntheticOnly:true,sourceHashes,observation};
-  const directory = new URL('../../fixtures/firebase-suite-v1/auth-popup/',import.meta.url);
+    capturedAt:new Date().toISOString(),syntheticOnly:true,sourceHashes,
+    ...(browserHost ? {browserHost,secureContext:false} : {}),observation};
+  const directory = new URL(`../../fixtures/firebase-suite-v1/${browserHost ? 'auth-popup-insecure-origin' : 'auth-popup'}/`,import.meta.url);
   await mkdir(directory,{recursive:true});
   const json = JSON.stringify(fixture,null,2)+'\n';
   const filename = safety ? 'account-safety.json' : 'fixture.json';

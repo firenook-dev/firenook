@@ -41,6 +41,15 @@
   const provider = query.get('providerId'), kind = query.get('authType');
   const storageKey = apiKey + ':' + appName;
   const error = message => { document.getElementById('error').textContent = message; };
+  // A random v4 UUID. `crypto.randomUUID` exists only in a secure context, and this
+  // page is not one when the emulator is reached over HTTP by a LAN address or a
+  // container name.
+  const uuid = () => {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = bytes[6] & 0x0f | 0x40; bytes[8] = bytes[8] & 0x3f | 0x80;
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join('-');
+  };
   document.getElementById('provider').textContent = provider;
 
   function complete(claims) {
@@ -54,14 +63,14 @@
       // The SDK listens through its Auth-origin iframe, not the app's window.
       const opener = window.opener;
       if (opener) for (let index = 0; index < opener.frames.length; index++) {
-        try {
-          const frame = opener.frames[index];
-          const frameUrl = new URL(frame.location.href);
-          if (frameUrl.origin !== location.origin || frameUrl.pathname !== '/emulator/auth/iframe') continue;
-          if (frameUrl.searchParams.get('apiKey') !== apiKey || frameUrl.searchParams.get('appName') !== appName) continue;
-          frame.postMessage({eventType:'sendAuthEvent',eventId:crypto.randomUUID(),data:{storageKey,authEvent}}, location.origin);
-          return;
-        } catch { /* Other-origin app frames are expected and are not relays. */ }
+        const frame = opener.frames[index];
+        let frameUrl;
+        // Reading another origin's frame throws: those are the app's own frames, not relays.
+        try { frameUrl = new URL(frame.location.href); } catch { continue; }
+        if (frameUrl.origin !== location.origin || frameUrl.pathname !== '/emulator/auth/iframe') continue;
+        if (frameUrl.searchParams.get('apiKey') !== apiKey || frameUrl.searchParams.get('appName') !== appName) continue;
+        frame.postMessage({eventType:'sendAuthEvent',eventId:uuid(),data:{storageKey,authEvent}}, location.origin);
+        return;
       }
       return error('Cannot find the matching Firebase Auth iframe. Close this window and retry sign-in.');
     }
@@ -93,7 +102,7 @@
   document.getElementById('back-button').onclick = () => showForm(false);
   document.getElementById('main-form').onsubmit = event => {
     event.preventDefault();
-    const claims = {sub:crypto.randomUUID(),iss:'',aud:'',exp:0,iat:0,email_verified:true};
+    const claims = {sub:uuid(),iss:'',aud:'',exp:0,iat:0,email_verified:true};
     for (const [id,key] of [['email-input','email'],['display-name-input','name'],['screen-name-input','screen_name'],['profile-photo-input','picture']]) {
       const value = document.getElementById(id).value;
       if (value) claims[key] = value;

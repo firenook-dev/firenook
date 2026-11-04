@@ -56,6 +56,22 @@ describe('whether a saved test passes', () => {
 })
 
 describe('the saved tests of one scope', () => {
+  it('are saved outside a secure context too, where the browser has no crypto.randomUUID', () => {
+    // A console opened over plain http by a LAN address or a container name.
+    vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) })
+    try {
+      const store = createTestsStore<Case, Result>(isCase)
+      store.getState().load('firenook.console.storage-rules-tests.demo.http')
+      store.getState().add({ name: 'a', form: { path: 'public/a' }, expected: 'allow' })
+      store.getState().add({ name: 'b', form: { path: 'public/b' }, expected: 'allow' })
+      const [first, second] = store.getState().cases.map((test) => test.id)
+      expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+      expect(second).not.toBe(first)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('are kept in this browser per key, and only items that are cases come back', () => {
     const store = createTestsStore<Case, Result>(isCase)
     store.getState().load('firenook.console.storage-rules-tests.demo.b')
