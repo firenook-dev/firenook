@@ -272,3 +272,31 @@ test('the form says what an email lacks, fills itself in and goes back', async (
   await expect(page.locator('#main-form')).toBeHidden()
   await expect(page.locator('.js-new-account')).toBeFocused()
 })
+
+test('a random user opens the form filled in and ready; Add account opens it empty', async ({
+  page,
+  engine,
+}) => {
+  await page.setViewportSize({ width: 500, height: 600 })
+  await page.goto(pickerUrl(engine.ports.auth))
+  const email = page.locator('#email-input')
+
+  await page.locator('.js-random-account').click()
+  await expect(page.getByRole('heading', { name: 'New Google account' })).toBeVisible()
+  await expect(email).toHaveValue(/^[a-z]+\.[a-z]+\.\d{5}@example\.test$/)
+  await expect(page.locator('#display-name-input')).toHaveValue(/^[A-Z][a-z]+ [A-Z][a-zA-Z]+$/)
+  await expect(page.locator('#screen-name-input')).toHaveValue(/^[a-z]+_[a-z]+$/)
+  await expect(page.locator('#sign-in')).toBeFocused()
+
+  // Another one, if this one will not do; and it can be changed by hand.
+  const first = await email.inputValue()
+  await page.locator('#autogen-button').click()
+  await expect(email).not.toHaveValue(first)
+
+  await page.locator('#back-button').click()
+  await expect(page.locator('.js-random-account')).toBeFocused()
+  await page.locator('.js-new-account').click()
+  await expect(email).toHaveValue('')
+  await expect(page.locator('#display-name-input')).toHaveValue('')
+  await expect(email).toBeFocused()
+})

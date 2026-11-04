@@ -290,17 +290,6 @@
     if (fields.photo) claims.picture = fields.photo;
     return claims;
   };
-  document.querySelector('.js-random-account').onclick = () => complete(claimsFor(someone()));
-
-  const showForm = visible => {
-    form.hidden = !visible;
-    list.hidden = visible;
-    document.getElementById('error').textContent = '';
-    (visible ? document.getElementById('email-input') : document.querySelector('.js-new-account')).focus();
-  };
-  document.querySelector('.js-new-account').onclick = () => showForm(true);
-  document.getElementById('back-button').onclick = () => showForm(false);
-  form.onkeydown = event => { if (event.key === 'Escape') showForm(false); };
 
   const email = document.getElementById('email-input');
   const emailError = message => {
@@ -308,13 +297,39 @@
     email.setAttribute('aria-invalid', String(!!message));
   };
   email.oninput = () => emailError('');
-  document.getElementById('autogen-button').onclick = () => {
-    const made = someone();
+  const fillIn = made => {
     email.value = made.email;
     document.getElementById('display-name-input').value = made.name;
     document.getElementById('screen-name-input').value = made.screenName;
     emailError('');
   };
+
+  // The form opens empty, or with someone made up in it: they are for reading
+  // and changing before signing in as them, so Sign in has the focus then.
+  let openedBy;
+  const openForm = (opener, made) => {
+    openedBy = opener;
+    form.reset();
+    emailError('');
+    if (made) fillIn(made);
+    document.getElementById('error').textContent = '';
+    list.hidden = true;
+    form.hidden = false;
+    (made ? document.getElementById('sign-in') : email).focus();
+  };
+  const closeForm = () => {
+    document.getElementById('error').textContent = '';
+    form.hidden = true;
+    list.hidden = false;
+    openedBy.focus();
+  };
+  const randomUser = document.querySelector('.js-random-account');
+  const addAccount = document.querySelector('.js-new-account');
+  randomUser.onclick = () => openForm(randomUser, someone());
+  addAccount.onclick = () => openForm(addAccount);
+  document.getElementById('back-button').onclick = closeForm;
+  form.onkeydown = event => { if (event.key === 'Escape') closeForm(); };
+  document.getElementById('autogen-button').onclick = () => fillIn(someone());
   form.onsubmit = event => {
     event.preventDefault();
     const value = email.value.trim();

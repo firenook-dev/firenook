@@ -661,8 +661,9 @@ the console's light tokens, inlines its two faces and asks for nothing else
 (`console/e2e/auth-picker.spec.ts` fails when the colours part). It is always
 light, as the official page is: it stands in for a provider's sign-in and opens
 over the developer's app. Beyond the
-official page it signs in a new random user in one click and filters a long
-list; those run through the real SDK in `conformance/test/auth-popup.test.mjs`.
+official page it opens the form on a random user, to read before signing in as
+them, and filters a long list; those run through the real SDK in
+`conformance/test/auth-popup.test.mjs`.
 This is not real provider OAuth or a general tenant-support claim.
 
 Storage retains uploaded bytes and standard metadata. Gzip downloads follow

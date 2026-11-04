@@ -1,6 +1,6 @@
 // What the account picker adds to the official one, through the real SDK in a
-// real popup: a new random user in one click, the form filled in at random, and
-// a long list filtered. The official flow itself is `auth-popup-browser.mjs`,
+// real popup: a random user shown in the form before signing in as them, the
+// form filled in at random, and a long list filtered. The official flow itself is `auth-popup-browser.mjs`,
 // held to the official fixture; these have no official counterpart to hold them
 // to (its form has a fill button, but the fixture never presses it), so they
 // say what they expect here. Only synthetic accounts on an isolated Auth peer.
@@ -44,12 +44,19 @@ export async function observePickerAdditions(origin, { browserHost } = {}) {
       return (await page.evaluate('window.popupResult')).user;
     };
 
-    // One click makes a new account and signs in as it.
+    // A random user is shown before signing in, and Sign in is ready for Enter.
     let popup = await openPopup();
     await popup.locator('.js-random-account').click();
+    const shown = {email:await popup.locator('#email-input').inputValue(),
+      name:await popup.locator('#display-name-input').inputValue(),
+      screenName:await popup.locator('#screen-name-input').inputValue()};
+    assert.match(shown.email,/^[a-z]+\.[a-z]+\.\d{5}@example\.test$/);
+    assert.match(shown.name,/^[A-Z][a-z]+ [A-Z][a-zA-Z]+$/);
+    assert.match(shown.screenName,/^[a-z]+_[a-z]+$/);
+    await popup.keyboard.press('Enter');
     const random = await signedIn(popup);
-    assert.match(random.email,/^[a-z]+\.[a-z]+\.\d{5}@example\.test$/);
-    assert.match(random.displayName,/^[A-Z][a-z]+ [A-Z][a-zA-Z]+$/);
+    assert.equal(random.email,shown.email);
+    assert.equal(random.displayName,shown.name);
     assert.deepEqual(random.providers,['google.com']);
     assert.ok(!users.some(user=>user.localId===random.uid));
 
