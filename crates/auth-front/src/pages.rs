@@ -3,9 +3,12 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::sync::LazyLock;
 
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
 
 use crate::error::ApiError;
@@ -14,8 +17,25 @@ use crate::ops::oob::reset_password;
 use crate::ops::update::set_account_info_impl;
 use crate::{Runtime, pretty_json};
 
-const HANDLER: &str = include_str!("oauth-handler.html");
 const IFRAME: &str = include_str!("oauth-iframe.html");
+
+/// The account picker with the console's two faces inlined: the page has no
+/// other request to make, and its first paint is already in them.
+static HANDLER: LazyLock<String> = LazyLock::new(|| {
+    include_str!("oauth-handler.html")
+        .replace(
+            "__FIRENOOK_INTER__",
+            &BASE64.encode(include_bytes!(
+                "../../../console/public/fonts/inter-latin.woff2"
+            )),
+        )
+        .replace(
+            "__FIRENOOK_PLEX_MONO__",
+            &BASE64.encode(include_bytes!(
+                "../../../console/public/fonts/ibm-plex-mono-latin-400.woff2"
+            )),
+        )
+});
 
 #[must_use]
 pub fn readiness() -> Response {
@@ -342,25 +362,64 @@ pub fn handler(rt: &Runtime, query: &BTreeMap<String, String>, trace: &Trace) ->
             serde_json::to_string(claims).unwrap_or_default().as_bytes(),
         )
         .collect();
-        let name = info
-            .get("displayName")
-            .and_then(JsonValue::as_str)
-            .unwrap_or("(No display name)");
-        let email = info.get("email").and_then(JsonValue::as_str).unwrap_or("");
+        let text = |field: &str| {
+            info.get(field)
+                .and_then(JsonValue::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        };
+        let (name, email) = (text("displayName"), text("email"));
+        // The photo lies over the initials and leaves them showing if it fails
+        // to load; a third-party request, so lazily and without a referrer.
+        let photo = text("photoUrl").map_or_else(String::new, |url| {
+            format!(
+                "<img src=\"{}\" alt=\"\" loading=\"lazy\" referrerpolicy=\"no-referrer\">",
+                html_escape(url)
+            )
+        });
+        // Without a name the email is the row's one line.
+        let (title, detail) = match (name, email) {
+            (Some(name), Some(email)) => (
+                name,
+                format!("<span class=\"email\">{}</span>", html_escape(email)),
+            ),
+            (None, Some(only)) | (Some(only), None) => (only, String::new()),
+            (None, None) => ("(No display name)", String::new()),
+        };
         let _ = write!(
             items,
-            "<li><button type=\"button\" class=\"js-reuse-account\" data-id-token=\"{}\"><span>{}</span><span class=\"email\">{}</span></button></li>",
+            "<li><button type=\"button\" class=\"js-reuse-account\" data-id-token=\"{}\"><span class=\"avatar\" aria-hidden=\"true\">{}{}</span><span class=\"who\"><span class=\"name\">{}</span>{}</span><svg class=\"icon go\" aria-hidden=\"true\"><use href=\"#i-caret\"/></svg></button></li>",
             encoded.replace('+', "%20"),
-            html_escape(name),
-            html_escape(email)
+            html_escape(&initials(name, email)),
+            photo,
+            html_escape(title),
+            detail
         );
     }
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        HANDLER.replace("__FIRENOOK_ACCOUNT_ITEMS__", &items),
+        HANDLER
+            .replace("__FIRENOOK_PROJECT__", &html_escape(rt.default_project()))
+            .replace("__FIRENOOK_ACCOUNT_ITEMS__", &items),
     )
         .into_response()
+}
+
+/// Up to two letters for a row's avatar, as the console's `initialsOf`: the
+/// first and last word of a name, else the first letter of an email.
+fn initials(name: Option<&str>, email: Option<&str>) -> String {
+    let first = |word: &str| word.chars().next();
+    let letters: Vec<char> = match name {
+        Some(name) => {
+            let mut words = name.split_whitespace();
+            let head = words.next().and_then(first);
+            let tail = words.next_back().and_then(first);
+            head.into_iter().chain(tail).collect()
+        }
+        None => email.and_then(first).into_iter().collect(),
+    };
+    letters.into_iter().flat_map(char::to_uppercase).collect()
 }
 
 fn html_escape(text: &str) -> String {

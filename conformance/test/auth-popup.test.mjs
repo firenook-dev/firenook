@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { observePopup, popupProject } from '../src/suite/auth-popup-browser.mjs';
 import { observePopupAccountSafety } from '../src/suite/auth-popup-account-safety.mjs';
+import { observePickerAdditions } from '../src/suite/auth-picker-browser.mjs';
 
 const fixtureRoot = new URL('../fixtures/firebase-suite-v1/auth-popup/',import.meta.url);
 const insecureRoot = new URL('../fixtures/firebase-suite-v1/auth-popup-insecure-origin/',import.meta.url);
@@ -82,4 +83,9 @@ test('Firenook completes them outside a secure context, as the official emulator
   const fixture = JSON.parse(await readFile(new URL('fixture.json',insecureRoot)));
   const actual = await observePopup(origin,popupProject,{browserHost:fixture.browserHost});
   assert.deepEqual(semantic(actual),semantic(fixture.observation));
+}));
+
+test('the picker makes a random user and fills its form, through the real SDK, outside a secure context', {timeout:600_000}, () => withPeer(async origin => {
+  const {browserHost} = JSON.parse(await readFile(new URL('fixture.json',insecureRoot)));
+  await observePickerAdditions(origin,{browserHost});
 }));

@@ -12,37 +12,16 @@ const importedUid = 'imported-google-popup-user';
 const importedName = 'Popup 中文 😀';
 const importedEmail = 'popup@example.test';
 
-// With `browserHost` the browser reaches the app and the peer by that name, which it
-// resolves to loopback. Over plain HTTP a name other than localhost is not a secure
-// context, as with an emulator reached on a LAN address or a container name. Node
-// still seeds the peer on `origin`.
-export async function observePopup(origin, project = popupProject, { browserHost } = {}) {
-  const browserOrigin = (url => { if (browserHost) url.hostname = browserHost; return url.origin; })(new URL(origin));
-  const seed = { users: [
-    { localId: importedUid, email: importedEmail, displayName: importedName,
-      emailVerified: true, providerUserInfo: [{ providerId: 'google.com', rawId: 'google-popup-subject',
-        email: importedEmail, displayName: importedName }] },
-    { localId: 'github-only-user', email: 'github@example.test', providerUserInfo: [
-      { providerId: 'github.com', rawId: 'github-subject', email: 'github@example.test' }] },
-  ] };
-  const seeded = await fetch(`${origin}/identitytoolkit.googleapis.com/v1/projects/${project}/accounts:batchCreate`, {
-    method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer owner' },
-    body: JSON.stringify(seed), signal: AbortSignal.timeout(5000),
-  });
-  assert.equal(seeded.status, 200);
-  assert.deepEqual((await seeded.json()).error ?? [], []);
-  const validation = [];
-  for (const query of ['', '?apiKey=demo', '?providerId=google.com']) {
-    const response = await fetch(`${origin}/emulator/auth/handler${query}`);
-    validation.push({ status: response.status, body: await response.text() });
-  }
+// The app under test: a page with the real SDK connected to the peer, and a browser
+// that resolves `browserHost`. `origin` is the peer as the browser reaches it.
+export async function popupApp(origin, project, { browserHost } = {}) {
   const bundle = await build({
     stdin: { contents: `
       import { initializeApp } from 'firebase/app';
       import { getAuth, connectAuthEmulator, GoogleAuthProvider, signInWithPopup,
         signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
       const auth = getAuth(initializeApp({apiKey:'synthetic-api-key',authDomain:'${project}.firebaseapp.com',projectId:${JSON.stringify(project)}}, 'popup-regression'));
-      connectAuthEmulator(auth, ${JSON.stringify(browserOrigin)}, {disableWarnings:true});
+      connectAuthEmulator(auth, ${JSON.stringify(origin)}, {disableWarnings:true});
       const summarize = user => user && ({uid:user.uid,email:user.email,displayName:user.displayName,
         providers:user.providerData.map(p=>p.providerId)});
       window.popupResult = null;
@@ -73,6 +52,37 @@ export async function observePopup(origin, project = popupProject, { browserHost
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome', '/usr/bin/chromium'].find(p=>p && existsSync(p));
   const browser = await chromium.launch({ headless: true, ...(executablePath ? {executablePath} : {}),
     ...(browserHost ? {args:[`--host-resolver-rules=MAP ${browserHost} 127.0.0.1`]} : {}) });
+  const stop = async () => {
+    await browser.close(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve));
+  };
+  return { appOrigin, browser, stop };
+}
+
+// With `browserHost` the browser reaches the app and the peer by that name, which it
+// resolves to loopback. Over plain HTTP a name other than localhost is not a secure
+// context, as with an emulator reached on a LAN address or a container name. Node
+// still seeds the peer on `origin`.
+export async function observePopup(origin, project = popupProject, { browserHost } = {}) {
+  const browserOrigin = (url => { if (browserHost) url.hostname = browserHost; return url.origin; })(new URL(origin));
+  const seed = { users: [
+    { localId: importedUid, email: importedEmail, displayName: importedName,
+      emailVerified: true, providerUserInfo: [{ providerId: 'google.com', rawId: 'google-popup-subject',
+        email: importedEmail, displayName: importedName }] },
+    { localId: 'github-only-user', email: 'github@example.test', providerUserInfo: [
+      { providerId: 'github.com', rawId: 'github-subject', email: 'github@example.test' }] },
+  ] };
+  const seeded = await fetch(`${origin}/identitytoolkit.googleapis.com/v1/projects/${project}/accounts:batchCreate`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer owner' },
+    body: JSON.stringify(seed), signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(seeded.status, 200);
+  assert.deepEqual((await seeded.json()).error ?? [], []);
+  const validation = [];
+  for (const query of ['', '?apiKey=demo', '?providerId=google.com']) {
+    const response = await fetch(`${origin}/emulator/auth/handler${query}`);
+    validation.push({ status: response.status, body: await response.text() });
+  }
+  const {appOrigin,browser,stop} = await popupApp(browserOrigin,project,{browserHost});
   const pageErrors = [], events = [], exchanges = [], pending = [], stages = [], requestFailures = [];
   try {
     const context = await browser.newContext();
@@ -165,6 +175,6 @@ export async function observePopup(origin, project = popupProject, { browserHost
     assert.equal(events.length, 2);
     return {validation, stages, events, exchanges, pageErrors, browserVersion:browser.version()};
   } finally {
-    await browser.close(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve));
+    await stop();
   }
 }
