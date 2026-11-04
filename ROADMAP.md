@@ -1830,3 +1830,24 @@ behaviour was the question.
   latest.
 - [x] The CLI's `next` moved to 0.2.0 by hand on 2026-10-23 (trusted
   publishing cannot move a tag), so `latest` and `next` are both 0.2.0.
+
+## 0.2.1, sign-in from any address and the sign-in page
+
+- [x] The popup finishes over plain http on a name other than `localhost`,
+  where a browser has no `crypto.randomUUID`, and a saved rules test is saved
+  there too (PR #132). Recorded first from firebase-tools 15.22.0 in the same
+  mode (`auth-popup-insecure-origin`).
+- [x] The sign-in page in the console's look, always light, with a filter and
+  a new random user that opens the form filled in (PR #133).
+- [x] Published as `firenook@0.2.1` with `@firenook/cli-<platform>` ×5 (PR
+  #133, release PR #134, tag `npm-v0.2.1` on 75c3de2, engine 6556f79). Release
+  run 41910384778, dispatched with `latest` and approved on 2026-11-05, passed
+  every gate and published all six packages in one go: the CLI on `latest`,
+  the native packages on `next`. Registry integrity equals the release assets
+  for all six, and registry signatures and provenance attestations verify on
+  a fresh install. From the registry, a bare `npm install firenook` got 0.2.1,
+  and the Firebase JS SDK in Chrome finished popup and redirect sign-ins on
+  loopback and outside a secure context, and made and reused a random user.
+  The GitHub release is the repository's latest.
+- [x] The CLI's `next` moved to 0.2.1 by hand on 2026-11-05 (trusted publishing
+  cannot move a tag), so `latest` and `next` are both 0.2.1.
