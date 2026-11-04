@@ -231,19 +231,30 @@ fn compact_and_pretty_files_both_load_into_the_persistent_maps() {
 
 #[test]
 fn the_writer_holds_the_lock_only_to_snapshot_ten_thousand_users() {
-    let root = directory("hold");
-    let file = root.join("auth-state.json");
-    let runtime = persisting(&file);
-    populate(&runtime, 10_000);
-    runtime.flush().expect("flush");
-    let stats = runtime.runtime().persist_stats().expect("persists");
-    assert!(
-        stats.longest_hold < Duration::from_millis(1),
-        "the writer held the lock {:?}",
-        stats.longest_hold
-    );
-    drop(runtime);
-    let _ = std::fs::remove_dir_all(&root);
+    // A snapshot takes microseconds and an encode milliseconds. A machine that
+    // takes the thread away during the snapshot adds to the time, on a shared
+    // runner by more than the whole allowance, and can only add: the shortest
+    // of a few tries is what the snapshot costs. Encoding under the lock fails
+    // every one.
+    let mut holds = Vec::new();
+    for attempt in 0..5 {
+        let root = directory(&format!("hold-{attempt}"));
+        let runtime = persisting(&root.join("auth-state.json"));
+        populate(&runtime, 10_000);
+        runtime.flush().expect("flush");
+        let hold = runtime
+            .runtime()
+            .persist_stats()
+            .expect("persists")
+            .longest_hold;
+        drop(runtime);
+        let _ = std::fs::remove_dir_all(&root);
+        if hold < Duration::from_millis(1) {
+            return;
+        }
+        holds.push(hold);
+    }
+    panic!("the writer held the lock {holds:?}");
 }
 
 // ---------------------------------------------------------------- the writer
