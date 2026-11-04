@@ -4,10 +4,10 @@ import { batchCreate, scratchTenant } from './support/auth'
 
 // The account picker a federated sign-in opens (`crates/auth-front/src/
 // oauth-handler.html`). It is served from the Auth port with no console build
-// behind it, so it restates the console's tokens instead of importing them;
-// this holds the two together, measured as each page paints them, in light and
-// dark. It also holds the page's own contrast and the shape it keeps in a
-// popup and on a phone. Signing in through it, with the real SDK, is
+// behind it, so it restates the console's light tokens instead of importing
+// them; this holds the two together, measured as each page paints them. It is
+// light whatever the system's mode, as the official page is. It also holds the
+// page's own contrast and the shape it keeps in a popup and on a phone. Signing in through it, with the real SDK, is
 // `conformance/test/auth-popup.test.mjs`.
 
 /** A console token and the page's name for it. */
@@ -22,7 +22,7 @@ const TOKENS = [
   ['--color-kumo-focus', '--focus'],
   ['--color-kumo-danger', '--danger-ring'],
   ['--color-kumo-danger-tint', '--danger-tint'],
-  ['--color-kumo-brand', '--ring'],
+  ['--color-kumo-brand', '--brand'],
   ['--color-firenook-hover', '--hover'],
   ['--color-firenook-wordmark', '--wordmark'],
   ['--text-color-kumo-default', '--text'],
@@ -92,62 +92,63 @@ const googleUsers = (count: number) =>
     ],
   }))
 
-for (const mode of ['light', 'dark'] as const) {
-  test(`the picker paints the console's colours, and reads, in ${mode} mode`, async ({
+test("the picker paints the console's light colours, and reads", async ({ page, engine }) => {
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.goto(`${engine.origin}/console`)
+  await expect(page.getByTestId('top-bar')).toBeVisible()
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'light')
+  const consoleColors = await painted(
     page,
-    engine,
-  }) => {
-    await page.emulateMedia({ colorScheme: mode })
-    await page.goto(`${engine.origin}/console`)
-    await expect(page.getByTestId('top-bar')).toBeVisible()
-    await expect(page.locator('html')).toHaveAttribute('data-mode', mode)
-    const consoleColors = await painted(
-      page,
-      TOKENS.map(([name]) => name),
-    )
-    const picker = await page.context().newPage()
-    await picker.emulateMedia({ colorScheme: mode })
-    await picker.goto(pickerUrl(engine.ports.auth))
-    const pickerColors = await painted(
-      picker,
-      TOKENS.map(([, name]) => name),
-    )
-    TOKENS.forEach(([name, own], index) => {
-      const [theirs, ours] = [consoleColors[index] ?? [], pickerColors[index] ?? []]
-      const apart = Math.max(...theirs.map((value, at) => Math.abs(value - (ours[at] ?? 0))))
-      expect(
-        apart,
-        `${own} against ${name}: ${ours.join()} and ${theirs.join()}`,
-      ).toBeLessThanOrEqual(1)
-    })
-
-    // The console's primary button is the cobalt in both modes; so is this one.
-    expect(await painted(picker, ['--cobalt'])).toEqual(
-      await paint(picker, ['oklch(0.49 0.2 263)']),
-    )
-
-    const [canvas = [], base = [], control = [], text = [], subtle = [], placeholder = []] =
-      await painted(picker, [
-        '--canvas',
-        '--base',
-        '--control',
-        '--text',
-        '--subtle',
-        '--placeholder',
-      ])
-    for (const [what, ink, ground] of [
-      ['a name on a row', text, base],
-      ['an email on a row', subtle, base],
-      ['the words under the title', subtle, canvas],
-      ['the foot of the page', subtle, canvas],
-      ['the bar, its kind', subtle, base],
-      ['a filter hint', placeholder, control],
-    ] as const) {
-      expect(contrast(ink, ground), what).toBeGreaterThanOrEqual(4.5)
-    }
-    await picker.close()
+    TOKENS.map(([name]) => name),
+  )
+  const picker = await page.context().newPage()
+  await picker.goto(pickerUrl(engine.ports.auth))
+  const pickerColors = await painted(
+    picker,
+    TOKENS.map(([, name]) => name),
+  )
+  TOKENS.forEach(([name, own], index) => {
+    const [theirs, ours] = [consoleColors[index] ?? [], pickerColors[index] ?? []]
+    const apart = Math.max(...theirs.map((value, at) => Math.abs(value - (ours[at] ?? 0))))
+    expect(
+      apart,
+      `${own} against ${name}: ${ours.join()} and ${theirs.join()}`,
+    ).toBeLessThanOrEqual(1)
   })
-}
+
+  const [canvas = [], base = [], control = [], text = [], subtle = [], placeholder = []] =
+    await painted(picker, [
+      '--canvas',
+      '--base',
+      '--control',
+      '--text',
+      '--subtle',
+      '--placeholder',
+    ])
+  for (const [what, ink, ground] of [
+    ['a name on a row', text, base],
+    ['an email on a row', subtle, base],
+    ['the words under the title', subtle, canvas],
+    ['the foot of the page', subtle, canvas],
+    ['the bar, its kind', subtle, base],
+    ['a filter hint', placeholder, control],
+  ] as const) {
+    expect(contrast(ink, ground), what).toBeGreaterThanOrEqual(4.5)
+  }
+  await picker.close()
+})
+
+test('the picker stays light when the system is dark', async ({ page, engine }) => {
+  const names = TOKENS.map(([, name]) => name)
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.goto(pickerUrl(engine.ports.auth))
+  const light = await painted(page, names)
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.reload()
+  expect(await painted(page, names)).toEqual(light)
+  await expect(page.locator('html')).toHaveCSS('color-scheme', 'light')
+  await expect(page.locator('body')).toHaveCSS('background-color', 'oklch(0.9875 0 0)')
+})
 
 test('the picker is the console: its logo, its faces and a provider by name', async ({
   page,

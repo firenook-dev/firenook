@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light">
 <title>Firenook Auth Emulator</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22664.38%22 height=%22664.38%22 viewBox=%2245.62 117.87 664.38 664.38%22 role=%22img%22 aria-labelledby=%22title%22%3E%3Ctitle id=%22title%22%3EFirenook%3C/title%3E%3Cdesc%3EFirenook mark: favicon, optically adjusted for small sizes.%3C/desc%3E%3Cg id=%22firenook-mark%22%3E%3Cpath d=%22M343.55 529.57 C289.54 509.76 284.09 463.69 319.44 421.96 C345.83 390.80 382.16 370.01 409.25 339.59 C440.60 304.40 453.11 258.55 453.95 212.23 C454.25 195.90 453.30 179.56 451.70 163.31 C451.48 161.04 450.82 147.97 449.88 146.91 C449.71 146.71 447.41 148.56 447.15 148.75 C441.35 152.96 435.56 157.19 429.78 161.43 C407.75 177.61 385.84 193.95 363.91 210.26 C340.77 227.47 317.59 244.61 294.22 261.50 C229.57 308.23 158.35 361.00 146.88 446.17 C140.16 496.11 159.85 544.54 197.04 577.99 C201.85 582.32 227.47 602.79 232.51 602.85 C235.61 602.89 258.14 587.50 262.40 584.81 C290.08 567.33 317.31 549.15 343.55 529.57 Z%22 fill=%22%23F23818%22 /%3E%3Cpath d=%22M410.28 393.49 C422.01 397.78 433.58 402.98 442.82 411.59 C465.51 432.72 461.94 466.36 445.76 490.20 C410.57 542.06 347.33 555.60 316.07 631.76 C303.81 661.64 302.67 694.20 309.73 725.50 C311.71 734.28 314.26 742.93 317.25 751.42 C317.36 751.74 318.62 755.34 318.66 755.33 C321.77 754.34 339.15 740.09 343.11 737.09 C362.39 722.53 381.48 707.70 400.52 692.82 C426.25 672.70 451.81 652.34 477.82 632.58 C529.48 593.32 575.51 563.98 599.25 499.92 C619.05 446.48 610.48 387.00 573.77 342.78 C563.58 330.50 550.55 321.31 537.03 313.04 C535.34 312.01 532.50 309.48 530.50 309.44 C528.12 309.39 502.79 327.55 498.80 330.25 C468.79 350.58 439.35 371.88 410.28 393.49 Z%22 fill=%22%23FF9800%22 /%3E%3C/g%3E%3C/svg%3E">
 <!--
@@ -12,6 +12,9 @@
   `console/e2e/auth-picker.spec.ts` fails when they part) and the sizes of its
   controls at the console's 14 px root. The faces are the console's, inlined
   so the first paint is already right and nothing is fetched.
+
+  Always light, as the official page is: it stands in for a provider's sign-in
+  and opens over the developer's app, whatever the system's mode.
 -->
 <style>
   @font-face { font-family:'InterVariable'; font-style:normal; font-weight:100 900; font-display:block;
@@ -21,23 +24,12 @@
     src:url(data:font/woff2;base64,__FIRENOOK_PLEX_MONO__) format('woff2'); }
 
   :root {
-    color-scheme:light dark;
+    color-scheme:light;
     --canvas:oklch(.9875 0 0); --base:#fff; --tint:oklch(.97 0 0); --recessed:oklch(.96 0 0); --control:#fff;
     --line:oklch(.145 0 0 / .1); --hairline:oklch(.935 0 0); --focus:oklch(.15 0 0);
     --text:oklch(.205 0 0); --strong:oklch(.145 0 0); --subtle:oklch(.53 0 0); --placeholder:oklch(.55 0 0);
     --danger:oklch(.505 .213 27.518); --danger-tint:oklch(.936 .032 17.7 / .42); --danger-ring:oklch(.637 .237 25.331);
-    --ring:oklch(.49 .2 263); --hover:oklch(0 0 0 / .04); --wordmark:#202124;
-    /* The primary button is the cobalt in both modes (the console's theme.css). */
-    --cobalt:oklch(.49 .2 263);
-  }
-  @media (prefers-color-scheme:dark) {
-    :root {
-      --canvas:oklch(.1 0 0); --base:oklch(.17 0 0); --tint:oklch(.269 0 0); --recessed:oklch(.15 0 0); --control:oklch(.205 0 0);
-      --line:oklch(.32 0 0); --hairline:oklch(.269 0 0); --focus:oklch(.935 0 0);
-      --text:oklch(.97 0 0); --strong:oklch(.985 0 0); --subtle:oklch(.708 0 0); --placeholder:oklch(.64 0 0);
-      --danger:oklch(.704 .191 22.216); --danger-tint:oklch(.429 .176 28.7 / .17); --danger-ring:oklch(.577 .245 27.325);
-      --ring:oklch(.65 .16 258); --hover:oklch(1 0 0 / .096); --wordmark:#fff;
-    }
+    --brand:oklch(.49 .2 263); --hover:oklch(0 0 0 / .04); --wordmark:#202124;
   }
 
   * { box-sizing:border-box; }
@@ -76,7 +68,7 @@
   #accounts li + li { border-top:1px solid var(--hairline); }
   .js-reuse-account { display:flex; align-items:center; gap:11px; width:100%; min-height:58px; padding:8px 12px; border:0; background:none; text-align:left; }
   .js-reuse-account:hover,.js-reuse-account:hover .avatar { background-image:linear-gradient(var(--hover),var(--hover)); }
-  .js-reuse-account:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
+  .js-reuse-account:focus-visible { outline:2px solid var(--brand); outline-offset:-2px; }
   .avatar { flex:none; width:32px; height:32px; display:grid; place-items:center; overflow:hidden; border-radius:50%; background:var(--tint); font-size:12px; font-weight:500; color:var(--subtle); position:relative; }
   .avatar img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
   .who { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
@@ -95,11 +87,11 @@
   .btn { display:inline-flex; align-items:center; justify-content:center; gap:7px; height:35px; padding:0 14px; border:0; border-radius:7px; font-weight:500; white-space:nowrap;
     background:var(--base); box-shadow:0 0 0 1px var(--line),0 1px 2px 0 rgb(0 0 0 / .05); }
   .btn:hover { background:var(--tint); }
-  .btn:focus-visible,.square:focus-visible { outline:2px solid var(--ring); outline-offset:1px; }
+  .btn:focus-visible,.square:focus-visible { outline:2px solid var(--brand); outline-offset:1px; }
   .btn .icon { font-size:15px; }
-  .btn.primary { color:#fff; background:linear-gradient(color-mix(in oklch,var(--cobalt),white 15%),var(--cobalt));
-    box-shadow:0 0 0 1px color-mix(in oklch,var(--cobalt),black 10%),inset 0 1px 0 0 color-mix(in oklch,var(--cobalt),white 30%),0 1px 2px 0 rgb(0 0 0 / .05); }
-  .btn.primary:hover { background:linear-gradient(color-mix(in oklch,var(--cobalt),white 30%),var(--cobalt)); }
+  .btn.primary { color:#fff; background:linear-gradient(color-mix(in oklch,var(--brand),white 15%),var(--brand));
+    box-shadow:0 0 0 1px color-mix(in oklch,var(--brand),black 10%),inset 0 1px 0 0 color-mix(in oklch,var(--brand),white 30%),0 1px 2px 0 rgb(0 0 0 / .05); }
+  .btn.primary:hover { background:linear-gradient(color-mix(in oklch,var(--brand),white 30%),var(--brand)); }
   .square { flex:none; width:32px; height:32px; margin-left:-8px; display:grid; place-items:center; padding:0; border:0; border-radius:7px; background:none; }
   .square:hover { background:var(--hover); }
   .square .icon { font-size:16px; color:var(--text); }
