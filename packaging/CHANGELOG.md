@@ -1,3 +1,40 @@
+# 0.2.1 — sign-in from any address, and a sign-in page in the console's look
+
+- Pin the engine to `6556f79b2fda6ccc53c4700aff5fffc029939cde`, the merge of
+  [PR #133](https://github.com/firenook-dev/firenook/pull/133) on 0.2.0 and
+  [PR #132](https://github.com/firenook-dev/firenook/pull/132). Its tree is
+  the PR head's, `b49e9d8`, which passed CI
+  ([run 41892010113](https://github.com/firenook-dev/firenook/actions/runs/41892010113))
+  and the five-platform packed-install matrix
+  ([run 41892010175](https://github.com/firenook-dev/firenook/actions/runs/41892010175)).
+- **Popup sign-in from a LAN address or a container name.** Over plain http
+  on any name but `localhost`, a browser has no `crypto.randomUUID`. The
+  account picker called it inside a `try` that skips other origins' frames,
+  so the matching Auth iframe was skipped too and the page said "Cannot find
+  the matching Firebase Auth iframe"; adding an account threw the same way.
+  The ids now come from `crypto.getRandomValues`, which every page has, and
+  the popup finishes as it does on the official emulator, recorded from
+  firebase-tools 15.22.0 in the same mode.
+- **Saved rules tests from such an address.** The console threw the same way
+  when you added a test, and now saves it.
+- **The sign-in page, in the console's look.** The page a popup or redirect
+  opens now shows your project, the provider's test accounts with their
+  photos or initials, and a filter once there are eight or more. It stays
+  light whatever the system's theme, as a provider's sign-in page does, and
+  works on a phone. Its fonts are built in, and it asks for nothing beyond
+  the emulator except an account's own photo.
+- **A new random user from the sign-in page.** "New random user" opens the
+  form filled with a made-up name and email, so you see who you are about to
+  be and can change it before signing in. "Fill in random" does the same on
+  an empty form, and the next sign-in offers that account like any other.
+- **Small things.** `firenook` and its native packages link to
+  [firenook.dev](https://firenook.dev) on npm, and `init` suggests
+  `npm i -D firenook` without `-E`.
+- No emulator protocol, port or data format changed: 0.2.1 opens what 0.2.0
+  saved as it is, and 0.2.0 opens what 0.2.1 saves.
+- Published straight to `latest`; the CLI's `next` stays on 0.2.0 until it is
+  moved by hand.
+
 # 0.2.0 — the first release for public use
 
 - Pin the engine to `7a9614bea49f8208f96d2126b29ef11ee2f2810b`, the merge of
