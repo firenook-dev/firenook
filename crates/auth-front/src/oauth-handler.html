@@ -2,36 +2,188 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Firenook Auth Emulator</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22664.38%22 height=%22664.38%22 viewBox=%2245.62 117.87 664.38 664.38%22 role=%22img%22 aria-labelledby=%22title%22%3E%3Ctitle id=%22title%22%3EFirenook%3C/title%3E%3Cdesc%3EFirenook mark: favicon, optically adjusted for small sizes.%3C/desc%3E%3Cg id=%22firenook-mark%22%3E%3Cpath d=%22M343.55 529.57 C289.54 509.76 284.09 463.69 319.44 421.96 C345.83 390.80 382.16 370.01 409.25 339.59 C440.60 304.40 453.11 258.55 453.95 212.23 C454.25 195.90 453.30 179.56 451.70 163.31 C451.48 161.04 450.82 147.97 449.88 146.91 C449.71 146.71 447.41 148.56 447.15 148.75 C441.35 152.96 435.56 157.19 429.78 161.43 C407.75 177.61 385.84 193.95 363.91 210.26 C340.77 227.47 317.59 244.61 294.22 261.50 C229.57 308.23 158.35 361.00 146.88 446.17 C140.16 496.11 159.85 544.54 197.04 577.99 C201.85 582.32 227.47 602.79 232.51 602.85 C235.61 602.89 258.14 587.50 262.40 584.81 C290.08 567.33 317.31 549.15 343.55 529.57 Z%22 fill=%22%23F23818%22 /%3E%3Cpath d=%22M410.28 393.49 C422.01 397.78 433.58 402.98 442.82 411.59 C465.51 432.72 461.94 466.36 445.76 490.20 C410.57 542.06 347.33 555.60 316.07 631.76 C303.81 661.64 302.67 694.20 309.73 725.50 C311.71 734.28 314.26 742.93 317.25 751.42 C317.36 751.74 318.62 755.34 318.66 755.33 C321.77 754.34 339.15 740.09 343.11 737.09 C362.39 722.53 381.48 707.70 400.52 692.82 C426.25 672.70 451.81 652.34 477.82 632.58 C529.48 593.32 575.51 563.98 599.25 499.92 C619.05 446.48 610.48 387.00 573.77 342.78 C563.58 330.50 550.55 321.31 537.03 313.04 C535.34 312.01 532.50 309.48 530.50 309.44 C528.12 309.39 502.79 327.55 498.80 330.25 C468.79 350.58 439.35 371.88 410.28 393.49 Z%22 fill=%22%23FF9800%22 /%3E%3C/g%3E%3C/svg%3E">
+<!--
+  The account picker of a federated sign-in, in the console's own look. It is
+  served from the Auth port with no console build behind it, so it cannot use
+  Kumo's components: it restates the tokens a Kumo page paints (the journey
+  `console/e2e/auth-picker.spec.ts` fails when they part) and the sizes of its
+  controls at the console's 14 px root. The faces are the console's, inlined
+  so the first paint is already right and nothing is fetched.
+-->
 <style>
-  body { font:16px system-ui,sans-serif; color:#202124; background:#f6f7f9; margin:0; padding:24px; }
-  main { max-width:480px; margin:auto; padding:24px; background:white; border-radius:12px; }
-  h1 { font-size:22px; } p { line-height:1.5; } ul { list-style:none; padding:0; }
-  button,input { font:inherit; padding:12px; border:1px solid #ccc; border-radius:6px; }
-  button { cursor:pointer; background:#fff; } button:hover { background:#f0f4ff; }
-  .js-reuse-account { display:block; width:100%; text-align:left; margin-bottom:8px; }
-  .email { display:block; font-size:14px; color:#555; margin-top:4px; }
-  label,input { display:block; } input { box-sizing:border-box; width:100%; margin:8px 0 16px; }
-  [role=alert] { color:#b3261e; white-space:pre-wrap; } small { color:#555; }
+  @font-face { font-family:'InterVariable'; font-style:normal; font-weight:100 900; font-display:block;
+    src:url(data:font/woff2;base64,__FIRENOOK_INTER__) format('woff2');
+    unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+  @font-face { font-family:'IBM Plex Mono'; font-style:normal; font-weight:400; font-display:block;
+    src:url(data:font/woff2;base64,__FIRENOOK_PLEX_MONO__) format('woff2'); }
+
+  :root {
+    color-scheme:light dark;
+    --canvas:oklch(.9875 0 0); --base:#fff; --tint:oklch(.97 0 0); --recessed:oklch(.96 0 0); --control:#fff;
+    --line:oklch(.145 0 0 / .1); --hairline:oklch(.935 0 0); --focus:oklch(.15 0 0);
+    --text:oklch(.205 0 0); --strong:oklch(.145 0 0); --subtle:oklch(.53 0 0); --placeholder:oklch(.55 0 0);
+    --danger:oklch(.505 .213 27.518); --danger-tint:oklch(.936 .032 17.7 / .42); --danger-ring:oklch(.637 .237 25.331);
+    --ring:oklch(.49 .2 263); --hover:oklch(0 0 0 / .04); --wordmark:#202124;
+    /* The primary button is the cobalt in both modes (the console's theme.css). */
+    --cobalt:oklch(.49 .2 263);
+  }
+  @media (prefers-color-scheme:dark) {
+    :root {
+      --canvas:oklch(.1 0 0); --base:oklch(.17 0 0); --tint:oklch(.269 0 0); --recessed:oklch(.15 0 0); --control:oklch(.205 0 0);
+      --line:oklch(.32 0 0); --hairline:oklch(.269 0 0); --focus:oklch(.935 0 0);
+      --text:oklch(.97 0 0); --strong:oklch(.985 0 0); --subtle:oklch(.708 0 0); --placeholder:oklch(.64 0 0);
+      --danger:oklch(.704 .191 22.216); --danger-tint:oklch(.429 .176 28.7 / .17); --danger-ring:oklch(.577 .245 27.325);
+      --ring:oklch(.65 .16 258); --hover:oklch(1 0 0 / .096); --wordmark:#fff;
+    }
+  }
+
+  * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
+  html { height:100%; font:14px/1.45 'InterVariable','Inter',ui-sans-serif,system-ui,'Segoe UI',Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; font-feature-settings:'calt','cv02','cv03','cv04'; }
+  body { margin:0; min-height:100%; height:100dvh; display:flex; flex-direction:column; background:var(--canvas); color:var(--text); }
+  button,input { font:inherit; color:inherit; margin:0; }
+  button { cursor:pointer; }
+  .icon { width:1em; height:1em; flex:none; fill:currentColor; }
+
+  /* The console's top bar. */
+  header { flex:none; height:48px; display:flex; align-items:center; gap:10px; padding:0 16px; background:var(--base); border-bottom:1px solid var(--line); }
+  .logo { display:block; flex:none; height:24px; width:auto; color:var(--wordmark); }
+  .slash { flex:none; width:9px; height:18px; color:var(--line); }
+  .project { display:flex; align-items:center; gap:7px; min-width:0; }
+  .project .icon { font-size:15px; color:var(--subtle); }
+  .project span { font:400 13px/1 'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .kind { margin-left:auto; flex:none; font-size:12px; color:var(--subtle); white-space:nowrap; }
+
+  main { flex:1; min-height:0; width:100%; max-width:520px; margin:0 auto; padding:20px 20px 14px; display:flex; flex-direction:column; transition:opacity .15s .1s; }
+  body[data-busy] main { opacity:.55; pointer-events:none; }
+  .view { flex:1; min-height:0; display:flex; flex-direction:column; }
+  .title { display:flex; align-items:center; gap:8px; min-height:32px; }
+  .title .icon { font-size:19px; color:var(--subtle); }
+  h1 { margin:0; font-size:18px; font-weight:600; line-height:1.25; letter-spacing:-.01em; color:var(--strong); overflow-wrap:anywhere; }
+  .lede { margin:2px 0 0; color:var(--subtle); }
+
+  /* A framed list, the shape every console panel has. */
+  .search { position:relative; margin-top:14px; flex:none; }
+  .search .icon { position:absolute; left:10px; top:50%; translate:0 -50%; font-size:14px; color:var(--subtle); pointer-events:none; }
+  .search input { padding-left:30px; }
+  #accounts { list-style:none; margin:14px 0 0; padding:0; flex:0 1 auto; min-height:64px; overflow-y:auto; background:var(--base) padding-box; border:1px solid var(--line); border-radius:7px; }
+  .search + #accounts { margin-top:8px; }
+  #accounts:empty { display:none; }
+  #accounts li + li { border-top:1px solid var(--hairline); }
+  .js-reuse-account { display:flex; align-items:center; gap:11px; width:100%; min-height:58px; padding:8px 12px; border:0; background:none; text-align:left; }
+  .js-reuse-account:hover,.js-reuse-account:hover .avatar { background-image:linear-gradient(var(--hover),var(--hover)); }
+  .js-reuse-account:focus-visible { outline:2px solid var(--ring); outline-offset:-2px; }
+  .avatar { flex:none; width:32px; height:32px; display:grid; place-items:center; overflow:hidden; border-radius:50%; background:var(--tint); font-size:12px; font-weight:500; color:var(--subtle); position:relative; }
+  .avatar img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  .who { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+  .who span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .name { font-weight:500; }
+  .email { font:400 12px/1.4 'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:var(--subtle); }
+  .go { font-size:13px; color:var(--subtle); opacity:0; }
+  .js-reuse-account:hover .go,.js-reuse-account:focus-visible .go { opacity:1; }
+  .none { display:none; margin-top:14px; padding:22px 16px; border-radius:7px; background:var(--recessed); text-align:center; color:var(--subtle); }
+  .none strong { display:block; font-weight:500; color:var(--text); }
+  #accounts:empty + .none { display:block; }
+  #no-match { margin-top:8px; padding:14px 16px; }
+
+  /* Kumo's buttons, at its large size. */
+  .actions { flex:none; display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px; }
+  .btn { display:inline-flex; align-items:center; justify-content:center; gap:7px; height:35px; padding:0 14px; border:0; border-radius:7px; font-weight:500; white-space:nowrap;
+    background:var(--base); box-shadow:0 0 0 1px var(--line),0 1px 2px 0 rgb(0 0 0 / .05); }
+  .btn:hover { background:var(--tint); }
+  .btn:focus-visible,.square:focus-visible { outline:2px solid var(--ring); outline-offset:1px; }
+  .btn .icon { font-size:15px; }
+  .btn.primary { color:#fff; background:linear-gradient(color-mix(in oklch,var(--cobalt),white 15%),var(--cobalt));
+    box-shadow:0 0 0 1px color-mix(in oklch,var(--cobalt),black 10%),inset 0 1px 0 0 color-mix(in oklch,var(--cobalt),white 30%),0 1px 2px 0 rgb(0 0 0 / .05); }
+  .btn.primary:hover { background:linear-gradient(color-mix(in oklch,var(--cobalt),white 30%),var(--cobalt)); }
+  .square { flex:none; width:32px; height:32px; margin-left:-8px; display:grid; place-items:center; padding:0; border:0; border-radius:7px; background:none; }
+  .square:hover { background:var(--hover); }
+  .square .icon { font-size:16px; color:var(--text); }
+
+  /* Kumo's fields. */
+  #main-form .fields { flex:0 1 auto; min-height:0; overflow-y:auto; margin:10px -4px 0; padding:4px; display:grid; gap:12px; }
+  label { display:block; margin-bottom:4px; font-weight:500; }
+  label small { font-size:12px; font-weight:400; color:var(--subtle); }
+  input { display:block; width:100%; height:32px; padding:0 10.5px; border:0; border-radius:7px; background:var(--control); box-shadow:0 0 0 1px var(--line); outline:none; }
+  input::placeholder { color:var(--placeholder); opacity:1; }
+  input:focus { box-shadow:0 0 0 1.5px color-mix(in oklch,var(--focus) 50%,transparent); }
+  input[aria-invalid=true] { box-shadow:0 0 0 1.5px var(--danger-ring); }
+  .field-error { margin:4px 0 0; font-size:13px; line-height:1.35; color:var(--danger); }
+  .field-error:empty { display:none; }
+  .form-actions { grid-template-columns:auto auto; justify-content:space-between; margin-top:14px; }
+
+  [role=alert] { flex:none; margin:12px 0 0; padding:9px 11px; border-radius:7px; background:var(--danger-tint); color:var(--danger); white-space:pre-wrap; overflow-wrap:anywhere; }
+  [role=alert]:empty { display:none; }
+  footer { flex:none; margin-top:auto; padding-top:14px; font-size:12px; line-height:1.4; color:var(--subtle); }
+
+  /* A finger needs more than a pointer does. */
+  @media (pointer:coarse) {
+    .js-reuse-account { min-height:62px; }
+    .btn,input { height:44px; }
+    input { font-size:16px; }
+    .square { width:44px; height:44px; margin-left:-14px; }
+  }
 </style>
+<svg hidden aria-hidden="true">
+  <symbol id="i-cube" viewBox="0 0 256 256"><path d="M223.68,66.15,135.68,18h0a15.88,15.88,0,0,0-15.36,0l-88,48.17a16,16,0,0,0-8.32,14v95.64a16,16,0,0,0,8.32,14l88,48.17a15.88,15.88,0,0,0,15.36,0l88-48.17a16,16,0,0,0,8.32-14V80.18A16,16,0,0,0,223.68,66.15ZM128,32h0l80.34,44L128,120,47.66,76ZM40,90l80,43.78v85.79L40,175.82Zm96,129.57V133.82L216,90v85.78Z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 256 256"><path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z"/></symbol>
+  <symbol id="i-dice" viewBox="0 0 256 256"><path d="M192,32H64A32,32,0,0,0,32,64V192a32,32,0,0,0,32,32H192a32,32,0,0,0,32-32V64A32,32,0,0,0,192,32Zm16,160a16,16,0,0,1-16,16H64a16,16,0,0,1-16-16V64A16,16,0,0,1,64,48H192a16,16,0,0,1,16,16ZM104,92A12,12,0,1,1,92,80,12,12,0,0,1,104,92Zm72,0a12,12,0,1,1-12-12A12,12,0,0,1,176,92Zm-72,72a12,12,0,1,1-12-12A12,12,0,0,1,104,164Zm36-36a12,12,0,1,1-12-12A12,12,0,0,1,140,128Zm36,36a12,12,0,1,1-12-12A12,12,0,0,1,176,164Z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 256 256"><path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"/></symbol>
+  <symbol id="i-back" viewBox="0 0 256 256"><path d="M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z"/></symbol>
+  <symbol id="i-caret" viewBox="0 0 256 256"><path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z"/></symbol>
+  <symbol id="i-card" viewBox="0 0 256 256"><path d="M200,112a8,8,0,0,1-8,8H152a8,8,0,0,1,0-16h40A8,8,0,0,1,200,112Zm-8,24H152a8,8,0,0,0,0,16h40a8,8,0,0,0,0-16Zm40-80V200a16,16,0,0,1-16,16H40a16,16,0,0,1-16-16V56A16,16,0,0,1,40,40H216A16,16,0,0,1,232,56ZM216,200V56H40V200H216Zm-80.26-34a8,8,0,1,1-15.5,4c-2.63-10.26-13.06-18-24.25-18s-21.61,7.74-24.25,18a8,8,0,1,1-15.5-4,39.84,39.84,0,0,1,17.19-23.34,32,32,0,1,1,45.12,0A39.76,39.76,0,0,1,135.75,166ZM96,136a16,16,0,1,0-16-16A16,16,0,0,0,96,136Z"/></symbol>
+  <symbol id="i-google" viewBox="0 0 256 256"><path d="M224,128a96,96,0,1,1-21.95-61.09,8,8,0,1,1-12.33,10.18A80,80,0,1,0,207.6,136H128a8,8,0,0,1,0-16h88A8,8,0,0,1,224,128Z"/></symbol>
+  <symbol id="i-apple" viewBox="0 0 256 256"><path d="M223.3,169.59a8.07,8.07,0,0,0-2.8-3.4C203.53,154.53,200,134.64,200,120c0-17.67,13.47-33.06,21.5-40.67a8,8,0,0,0,0-11.62C208.82,55.74,187.82,48,168,48a72.2,72.2,0,0,0-40,12.13,71.56,71.56,0,0,0-90.71,9.09A74.63,74.63,0,0,0,16,123.4a127.06,127.06,0,0,0,40.14,89.73A39.8,39.8,0,0,0,83.59,224h87.68a39.84,39.84,0,0,0,29.12-12.57,125,125,0,0,0,17.82-24.6C225.23,174,224.33,172,223.3,169.59Zm-34.63,30.94a23.76,23.76,0,0,1-17.4,7.47H83.59a23.82,23.82,0,0,1-16.44-6.51A111.14,111.14,0,0,1,32,123,58.5,58.5,0,0,1,48.65,80.47,54.81,54.81,0,0,1,88,64h.78A55.45,55.45,0,0,1,123,76.28a8,8,0,0,0,10,0A55.44,55.44,0,0,1,168,64a70.64,70.64,0,0,1,36,10.35c-13,14.52-20,30.47-20,45.65,0,23.77,7.64,42.73,22.18,55.3A105.82,105.82,0,0,1,188.67,200.53ZM128.23,30A40,40,0,0,1,167,0h1a8,8,0,0,1,0,16h-1a24,24,0,0,0-23.24,18,8,8,0,1,1-15.5-4Z"/></symbol>
+  <symbol id="i-github" viewBox="0 0 256 256"><path d="M208.31,75.68A59.78,59.78,0,0,0,202.93,28,8,8,0,0,0,196,24a59.75,59.75,0,0,0-48,24H124A59.75,59.75,0,0,0,76,24a8,8,0,0,0-6.93,4,59.78,59.78,0,0,0-5.38,47.68A58.14,58.14,0,0,0,56,104v8a56.06,56.06,0,0,0,48.44,55.47A39.8,39.8,0,0,0,96,192v8H72a24,24,0,0,1-24-24A40,40,0,0,0,8,136a8,8,0,0,0,0,16,24,24,0,0,1,24,24,40,40,0,0,0,40,40H96v16a8,8,0,0,0,16,0V192a24,24,0,0,1,48,0v40a8,8,0,0,0,16,0V192a39.8,39.8,0,0,0-8.44-24.53A56.06,56.06,0,0,0,216,112v-8A58.14,58.14,0,0,0,208.31,75.68ZM200,112a40,40,0,0,1-40,40H112a40,40,0,0,1-40-40v-8a41.74,41.74,0,0,1,6.9-22.48A8,8,0,0,0,80,73.83a43.81,43.81,0,0,1,.79-33.58,43.88,43.88,0,0,1,32.32,20.06A8,8,0,0,0,119.82,64h32.35a8,8,0,0,0,6.74-3.69,43.87,43.87,0,0,1,32.32-20.06A43.81,43.81,0,0,1,192,73.83a8.09,8.09,0,0,0,1,7.65A41.72,41.72,0,0,1,200,104Z"/></symbol>
+  <symbol id="i-facebook" viewBox="0 0 256 256"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm8,191.63V152h24a8,8,0,0,0,0-16H136V112a16,16,0,0,1,16-16h16a8,8,0,0,0,0-16H152a32,32,0,0,0-32,32v24H96a8,8,0,0,0,0,16h24v63.63a88,88,0,1,1,16,0Z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 256 256"><path d="M214.75,211.71l-62.6-98.38,61.77-67.95a8,8,0,0,0-11.84-10.76L143.24,99.34,102.75,35.71A8,8,0,0,0,96,32H48a8,8,0,0,0-6.75,12.3l62.6,98.37-61.77,68a8,8,0,1,0,11.84,10.76l58.84-64.72,40.49,63.63A8,8,0,0,0,160,224h48a8,8,0,0,0,6.75-12.29ZM164.39,208,62.57,48h29L193.43,208Z"/></symbol>
+  <symbol id="i-windows" viewBox="0 0 256 256"><path d="M208,136H128a8,8,0,0,0-8,8v57.45a8,8,0,0,0,6.57,7.88l80,14.54A7.61,7.61,0,0,0,208,224a8,8,0,0,0,8-8V144A8,8,0,0,0,208,136Zm-8,70.41-64-11.63V152h64ZM96,136H32a8,8,0,0,0-8,8v40a8,8,0,0,0,6.57,7.87l64,11.64a8.54,8.54,0,0,0,1.43.13,8,8,0,0,0,8-8V144A8,8,0,0,0,96,136Zm-8,50.05-48-8.73V152H88ZM213.13,33.86a8,8,0,0,0-6.56-1.73l-80,14.55A8,8,0,0,0,120,54.55V112a8,8,0,0,0,8,8h80a8,8,0,0,0,8-8V40A8,8,0,0,0,213.13,33.86ZM200,104H136V61.22l64-11.63ZM101.13,54.22a8,8,0,0,0-6.56-1.73l-64,11.64A8,8,0,0,0,24,72v40a8,8,0,0,0,8,8H96a8,8,0,0,0,8-8V60.36A8,8,0,0,0,101.13,54.22ZM88,104H40V78.68L88,70Z"/></symbol>
+  <symbol id="i-game" viewBox="0 0 256 256"><path d="M176,112H152a8,8,0,0,1,0-16h24a8,8,0,0,1,0,16ZM104,96H96V88a8,8,0,0,0-16,0v8H72a8,8,0,0,0,0,16h8v8a8,8,0,0,0,16,0v-8h8a8,8,0,0,0,0-16ZM241.48,200.65a36,36,0,0,1-54.94,4.81c-.12-.12-.24-.24-.35-.37L146.48,160h-37L69.81,205.09l-.35.37A36.08,36.08,0,0,1,44,216,36,36,0,0,1,8.56,173.75a.68.68,0,0,1,0-.14L24.93,89.52A59.88,59.88,0,0,1,83.89,40H172a60.08,60.08,0,0,1,59,49.25c0,.06,0,.12,0,.18l16.37,84.17a.68.68,0,0,1,0,.14A35.74,35.74,0,0,1,241.48,200.65ZM172,144a44,44,0,0,0,0-88H83.89A43.9,43.9,0,0,0,40.68,92.37l0,.13L24.3,176.59A20,20,0,0,0,58,194.3l41.92-47.59a8,8,0,0,1,6-2.71Zm59.7,32.59-8.74-45A60,60,0,0,1,172,160h-4.2L198,194.31a20.09,20.09,0,0,0,17.46,5.39,20,20,0,0,0,16.23-23.11Z"/></symbol>
+</svg>
+<header>
+  <svg class="logo" viewBox="135 129 2451 642" role="img" aria-label="Firenook"><g><path fill="#F23818" d="M456.83 130.65 C467.22 205.56 470.21 281.30 418.55 342.61 C388.63 378.12 327.24 413.08 312.19 449.78 C293.43 495.49 322.83 516.93 363.34 525.74 C323.78 556.77 281.64 583.74 238.87 610.06 C235.20 612.32 230.53 612.48 226.78 610.34 C132.36 556.38 109.21 453.73 170.62 362.40 C202.94 314.32 252.74 280.56 298.93 246.98 C351.82 208.54 403.73 168.81 456.83 130.65 Z"/><path fill="#FF9800" d="M314.55 769.48 C280.57 687.71 293.36 620.51 357.12 558.83 C383.62 533.19 427.54 508.71 443.91 475.60 C448.52 466.28 450.74 455.82 449.90 445.43 C447.33 413.87 415.49 403.84 389.52 396.47 C412.39 381.72 433.77 364.94 455.88 349.10 C478.35 332.99 501.30 317.67 524.27 302.31 C527.83 299.94 532.44 299.80 536.12 301.99 C549.48 309.94 562.64 318.30 573.71 329.35 C583.87 339.49 591.83 351.73 598.80 364.22 C633.01 425.52 621.45 493.83 583.23 550.05 C557.01 588.63 515.84 614.66 479.48 642.64 C424.55 684.91 370.64 728.74 314.55 769.48 Z"/></g><g fill="currentColor"><path d="M750.67 643V440.45H708V385.95H750.67V360.25Q750.67 319.12 771.75 296.24Q792.83 273.37 836.01 273.37Q850.92 273.37 867.63 278.51Q884.33 283.65 898.21 290.85L873.02 339.68Q864.8 335.57 858.12 333.52Q851.43 331.46 845.78 331.46Q831.9 331.46 825.21 340.97Q818.53 350.48 818.53 371.56V385.95H881.76V440.45H818.53V643Z"/><path d="M918.26 643V385.95H986.12V643ZM952.19 344.31Q936.77 344.31 924.95 332.74Q913.12 321.18 913.12 305.24Q913.12 289.3 924.95 277.74Q936.77 266.17 952.19 266.17Q968.13 266.17 979.7 277.74Q991.27 289.3 991.27 305.24Q991.27 321.18 979.7 332.74Q968.13 344.31 952.19 344.31Z"/><path d="M1035.99 643V385.95H1103.85V433.25Q1119.79 409.09 1144.21 397.01Q1168.63 384.92 1194.85 384.92V450.73Q1171.2 450.73 1150.38 456.38Q1129.56 462.04 1116.7 474.89Q1103.85 487.74 1103.85 507.79V643Z"/><path d="M1334.17 649.17Q1296.12 649.17 1266.82 631.95Q1237.52 614.72 1220.81 584.39Q1204.1 554.06 1204.1 514.48Q1204.1 474.89 1221.32 444.56Q1238.54 414.23 1268.62 397.01Q1298.69 379.78 1337.77 379.78Q1371.7 379.78 1400.23 397.52Q1428.76 415.26 1445.98 449.44Q1463.2 483.63 1463.2 532.47H1275.05Q1277.62 558.17 1297.15 573.34Q1316.69 588.51 1341.36 588.51Q1362.44 588.51 1375.81 579.51Q1389.17 570.51 1396.37 556.12L1457.03 579.77Q1446.24 601.36 1429.02 617.04Q1411.79 632.72 1388.15 640.94Q1364.5 649.17 1334.17 649.17ZM1278.64 482.09H1389.69Q1388.15 466.15 1379.41 456.38Q1370.67 446.62 1358.84 441.99Q1347.02 437.36 1335.71 437.36Q1324.91 437.36 1312.32 441.73Q1299.72 446.1 1290.21 455.87Q1280.7 465.64 1278.64 482.09Z"/><path d="M1489.94 643V385.95H1553.68L1556.77 420.91Q1569.11 400.86 1588.39 390.32Q1607.66 379.78 1632.34 379.78Q1662.67 379.78 1684.26 392.12Q1705.86 404.46 1717.17 430.42Q1728.48 456.38 1727.96 497.51V643H1660.1V511.39Q1660.1 485.17 1654.19 470.78Q1648.28 456.38 1637.48 449.96Q1626.69 443.53 1612.29 443.53Q1586.07 443.02 1571.93 459.47Q1557.8 475.92 1557.8 508.31V643Z"/><path d="M1889.9 649.17Q1850.83 649.17 1820.24 631.95Q1789.65 614.72 1772.43 584.39Q1755.21 554.06 1755.21 514.48Q1755.21 474.89 1772.17 444.56Q1789.14 414.23 1819.47 397.01Q1849.8 379.78 1888.87 379.78Q1928.46 379.78 1958.79 397.01Q1989.12 414.23 2006.09 444.56Q2023.05 474.89 2023.05 514.48Q2023.05 554.06 2006.09 584.39Q1989.12 614.72 1959.05 631.95Q1928.97 649.17 1889.9 649.17ZM1889.9 586.45Q1908.92 586.45 1923.32 577.2Q1937.71 567.94 1945.68 551.75Q1953.65 535.55 1953.65 514.48Q1953.65 493.4 1945.42 477.2Q1937.2 461.01 1922.55 451.76Q1907.9 442.5 1888.87 442.5Q1870.37 442.5 1855.71 451.76Q1841.06 461.01 1832.84 477.2Q1824.61 493.4 1824.61 514.48Q1824.61 535.55 1832.84 551.75Q1841.06 567.94 1855.97 577.2Q1870.88 586.45 1889.9 586.45Z"/><path d="M2175.74 649.17Q2136.67 649.17 2106.08 631.95Q2075.49 614.72 2058.27 584.39Q2041.05 554.06 2041.05 514.48Q2041.05 474.89 2058.01 444.56Q2074.98 414.23 2105.31 397.01Q2135.64 379.78 2174.71 379.78Q2214.3 379.78 2244.63 397.01Q2274.96 414.23 2291.92 444.56Q2308.89 474.89 2308.89 514.48Q2308.89 554.06 2291.92 584.39Q2274.96 614.72 2244.88 631.95Q2214.81 649.17 2175.74 649.17ZM2175.74 586.45Q2194.76 586.45 2209.15 577.2Q2223.55 567.94 2231.52 551.75Q2239.49 535.55 2239.49 514.48Q2239.49 493.4 2231.26 477.2Q2223.03 461.01 2208.38 451.76Q2193.73 442.5 2174.71 442.5Q2156.2 442.5 2141.55 451.76Q2126.9 461.01 2118.67 477.2Q2110.45 493.4 2110.45 514.48Q2110.45 535.55 2118.67 551.75Q2126.9 567.94 2141.81 577.2Q2156.72 586.45 2175.74 586.45Z"/><path d="M2340.76 643V283.13H2408.62V481.57L2496.53 385.95H2577.25L2480.08 494.43L2584.96 643H2505.27L2436.9 543.27L2408.62 574.11V643Z"/></g></svg>
+  <svg class="slash" viewBox="0 0 12 24" aria-hidden="true"><path d="M9.5 3.5 2.5 20.5" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
+  <div class="project"><svg class="icon" aria-hidden="true"><use href="#i-cube"/></svg><span id="project">__FIRENOOK_PROJECT__</span></div>
+  <div class="kind">Auth emulator</div>
+</header>
 <main>
-  <h1>Firenook Auth Emulator</h1>
-  <p>Sign in with <strong id="provider"></strong></p>
-  <div id="accounts-list">
-    <p id="account-help">Choose an existing local account or add one.</p>
+  <div class="view" id="accounts-list">
+    <div class="title"><svg class="icon" aria-hidden="true"><use class="js-provider-icon" href="#i-card"/></svg><h1>Sign in with <span class="js-provider"></span></h1></div>
+    <p class="lede">Choose a test account, or make a new one.</p>
+    <div class="search" id="search" hidden>
+      <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="account-filter" type="search" placeholder="Filter accounts" aria-label="Filter accounts" autocomplete="off" spellcheck="false">
+    </div>
     <ul id="accounts">__FIRENOOK_ACCOUNT_ITEMS__</ul>
-    <button class="js-new-account" type="button">Add new account</button>
+    <div class="none"><strong>No <span class="js-provider"></span> accounts yet</strong>A new one is created when you sign in.</div>
+    <div class="none" id="no-match">No account matches.</div>
+    <div class="actions">
+      <button class="btn primary js-random-account" type="button"><svg class="icon" aria-hidden="true"><use href="#i-dice"/></svg>New random user</button>
+      <button class="btn js-new-account" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add account</button>
+    </div>
   </div>
-  <form id="main-form" hidden>
-    <label for="email-input">Email</label><input id="email-input" type="email" required>
-    <label for="display-name-input">Display name</label><input id="display-name-input">
-    <label for="screen-name-input">Screen name (optional)</label><input id="screen-name-input">
-    <label for="profile-photo-input">Photo URL (optional)</label><input id="profile-photo-input" type="url">
-    <button id="sign-in" type="submit">Sign in</button>
-    <button id="back-button" type="button">Back</button>
+  <form class="view" id="main-form" novalidate hidden>
+    <div class="title">
+      <button class="square" id="back-button" type="button" aria-label="Back to the accounts"><svg class="icon" aria-hidden="true"><use href="#i-back"/></svg></button>
+      <h1>New <span class="js-provider"></span> account</h1>
+    </div>
+    <div class="fields">
+      <div><label for="email-input">Email</label><input id="email-input" type="email" autocomplete="off" spellcheck="false" aria-describedby="email-error"><p class="field-error" id="email-error"></p></div>
+      <div><label for="display-name-input">Display name</label><input id="display-name-input" autocomplete="off"></div>
+      <div><label for="screen-name-input">Screen name <small>optional</small></label><input id="screen-name-input" autocomplete="off" spellcheck="false"></div>
+      <div><label for="profile-photo-input">Photo URL <small>optional</small></label><input id="profile-photo-input" type="url" autocomplete="off" spellcheck="false"></div>
+    </div>
+    <div class="actions form-actions">
+      <button class="btn" id="autogen-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-dice"/></svg>Fill in random</button>
+      <button class="btn primary" id="sign-in" type="submit">Sign in</button>
+    </div>
   </form>
   <p id="error" role="alert"></p>
-  <small>Local test accounts only. No Google password is requested or sent.</small>
+  <footer>Local test accounts only. No password is requested or sent.</footer>
 </main>
 <script>
 (() => {
@@ -40,7 +192,10 @@
   const apiKey = query.get('apiKey'), appName = query.get('appName');
   const provider = query.get('providerId'), kind = query.get('authType');
   const storageKey = apiKey + ':' + appName;
-  const error = message => { document.getElementById('error').textContent = message; };
+  const form = document.getElementById('main-form');
+  const list = document.getElementById('accounts-list');
+  const error = message => { document.getElementById('error').textContent = message; document.body.removeAttribute('data-busy'); };
+  const random = limit => crypto.getRandomValues(new Uint32Array(1))[0] % limit;
   // A random v4 UUID. `crypto.randomUUID` exists only in a secure context, and this
   // page is not one when the emulator is reached over HTTP by a LAN address or a
   // container name.
@@ -50,10 +205,21 @@
     const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
     return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join('-');
   };
-  document.getElementById('provider').textContent = provider;
+
+  // A provider's name and glyph, as the console's Auth pages write them.
+  const PROVIDERS = {'google.com':['Google','google'],'apple.com':['Apple','apple'],'github.com':['GitHub','github'],
+    'facebook.com':['Facebook','facebook'],'twitter.com':['X (Twitter)','x'],'microsoft.com':['Microsoft','windows'],
+    'yahoo.com':['Yahoo','card'],'gc.apple.com':['Game Center','game'],'playgames.google.com':['Play Games','game']};
+  const [label, glyph] = PROVIDERS[provider] ?? [provider?.startsWith('saml.') ? 'SAML (' + provider + ')' : provider?.startsWith('oidc.') ? 'OIDC (' + provider + ')' : provider, 'card'];
+  for (const name of document.querySelectorAll('.js-provider')) name.textContent = label;
+  document.querySelector('.js-provider-icon').setAttribute('href', '#i-' + glyph);
+  document.title = 'Sign in with ' + label + ' · Firenook Auth Emulator';
+  if (query.get('tid')) document.getElementById('project').textContent += ' · ' + query.get('tid');
 
   function complete(claims) {
     if (!appName) return error('Missing appName for browser sign-in.');
+    document.getElementById('error').textContent = '';
+    document.body.dataset.busy = '';
     const response = new URL(location.pathname, location.origin);
     response.searchParams.set('providerId', provider);
     response.searchParams.set('id_token', JSON.stringify(claims));
@@ -89,25 +255,84 @@
   // The accounts are rendered by the server in the official picker's shape:
   // one `.js-reuse-account` per account with its fake IdP claims in
   // `data-id-token`, URL-encoded.
-  const buttons = document.querySelectorAll('.js-reuse-account');
-  if (!buttons.length) document.getElementById('account-help').textContent = 'No ' + provider + ' accounts exist in the Auth Emulator.';
+  const buttons = [...document.querySelectorAll('.js-reuse-account')];
   for (const button of buttons) {
     button.onclick = () => complete(JSON.parse(decodeURIComponent(button.dataset.idToken)));
   }
+  // A photo that does not load leaves the initials under it.
+  for (const photo of document.querySelectorAll('.avatar img')) photo.onerror = () => photo.remove();
+
+  // A long list is searched: Enter takes the first account left.
+  const filter = document.getElementById('account-filter');
+  document.getElementById('search').hidden = buttons.length < 8;
+  filter.oninput = () => {
+    const words = filter.value.toLowerCase().split(/\s+/).filter(Boolean);
+    let left = 0;
+    for (const button of buttons) {
+      const text = button.textContent.toLowerCase();
+      const shown = words.every(word => text.includes(word));
+      button.parentElement.hidden = !shown;
+      if (shown) left++;
+    }
+    document.getElementById('accounts').hidden = !left;
+    document.getElementById('no-match').style.display = left ? '' : 'block';
+  };
+  filter.onkeydown = event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    buttons.find(button => !button.parentElement.hidden)?.click();
+  };
+
+  // Someone to sign in as, from the names the console's sample users take.
+  const FIRST = ['Ada','Grace','Alan','Katherine','Edsger','Barbara','Donald','Frances','Hedy','John','Margaret','Radia','Annie','Ken','Dennis','Mary','Claude','Evelyn','Tim','Lynn'];
+  const LAST = ['Lovelace','Hopper','Turing','Johnson','Dijkstra','Liskov','Knuth','Allen','Lamarr','McCarthy','Hamilton','Perlman','Easley','Thompson','Ritchie','Keller','Shannon','Boyd','Berners','Conway'];
+  const someone = () => {
+    const first = FIRST[random(FIRST.length)], last = LAST[random(LAST.length)];
+    const handle = (first + '.' + last).toLowerCase();
+    return {name:first + ' ' + last, screenName:handle.replace('.', '_'), email:handle + '.' + (10000 + random(90000)) + '@example.test'};
+  };
+  const claimsFor = (fields) => {
+    const claims = {sub:uuid(),iss:'',aud:'',exp:0,iat:0,email_verified:true,email:fields.email};
+    if (fields.name) claims.name = fields.name;
+    if (fields.screenName) claims.screen_name = fields.screenName;
+    if (fields.photo) claims.picture = fields.photo;
+    return claims;
+  };
+  document.querySelector('.js-random-account').onclick = () => complete(claimsFor(someone()));
+
   const showForm = visible => {
-    document.getElementById('main-form').hidden = !visible;
-    document.getElementById('accounts-list').hidden = visible;
+    form.hidden = !visible;
+    list.hidden = visible;
+    document.getElementById('error').textContent = '';
+    (visible ? document.getElementById('email-input') : document.querySelector('.js-new-account')).focus();
   };
   document.querySelector('.js-new-account').onclick = () => showForm(true);
   document.getElementById('back-button').onclick = () => showForm(false);
-  document.getElementById('main-form').onsubmit = event => {
+  form.onkeydown = event => { if (event.key === 'Escape') showForm(false); };
+
+  const email = document.getElementById('email-input');
+  const emailError = message => {
+    document.getElementById('email-error').textContent = message;
+    email.setAttribute('aria-invalid', String(!!message));
+  };
+  email.oninput = () => emailError('');
+  document.getElementById('autogen-button').onclick = () => {
+    const made = someone();
+    email.value = made.email;
+    document.getElementById('display-name-input').value = made.name;
+    document.getElementById('screen-name-input').value = made.screenName;
+    emailError('');
+  };
+  form.onsubmit = event => {
     event.preventDefault();
-    const claims = {sub:uuid(),iss:'',aud:'',exp:0,iat:0,email_verified:true};
-    for (const [id,key] of [['email-input','email'],['display-name-input','name'],['screen-name-input','screen_name'],['profile-photo-input','picture']]) {
-      const value = document.getElementById(id).value;
-      if (value) claims[key] = value;
+    const value = email.value.trim();
+    // What the official form says of an email it will not take.
+    if (!value || !value.includes('@')) {
+      emailError(value ? 'Missing "@"' : 'Email required');
+      return email.focus();
     }
-    complete(claims);
+    complete(claimsFor({email:value, name:document.getElementById('display-name-input').value,
+      screenName:document.getElementById('screen-name-input').value, photo:document.getElementById('profile-photo-input').value}));
   };
 })();
 </script>

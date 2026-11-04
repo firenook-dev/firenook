@@ -804,6 +804,14 @@ async fn picker_lists_only_the_provider_accounts_and_escapes_profile_values() {
         !html.contains("hidden@example.test"),
         "other providers stay hidden"
     );
+    assert!(html.contains(">demo-auth<"), "the page names its project");
+    assert!(!html.contains("__FIRENOOK_"), "every placeholder is filled");
+    // The one URL left is the favicon's SVG namespace, which is never fetched.
+    let requests = html.replace("http://www.w3.org/2000/svg", "");
+    assert!(
+        !requests.contains("https://") && !requests.contains("http://"),
+        "the page asks for nothing: its faces, logo and icons are inlined"
+    );
     assert_eq!(html.matches("class=\"js-reuse-account\"").count(), 1);
     let encoded = html
         .split("data-id-token=\"")
@@ -818,6 +826,74 @@ async fn picker_lists_only_the_provider_accounts_and_escapes_profile_values() {
     assert_eq!(claims["sub"], "subject");
     assert_eq!(claims["name"], name);
     assert_eq!(claims["email"], "google@example.test");
+}
+
+#[tokio::test]
+async fn picker_rows_carry_initials_a_photo_and_fall_back_to_the_email() {
+    let (runtime, _dispatches) = fixture_runtime("demo-auth");
+    let user = |id: &str, info: JsonValue| {
+        let mut provider = json!({ "providerId": "google.com", "rawId": id });
+        provider
+            .as_object_mut()
+            .expect("object")
+            .extend(info.as_object().expect("object").clone());
+        json!({ "localId": id, "providerUserInfo": [provider] })
+    };
+    let (_, imported) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts:batchCreate",
+        &json!({ "users": [
+            user("named", json!({ "displayName": "ada byron lovelace", "email": "ada@example.test",
+                "photoUrl": "https://example.test/a.png?x=\"1\"&y=2" })),
+            user("emailed", json!({ "email": "grace@example.test" })),
+            user("bare", json!({})),
+        ] }),
+    )
+    .await;
+    assert_eq!(imported["error"], json!([]));
+    let response = runtime
+        .application()
+        .oneshot(
+            Request::builder()
+                .uri("/emulator/auth/handler?apiKey=demo&providerId=google.com")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let html = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body")
+            .to_vec(),
+    )
+    .expect("UTF-8");
+    let row = |marker: &str| {
+        html.split("<li>")
+            .find(|row| row.contains(marker))
+            .unwrap_or_else(|| panic!("a row with {marker}"))
+            .to_owned()
+    };
+    let named = row("ada byron lovelace");
+    assert!(named.contains(">AL<"), "first and last word: {named}");
+    assert!(named.contains("<span class=\"email\">ada@example.test</span>"));
+    assert!(
+        named.contains("<img src=\"https://example.test/a.png?x=&quot;1&quot;&amp;y=2\""),
+        "the photo's URL is escaped: {named}"
+    );
+    assert!(named.contains("referrerpolicy=\"no-referrer\""));
+    let emailed = row("grace@example.test");
+    assert!(
+        emailed.contains(">G<"),
+        "the email's first letter: {emailed}"
+    );
+    assert!(emailed.contains("<span class=\"name\">grace@example.test</span>"));
+    assert!(!emailed.contains("class=\"email\""), "one line: {emailed}");
+    assert!(!emailed.contains("<img"));
+    assert!(
+        row("(No display name)").contains("<span class=\"avatar\" aria-hidden=\"true\"></span>")
+    );
 }
 
 #[tokio::test]

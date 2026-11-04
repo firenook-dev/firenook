@@ -655,6 +655,12 @@ account selection and token return flow. Disabled users and account isolation
 are tested. The pages need no secure context: an emulator reached over plain
 HTTP by a LAN address or a container name completes the popup, the new account
 and the redirect, as the official one does (`auth-popup-insecure-origin`).
+The picker is drawn like the console but cannot use its components: it is served
+from the Auth port and the engine builds without a console build, so it restates
+the console's tokens, inlines its two faces and asks for nothing else
+(`console/e2e/auth-picker.spec.ts` fails when the colours part). Beyond the
+official page it signs in a new random user in one click and filters a long
+list; those run through the real SDK in `conformance/test/auth-popup.test.mjs`.
 This is not real provider OAuth or a general tenant-support claim.
 
 Storage retains uploaded bytes and standard metadata. Gzip downloads follow
