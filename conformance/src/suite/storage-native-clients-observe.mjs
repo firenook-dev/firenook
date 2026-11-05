@@ -3,6 +3,8 @@
 // bucket path, CORS preflights, and listing under rules. The capture records
 // this against the official emulator; the replay test runs the same requests
 // against the native engine.
+import { request as httpRequest } from 'node:http';
+
 export const project = 'demo-firenook-native-clients';
 export const bucket = `${project}.appspot.com`;
 
@@ -217,6 +219,24 @@ export async function observe(origin, log = () => {}) {
   uploads['android-typed-finalize'] = await observed(await send(await uploadUrlOf(typed), 'upload, finalize', 'abc', { contentType: 'application/x-www-form-urlencoded' }));
   const untyped = await androidStart('open/untyped.png', { contentType: 'image/png', body: { metadata: { k: 'v' } } });
   uploads['android-untyped-finalize'] = await observed(await send(await uploadUrlOf(untyped), 'upload, finalize', 'abc', { contentType: 'application/x-www-form-urlencoded' }));
+
+  // An Android emulator reaches the host as 10.0.2.2, where 127.0.0.1 is the
+  // phone itself, so the upload URL has to name what the client asked for.
+  const startedAs = await new Promise((resolve, reject) => {
+    const parsed = new URL(origin);
+    const request = httpRequest({
+      host: parsed.hostname, port: parsed.port, method: 'POST', path: `${v0()}?name=open%2Fhost.bin&uploadType=resumable`,
+      headers: { host: `10.0.2.2:${parsed.port}`, 'x-goog-upload-protocol': 'resumable', 'x-goog-upload-command': 'start', 'content-length': '0' },
+    }, (response) => { response.resume(); response.on('end', () => resolve(response)); });
+    request.on('error', reject);
+    request.end();
+  });
+  uploads['start-names-the-host-asked-for'] = {
+    status: startedAs.statusCode,
+    // Its port is this run's.
+    host: new URL(startedAs.headers['x-goog-upload-url']).hostname,
+  };
+  log(`start-names-the-host-asked-for: ${JSON.stringify(uploads['start-names-the-host-asked-for'])}`);
 
   // The web SDK's start, for comparison.
   const web = await webStart('open/web.txt', 3);

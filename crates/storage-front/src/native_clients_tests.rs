@@ -135,6 +135,52 @@ async fn the_ios_start_on_an_object_path_is_an_upload_that_finishes_by_put() {
 }
 
 #[tokio::test]
+async fn the_upload_url_names_the_host_the_client_asked_for() {
+    let fixture = Fixture::start("host").await;
+    let start = |host: Option<&str>, forwarded: Option<&str>| {
+        let mut request = Request::post(format!(
+            "/v0/b/{BUCKET}/o?name=open%2Fa.bin&uploadType=resumable"
+        ))
+        .header("x-goog-upload-protocol", "resumable")
+        .header("x-goog-upload-command", "start");
+        if let Some(host) = host {
+            request = request.header(header::HOST, host);
+        }
+        if let Some(forwarded) = forwarded {
+            request = request.header("x-forwarded-host", forwarded);
+        }
+        request.body(Body::empty()).expect("request")
+    };
+    let origin = |headers: &HeaderMap| {
+        let url = url::Url::parse(
+            headers["x-goog-upload-url"]
+                .to_str()
+                .expect("upload url header"),
+        )
+        .expect("url");
+        format!(
+            "{}:{}",
+            url.host_str().expect("host"),
+            url.port().expect("port")
+        )
+    };
+    // As an Android emulator reaches the host.
+    let (_, headers, _) = fixture.send(start(Some("10.0.2.2:21003"), None)).await;
+    assert_eq!(origin(&headers), "10.0.2.2:21003");
+    // A proxy says where the client really is.
+    let (_, headers, _) = fixture
+        .send(start(Some("127.0.0.1:21003"), Some("proxy.test:8443")))
+        .await;
+    assert_eq!(origin(&headers), "proxy.test:8443");
+    // No usable name falls back to the configured origin.
+    let (_, headers, _) = fixture.send(start(None, None)).await;
+    assert_eq!(origin(&headers), "127.0.0.1:21003");
+    let (_, headers, _) = fixture.send(start(Some("not a host/../x"), None)).await;
+    assert_eq!(origin(&headers), "127.0.0.1:21003");
+    fixture.stop().await;
+}
+
+#[tokio::test]
 async fn the_path_names_the_object_whatever_the_query_and_body_say() {
     let fixture = Fixture::start("names").await;
     let (status, headers, _) = fixture

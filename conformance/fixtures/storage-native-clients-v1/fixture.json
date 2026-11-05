@@ -2,7 +2,7 @@
  "schemaVersion": 1,
  "syntheticOnly": true,
  "project": "demo-firenook-native-clients",
- "capturedAt": "2026-11-05T18:08:40.648Z",
+ "capturedAt": "2026-11-05T19:09:16.758Z",
  "oracle": {
   "firebaseTools": "15.34.0",
   "node": "v24.20.0",
@@ -225,6 +225,10 @@
     },
     "hasDownloadTokens": true
    }
+  },
+  "start-names-the-host-asked-for": {
+   "status": 200,
+   "host": "10.0.2.2"
   },
   "web-finalize": {
    "status": 200,

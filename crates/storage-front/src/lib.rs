@@ -1509,7 +1509,7 @@ async fn resumable_start(
         .map_err(io_error)?;
     let location = format!(
         "{}/upload/storage/v1/b/{}/o?name={}&uploadType=resumable&upload_id={}",
-        request_origin(headers, &state.config.origin),
+        upload_origin(headers, &state.config.origin),
         percent_encode(bucket),
         percent_encode(&name),
         percent_encode(&id)
@@ -2553,6 +2553,28 @@ fn firebase_metadata(object: &StoredObject) -> JsonValue {
 /// A direct client of the Storage port sends no such headers and sees the
 /// configured origin; one that sends them itself changes only the URLs in
 /// its own answers.
+/// Where a client continues an upload: wherever it reached this request, as on
+/// the official emulator. An Android emulator reaches the host as 10.0.2.2, where
+/// the configured 127.0.0.1 would be the phone itself.
+fn upload_origin(headers: &HeaderMap, configured: &str) -> String {
+    let asked = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|host| {
+            !host.is_empty()
+                && host.len() <= 255
+                && host.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric()
+                        || matches!(byte, b'.' | b'-' | b'_' | b':' | b'[' | b']')
+                })
+        });
+    match asked {
+        Some(host) if !headers.contains_key("x-forwarded-host") => format!("http://{host}"),
+        _ => request_origin(headers, configured),
+    }
+}
+
 fn request_origin(headers: &HeaderMap, configured: &str) -> String {
     let header = |name: &str| {
         headers
