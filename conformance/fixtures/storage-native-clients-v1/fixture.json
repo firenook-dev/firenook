@@ -1,0 +1,1319 @@
+{
+ "schemaVersion": 1,
+ "syntheticOnly": true,
+ "project": "demo-firenook-native-clients",
+ "capturedAt": "2026-11-05T18:08:40.648Z",
+ "oracle": {
+  "firebaseTools": "15.34.0",
+  "node": "v24.20.0",
+  "java": "java version \"25.0.1\" 2025-10-21 LTS"
+ },
+ "uploads": {
+  "ios-start": {
+   "status": 200,
+   "uploadStatus": "active",
+   "chunkGranularity": "10000",
+   "sizeReceived": null,
+   "hasUploadId": true,
+   "uploadUrl": {
+    "path": "/v0/b/demo-firenook-native-clients.appspot.com/o",
+    "name": "open/hello.txt",
+    "protocol": "resumable",
+    "hasId": true
+   }
+  },
+  "ios-query": {
+   "status": 200,
+   "uploadStatus": "active",
+   "chunkGranularity": null,
+   "sizeReceived": "0",
+   "hasUploadId": false
+  },
+  "ios-put-upload": {
+   "status": 200,
+   "uploadStatus": "active",
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": true
+  },
+  "ios-query-after-upload": {
+   "status": 200,
+   "uploadStatus": "active",
+   "chunkGranularity": null,
+   "sizeReceived": "3",
+   "hasUploadId": false
+  },
+  "ios-put-finalize": {
+   "status": 200,
+   "uploadStatus": "final",
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "name": "open/hello.txt",
+    "bucket": "demo-firenook-native-clients.appspot.com",
+    "contentType": "text/plain",
+    "size": "5",
+    "contentDisposition": "inline",
+    "metadata": {
+     "k": "v"
+    },
+    "hasDownloadTokens": true
+   }
+  },
+  "ios-denied-start": {
+   "status": 200,
+   "uploadStatus": "active",
+   "chunkGranularity": "10000",
+   "sizeReceived": null,
+   "hasUploadId": true,
+   "uploadUrl": {
+    "path": "/v0/b/demo-firenook-native-clients.appspot.com/o",
+    "name": "users/not-me/a.txt",
+    "protocol": "resumable",
+    "hasId": true
+   }
+  },
+  "ios-denied-finalize": {
+   "status": 403,
+   "uploadStatus": "final",
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "error": {
+     "code": 403,
+     "message": "Permission denied. No WRITE permission."
+    },
+    "hasDownloadTokens": false
+   }
+  },
+  "ios-denied-finalize-again": {
+   "status": 403,
+   "uploadStatus": "final",
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false
+  },
+  "ios-own-finalize": {
+   "status": 200,
+   "uploadStatus": "final",
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "name": "users/someone/a.txt",
+    "bucket": "demo-firenook-native-clients.appspot.com",
+    "contentType": "application/octet-stream",
+    "size": "1",
+    "contentDisposition": "inline",
+    "metadata": {},
+    "hasDownloadTokens": true
+   }
+  },
+  "path-beats-query-start": {
+   "status": 200,
+   "uploadStatus": "active",
+   "chunkGranularity": "10000",
+   "sizeReceived": null,
+   "hasUploadId": true,
+   "uploadUrl": {
+    "path": "/v0/b/demo-firenook-native-clients.appspot.com/o",
+    "name": "open/path.txt",
+    "protocol": "resumable",
+    "hasId": true
+   }
+  },
+  "path-beats-query-finalize": {
+   "status": 200,
+   "uploadStatus": "final",
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "name": "open/path.txt",
+    "bucket": "demo-firenook-native-clients.appspot.com",
+    "contentType": "application/octet-stream",
+    "size": "1",
+    "contentDisposition": "inline",
+    "metadata": {},
+    "hasDownloadTokens": true
+   }
+  },
+  "ios-cancel": {
+   "status": 200,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false
+  },
+  "ios-after-cancel": {
+   "status": 400,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false
+  },
+  "android-start-no-body": {
+   "status": 200,
+   "uploadStatus": "active",
+   "chunkGranularity": "10000",
+   "sizeReceived": null,
+   "hasUploadId": true,
+   "uploadUrl": {
+    "path": "/v0/b/demo-firenook-native-clients.appspot.com/o",
+    "name": "open/android.bin",
+    "protocol": "resumable",
+    "hasId": true
+   }
+  },
+  "android-chunk": {
+   "status": 200,
+   "uploadStatus": "active",
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": true
+  },
+  "android-empty-finalize": {
+   "status": 200,
+   "uploadStatus": "final",
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "name": "open/android.bin",
+    "bucket": "demo-firenook-native-clients.appspot.com",
+    "contentType": "application/octet-stream",
+    "size": "3",
+    "contentDisposition": "inline",
+    "metadata": {},
+    "hasDownloadTokens": true
+   }
+  },
+  "android-typed-finalize": {
+   "status": 200,
+   "uploadStatus": "final",
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "name": "open/typed.png",
+    "bucket": "demo-firenook-native-clients.appspot.com",
+    "contentType": "image/png",
+    "size": "3",
+    "contentDisposition": "inline",
+    "metadata": {
+     "k": "v"
+    },
+    "hasDownloadTokens": true
+   }
+  },
+  "android-untyped-finalize": {
+   "status": 200,
+   "uploadStatus": "final",
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "name": "open/untyped.png",
+    "bucket": "demo-firenook-native-clients.appspot.com",
+    "contentType": "application/octet-stream",
+    "size": "3",
+    "contentDisposition": "inline",
+    "metadata": {
+     "k": "v"
+    },
+    "hasDownloadTokens": true
+   }
+  },
+  "web-finalize": {
+   "status": 200,
+   "uploadStatus": "final",
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "name": "open/web.txt",
+    "bucket": "demo-firenook-native-clients.appspot.com",
+    "contentType": "text/plain",
+    "size": "3",
+    "contentDisposition": "inline",
+    "metadata": {},
+    "hasDownloadTokens": true
+   }
+  },
+  "object-path-media": {
+   "status": 200,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "name": "open/media.txt",
+    "bucket": "demo-firenook-native-clients.appspot.com",
+    "contentType": "text/plain",
+    "size": "5",
+    "contentDisposition": "inline",
+    "metadata": {},
+    "hasDownloadTokens": true
+   }
+  },
+  "object-path-media-put": {
+   "status": 200,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "name": "open/media-put.txt",
+    "bucket": "demo-firenook-native-clients.appspot.com",
+    "contentType": "text/plain",
+    "size": "5",
+    "contentDisposition": "inline",
+    "metadata": {},
+    "hasDownloadTokens": true
+   }
+  },
+  "bucket-path-media-put": {
+   "status": 200,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "name": "open/bucket-put.txt",
+    "bucket": "demo-firenook-native-clients.appspot.com",
+    "contentType": "text/plain",
+    "size": "5",
+    "contentDisposition": "inline",
+    "metadata": {},
+    "hasDownloadTokens": true
+   }
+  },
+  "object-path-multipart": {
+   "status": 200,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "name": "open/multi.txt",
+    "bucket": "demo-firenook-native-clients.appspot.com",
+    "contentType": "text/plain",
+    "size": "9",
+    "contentDisposition": "inline",
+    "metadata": {
+     "k": "v"
+    },
+    "hasDownloadTokens": true
+   }
+  },
+  "object-path-denied-media": {
+   "status": 403,
+   "uploadStatus": "final",
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "error": {
+     "code": 403,
+     "message": "Permission denied. No WRITE permission."
+    },
+    "hasDownloadTokens": false
+   }
+  },
+  "start-without-a-name": {
+   "status": 400,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false
+  },
+  "command-without-an-id": {
+   "status": 400,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false
+  },
+  "protocol-without-a-command": {
+   "status": 400,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false
+  },
+  "put-as-patch": {
+   "status": 200,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "name": "open/hello.txt",
+    "bucket": "demo-firenook-native-clients.appspot.com",
+    "contentType": "text/plain",
+    "size": "5",
+    "contentDisposition": "inline",
+    "metadata": {
+     "k": "patched"
+    },
+    "hasDownloadTokens": true
+   }
+  }
+ },
+ "downloads": {
+  "ios-read": {
+   "status": 200,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false
+  },
+  "android-read": {
+   "status": 200,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false
+  }
+ },
+ "tokens": {
+  "create-token-signed-out": {
+   "status": 403,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "error": {
+     "code": 403,
+     "message": "Missing admin credentials."
+    },
+    "hasDownloadTokens": false
+   }
+  },
+  "delete-token-signed-out": {
+   "status": 403,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "error": {
+     "code": 403,
+     "message": "Missing admin credentials."
+    },
+    "hasDownloadTokens": false
+   }
+  },
+  "create-token-owner": {
+   "status": 200,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false,
+   "body": {
+    "name": "open/hello.txt",
+    "bucket": "demo-firenook-native-clients.appspot.com",
+    "contentType": "text/plain",
+    "size": "5",
+    "contentDisposition": "inline",
+    "metadata": {
+     "k": "patched"
+    },
+    "hasDownloadTokens": true
+   }
+  },
+  "create-token-not-true": {
+   "status": 400,
+   "uploadStatus": null,
+   "chunkGranularity": null,
+   "sizeReceived": null,
+   "hasUploadId": false
+  }
+ },
+ "cors": {
+  "preflight": {
+   "allowHeaders": [
+    "authorization",
+    "content-type",
+    "x-firebase-gmpid",
+    "x-firebase-storage-version",
+    "x-goog-upload-command",
+    "x-goog-upload-header-content-length",
+    "x-goog-upload-header-content-type",
+    "x-goog-upload-offset",
+    "x-goog-upload-protocol",
+    "x-made-up-header"
+   ],
+   "allowMethods": [
+    "delete",
+    "get",
+    "head",
+    "patch",
+    "post",
+    "put"
+   ],
+   "ok": true
+  },
+  "privateNetwork": "true",
+  "exposed": [
+   "content-type",
+   "x-firebase-storage-version",
+   "x-goog-upload-chunk-granularity",
+   "x-goog-upload-command",
+   "x-goog-upload-control-url",
+   "x-goog-upload-header-content-length",
+   "x-goog-upload-header-content-type",
+   "x-goog-upload-protocol",
+   "x-goog-upload-size-received",
+   "x-goog-upload-status",
+   "x-goog-upload-url",
+   "x-gupload-uploadid"
+  ]
+ },
+ "lists": {
+  "single-wildcard": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 200,
+    "items": [
+     "open/a.txt",
+     "open/android.bin",
+     "open/bucket-put.txt",
+     "open/hello.txt",
+     "open/media-put.txt",
+     "open/media.txt",
+     "open/multi.txt",
+     "open/path.txt",
+     "open/typed.png",
+     "open/untyped.png",
+     "open/web.txt"
+    ],
+    "prefixes": [
+     "open/sub/"
+    ]
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "single-wildcard-read": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 200,
+    "items": [
+     "open/a.txt",
+     "open/android.bin",
+     "open/bucket-put.txt",
+     "open/hello.txt",
+     "open/media-put.txt",
+     "open/media.txt",
+     "open/multi.txt",
+     "open/path.txt",
+     "open/typed.png",
+     "open/untyped.png",
+     "open/web.txt"
+    ],
+    "prefixes": [
+     "open/sub/"
+    ]
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "single-wildcard-get-only": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "recursive-wildcard": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 200,
+    "items": [
+     "open/a.txt",
+     "open/android.bin",
+     "open/bucket-put.txt",
+     "open/hello.txt",
+     "open/media-put.txt",
+     "open/media.txt",
+     "open/multi.txt",
+     "open/path.txt",
+     "open/typed.png",
+     "open/untyped.png",
+     "open/web.txt"
+    ],
+    "prefixes": [
+     "open/sub/"
+    ]
+   },
+   "open/sub/": {
+    "status": 200,
+    "items": [
+     "open/sub/b.txt"
+    ],
+    "prefixes": [
+     "open/sub/deep/"
+    ]
+   },
+   "open/sub/deep/": {
+    "status": 200,
+    "items": [
+     "open/sub/deep/c.txt"
+    ],
+    "prefixes": []
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "root-single-wildcard": {
+   "(root)": {
+    "status": 200,
+    "items": [
+     "e.txt"
+    ],
+    "prefixes": [
+     "open/",
+     "other/",
+     "users/"
+    ]
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "root-recursive-wildcard": {
+   "(root)": {
+    "status": 200,
+    "items": [
+     "e.txt"
+    ],
+    "prefixes": [
+     "open/",
+     "other/",
+     "users/"
+    ]
+   },
+   "open/": {
+    "status": 200,
+    "items": [
+     "open/a.txt",
+     "open/android.bin",
+     "open/bucket-put.txt",
+     "open/hello.txt",
+     "open/media-put.txt",
+     "open/media.txt",
+     "open/multi.txt",
+     "open/path.txt",
+     "open/typed.png",
+     "open/untyped.png",
+     "open/web.txt"
+    ],
+    "prefixes": [
+     "open/sub/"
+    ]
+   },
+   "open/sub/": {
+    "status": 200,
+    "items": [
+     "open/sub/b.txt"
+    ],
+    "prefixes": [
+     "open/sub/deep/"
+    ]
+   },
+   "open/sub/deep/": {
+    "status": 200,
+    "items": [
+     "open/sub/deep/c.txt"
+    ],
+    "prefixes": []
+   },
+   "other/": {
+    "status": 200,
+    "items": [
+     "other/d.txt"
+    ],
+    "prefixes": []
+   }
+  },
+  "exact-folder": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "deeper-single-wildcard": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 200,
+    "items": [
+     "open/sub/b.txt"
+    ],
+    "prefixes": [
+     "open/sub/deep/"
+    ]
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "two-wildcards": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 200,
+    "items": [
+     "open/a.txt",
+     "open/android.bin",
+     "open/bucket-put.txt",
+     "open/hello.txt",
+     "open/media-put.txt",
+     "open/media.txt",
+     "open/multi.txt",
+     "open/path.txt",
+     "open/typed.png",
+     "open/untyped.png",
+     "open/web.txt"
+    ],
+    "prefixes": [
+     "open/sub/"
+    ]
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 200,
+    "items": [
+     "other/d.txt"
+    ],
+    "prefixes": []
+   }
+  },
+  "three-wildcards": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 200,
+    "items": [
+     "open/sub/b.txt"
+    ],
+    "prefixes": [
+     "open/sub/deep/"
+    ]
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "nested-match": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 200,
+    "items": [
+     "open/a.txt",
+     "open/android.bin",
+     "open/bucket-put.txt",
+     "open/hello.txt",
+     "open/media-put.txt",
+     "open/media.txt",
+     "open/multi.txt",
+     "open/path.txt",
+     "open/typed.png",
+     "open/untyped.png",
+     "open/web.txt"
+    ],
+    "prefixes": [
+     "open/sub/"
+    ]
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "wildcard-then-literal": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 200,
+    "items": [
+     "open/sub/b.txt"
+    ],
+    "prefixes": [
+     "open/sub/deep/"
+    ]
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "binds-the-folder": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 200,
+    "items": [
+     "open/a.txt",
+     "open/android.bin",
+     "open/bucket-put.txt",
+     "open/hello.txt",
+     "open/media-put.txt",
+     "open/media.txt",
+     "open/multi.txt",
+     "open/path.txt",
+     "open/typed.png",
+     "open/untyped.png",
+     "open/web.txt"
+    ],
+    "prefixes": [
+     "open/sub/"
+    ]
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "name-is-empty": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "name-is-a-string": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "name-unknown-denies": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "name-not-equal": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "name-negated": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "name-or-true": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 200,
+    "items": [
+     "open/a.txt",
+     "open/android.bin",
+     "open/bucket-put.txt",
+     "open/hello.txt",
+     "open/media-put.txt",
+     "open/media.txt",
+     "open/multi.txt",
+     "open/path.txt",
+     "open/typed.png",
+     "open/untyped.png",
+     "open/web.txt"
+    ],
+    "prefixes": [
+     "open/sub/"
+    ]
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "name-and-true": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "recursive-binding-is-path": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 200,
+    "items": [
+     "open/a.txt",
+     "open/android.bin",
+     "open/bucket-put.txt",
+     "open/hello.txt",
+     "open/media-put.txt",
+     "open/media.txt",
+     "open/multi.txt",
+     "open/path.txt",
+     "open/typed.png",
+     "open/untyped.png",
+     "open/web.txt"
+    ],
+    "prefixes": [
+     "open/sub/"
+    ]
+   },
+   "open/sub/": {
+    "status": 200,
+    "items": [
+     "open/sub/b.txt"
+    ],
+    "prefixes": [
+     "open/sub/deep/"
+    ]
+   },
+   "open/sub/deep/": {
+    "status": 200,
+    "items": [
+     "open/sub/deep/c.txt"
+    ],
+    "prefixes": []
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "recursive-binding-negated": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 200,
+    "items": [
+     "open/a.txt",
+     "open/android.bin",
+     "open/bucket-put.txt",
+     "open/hello.txt",
+     "open/media-put.txt",
+     "open/media.txt",
+     "open/multi.txt",
+     "open/path.txt",
+     "open/typed.png",
+     "open/untyped.png",
+     "open/web.txt"
+    ],
+    "prefixes": [
+     "open/sub/"
+    ]
+   },
+   "open/sub/": {
+    "status": 200,
+    "items": [
+     "open/sub/b.txt"
+    ],
+    "prefixes": [
+     "open/sub/deep/"
+    ]
+   },
+   "open/sub/deep/": {
+    "status": 200,
+    "items": [
+     "open/sub/deep/c.txt"
+    ],
+    "prefixes": []
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "recursive-value-empty": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "recursive-value-slash": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "recursive-value-sub": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "recursive-value-slash-sub": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "recursive-value-deep": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "recursive-value-is-string": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "recursive-then-wildcard": {
+   "(root)": {
+    "status": 200,
+    "items": [
+     "e.txt"
+    ],
+    "prefixes": [
+     "open/",
+     "other/",
+     "users/"
+    ]
+   },
+   "open/": {
+    "status": 200,
+    "items": [
+     "open/a.txt",
+     "open/android.bin",
+     "open/bucket-put.txt",
+     "open/hello.txt",
+     "open/media-put.txt",
+     "open/media.txt",
+     "open/multi.txt",
+     "open/path.txt",
+     "open/typed.png",
+     "open/untyped.png",
+     "open/web.txt"
+    ],
+    "prefixes": [
+     "open/sub/"
+    ]
+   },
+   "open/sub/": {
+    "status": 200,
+    "items": [
+     "open/sub/b.txt"
+    ],
+    "prefixes": [
+     "open/sub/deep/"
+    ]
+   },
+   "open/sub/deep/": {
+    "status": 200,
+    "items": [
+     "open/sub/deep/c.txt"
+    ],
+    "prefixes": []
+   },
+   "other/": {
+    "status": 200,
+    "items": [
+     "other/d.txt"
+    ],
+    "prefixes": []
+   }
+  },
+  "recursive-equals-sub": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "recursive-equals-slash-sub": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 403
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  },
+  "request-path": {
+   "(root)": {
+    "status": 403
+   },
+   "open/": {
+    "status": 200,
+    "items": [
+     "open/a.txt",
+     "open/android.bin",
+     "open/bucket-put.txt",
+     "open/hello.txt",
+     "open/media-put.txt",
+     "open/media.txt",
+     "open/multi.txt",
+     "open/path.txt",
+     "open/typed.png",
+     "open/untyped.png",
+     "open/web.txt"
+    ],
+    "prefixes": [
+     "open/sub/"
+    ]
+   },
+   "open/sub/": {
+    "status": 403
+   },
+   "open/sub/deep/": {
+    "status": 403
+   },
+   "other/": {
+    "status": 403
+   }
+  }
+ },
+ "passed": true
+}

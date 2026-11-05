@@ -136,6 +136,8 @@ mod listing_reference;
 #[cfg(test)]
 mod missing_object_tests;
 #[cfg(test)]
+mod native_clients_tests;
+#[cfg(test)]
 mod pagination_tests;
 #[cfg(test)]
 mod persistence_tests;
@@ -671,12 +673,16 @@ fn routes(state: StorageState) -> Router {
     Router::new()
         .route("/b", get(list_buckets))
         .route("/v0/", get(readiness))
-        .route("/v0/b/{bucket}/o", get(v0_list).post(v0_upload))
+        .route(
+            "/v0/b/{bucket}/o",
+            get(v0_list).post(v0_upload).put(v0_upload),
+        )
         .route(
             "/v0/b/{bucket}/o/{*object}",
             get(v0_object)
                 .patch(v0_patch)
-                .post(v0_token_action)
+                .post(v0_object_post)
+                .put(v0_object_put)
                 .delete(v0_delete),
         )
         .route(
@@ -757,7 +763,20 @@ async fn not_found() -> StorageApiError {
     StorageApiError::json(StatusCode::NOT_FOUND, "Object not found")
 }
 
+/// What a browser may read of a response, as the official emulator lists it.
+/// Without it the web SDK cannot see where to send a resumable upload.
+const EXPOSED_HEADERS: &str = "content-type,x-firebase-storage-version,x-goog-upload-size-received,x-goog-upload-url,x-goog-upload-command,x-gupload-uploadid,x-goog-upload-header-content-length,x-goog-upload-header-content-type,x-goog-upload-protocol,x-goog-upload-status,x-goog-upload-chunk-granularity,x-goog-upload-control-url";
+
 async fn cors(request: axum::extract::Request, next: Next) -> Response {
+    // A preflight is answered with the headers it asks for, so a client's
+    // headers need no list here, as on the official emulator.
+    let requested_headers = request
+        .headers()
+        .get("access-control-request-headers")
+        .cloned();
+    let private_network = request
+        .headers()
+        .contains_key("access-control-request-private-network");
     let mut response = if request.method() == Method::OPTIONS {
         StatusCode::NO_CONTENT.into_response()
     } else {
@@ -767,14 +786,25 @@ async fn cors(request: axum::extract::Request, next: Next) -> Response {
     headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
     headers.insert(
         "access-control-allow-methods",
-        HeaderValue::from_static("GET,POST,PUT,PATCH,DELETE,OPTIONS"),
+        HeaderValue::from_static("GET,HEAD,PUT,PATCH,POST,DELETE"),
     );
+    if let Some(requested_headers) = requested_headers {
+        headers.insert("access-control-allow-headers", requested_headers);
+        headers.append(
+            header::VARY,
+            HeaderValue::from_static("Access-Control-Request-Headers"),
+        );
+    }
     headers.insert(
-        "access-control-allow-headers",
-        HeaderValue::from_static(
-            "Authorization,Content-Type,Content-Range,X-Firebase-GMPID,X-Firebase-Storage-Version,X-Goog-Upload-Command,X-Goog-Upload-Offset,X-Goog-Upload-Protocol",
-        ),
+        "access-control-expose-headers",
+        HeaderValue::from_static(EXPOSED_HEADERS),
     );
+    if private_network {
+        headers.insert(
+            "access-control-allow-private-network",
+            HeaderValue::from_static("true"),
+        );
+    }
     response
 }
 
@@ -886,36 +916,103 @@ async fn v0_upload(
     headers: HeaderMap,
     body: Body,
 ) -> Result<Response, StorageApiError> {
-    let query = query_fields(query.as_deref());
-    ensure_ruleset(
+    upload_named_by(
         &state,
         &bucket,
+        &query_fields(query.as_deref()),
+        &headers,
+        body,
+    )
+    .await
+}
+
+/// A POST or PUT on an object path is an upload naming that object, which is
+/// how the iOS SDK starts one, unless it asks for a download token.
+async fn v0_object_post(
+    State(state): State<StorageState>,
+    Path((bucket, object)): Path<(String, String)>,
+    RawQuery(query): RawQuery,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Response, StorageApiError> {
+    let mut query = query_fields(query.as_deref());
+    let asks_for = |action: &str| query.get(action).is_some_and(|value| !value.is_empty());
+    if asks_for("create_token") || asks_for("delete_token") {
+        return token_action(&state, &bucket, &object, &query, &headers)
+            .await
+            .map(IntoResponse::into_response);
+    }
+    query.insert("name".to_owned(), decoded_object(&object));
+    upload_named_by(&state, &bucket, &query, &headers, body).await
+}
+
+async fn v0_object_put(
+    state: State<StorageState>,
+    path: Path<(String, String)>,
+    query: RawQuery,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Response, StorageApiError> {
+    let as_patch = headers
+        .get("x-http-method-override")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("patch"));
+    if !as_patch {
+        return v0_object_post(state, path, query, headers, body).await;
+    }
+    let bytes = collect_limited(body, 1_048_576).await?;
+    let request =
+        serde_json::from_slice::<JsonValue>(&bytes).map_err(|_| bad_request("Invalid metadata"))?;
+    v0_patch(state, path, headers, Json(request))
+        .await
+        .map(IntoResponse::into_response)
+}
+
+async fn upload_named_by(
+    state: &StorageState,
+    bucket: &str,
+    query: &BTreeMap<String, String>,
+    headers: &HeaderMap,
+    body: Body,
+) -> Result<Response, StorageApiError> {
+    ensure_ruleset(
+        state,
+        bucket,
         Some((
             Operation::Create,
             query.get("name").map_or("", String::as_str),
         )),
-        &headers,
+        headers,
     )?;
     if headers.contains_key("x-goog-upload-command") {
-        return firebase_resumable(&state, &bucket, &query, &headers, body).await;
+        return firebase_resumable(state, bucket, query, headers, body).await;
+    }
+    if headers
+        .get("x-goog-upload-protocol")
+        .is_some_and(|protocol| protocol == "resumable")
+    {
+        return Err(StorageApiError::plain(
+            StatusCode::BAD_REQUEST,
+            "Bad Request",
+        ));
     }
     let name = query
         .get("name")
         .filter(|value| !value.is_empty())
         .ok_or_else(|| bad_request("Missing object name"))?
         .clone();
-    let upload = firebase_upload(&state, &bucket, &headers, body).await?;
+    let upload = firebase_upload(state, bucket, headers, body).await?;
     let object = commit_staging(
-        &state,
+        state,
         CommitSpec {
-            bucket: &bucket,
+            bucket,
             name: &name,
             content_type: &upload.content_type,
             metadata: upload.metadata,
             object_metadata: &upload.object_metadata,
-            authorization: authorization_header(&headers),
+            authorization: authorization_header(headers),
             firebase: true,
-            console: via_console(&headers),
+            console: via_console(headers),
             keep_tokens: false,
         },
         upload.uploaded,
@@ -978,7 +1075,8 @@ async fn firebase_resumable(
         .and_then(|value| value.to_str().ok())
         .unwrap_or("");
     if command == "start" {
-        let response = gcs_resumable_start(state, bucket, query, headers, body).await?;
+        let response =
+            resumable_start(state, bucket, query, headers, body, ResumableApi::Firebase).await?;
         return firebase_upload_start_response(&response, bucket);
     }
     let id = query
@@ -1198,25 +1296,25 @@ async fn v0_patch(
     Ok(Json(firebase_metadata(&object)))
 }
 
-async fn v0_token_action(
-    State(state): State<StorageState>,
-    Path((bucket, object)): Path<(String, String)>,
-    RawQuery(query): RawQuery,
-    headers: HeaderMap,
+async fn token_action(
+    state: &StorageState,
+    bucket: &str,
+    object: &str,
+    query: &BTreeMap<String, String>,
+    headers: &HeaderMap,
 ) -> Result<Json<JsonValue>, StorageApiError> {
-    let object_name = decoded_object(&object);
-    let query = query_fields(query.as_deref());
-    ensure_ruleset(&state, &bucket, None, &headers)?;
+    let object_name = decoded_object(object);
+    ensure_ruleset(state, bucket, None, headers)?;
     // Download-token routes are admin-only in the official emulator, whatever
     // the rules say (storage-rules-v1 bypass-owner-and-download-tokens).
-    if !is_owner(&headers) {
+    if !is_owner(headers) {
         return Err(StorageApiError::json(
             StatusCode::FORBIDDEN,
             "Missing admin credentials.",
         ));
     }
     let guard = state.mutation.lock().await;
-    let object = get_object(&state, &bucket, &object_name)
+    let object = get_object(state, bucket, &object_name)
         .map_err(|_| StorageApiError::plain(StatusCode::NOT_FOUND, "Not Found"))?;
     let op = if query.get("create_token").map(String::as_str) == Some("true") {
         write::TokenOp::Create
@@ -1227,16 +1325,16 @@ async fn v0_token_action(
     };
     let mut pending = write::Pending::default();
     let object = write::token_locked(
-        &state,
+        state,
         &guard,
         &mut pending,
         object,
         &op,
-        &ChangeContext::from_authorization(authorization_header(&headers), via_console(&headers)),
+        &ChangeContext::from_authorization(authorization_header(headers), via_console(headers)),
     );
-    pending.commit(&state).await?;
+    pending.commit(state).await?;
     drop(guard);
-    pending.dispatch(&state);
+    pending.dispatch(state);
     Ok(Json(firebase_metadata(&object)))
 }
 
@@ -1262,7 +1360,9 @@ async fn gcs_upload_start(
     let upload_type = query.get("uploadType").map_or("media", String::as_str);
     match upload_type {
         "multipart" => gcs_multipart_upload(&state, &bucket, &query, &headers, body).await,
-        "resumable" => gcs_resumable_start(&state, &bucket, &query, &headers, body).await,
+        "resumable" => {
+            resumable_start(&state, &bucket, &query, &headers, body, ResumableApi::Gcs).await
+        }
         "media" => gcs_media_upload(&state, &bucket, &query, &headers, body).await,
         _ => Err(bad_request("Unsupported uploadType")),
     }
@@ -1314,12 +1414,23 @@ async fn gcs_multipart_upload(
     .into_response())
 }
 
-async fn gcs_resumable_start(
+/// Which API started a resumable upload. Only the Cloud Storage one takes the
+/// object's type from the request's headers: a Firebase start reads it from its
+/// body alone, whatever `X-Goog-Upload-*Content-Type` says, as the official
+/// emulator does (fixture `storage-native-clients-v1`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ResumableApi {
+    Firebase,
+    Gcs,
+}
+
+async fn resumable_start(
     state: &StorageState,
     bucket: &str,
     query: &BTreeMap<String, String>,
     headers: &HeaderMap,
     body: Body,
+    api: ResumableApi,
 ) -> Result<Response, StorageApiError> {
     let bytes = collect_limited(body, 1_048_576).await?;
     let bytes = decode_request_body(headers, &bytes, 1_048_576)?;
@@ -1341,11 +1452,15 @@ async fn gcs_resumable_start(
         .get("contentType")
         .and_then(JsonValue::as_str)
         .or_else(|| {
-            headers
-                .get("x-upload-content-type")
+            (api == ResumableApi::Gcs)
+                .then(|| headers.get("x-upload-content-type"))
+                .flatten()
                 .and_then(|value| value.to_str().ok())
         })
-        .unwrap_or_else(|| content_type(headers))
+        .unwrap_or_else(|| match api {
+            ResumableApi::Firebase => "application/octet-stream",
+            ResumableApi::Gcs => content_type(headers),
+        })
         .to_owned();
     let (id, staging_file) = {
         let mut data = lock(&state.inner);
@@ -1370,9 +1485,11 @@ async fn gcs_resumable_start(
             authorization: authorization_header(headers).map(str::to_owned),
             denied: false,
             cancelled: false,
+            // iOS says `-Content-Length`, the web SDK `-Header-Content-Length`.
             total: [
                 "x-upload-content-length",
                 "x-goog-upload-header-content-length",
+                "x-goog-upload-content-length",
             ]
             .iter()
             .find_map(|header| {
@@ -3160,7 +3277,7 @@ mod tests {
                 .headers()
                 .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
                 .and_then(|value| value.to_str().ok())
-                .is_some_and(|value| value.contains("X-Firebase-Storage-Version"))
+                .is_some_and(|value| value.contains("x-firebase-storage-version"))
         );
         runtime.shutdown().await.expect("shutdown");
         std::fs::remove_dir_all(root).expect("remove test storage");

@@ -752,6 +752,7 @@ pub(crate) fn evaluation_request(
     request.auth = auth;
     request.storage_resource = before;
     request.storage_request_resource = after;
+    request.storage_lists_folder = operation == Operation::List;
     request
 }
 

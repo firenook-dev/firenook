@@ -64,18 +64,6 @@ const DIVERGENCES: &[(&str, &str, u16, &str)] = &[
         "request-method-undefined: production defines request.method",
     ),
     (
-        "path-matching",
-        "root-recursive-list-one-segment-is-path",
-        200,
-        "list-prefix-template-matching: production indexes a one-segment recursive binding",
-    ),
-    (
-        "path-matching",
-        "list-exact-match-single-wildcard",
-        200,
-        "list-prefix-template-matching: production matches /la/{x} for a list on /la/q",
-    ),
-    (
         "bypass-json-api",
         "json-patch-anonymous",
         200,

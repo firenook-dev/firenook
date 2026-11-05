@@ -396,6 +396,8 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             .filter(|_| self.query_branch.is_some())
         {
             query_constraints::bindings(&pattern, &self.request.path, scope)
+        } else if self.request.storage_lists_folder {
+            query_constraints::child_bindings(&pattern, &self.request.path)
         } else {
             match_pattern(&pattern, &self.request.path).map(|bindings| {
                 bindings
@@ -1723,6 +1725,11 @@ fn index_value(base: EvalValue, index: EvalValue) -> Result<EvalValue, RuntimeEr
                 return Err(RuntimeError::new("path segments are indexed by position"));
             };
             let segments = path_segments(&path);
+            if segments.last() == Some(&query_constraints::UNBOUND_CHILD) {
+                return Err(RuntimeError::new(
+                    "Variable  is not bound in path template.",
+                ));
+            }
             usize::try_from(position)
                 .ok()
                 .and_then(|position| segments.get(position))

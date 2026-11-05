@@ -439,6 +439,11 @@ pub struct EvaluationRequest {
     pub storage_resource: Option<StorageObject>,
     /// Proposed object exposed as `request.resource` under Firebase Storage.
     pub storage_request_resource: Option<StorageObject>,
+    /// A Storage list whose `path` names the folder it lists, as a list over
+    /// HTTP does, so it matches as that folder and one more segment. Without
+    /// this the path matches literally, as the production `projects.test` API
+    /// treats the path it is given.
+    pub storage_lists_folder: bool,
 }
 
 impl EvaluationRequest {
@@ -457,6 +462,7 @@ impl EvaluationRequest {
             query: Query::default(),
             storage_resource: None,
             storage_request_resource: None,
+            storage_lists_folder: false,
         }
     }
 
