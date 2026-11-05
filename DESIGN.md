@@ -954,6 +954,40 @@ to every identifier token, with source-positioned diagnostics. This resolves
 the earlier duration-parameter gap without changing evaluation semantics or
 claiming exhaustive language parity.
 
+### Queries that name no collection
+
+The Admin SDK's `recursiveDelete` finds what to delete with an all-descendants
+selector and no collection id, recorded from the official emulator in
+`kindless-query-v1`. Only `__name__` may filter or order such a query, so each key
+can be judged without its document. Results sort by path segment with numeric ids
+first, and no stored order spans collections that way: the documents table is in
+byte order, where `rd-sibling/a` sorts before `rd/A`. So the keys are selected from
+the collection index, which holds no document bodies, into a heap the size of the
+limit, and only the selected documents are read. Each collection arrives in name
+order, so it stops being read once it can add nothing, and one outside the
+query's prefix costs a seek. A page therefore costs about its limit plus one seek
+per collection, not a scan of the store. As on the official emulator, a listener
+on such a query gets its first snapshot and no change after it.
+
+### Storage clients and list rules
+
+`storage-native-clients-v1` records what the official emulator answers to the
+requests the real clients send. The iOS SDK starts an upload with a POST on the
+object path, so a POST or PUT there is an upload unless it asks for a download
+token, which stays admin-only. A preflight is answered with the headers it asks
+for and responses expose the upload headers, because the web SDK's resumable upload
+needs both and only a browser enforces them, so `storage-browser.test.mjs` runs the
+real SDK in a real browser. `conformance/flutter-check` runs the native SDKs.
+
+A list over HTTP is matched as the folder and one more segment, which stays unknown
+in rule expressions: `match /open/{name}` proves a list of `open/` and `match /open`
+does not. The production `projects.test` API matches the literal path it is given,
+and `storage-rules-v1`'s production corpus keeps replaying that way, so the matching
+is asked for by the Storage front end (`storage_lists_folder`) and not implied by a
+list. This replaces the production-first choice `storage-rules-v1` records as
+`list-prefix-template-matching`: it refused listing `open/` under `match
+/open/{name}`, a rule written for exactly that, and allowed listing `open/sub/`.
+
 ### REST document reads and transaction boundary
 
 `rest-read-options-v1` records independent official-jar HTTP observations before

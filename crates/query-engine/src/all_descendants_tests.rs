@@ -145,9 +145,9 @@ fn an_ancestor_keeps_only_what_is_below_it() {
         );
         // A document that does not exist still has what is below it.
         assert_eq!(paths(store, &under("rd/ghost")), ["rd/ghost/sub/z"]);
-        assert!(paths(store, &under("nope/nope")).is_empty());
+        assert_eq!(paths(store, &under("nope/nope")), [""; 0]);
         // `top/parent` is not below `top/par`, however the bytes compare.
-        assert!(paths(store, &under("top/par")).is_empty());
+        assert_eq!(paths(store, &under("top/par")), [""; 0]);
     });
 }
 

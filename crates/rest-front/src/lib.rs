@@ -1331,6 +1331,35 @@ fn require_atomic_allowed(
     Err(RestError::permission_denied(message))
 }
 
+/// What a collection selector asks for, and whether it reaches all descendants.
+/// Only an all-descendants selector may leave the collection out.
+fn decode_query_scope(
+    selector: &Map<String, JsonValue>,
+    parent: Option<&str>,
+) -> Result<(QueryScope, bool), RestError> {
+    let all_descendants = selector
+        .get("allDescendants")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false);
+    let collection = match selector.get("collectionId").and_then(JsonValue::as_str) {
+        Some(collection) => collection,
+        None if all_descendants => "",
+        None => return Err(RestError::invalid("collectionId is required")),
+    };
+    let scope = if all_descendants && collection.is_empty() {
+        Ok(QueryScope::AllDescendants)
+    } else if all_descendants {
+        QueryScope::collection_group(collection)
+    } else {
+        QueryScope::collection(parent.map_or_else(
+            || collection.to_owned(),
+            |parent| format!("{parent}/{collection}"),
+        ))
+    }
+    .map_err(|error| RestError::invalid(error.to_string()))?;
+    Ok((scope, all_descendants))
+}
+
 fn rest_query_error(error: &QueryError) -> RestError {
     if error.is_failed_precondition() {
         RestError::failed_precondition(error.to_string())
@@ -1460,26 +1489,7 @@ fn decode_query(
     let selector = selector
         .as_object()
         .ok_or_else(|| RestError::invalid("collection selector must be an object"))?;
-    let all_descendants = selector
-        .get("allDescendants")
-        .and_then(JsonValue::as_bool)
-        .unwrap_or(false);
-    let collection = match selector.get("collectionId").and_then(JsonValue::as_str) {
-        Some(collection) => collection,
-        None if all_descendants => "",
-        None => return Err(RestError::invalid("collectionId is required")),
-    };
-    let scope = if all_descendants && collection.is_empty() {
-        Ok(QueryScope::AllDescendants)
-    } else if all_descendants {
-        QueryScope::collection_group(collection)
-    } else {
-        QueryScope::collection(parent.map_or_else(
-            || collection.to_owned(),
-            |parent| format!("{parent}/{collection}"),
-        ))
-    }
-    .map_err(|error| RestError::invalid(error.to_string()))?;
+    let (scope, all_descendants) = decode_query_scope(selector, parent)?;
     let mut query = StructuredQuery::new(scope);
     if all_descendants && let Some(parent) = parent {
         query = query

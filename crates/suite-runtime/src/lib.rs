@@ -1242,7 +1242,7 @@ async fn prepare_suite(
         Some(Arc::new(
             AuthRuntime::new(
                 &config.project_id,
-                lifecycle_queue(&config, &delivery),
+                lifecycle_queue(config, &delivery),
                 triggers.clone(),
                 Some(config.state_dir.join("auth-state.json")),
             )
