@@ -24,7 +24,7 @@ pub use query::{
     Aggregation, Cursor, Direction, DistanceMeasure, FieldFilter, FieldOperator, FieldPath, Filter,
     IncrementalQuery, Limit, Nearest, Order, OrderKey, PartitionCursor, Query, QueryCandidates,
     QueryDocument, QueryDocumentIterator, QueryError, QueryPlan, QueryScope, QueryStrategy,
-    aggregate, count, execute, execute_iter, partition, plan,
+    aggregate, count, execute, execute_iter, partition, plan, validate_aggregations,
 };
 
 const STANDARD_INDEXED_VALUE_BYTES: usize = 1_500;

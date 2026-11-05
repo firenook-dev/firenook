@@ -28,8 +28,8 @@ use firenook_export_format::{ExportedDocument, write_export};
 use firenook_functions_bridge::TriggerRegistry;
 use firenook_query_engine::{
     Aggregation, DatabaseEdition, Direction, DistanceMeasure, FieldFilter, FieldOperator,
-    FieldPath as QueryFieldPath, Filter, Limit, Query as StructuredQuery, QueryPolicy, QueryScope,
-    aggregate, count, execute,
+    FieldPath as QueryFieldPath, Filter, Limit, Query as StructuredQuery, QueryError, QueryPolicy,
+    QueryScope, aggregate, count, execute, validate_aggregations,
 };
 use firenook_rules_runtime::RequestOperation;
 use firenook_rules_runtime::{Authorization, RulesRuntime, SnapshotAccess, evaluation_request};
@@ -1180,7 +1180,7 @@ fn run_query_blocking(
         .map_err(|error| RestError::streaming_failed_precondition(error.to_string()))?;
     let snapshot = state.store.snapshot();
     let documents = execute(&snapshot, database, &query, state.query_policy.edition())
-        .map_err(|error| RestError::invalid(error.to_string()))?;
+        .map_err(|error| rest_query_error(&error))?;
     authorize_query(state, database, &query, authorization, &snapshot)?;
     let read_time = format_timestamp(now_timestamp())?;
     let mut responses = documents
@@ -1228,6 +1228,7 @@ fn run_aggregation_query_blocking(
         .validate(&query)
         .map_err(|error| RestError::streaming_failed_precondition(error.to_string()))?;
     let (operations, count_bounds) = decode_aggregations(aggregation_query)?;
+    validate_aggregations(&query, &operations).map_err(|error| rest_query_error(&error))?;
     let snapshot = state.store.snapshot();
     // A count needs no document payloads: it is answered from the lazy scan
     // (or the store's indexes) exactly as the gRPC service answers it. Every
@@ -1328,6 +1329,14 @@ fn require_atomic_allowed(
             firenook_rules_runtime::EvaluationResult::denial_message,
         );
     Err(RestError::permission_denied(message))
+}
+
+fn rest_query_error(error: &QueryError) -> RestError {
+    if error.is_failed_precondition() {
+        RestError::failed_precondition(error.to_string())
+    } else {
+        RestError::invalid(error.to_string())
+    }
 }
 
 fn decode_aggregations(
@@ -1451,15 +1460,18 @@ fn decode_query(
     let selector = selector
         .as_object()
         .ok_or_else(|| RestError::invalid("collection selector must be an object"))?;
-    let collection = selector
-        .get("collectionId")
-        .and_then(JsonValue::as_str)
-        .ok_or_else(|| RestError::invalid("collectionId is required"))?;
     let all_descendants = selector
         .get("allDescendants")
         .and_then(JsonValue::as_bool)
         .unwrap_or(false);
-    let scope = if all_descendants {
+    let collection = match selector.get("collectionId").and_then(JsonValue::as_str) {
+        Some(collection) => collection,
+        None if all_descendants => "",
+        None => return Err(RestError::invalid("collectionId is required")),
+    };
+    let scope = if all_descendants && collection.is_empty() {
+        Ok(QueryScope::AllDescendants)
+    } else if all_descendants {
         QueryScope::collection_group(collection)
     } else {
         QueryScope::collection(parent.map_or_else(
@@ -2355,6 +2367,15 @@ impl RestError {
         Self {
             status: StatusCode::BAD_REQUEST,
             code: "INVALID_ARGUMENT",
+            message: message.into(),
+            streaming: false,
+        }
+    }
+
+    fn failed_precondition(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            code: "FAILED_PRECONDITION",
             message: message.into(),
             streaming: false,
         }

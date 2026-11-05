@@ -360,6 +360,7 @@ jobs:
           node --test conformance/test/functions-readiness-fixture.test.mjs
           node --test conformance/test/functions-readiness-receipts.test.mjs
           node --test conformance/test/rest-read-options-fixture.test.mjs
+          node --test conformance/test/kindless-query-fixture.test.mjs
           node --test conformance/test/rule-bindings-fixture.test.mjs
           node --test conformance/test/request-identity-fixture.test.mjs
           node --test conformance/test/functions-topic-reload-fixture.test.mjs
@@ -407,6 +408,8 @@ jobs:
         run: node --test conformance/test/auth-popup.test.mjs
       - name: Replay REST read options in memory and disk/WAL
         run: node --test conformance/test/rest-read-options-replay.test.mjs
+      - name: Replay kindless queries and recursiveDelete in memory and disk/WAL
+        run: node --test conformance/test/kindless-query-replay.test.mjs
       - name: Verify native coverage reports in a real browser
         run: node --test conformance/test/developer-coverage-browser.test.mjs
       # The previous engine the upgrade check resumes from still needs the

@@ -8,7 +8,7 @@
 #![forbid(unsafe_code)]
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::path::Path;
@@ -416,6 +416,23 @@ pub struct Document {
 }
 
 impl Document {
+    /// A document with no fields, for judging a predicate that looks only at
+    /// a document's name without reading the document.
+    #[must_use]
+    pub fn nameless_stand_in() -> Self {
+        Self {
+            fields: Fields::new(),
+            create_time: Timestamp {
+                seconds: 0,
+                nanos: 0,
+            },
+            update_time: Timestamp {
+                seconds: 0,
+                nanos: 0,
+            },
+        }
+    }
+
     /// Document fields.
     #[must_use]
     pub const fn fields(&self) -> &Fields {
@@ -1498,6 +1515,38 @@ impl Snapshot {
         }
     }
 
+    /// The lowest document keys, in query name order, among the documents
+    /// whose path starts with `prefix` and that `accept` passes, at most
+    /// `at_most` of them. No document body is read. On disk the collection
+    /// index is walked one collection at a time: each collection comes in
+    /// name order, so it stops being read as soon as it can add nothing, and
+    /// a collection outside `prefix` costs one seek.
+    #[must_use]
+    pub fn lowest_keys_under(
+        &self,
+        database: &DatabaseName,
+        prefix: &str,
+        at_most: Option<usize>,
+        accept: &mut dyn FnMut(&DocumentKey) -> bool,
+    ) -> Vec<DocumentKey> {
+        let mut lowest = LowestKeys::new(at_most, accept);
+        if lowest.is_full() {
+            return Vec::new();
+        }
+        match &self.documents {
+            SnapshotDocuments::Memory { .. } => {
+                let mut cursor = self.key_cursor(database, prefix);
+                while let Some(key) = cursor.next() {
+                    lowest.offer(key);
+                }
+            }
+            SnapshotDocuments::Disk(documents) => {
+                documents.offer_keys_under(database, prefix, &mut lowest);
+            }
+        }
+        lowest.into_sorted()
+    }
+
     /// Every document key of `database`, in no particular order, without
     /// reading a document body. On disk it walks the collection index, far
     /// smaller than the documents table a [`KeyCursor`] walks; use it when
@@ -1874,6 +1923,79 @@ impl Snapshot {
 }
 
 /// Owned iterator over one immutable snapshot selection.
+/// A document key ordered as a query orders names: by path segment, numeric
+/// ids first, not by the bytes of the whole path.
+struct ByName(DocumentKey);
+
+impl PartialEq for ByName {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for ByName {}
+
+impl PartialOrd for ByName {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ByName {
+    fn cmp(&self, other: &Self) -> Ordering {
+        compare_resource_paths(self.0.path(), other.0.path())
+    }
+}
+
+/// Keeps the lowest keys offered to it, by name, so a limited selection over a
+/// large scope holds only as many keys as its limit.
+pub(crate) struct LowestKeys<'a> {
+    kept: BinaryHeap<ByName>,
+    at_most: usize,
+    accept: &'a mut dyn FnMut(&DocumentKey) -> bool,
+}
+
+impl<'a> LowestKeys<'a> {
+    fn new(at_most: Option<usize>, accept: &'a mut dyn FnMut(&DocumentKey) -> bool) -> Self {
+        Self {
+            kept: BinaryHeap::new(),
+            at_most: at_most.unwrap_or(usize::MAX),
+            accept,
+        }
+    }
+
+    fn is_full(&self) -> bool {
+        self.kept.len() >= self.at_most
+    }
+
+    /// Whether `key` can no longer be selected, which also rules out every
+    /// key after it when keys arrive in name order.
+    pub(crate) fn is_past_the_selection(&self, key: &DocumentKey) -> bool {
+        self.is_full()
+            && self.kept.peek().is_none_or(|highest| {
+                compare_resource_paths(key.path(), highest.0.path()) == Ordering::Greater
+            })
+    }
+
+    pub(crate) fn offer(&mut self, key: DocumentKey) {
+        if self.is_past_the_selection(&key) || !(self.accept)(&key) {
+            return;
+        }
+        self.kept.push(ByName(key));
+        if self.kept.len() > self.at_most {
+            self.kept.pop();
+        }
+    }
+
+    fn into_sorted(self) -> Vec<DocumentKey> {
+        self.kept
+            .into_sorted_vec()
+            .into_iter()
+            .map(|key| key.0)
+            .collect()
+    }
+}
+
 /// Walks document keys under one path prefix in byte order without decoding
 /// or copying document bodies. `seek` repositions the walk forward, so a
 /// caller can skip a whole subtree in one step.

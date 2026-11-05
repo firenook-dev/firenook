@@ -332,6 +332,12 @@ pub enum QueryScope {
         /// Optional ancestor document, relative to the database.
         ancestor: Option<String>,
     },
+    /// Every document below the optional relative ancestor document, whatever
+    /// its collection.
+    AllDescendants {
+        /// Optional ancestor document, relative to the database.
+        ancestor: Option<String>,
+    },
 }
 
 /// A constraint operator, kept separate from executable row filtering.

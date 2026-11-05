@@ -14,6 +14,7 @@ use firenook_query_engine::{
     Aggregation as QueryAggregation, DatabaseEdition, Direction as QueryDirection,
     FieldPath as QueryFieldPath, IndexConfigError, Query as StructuredQuery, QueryDocument,
     QueryPolicy, QueryScope, aggregate, compare_values, count, execute, execute_iter, partition,
+    validate_aggregations,
 };
 use firenook_rules_runtime::{
     AtomicEvaluationResult, Authorization, EvaluationResult, RequestOperation, RulesQuery,
@@ -1702,6 +1703,8 @@ impl Firestore for FirestoreService {
             .as_ref()
             .map(|_| query_plan_summary(&structured));
         let query = decode_query(parent.as_deref(), structured)?;
+        validate_aggregations(&query, &aggregation.operations)
+            .map_err(|error| query_status(&error))?;
         let rules_query = firenook_rules_runtime::query_policy(&query);
         let rules_candidate = firenook_rules_runtime::query_candidate(&database, &query)
             .map_err(Status::invalid_argument)?;

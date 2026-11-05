@@ -260,7 +260,10 @@ fn candidates(candidates: QueryCandidates) -> ExplainCandidates {
             ExplainCandidates::OrderIndex { field, lookups }
         }
         QueryCandidates::CollectionScan => ExplainCandidates::CollectionScan,
-        QueryCandidates::CollectionGroupScan { ancestor } => {
+        // The console's query box always names a collection, so its explain
+        // never reaches the keys of a query that names none.
+        QueryCandidates::CollectionGroupScan { ancestor }
+        | QueryCandidates::DescendantKeys { ancestor } => {
             ExplainCandidates::CollectionGroupScan { ancestor }
         }
     }

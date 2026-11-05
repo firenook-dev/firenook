@@ -36,7 +36,9 @@ pub(crate) fn decode_query(
             "structured query requires exactly one collection selector",
         ));
     };
-    let scope = if selector.all_descendants {
+    let scope = if selector.all_descendants && selector.collection_id.is_empty() {
+        Ok(QueryScope::AllDescendants)
+    } else if selector.all_descendants {
         QueryScope::collection_group(selector.collection_id.clone())
     } else {
         let path = parent.map_or_else(
@@ -310,7 +312,11 @@ fn decode_field_reference(field: Option<FieldReference>) -> Result<FieldPath, St
 }
 
 pub(crate) fn query_status(error: &firenook_query_engine::QueryError) -> Status {
-    Status::invalid_argument(error.to_string())
+    if error.is_failed_precondition() {
+        Status::failed_precondition(error.to_string())
+    } else {
+        Status::invalid_argument(error.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -320,6 +326,40 @@ mod tests {
         CollectionSelector, Direction as ProtoDirection, FieldReference, FindNearest, Order,
         Projection,
     };
+
+    #[test]
+    fn an_empty_id_with_all_descendants_names_no_collection() {
+        let selector = |all_descendants| StructuredQuery {
+            from: vec![CollectionSelector {
+                collection_id: String::new(),
+                all_descendants,
+            }],
+            ..StructuredQuery::default()
+        };
+        let query = decode_query(None, selector(true)).expect("kindless");
+        assert_eq!(query.scope_ref(), &QueryScope::AllDescendants);
+        assert_eq!(query.ancestor_ref(), None);
+
+        let query = decode_query(Some("top/parent"), selector(true)).expect("kindless");
+        assert_eq!(query.scope_ref(), &QueryScope::AllDescendants);
+        assert_eq!(query.ancestor_ref(), Some("top/parent"));
+
+        // Only all-descendants may leave the collection out.
+        assert_eq!(
+            decode_query(None, selector(false))
+                .expect_err("no collection")
+                .code(),
+            tonic::Code::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn a_descending_key_scan_is_a_failed_precondition() {
+        let status = query_status(&firenook_query_engine::QueryError::DescendingKeyScan);
+        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
+        let status = query_status(&firenook_query_engine::QueryError::KindRequiredForOrder);
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
 
     #[test]
     fn decodes_collection_group_order_projection_and_limit() {

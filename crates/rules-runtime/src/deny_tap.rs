@@ -178,6 +178,10 @@ pub(crate) fn denied_path(database: &DatabaseName, request: &EvaluationRequest) 
             collection_id,
             ancestor: None,
         }) => format!("{root}/**/{collection_id}"),
+        Some(QueryScope::AllDescendants {
+            ancestor: Some(ancestor),
+        }) => format!("{root}/{ancestor}/**"),
+        Some(QueryScope::AllDescendants { ancestor: None }) => format!("{root}/**"),
         None => request.path.rsplit_once('/').map_or_else(
             || request.path.clone(),
             |(collection, _)| collection.to_owned(),

@@ -399,6 +399,8 @@ fn query_target(scope: &StructuredQueryScope) -> (String, IndexScope) {
         StructuredQueryScope::CollectionGroup(collection_group) => {
             (collection_group.clone(), IndexScope::CollectionGroup)
         }
+        // Only `__name__` may filter or order it, which no index serves.
+        StructuredQueryScope::AllDescendants => (String::new(), IndexScope::CollectionGroup),
     }
 }
 

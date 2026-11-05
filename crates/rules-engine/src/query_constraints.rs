@@ -263,6 +263,18 @@ pub(super) fn bindings(
             domain.push(Segment::Descendants);
             domain.push(Segment::Literal(collection_id.clone()));
         }
+        // Any path below the ancestor, so only a match that covers the whole
+        // subtree can prove access to it.
+        QueryScope::AllDescendants { ancestor } => {
+            if let Some(ancestor) = ancestor {
+                domain.extend(
+                    ancestor
+                        .split('/')
+                        .map(|value| Segment::Literal(value.to_owned())),
+                );
+            }
+            domain.push(Segment::Descendants);
+        }
     }
     domain.push(Segment::Any);
     match_domain(pattern, &domain, BTreeMap::new())
