@@ -413,6 +413,10 @@ jobs:
         run: node --test conformance/test/kindless-query-replay.test.mjs
       - name: Replay what native SDKs and browsers send to Storage
         run: node --test conformance/test/storage-native-clients-replay.test.mjs
+      - name: Verify Storage with the real Firebase SDK in a real browser
+        run: |
+          node conformance/node_modules/playwright/cli.js install --with-deps chromium
+          node --test conformance/test/storage-browser.test.mjs
       - name: Verify native coverage reports in a real browser
         run: node --test conformance/test/developer-coverage-browser.test.mjs
       # The previous engine the upgrade check resumes from still needs the
