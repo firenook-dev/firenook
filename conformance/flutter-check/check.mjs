@@ -11,9 +11,10 @@
 //     [--runs <n>]             repeat each backend; flaky checks are counted
 //     [--cold-boot]            restart the simulator before each run
 //     [--out <directory>]      where results go (default: a new temporary one)
+//     [--keep]                 keep the generated project for a closer look
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -66,14 +67,16 @@ async function flutterDevice() {
   throw new Error(`no ${platform} device: pass --device, or start one`);
 }
 
+// `flutter create` adds what is missing and leaves what exists alone.
+const generateProject = (app) => execute(flutter, ['create', '--no-pub', '--project-name', 'flutter_check', '--org', organisation, `--platforms=${platform}`, app], { env: environment, maxBuffer: 16 * 1024 * 1024 });
+
 // The generated project lives outside the repository; only the app's own files
 // and the settings a local emulator needs are put into it.
 async function prepareApp(work) {
   const app = join(work, 'app');
   await mkdir(app, { recursive: true });
-  const platforms = platform === 'web' ? 'web' : platform;
-  log(`creating the ${platforms} project`);
-  await execute(flutter, ['create', '--no-pub', '--project-name', 'flutter_check', '--org', organisation, `--platforms=${platforms}`, app], { env: environment, maxBuffer: 16 * 1024 * 1024 });
+  log(`creating the ${platform} project`);
+  await generateProject(app);
   await cp(join(here, 'app/lib'), join(app, 'lib'), { recursive: true });
   await cp(join(here, 'app/pubspec.yaml'), join(app, 'pubspec.yaml'));
   await cp(join(here, 'app/pubspec.lock'), join(app, 'pubspec.lock')).catch(() => {});
@@ -117,13 +120,14 @@ function startBackend(backend, directory) {
   return spawn(command, args, { cwd: directory, env: environment, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
 }
 
+// Signals the whole process group, which can outlive its leader: `flutter run`
+// can exit and leave its debug service behind.
 async function stop(child, signal = 'SIGINT') {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  try { process.kill(-child.pid, signal); } catch { return; }
-  await Promise.race([once(child, 'exit'), delay(40_000)]);
   if (child.exitCode === null && child.signalCode === null) {
-    try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ }
+    try { process.kill(-child.pid, signal); } catch { /* gone */ }
+    await Promise.race([once(child, 'exit'), delay(40_000)]);
   }
+  try { process.kill(-child.pid, 'SIGKILL'); } catch { /* the group is gone */ }
 }
 
 async function resetDevice(device) {
@@ -152,6 +156,11 @@ async function runOnce(backend, run, app, template, device, work) {
 }
 
 async function attempt(backend, run, app, template, device, work, attemptNumber) {
+  // Xcode's workspace file has been seen to vanish between runs of one project,
+  // and without it xcodebuild finds no scheme.
+  if (platform === 'ios') {
+    await access(join(app, 'ios/Runner.xcworkspace/contents.xcworkspacedata')).catch(() => generateProject(app));
+  }
   const label = `${platform}-${backend}${runs > 1 ? `-${run}` : ''}`;
   const directory = join(work, 'runs', `${label}-${attemptNumber}`);
   await cp(template, directory, { recursive: true, verbatimSymlinks: true });
@@ -181,7 +190,9 @@ async function attempt(backend, run, app, template, device, work, attemptNumber)
         if (client.exitCode !== null) { status = `app exited ${client.exitCode}`; break; }
         await delay(500);
       }
+      // Let it quit by itself first: it tidies up the project as it goes.
       client.stdin.write('q');
+      await Promise.race([once(client, 'exit'), delay(15_000)]);
       await stop(client, 'SIGTERM');
       for (const match of clientLog.matchAll(/CHECK_RESULT (\{.*\})/g)) {
         try {
@@ -259,4 +270,5 @@ for (const backend of backends) {
   console.log(`${backend} on ${platform}: ${summary.backends[backend].map((row) => `${row.passed}/${row.checks}`).join(' ')}`);
 }
 console.log(failed ? `${platform}: FAILED` : `${platform}: same on every check`);
+if (!process.argv.includes('--keep')) await rm(work, { recursive: true, force: true });
 process.exit(failed ? 1 : 0);

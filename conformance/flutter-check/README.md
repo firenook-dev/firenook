@@ -20,8 +20,8 @@ the platform's tools: Chrome, Xcode with an iPhone simulator, or the Android SDK
 with a running emulator. It runs by schedule and before a release in
 `.github/workflows/sdk-clients.yml`, not on every pull request.
 
-`--runs <n>` repeats each backend and `--cold-boot` restarts the simulator before
-each run.
+`--runs <n>` repeats each backend, `--cold-boot` restarts the simulator before each
+run, and `--keep` keeps the generated project, which is otherwise deleted at the end.
 
 ## What the app needs
 
