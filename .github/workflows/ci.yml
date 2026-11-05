@@ -413,6 +413,8 @@ jobs:
         run: node --test conformance/test/kindless-query-replay.test.mjs
       - name: Replay what native SDKs and browsers send to Storage
         run: node --test conformance/test/storage-native-clients-replay.test.mjs
+      - name: Check that Auth and Storage send nothing with Functions off
+        run: node --test conformance/test/no-functions-no-events.test.mjs
       - name: Verify Storage with the real Firebase SDK in a real browser
         run: |
           node conformance/node_modules/playwright/cli.js install --with-deps chromium

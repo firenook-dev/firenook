@@ -28,7 +28,8 @@ use firenook_core_store::{
 };
 use firenook_export_format::{ExportReader, ExportedDocument, write_export};
 use firenook_functions_bridge::{
-    DeliveryHealth, DeliveryPolicy, DeliveryRuntime, FunctionsInventory, TriggerRegistry,
+    DeliveryHealth, DeliveryPolicy, DeliveryRuntime, DispatchQueue, FunctionsInventory,
+    TriggerRegistry,
 };
 pub use firenook_functions_runtime::InspectConfig;
 use firenook_functions_runtime::{
@@ -1241,7 +1242,7 @@ async fn prepare_suite(
         Some(Arc::new(
             AuthRuntime::new(
                 &config.project_id,
-                delivery.queue(),
+                lifecycle_queue(&config, &delivery),
                 triggers.clone(),
                 Some(config.state_dir.join("auth-state.json")),
             )
@@ -2224,11 +2225,22 @@ async fn start_storage(
             }),
         },
         options,
-        delivery.queue(),
+        lifecycle_queue(config, delivery),
         triggers.clone(),
     )
     .await
     .map_err(|error| failure(format!("Storage failed to start: {error}")))
+}
+
+/// Where Auth and Storage send their lifecycle events. With no Functions
+/// emulator nothing is sent, as the official dispatchers are enabled only while
+/// Functions runs (fixed in `no-functions-no-events.test.mjs`).
+fn lifecycle_queue(config: &SuiteConfig, delivery: &DeliveryRuntime) -> DispatchQueue {
+    if config.services.functions {
+        delivery.queue()
+    } else {
+        DispatchQueue::without_functions()
+    }
 }
 
 /// Every listener the selection needs, in the official listing order.
