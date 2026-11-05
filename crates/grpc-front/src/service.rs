@@ -586,6 +586,9 @@ impl FirestoreService {
         snapshot: &Snapshot,
         request_time: Timestamp,
     ) -> Result<(), Status> {
+        if authorization.is_owner() {
+            return Ok(());
+        }
         let writes = decoded
             .iter()
             .map(|decoded| decoded.write.clone())
