@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.firenook-dev/firenook",
+  "title": "Firenook",
+  "description": "Local Firebase emulators for coding agents: Firestore, Auth, Storage, Functions, logs, rules checks.",
+  "websiteUrl": "https://firenook.dev/mcp",
+  "repository": {
+    "url": "https://github.com/firenook-dev/firenook",
+    "source": "github",
+    "subfolder": "packages/cli"
+  },
+  "version": "0.2.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "firenook",
+      "version": "0.2.1",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}

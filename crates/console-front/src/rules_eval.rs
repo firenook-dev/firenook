@@ -903,6 +903,9 @@ fn relative_target(request: &EvaluationRequest) -> (String, bool) {
                     true,
                 );
             }
+            Some(QueryScope::AllDescendants { ancestor }) => {
+                return (ancestor.clone().unwrap_or_default(), true);
+            }
             None => {}
         }
     }

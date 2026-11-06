@@ -73,10 +73,15 @@ macOS notarization and more platforms remain separate supported-platform work.
 
 ## Subsequent releases
 
-1. Open a conventional release PR updating CLI version and every native optional
-   dependency to the **same exact version**, release notes and, only when
+1. Open a conventional release PR updating CLI version, every native optional
+   dependency and both versions in the root `server.json` to the **same exact
+   version**, release notes and, only when
    intentionally upgrading the engine, the tested engine revision/toolchain.
-   Run all quality and packaging checks. No package is published from a PR.
+   Run all quality and packaging checks. The PR also runs **Real SDK clients**
+   (`sdk-clients.yml`), the real FlutterFire clients on web, iOS and Android
+   against this engine and firebase-tools; it must be green, or its differences
+   explained, on the exact commit before the next step. It is separate from the
+   release job. No package is published from a PR.
 2. After review/merge, the release owner creates annotated `npm-vVERSION` at
    that exact main commit. Existing Phase gate tags are not release triggers.
    This runbook does not authorize an agent to create a tag automatically.
@@ -128,6 +133,14 @@ macOS notarization and more platforms remain separate supported-platform work.
    preview never moves it, by hand or otherwise. npm OIDC does not
    authenticate dist-tag management; never add a long-lived token merely to
    automate that step.
+7. After a stable version is verified on npm, the release owner publishes its
+   [MCP Registry](https://registry.modelcontextprotocol.io) entry from the
+   repository root with `mcp-publisher publish`. The registry reads `mcpName`
+   from that exact npm version, so it cannot be published first. `mcp-publisher
+   login github` cannot publish an organisation's name: an owner of the
+   organisation logs in with `mcp-publisher login github --token <token>`, using
+   a token that can read organisation membership and has no repository access.
+   Previews are not listed.
 
 ## Publishing the CLI straight to `latest`
 

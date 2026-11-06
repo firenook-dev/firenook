@@ -367,6 +367,10 @@ impl WatchTarget {
                     QueryScope::CollectionGroup(collection) => {
                         collection_path.rsplit('/').next() == Some(collection.as_str())
                     }
+                    // The official emulator answers a listener with no
+                    // collection once and tells it of no change after that
+                    // (fixture `kindless-query-v1`).
+                    QueryScope::AllDescendants => false,
                 }
             }
         }

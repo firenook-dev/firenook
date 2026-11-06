@@ -40,6 +40,12 @@ impl<'a> Domain<'a> {
                 parent: ancestor.as_deref(),
                 group: true,
             }),
+            QueryScope::AllDescendants { ancestor } => Ok(Self {
+                base,
+                kind: "",
+                parent: ancestor.as_deref(),
+                group: true,
+            }),
         }
     }
     fn parent_path(&self) -> String {
@@ -55,7 +61,9 @@ impl<'a> Domain<'a> {
 
 pub(super) fn query_domain(request: &EvaluationRequest) -> Result<String, &'static str> {
     let domain = Domain::new(request)?;
-    Ok(if domain.group {
+    Ok(if domain.group && domain.kind.is_empty() {
+        format!("{}/**", domain.parent_path())
+    } else if domain.group {
         format!("{}/**/{}/*", domain.parent_path(), domain.kind)
     } else {
         format!("{}/*", domain.collection_path())

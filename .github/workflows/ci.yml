@@ -360,6 +360,10 @@ jobs:
           node --test conformance/test/functions-readiness-fixture.test.mjs
           node --test conformance/test/functions-readiness-receipts.test.mjs
           node --test conformance/test/rest-read-options-fixture.test.mjs
+          node --test conformance/test/kindless-query-fixture.test.mjs
+          node --test conformance/test/storage-native-clients-fixture.test.mjs
+          node --test conformance/test/listen-resume-fixture.test.mjs
+          node --test conformance/test/rules-document-paths-fixture.test.mjs
           node --test conformance/test/rule-bindings-fixture.test.mjs
           node --test conformance/test/request-identity-fixture.test.mjs
           node --test conformance/test/functions-topic-reload-fixture.test.mjs
@@ -407,6 +411,23 @@ jobs:
         run: node --test conformance/test/auth-popup.test.mjs
       - name: Replay REST read options in memory and disk/WAL
         run: node --test conformance/test/rest-read-options-replay.test.mjs
+      - name: Replay kindless queries and recursiveDelete in memory and disk/WAL
+        run: node --test conformance/test/kindless-query-replay.test.mjs
+      - name: Replay what native SDKs and browsers send to Storage
+        run: node --test conformance/test/storage-native-clients-replay.test.mjs
+      - name: Replay listeners resuming with any token, in memory and disk/WAL
+        run: node --test conformance/test/listen-resume-replay.test.mjs
+      - name: Replay rules paths and document names
+        run: node --test conformance/test/rules-document-paths-replay.test.mjs
+      - name: Check a racing write reaches the real SDK's listener
+        run: node --test conformance/test/listener-write-race.test.mjs
+      - name: Check that Auth and Storage send nothing with Functions off
+        run: node --test conformance/test/no-functions-no-events.test.mjs
+      - name: Verify Storage with the real Firebase SDK in a real browser
+        run: |
+          node conformance/node_modules/playwright/cli.js install --with-deps chromium
+          node --test conformance/test/storage-browser.test.mjs
+          node --test conformance/test/listener-cache-browser.test.mjs
       - name: Verify native coverage reports in a real browser
         run: node --test conformance/test/developer-coverage-browser.test.mjs
       # The previous engine the upgrade check resumes from still needs the

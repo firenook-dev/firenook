@@ -13,6 +13,14 @@ use firenook_core_store::{
 use crate::indexes::IndexScope;
 use crate::{DatabaseEdition, compare_values};
 
+/// The id that sorts before every other: the lowest numeric id. The Admin SDK
+/// bounds a whole collection with it.
+const LOWEST_RESOURCE_ID: &str = "__id-9223372036854775808__";
+
+#[cfg(test)]
+#[path = "all_descendants_tests.rs"]
+mod all_descendants_tests;
+
 #[cfg(test)]
 #[path = "ordered_disk_tests.rs"]
 mod ordered_disk_tests;
@@ -179,6 +187,10 @@ pub enum QueryScope {
     Collection(String),
     /// Documents in every collection with one collection ID.
     CollectionGroup(String),
+    /// Every document below the query's ancestor, or in the whole database,
+    /// whatever its collection: the kindless query the Admin SDK's
+    /// `recursiveDelete` sends. Only `__name__` may filter or order it.
+    AllDescendants,
 }
 
 impl QueryScope {
@@ -319,12 +331,15 @@ impl Query {
         }
     }
 
-    /// Restricts a collection-group query to descendants of one document path.
+    /// Restricts a collection-group or all-descendants query to descendants
+    /// of one document path.
     pub fn under_ancestor(mut self, path: impl Into<String>) -> Result<Self, QueryError> {
         let path = path.into();
         let segments = split_path(&path);
-        if !matches!(self.scope, QueryScope::CollectionGroup(_))
-            || segments.is_empty()
+        if !matches!(
+            self.scope,
+            QueryScope::CollectionGroup(_) | QueryScope::AllDescendants
+        ) || segments.is_empty()
             || !segments.len().is_multiple_of(2)
             || segments.join("/") != path
         {
@@ -456,7 +471,8 @@ impl Query {
         self.nearest.as_ref()
     }
 
-    /// Returns the optional ancestor restriction for collection-group queries.
+    /// Returns the optional ancestor restriction of a collection-group or
+    /// all-descendants query.
     #[must_use]
     pub fn ancestor_ref(&self) -> Option<&str> {
         self.ancestor.as_deref()
@@ -591,6 +607,7 @@ fn count_from_indexes(
         QueryScope::CollectionGroup(collection_id) => {
             snapshot.count_collection_group(database, collection_id, query.ancestor.as_deref())
         }
+        QueryScope::AllDescendants => return Ok(None),
     };
     let after_offset = scoped.saturating_sub(query.offset);
     let limited = match query.limit {
@@ -787,7 +804,7 @@ pub fn execute_iter(
         (QueryStrategy::Streaming, _) => Ok(QueryDocumentIterator {
             inner: QueryDocumentIteratorInner::Streaming(Box::new(
                 StreamingQueryDocumentIterator {
-                    candidates: scoped_documents(snapshot, database, query),
+                    candidates: scoped_documents(snapshot, database, query, edition),
                     edition,
                     orders,
                     query: query.clone(),
@@ -1066,6 +1083,9 @@ pub enum QueryCandidates {
     /// Every document of the collection group is read, optionally under one
     /// ancestor.
     CollectionGroupScan { ancestor: Option<String> },
+    /// The keys of every document, optionally under one ancestor, are read
+    /// from the collection index; only the selected documents are read.
+    DescendantKeys { ancestor: Option<String> },
 }
 
 /// How a query would be answered, without answering it.
@@ -1097,6 +1117,10 @@ pub fn plan(
     let (target, scope) = match &query.scope {
         QueryScope::Collection(path) => (path.clone(), IndexScope::Collection),
         QueryScope::CollectionGroup(id) => (id.clone(), IndexScope::CollectionGroup),
+        QueryScope::AllDescendants => (
+            query.ancestor.clone().unwrap_or_default(),
+            IndexScope::CollectionGroup,
+        ),
     };
     let index_order = index_order(snapshot, database, query, &orders);
     let strategy = QueryStrategy::of(snapshot, query, &orders, index_order.is_some());
@@ -1146,6 +1170,9 @@ fn candidate_source(
     match &query.scope {
         QueryScope::Collection(_) => QueryCandidates::CollectionScan,
         QueryScope::CollectionGroup(_) => QueryCandidates::CollectionGroupScan {
+            ancestor: query.ancestor.clone(),
+        },
+        QueryScope::AllDescendants => QueryCandidates::DescendantKeys {
             ancestor: query.ancestor.clone(),
         },
     }
@@ -1229,7 +1256,7 @@ fn ordered_disk_iterator(
 ) -> QueryDocumentIterator {
     // None denotes the resource-name key; Some is an actual Firestore value,
     // including Null. All missing fields have already been excluded.
-    let mut candidates = scoped_documents(snapshot, database, query)
+    let mut candidates = scoped_documents(snapshot, database, query, edition)
         .filter(|(key, document)| candidate_matches(query, orders, edition, key, document))
         .map(|(key, document)| {
             let values = order_values(&key, &document, orders);
@@ -1459,7 +1486,7 @@ fn execute_buffered(
 
     // Order keys are extracted once per candidate; the payload of a disk
     // candidate is decoded only after it survives ordering and the limit.
-    let candidates = scoped_documents(snapshot, database, query)
+    let candidates = scoped_documents(snapshot, database, query, edition)
         .filter(|(key, document)| candidate_matches(query, orders, edition, key, document))
         .map(|(key, document)| {
             let values = order_values(&key, &document, orders);
@@ -1577,7 +1604,7 @@ fn execute_nearest(
     });
     let bound = query.offset.saturating_add(limit);
     let mut candidates = Vec::with_capacity(bound.min(1_000));
-    for candidate in scoped_documents(snapshot, database, query)
+    for candidate in scoped_documents(snapshot, database, query, edition)
         .filter(|(key, document)| {
             query
                 .filter
@@ -1850,7 +1877,71 @@ fn normalized_orders(query: &Query) -> Result<Vec<Order>, QueryError> {
     {
         return Err(QueryError::DocumentKeyOrderNotLast);
     }
+    if matches!(query.scope, QueryScope::AllDescendants) {
+        validate_all_descendants(query, &orders)?;
+    }
     Ok(orders)
+}
+
+/// What the official emulator allows a query that names no collection: names
+/// only, ascending. Orders are checked first, so an inequality on a field,
+/// which orders by it, reports the order.
+fn validate_all_descendants(query: &Query, orders: &[Order]) -> Result<(), QueryError> {
+    if orders
+        .iter()
+        .any(|order| order.path != FieldPath::DocumentId)
+    {
+        return Err(QueryError::KindRequiredForOrder);
+    }
+    if orders
+        .iter()
+        .any(|order| order.direction == Direction::Descending)
+    {
+        return Err(QueryError::DescendingKeyScan);
+    }
+    query
+        .filter
+        .as_ref()
+        .map_or(Ok(()), validate_all_descendants_filter)
+}
+
+fn validate_all_descendants_filter(filter: &Filter) -> Result<(), QueryError> {
+    match filter {
+        Filter::And(filters) | Filter::Or(filters) => {
+            filters.iter().try_for_each(validate_all_descendants_filter)
+        }
+        Filter::Field(filter) => match (&filter.path, &filter.value) {
+            (FieldPath::Field(_), _) => {
+                Err(QueryError::KindRequiredForFilter(filter.path.to_string()))
+            }
+            (FieldPath::DocumentId, Value::Reference(_)) => Ok(()),
+            (FieldPath::DocumentId, Value::Array(values))
+                if matches!(filter.operator, FieldOperator::In | FieldOperator::NotIn)
+                    && values
+                        .iter()
+                        .all(|value| matches!(value, Value::Reference(_))) =>
+            {
+                Ok(())
+            }
+            (FieldPath::DocumentId, _) => Err(QueryError::KeyFilterValueNotKey),
+        },
+    }
+}
+
+/// Refuses the aggregations a query that names no collection cannot answer:
+/// the official emulator counts one, and orders by the field of anything else.
+pub fn validate_aggregations(
+    query: &Query,
+    aggregations: &[Aggregation],
+) -> Result<(), QueryError> {
+    if matches!(query.scope, QueryScope::AllDescendants)
+        && aggregations
+            .iter()
+            .any(|aggregation| !matches!(aggregation, Aggregation::Count { .. }))
+    {
+        return Err(QueryError::KindRequiredForOrder);
+    }
+    Ok(())
 }
 
 fn collect_inequality_fields(filter: &Filter) -> BTreeSet<FieldPath> {
@@ -1898,6 +1989,7 @@ fn scoped_documents(
     snapshot: &Snapshot,
     database: &DatabaseName,
     query: &Query,
+    edition: DatabaseEdition,
 ) -> ScopedCandidates {
     if let Some(keys) = named_candidates(query, database) {
         let snapshot = snapshot.clone();
@@ -1930,7 +2022,85 @@ fn scoped_documents(
                 .iter_collection_group(database, collection_id, query.ancestor.as_deref())
                 .lazy(),
         ),
+        QueryScope::AllDescendants => descendant_documents(snapshot, database, query, edition),
     }
+}
+
+/// The documents of an all-descendants query, in name order. No stored order
+/// spans collections by name, so the keys are selected first and only the
+/// selected documents are read. A query that names no collection filters on
+/// names alone, so each key is judged without its document, and a limit keeps
+/// the selection that small.
+fn descendant_documents(
+    snapshot: &Snapshot,
+    database: &DatabaseName,
+    query: &Query,
+    edition: DatabaseEdition,
+) -> ScopedCandidates {
+    let orders = [Order {
+        path: FieldPath::DocumentId,
+        direction: Direction::Ascending,
+    }];
+    let at_most = match (query.limit, &query.nearest) {
+        (Some(Limit::First(limit)), None) => Some(limit.saturating_add(query.offset)),
+        _ => None,
+    };
+    let unread = LazyDocument::Decoded(Arc::new(Document::nameless_stand_in()));
+    let keys = snapshot.lowest_keys_under(
+        database,
+        &descendant_prefix(query, database),
+        at_most,
+        &mut |key| candidate_matches(query, &orders, edition, key, &unread),
+    );
+    let snapshot = snapshot.clone();
+    Box::new(keys.into_iter().filter_map(move |key| {
+        snapshot
+            .get(&key)
+            .map(|document| (key, LazyDocument::Decoded(document)))
+    }))
+}
+
+/// The path prefix of every document an all-descendants query can return: its
+/// ancestor's, or the one collection a range such as the SDK's names.
+fn descendant_prefix(query: &Query, database: &DatabaseName) -> String {
+    let ancestor = query
+        .ancestor
+        .as_ref()
+        .map_or_else(String::new, |ancestor| format!("{ancestor}/"));
+    query
+        .filter
+        .as_ref()
+        .and_then(|filter| name_range_collection(filter, database))
+        .map(|collection| format!("{collection}/"))
+        .filter(|collection| collection.starts_with(&ancestor))
+        .unwrap_or(ancestor)
+}
+
+/// The collection a `__name__` range covers exactly: from the lowest possible
+/// id in `collection` up to the lowest possible id in `collection\0`, the next
+/// possible collection, so nothing else falls inside it.
+fn name_range_collection(filter: &Filter, database: &DatabaseName) -> Option<String> {
+    let Filter::And(filters) = filter else {
+        return None;
+    };
+    let bound = |operator| {
+        filters.iter().find_map(|filter| match filter {
+            Filter::Field(FieldFilter {
+                path: FieldPath::DocumentId,
+                operator: found,
+                value: Value::Reference(name),
+            }) if *found == operator => document_key_from_name(name, database),
+            _ => None,
+        })
+    };
+    let lower = bound(FieldOperator::GreaterThanOrEqual)?;
+    let upper = bound(FieldOperator::LessThan)?;
+    let (collection, lower_id) = lower.path().rsplit_once('/')?;
+    let (next, upper_id) = upper.path().rsplit_once('/')?;
+    (lower_id == LOWEST_RESOURCE_ID
+        && upper_id == LOWEST_RESOURCE_ID
+        && next.strip_suffix('\0') == Some(collection))
+    .then(|| collection.to_owned())
 }
 
 /// The conjunctive `==` and `in` filters on one top-level field, as `(field,
@@ -2054,6 +2224,11 @@ fn key_in_scope(key: &DocumentKey, query: &Query) -> bool {
                         .is_some_and(|descendant| descendant.split('/').count() >= 2)
                 })
         }
+        QueryScope::AllDescendants => query.ancestor.as_deref().is_none_or(|ancestor| {
+            key.path()
+                .strip_prefix(ancestor)
+                .is_some_and(|descendant| descendant.starts_with('/'))
+        }),
     }
 }
 
@@ -2436,6 +2611,23 @@ pub enum QueryError {
     UnsupportedVectorShape,
     DocumentKeyOrderNotLast,
     DocumentKeyEqualityWithOtherInequality,
+    /// An all-descendants query ordered by anything but `__name__`.
+    KindRequiredForOrder,
+    /// An all-descendants query filtered on this field.
+    KindRequiredForFilter(String),
+    /// An all-descendants query ordered by `__name__` descending.
+    DescendingKeyScan,
+    /// An all-descendants query comparing `__name__` to something not a name.
+    KeyFilterValueNotKey,
+}
+
+impl QueryError {
+    /// Whether the query is well formed but cannot run, which the official
+    /// emulator reports as `FAILED_PRECONDITION`, not `INVALID_ARGUMENT`.
+    #[must_use]
+    pub const fn is_failed_precondition(&self) -> bool {
+        matches!(self, Self::DescendingKeyScan)
+    }
 }
 
 impl Display for QueryError {
@@ -2470,6 +2662,18 @@ impl Display for QueryError {
             Self::DocumentKeyEqualityWithOtherInequality => formatter.write_str(
                 "Equality on key is not allowed if there are other inequality fields and key does not appear in inequalities.",
             ),
+            Self::KindRequiredForOrder => {
+                formatter.write_str("kind is required for all orders except __key__ ascending")
+            }
+            Self::KindRequiredForFilter(field) => {
+                write!(formatter, "kind is required for filter: {field}")
+            }
+            Self::DescendingKeyScan => {
+                formatter.write_str("Firestore does not support descending key scans")
+            }
+            Self::KeyFilterValueNotKey => {
+                formatter.write_str("__key__ filter value must be a Key")
+            }
         }
     }
 }

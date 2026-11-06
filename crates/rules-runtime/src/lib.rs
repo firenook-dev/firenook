@@ -502,7 +502,9 @@ impl RulesRuntime {
         snapshot: &Snapshot,
         time: StoreTimestamp,
     ) -> Result<AtomicEvaluationResult, firenook_core_store::CommitError> {
-        if writes.is_empty() {
+        // Rules do not apply to the owner, so there is nothing to preview a
+        // write for; the commit reports any error the preview would have.
+        if writes.is_empty() || authorization.is_owner() {
             return Ok(AtomicEvaluationResult {
                 allowed: true,
                 operations: Vec::new(),

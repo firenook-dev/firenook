@@ -223,11 +223,18 @@ fn compare(left: &Value, right: &Value) -> Option<Ordering> {
     .ok()
 }
 
+/// The last segment of a recursive binding that took a Storage list's unnamed
+/// child. No object name holds it, so the binding equals nothing a rule can
+/// write, and indexing the binding is an error, as on the official emulator.
+pub(super) const UNBOUND_CHILD: &str = "\0";
+
 #[derive(Clone)]
 enum Segment {
     Literal(String),
     Any,
     Descendants,
+    /// The unnamed child a Storage list is about.
+    Child,
 }
 
 /// Match an entire symbolic path domain, not one placeholder document. Unknown
@@ -263,8 +270,39 @@ pub(super) fn bindings(
             domain.push(Segment::Descendants);
             domain.push(Segment::Literal(collection_id.clone()));
         }
+        // Any path below the ancestor, so only a match that covers the whole
+        // subtree can prove access to it.
+        QueryScope::AllDescendants { ancestor } => {
+            if let Some(ancestor) = ancestor {
+                domain.extend(
+                    ancestor
+                        .split('/')
+                        .map(|value| Segment::Literal(value.to_owned())),
+                );
+            }
+            domain.push(Segment::Descendants);
+        }
     }
     domain.push(Segment::Any);
+    match_domain(pattern, &domain, BTreeMap::new())
+}
+
+/// A Storage list is about what is directly inside a folder, so it is matched
+/// as the folder's path and one more segment, which stays unknown inside rule
+/// expressions: `match /open/{name}` proves a list of `open/` and `match /open`
+/// does not. A recursive wildcard stays a path, ending in the unnamed child, so
+/// it equals nothing a rule can write (fixture `storage-native-clients-v1`).
+pub(super) fn child_bindings(
+    pattern: &[PatternSegment],
+    path: &str,
+) -> Option<BTreeMap<String, EvalValue>> {
+    let mut domain = path
+        .trim_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| Segment::Literal(segment.to_owned()))
+        .collect::<Vec<_>>();
+    domain.push(Segment::Child);
     match_domain(pattern, &domain, BTreeMap::new())
 }
 
@@ -289,7 +327,7 @@ fn match_domain(
             let (segment, tail) = domain.split_first()?;
             let value = match segment {
                 Segment::Literal(value) => EvalValue::data(value.clone()),
-                Segment::Any => EvalValue::Unknown,
+                Segment::Any | Segment::Child => EvalValue::Unknown,
                 Segment::Descendants => return None,
             };
             bindings.insert(name.clone(), value);
@@ -299,12 +337,10 @@ fn match_domain(
             for end in 0..=domain.len() {
                 let literals = domain[..end]
                     .iter()
-                    .map(|segment| {
-                        if let Segment::Literal(value) = segment {
-                            Some(value.as_str())
-                        } else {
-                            None
-                        }
+                    .map(|segment| match segment {
+                        Segment::Literal(value) => Some(value.as_str()),
+                        Segment::Child => Some(UNBOUND_CHILD),
+                        Segment::Any | Segment::Descendants => None,
                     })
                     .collect::<Option<Vec<_>>>();
                 let value = literals.map_or(EvalValue::Unknown, |values| {

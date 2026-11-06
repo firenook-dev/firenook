@@ -1269,14 +1269,29 @@ impl QueueDepth {
 /// Cloneable producer for non-Firestore background events.
 #[derive(Clone)]
 pub struct DispatchQueue {
-    sender: tokio::sync::mpsc::UnboundedSender<DispatchRequest>,
+    /// `None` when no Functions emulator runs: what it is given goes nowhere.
+    sender: Option<tokio::sync::mpsc::UnboundedSender<DispatchRequest>>,
     depth: Arc<QueueDepth>,
 }
 
 impl DispatchQueue {
+    /// A queue for a stack with no Functions emulator. As on the official
+    /// emulator, an event is then not sent, not retried and not counted: it is
+    /// neither a failed delivery nor one dropped while delivery is paused.
+    #[must_use]
+    pub fn without_functions() -> Self {
+        Self {
+            sender: None,
+            depth: Arc::default(),
+        }
+    }
+
     /// Enqueues one event before the Firestore/Pub/Sub shared dedupe boundary.
     pub fn enqueue(&self, request: DispatchRequest) -> Result<(), BridgeError> {
-        self.depth.send(&self.sender, request)
+        match &self.sender {
+            Some(sender) => self.depth.send(sender, request),
+            None => Ok(()),
+        }
     }
 
     /// Dispatches queued and not yet taken by the delivery runtime (every
@@ -1293,6 +1308,9 @@ impl DispatchQueue {
     /// bulk producer awaits it between batches so it never floods the
     /// queue.
     pub async fn wait_below(&self, n: usize) {
+        let Some(sender) = &self.sender else {
+            return;
+        };
         loop {
             let fell = self.depth.fell.notified();
             tokio::pin!(fell);
@@ -1302,7 +1320,7 @@ impl DispatchQueue {
             }
             tokio::select! {
                 () = &mut fell => {}
-                () = self.sender.closed() => return,
+                () = sender.closed() => return,
             }
         }
     }
@@ -1332,7 +1350,7 @@ impl TriggerObserver {
     #[must_use]
     pub fn queue(&self) -> DispatchQueue {
         DispatchQueue {
-            sender: self.sender.clone(),
+            sender: Some(self.sender.clone()),
             depth: Arc::clone(&self.depth),
         }
     }

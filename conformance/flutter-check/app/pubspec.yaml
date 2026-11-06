@@ -1,0 +1,16 @@
+name: flutter_check
+description: Runs the same FlutterFire calls against two emulators. See ../README.md.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  cloud_firestore: ^7.1.0
+  cloud_functions: ^7.0.1
+  firebase_auth: ^7.0.1
+  firebase_core: ^5.1.0
+  firebase_storage: ^14.0.1
+  flutter:
+    sdk: flutter

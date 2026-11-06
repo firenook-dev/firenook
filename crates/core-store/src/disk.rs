@@ -20,11 +20,11 @@ use redb::{
 use super::{
     Change, CommitError, CommitPlan, CommitResult, DatabaseName, DiskCacheMemoryUsage,
     DiskWriteBufferMemoryUsage, Document, DocumentKey, EncodedDocument, FieldEquality,
-    LazyDocument, ListenerMemoryUsage, LogicalMemoryUsage, ResetRequired, Revision, Snapshot,
-    SnapshotError, State, StoreMemoryUsage, StoreOptions, Timestamp, TransactionMemoryUsage, Write,
-    WriteBufferMemoryUsage, apply_document_transition, compare_resource_paths,
-    decode_stored_document, document_entry_logical_bytes, encode_stored_document,
-    numeric_resource_id, stored_index_fields, usize_to_u64,
+    LazyDocument, ListenerMemoryUsage, LogicalMemoryUsage, LowestKeys, ResetRequired, Revision,
+    Snapshot, SnapshotError, State, StoreMemoryUsage, StoreOptions, Timestamp,
+    TransactionMemoryUsage, Write, WriteBufferMemoryUsage, apply_document_transition,
+    compare_resource_paths, decode_stored_document, document_entry_logical_bytes,
+    encode_stored_document, numeric_resource_id, stored_index_fields, usize_to_u64,
 };
 
 mod field_index;
@@ -451,9 +451,11 @@ impl DiskStore {
     /// Returns an immutable snapshot at the current revision.
     #[must_use]
     pub fn snapshot(&self) -> Snapshot {
-        let state = self.state();
+        let mut state = self.state();
+        let read_time = state.memory.next_read_time();
         Snapshot::disk(
             state.memory.revision,
+            read_time,
             DiskSnapshot::open(&state.database, im::OrdMap::new(), state.field_indexes),
             state.memory.current_documents,
         )
@@ -465,6 +467,7 @@ impl DiskStore {
         let overlay = historical_overlay(&state.memory, revision)?;
         Ok(Snapshot::disk(
             revision,
+            state.memory.commit_time_at(revision),
             DiskSnapshot::open(&state.database, overlay, state.field_indexes),
             state.memory.document_usage_at_revision(revision),
         ))
@@ -489,6 +492,7 @@ impl DiskStore {
         let overlay = historical_overlay(&state.memory, revision)?;
         Ok(Snapshot::disk(
             revision,
+            read_time,
             DiskSnapshot::open(&state.database, overlay, state.field_indexes),
             state.memory.document_usage_at_revision(revision),
         ))
@@ -694,6 +698,77 @@ impl DiskSnapshot {
     /// with this snapshot's overlay merged in. See [`DiskDocumentKeys`].
     pub(crate) fn document_keys(&self, database: &DatabaseName) -> DiskDocumentKeys {
         DiskDocumentKeys::open(self, database)
+    }
+
+    /// Offers every visible document key under `prefix` to `lowest`, reading
+    /// the collection index instead of the documents table, so no document
+    /// body is paged in. The index holds one run per collection, in name
+    /// order within it. Every document of a run shares its collection, so a
+    /// whole run is inside or outside `prefix`: one outside, or one that can
+    /// add nothing more to the selection, is left with a single seek.
+    pub(crate) fn offer_keys_under(
+        &self,
+        database: &DatabaseName,
+        prefix: &str,
+        lowest: &mut LowestKeys<'_>,
+    ) {
+        self.offer_stored_keys_under(database, prefix, lowest);
+        let start = DocumentKey::unchecked(database.clone(), prefix);
+        for (key, document) in self.overlay.range(start..) {
+            if key.database() != database || !key.path().starts_with(prefix) {
+                break;
+            }
+            if document.is_some() {
+                lowest.offer(key.clone());
+            }
+        }
+    }
+
+    fn offer_stored_keys_under(
+        &self,
+        database: &DatabaseName,
+        prefix: &str,
+        lowest: &mut LowestKeys<'_>,
+    ) {
+        let Ok(mut lower) = database_prefix(database) else {
+            return;
+        };
+        let Some(upper) = prefix_successor(&lower) else {
+            return;
+        };
+        let Ok(index) = self.transaction.open_table(COLLECTIONS) else {
+            return;
+        };
+        loop {
+            let Ok(range) = index.range::<&[u8]>(lower.as_slice()..upper.as_slice()) else {
+                return;
+            };
+            let mut next_run = None;
+            for entry in range {
+                let Ok((_, encoded_key)) = entry else {
+                    continue;
+                };
+                let Ok(key) = decode_document_key(encoded_key.value()) else {
+                    continue;
+                };
+                if key.path().starts_with(prefix) && !lowest.is_past_the_selection(&key) {
+                    if !self.overlay.contains_key(&key) {
+                        lowest.offer(key);
+                    }
+                    continue;
+                }
+                next_run = key
+                    .path()
+                    .rsplit_once('/')
+                    .and_then(|(collection, _)| collection_index_prefix(database, collection).ok())
+                    .and_then(|run| prefix_successor(&run));
+                break;
+            }
+            match next_run {
+                Some(next) if next < upper => lower = next,
+                _ => return,
+            }
+        }
     }
 
     pub(crate) fn iter_documents(&self, database: &DatabaseName) -> DiskDocumentIterator {

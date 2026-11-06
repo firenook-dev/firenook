@@ -1,0 +1,105 @@
+name: Real SDK clients
+
+# The same FlutterFire app against Firenook and firebase-tools on each platform,
+# failing on any difference (conformance/flutter-check). It builds and boots real
+# clients, so it runs weekly, by hand, and on a release pull request, not on every
+# pull request, and it is separate from the release job. A release runs it on the
+# exact commit first: see packaging/PUBLISHING.md.
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - packages/cli/release.json
+      - conformance/flutter-check/**
+      - .github/workflows/sdk-clients.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-clients-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.47.9
+
+jobs:
+  check:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: web
+            runner: ubuntu-latest
+            flutter: linux/flutter_linux
+            archive: tar.xz
+          - platform: ios
+            runner: macos-latest
+            flutter: macos/flutter_macos_arm64
+            archive: zip
+          - platform: android
+            runner: ubuntu-latest
+            flutter: linux/flutter_linux
+            archive: tar.xz
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.20.0
+          cache: npm
+          cache-dependency-path: conformance/package-lock.json
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install latest stable Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+      - name: Build the engine
+        run: cargo build --locked --bin firenook
+      - name: Install firebase-tools at the pinned version
+        run: npm ci --prefix conformance --no-audit --no-fund
+      - name: Install Flutter
+        run: |
+          url="https://storage.googleapis.com/flutter_infra_release/releases/stable/${{ matrix.flutter }}_${FLUTTER_VERSION}-stable.${{ matrix.archive }}"
+          curl --fail --silent --show-error --location --retry 3 --output "$RUNNER_TEMP/flutter.${{ matrix.archive }}" "$url"
+          if [ "${{ matrix.archive }}" = zip ]; then
+            unzip -q "$RUNNER_TEMP/flutter.zip" -d "$RUNNER_TEMP"
+          else
+            tar -xJf "$RUNNER_TEMP/flutter.tar.xz" -C "$RUNNER_TEMP"
+          fi
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - name: Start an Android emulator
+        if: matrix.platform == 'android'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null
+          "$sdkmanager" --install platform-tools emulator "system-images;android-35;google_apis;x86_64" > /dev/null
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name check --package "system-images;android-35;google_apis;x86_64"
+          nohup "$ANDROID_HOME/emulator/emulator" -avd check -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          adb="$ANDROID_HOME/platform-tools/adb"
+          "$adb" wait-for-device
+          until [ "$("$adb" shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; do sleep 5; done
+      - name: Run the same app against Firenook and firebase-tools
+        run: node conformance/flutter-check/check.mjs --platform ${{ matrix.platform }} --out "$RUNNER_TEMP/results"
+      - name: Run them on a kept cache, as a device moving from firebase-tools to Firenook
+        if: ${{ !cancelled() && matrix.platform != 'web' }}
+        run: node conformance/flutter-check/check.mjs --platform ${{ matrix.platform }} --keep-cache --out "$RUNNER_TEMP/results/kept-cache"
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: sdk-clients-${{ matrix.platform }}
+          path: ${{ runner.temp }}/results
+          if-no-files-found: warn
+          retention-days: 14
