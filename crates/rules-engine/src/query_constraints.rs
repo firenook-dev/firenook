@@ -138,6 +138,14 @@ pub(super) fn binary(
             };
             (constraint, value, reversed)
         }
+        // Every row a query returns is an existing document, so `resource`
+        // is never null in a query proof, as the official emulator answers.
+        (EvalValue::QueryResource, EvalValue::Data(Value::Null))
+        | (EvalValue::Data(Value::Null), EvalValue::QueryResource)
+            if matches!(operator, B::Equal | B::NotEqual) =>
+        {
+            return Some(EvalValue::data(operator == B::NotEqual));
+        }
         (
             EvalValue::Constraint(_)
             | EvalValue::Unknown

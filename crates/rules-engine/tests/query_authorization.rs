@@ -186,6 +186,33 @@ fn unknown_constraints_do_not_become_false_under_negation_or_type_tests() {
 }
 
 #[test]
+fn resource_is_never_null_in_a_query_proof() {
+    let request = request(&serde_json::json!({
+        "collection": "records",
+        "filter": {"field": "createdBy", "op": "==", "value": "query-owner"}
+    }));
+    // Verdicts recorded from the official emulator (firebase-tools 15.31.0).
+    for (condition, allowed) in [
+        ("resource != null", true),
+        ("null != resource", true),
+        ("!(resource == null)", true),
+        ("resource == null", false),
+        (
+            "resource == null || resource.data.createdBy == request.auth.uid",
+            true,
+        ),
+    ] {
+        let source = format!(
+            "rules_version = '2'; service cloud.firestore {{ match /databases/{{db}}/documents/records/{{id}} {{ allow list: if {condition}; }} }}"
+        );
+        let result = compile(&source)
+            .expect("source")
+            .evaluate(&request, &EmptyDocumentAccess);
+        assert_eq!(result.allowed, allowed, "{condition}: {result:?}");
+    }
+}
+
+#[test]
 fn alternatives_do_not_multiply_document_access_budgets() {
     struct Existing;
     impl DocumentAccess for Existing {
