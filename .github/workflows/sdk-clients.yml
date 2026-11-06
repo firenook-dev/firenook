@@ -92,6 +92,9 @@ jobs:
           until [ "$("$adb" shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; do sleep 5; done
       - name: Run the same app against Firenook and firebase-tools
         run: node conformance/flutter-check/check.mjs --platform ${{ matrix.platform }} --out "$RUNNER_TEMP/results"
+      - name: Run them on a kept cache, as a device moving from firebase-tools to Firenook
+        if: ${{ !cancelled() && matrix.platform != 'web' }}
+        run: node conformance/flutter-check/check.mjs --platform ${{ matrix.platform }} --keep-cache --out "$RUNNER_TEMP/results/kept-cache"
       - name: Keep the results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
