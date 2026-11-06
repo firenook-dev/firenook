@@ -18,13 +18,8 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const fixture = JSON.parse(await readFile(new URL('../fixtures/storage-native-clients-v1/fixture.json', import.meta.url)));
 const execute = promisify(execFile);
 
-// firebase-tools 15.34.0 stores a one-shot v0 upload's Content-Type; 15.22.0,
-// pinned by storage-rules-v1, ignored it. No SDK sends this shape.
-const MEDIA_TYPE_NOT_READ = new Set(['object-path-media', 'object-path-media-put', 'bucket-path-media-put']);
 // The same refusal, with a JSON error natively and an empty body officially.
 const REFUSAL_BODY_DIFFERS = new Set(['start-without-a-name', 'command-without-an-id', 'create-token-not-true']);
-// The rules path() function is not implemented natively, so this denies.
-const NEEDS_THE_PATH_FUNCTION = new Set(['recursive-binding-negated']);
 
 const reservePort = async () => {
   const reservation = createServer();
@@ -63,8 +58,6 @@ test('what native SDKs and browsers send to Storage matches the official capture
       for (const [id, expected] of Object.entries(fixture[section])) {
         if (REFUSAL_BODY_DIFFERS.has(id)) {
           assert.equal(actual[section][id].status, expected.status, `${section} ${id}`);
-        } else if (MEDIA_TYPE_NOT_READ.has(id)) {
-          assert.deepEqual(actual[section][id], { ...expected, body: { ...expected.body, contentType: 'application/octet-stream' } }, `${section} ${id}`);
         } else {
           assert.deepEqual(actual[section][id], expected, `${section} ${id}`);
         }
@@ -72,7 +65,7 @@ test('what native SDKs and browsers send to Storage matches the official capture
     }
     assert.deepEqual(actual.cors, fixture.cors, 'cors');
     for (const [id, expected] of Object.entries(fixture.lists)) {
-      if (!NEEDS_THE_PATH_FUNCTION.has(id)) assert.deepEqual(actual.lists[id], expected, `lists ${id}`);
+      assert.deepEqual(actual.lists[id], expected, `lists ${id}`);
     }
   } finally {
     if (child.exitCode === null) child.kill('SIGINT');

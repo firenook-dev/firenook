@@ -1995,12 +1995,11 @@ async fn firebase_upload(
 ) -> Result<FirebaseUpload, StorageApiError> {
     let request_content_type = content_type(headers);
     let Some(boundary) = multipart_boundary(request_content_type) else {
-        // A v0 media upload carries no metadata part; the official emulator
-        // ignores the request Content-Type (storage-rules-v1
-        // request-resource-create-media content-type-defaulted).
+        // A v0 media upload carries no metadata part, so the request's own
+        // Content-Type names the object, as in firebase-tools 15.34.
         return Ok(FirebaseUpload {
             uploaded: stream_to_staging(state, bucket, body).await?,
-            content_type: "application/octet-stream".to_owned(),
+            content_type: request_content_type.to_owned(),
             metadata: BTreeMap::new(),
             object_metadata: JsonValue::Null,
         });

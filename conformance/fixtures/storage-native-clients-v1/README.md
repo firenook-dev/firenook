@@ -42,14 +42,8 @@ Observed contracts:
 `conformance/test/storage-native-clients-replay.test.mjs` runs the same requests
 against the native engine and lists each accepted difference with its reason:
 
-- A one-shot v0 upload stores `application/octet-stream` natively. firebase-tools
-  15.34.0 reads the request's `Content-Type`; 15.22.0, which
-  `storage-rules-v1` pins (`content-type-header-ignored`), ignored it. No SDK
-  sends this shape: they use multipart or resumable.
 - A few refusals carry a JSON error natively and an empty body officially, with
   the same status.
-- The rules `path()` function is not implemented natively, so a condition using
-  it denies.
 - The native preflight allows every origin; the official one repeats the origin
   it was given.
 
