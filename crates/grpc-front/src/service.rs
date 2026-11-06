@@ -1210,7 +1210,7 @@ impl Firestore for FirestoreService {
         } else {
             self.snapshot_for_transaction(&database, &token)?
         };
-        let read_time = Some(encode_system_read_time(now()));
+        let read_time = Some(encode_system_read_time(snapshot.read_time()));
         let request_time = now();
         // Rules decide nothing for the owner, nor where none are installed:
         // the documents are then not converted for an evaluation that never
@@ -1479,7 +1479,7 @@ impl Firestore for FirestoreService {
             )));
         }
         if explain_options.is_none() {
-            let read_time = Some(encode_system_read_time(now()));
+            let read_time = Some(encode_system_read_time(snapshot.read_time()));
             // Planning, and the scan or sort behind a first result, run on
             // the read pool; the query fails as an RPC error exactly as
             // before. The results are then decoded and encoded by a blocking
@@ -1568,7 +1568,7 @@ impl Firestore for FirestoreService {
         };
         let execution_duration = started.elapsed();
         let document_count = documents.len();
-        let read_time = Some(encode_system_read_time(now()));
+        let read_time = Some(encode_system_read_time(snapshot.read_time()));
         let transaction_response = new_transaction.then(|| {
             Ok(RunQueryResponse {
                 transaction: token.clone(),
@@ -1782,7 +1782,7 @@ impl Firestore for FirestoreService {
         }
         responses.push(RunAggregationQueryResponse {
             result: Some(result),
-            read_time: Some(encode_system_read_time(now())),
+            read_time: Some(encode_system_read_time(snapshot.read_time())),
             ..RunAggregationQueryResponse::default()
         });
         if explain_options.is_some() {

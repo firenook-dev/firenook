@@ -47,6 +47,11 @@ enum ResumePoint {
     Revision(Revision),
     ReadTime(Timestamp),
     ExpiredReadTime,
+    /// A token or read time that names no state of this store: empty, as the
+    /// Android SDK sends for a new target, or kept by a device from another
+    /// emulator or an earlier run of this one. The target starts over, as on
+    /// the official emulator.
+    Unknown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -67,6 +72,8 @@ struct InitialTarget {
     changes: ChangeBatch,
     filter: InitialFilter,
     mode: InitialMode,
+    token: Vec<u8>,
+    read_time: Timestamp,
 }
 
 struct ActiveTarget {
@@ -282,20 +289,7 @@ async fn add_target(
         .await?;
         return Ok(());
     }
-    let resume_point = match decode_resume_point(&target) {
-        Ok(resume_point) => resume_point,
-        Err(_) if matches!(target.resume_type, Some(ResumeType::ResumeToken(_))) => {
-            send_target_error(
-                context.sender,
-                id,
-                Code::InvalidArgument,
-                "bad resume token",
-            )
-            .await?;
-            return Ok(());
-        }
-        Err(error) => return Err(error),
-    };
+    let resume_point = decode_resume_point(context.store, &target);
     let authorization = context.authorization.resolve()?;
     let (spec, policy) = match decode_target_spec(&database, target.target_type) {
         Ok(decoded) => decoded,
@@ -379,19 +373,17 @@ async fn add_target(
     Ok(())
 }
 
-fn decode_resume_point(target: &Target) -> Result<Option<ResumePoint>, Status> {
-    match target.resume_type.as_ref() {
-        Some(ResumeType::ResumeToken(token)) => decode_resume_token(token)
-            .map(ResumePoint::Revision)
-            .map(Some),
-        Some(ResumeType::ReadTime(read_time)) => {
-            Ok(Some(match classify_listen_read_time(*read_time, now())? {
-                ReadTimeClass::Retained(read_time) => ResumePoint::ReadTime(read_time),
-                ReadTimeClass::Expired(_) => ResumePoint::ExpiredReadTime,
-            }))
+fn decode_resume_point(store: &Store, target: &Target) -> Option<ResumePoint> {
+    Some(match target.resume_type.as_ref()? {
+        ResumeType::ResumeToken(token) => {
+            decode_resume_token(store, token).map_or(ResumePoint::Unknown, ResumePoint::Revision)
         }
-        None => Ok(None),
-    }
+        ResumeType::ReadTime(read_time) => match classify_listen_read_time(*read_time, now()) {
+            Ok(ReadTimeClass::Retained(read_time)) => ResumePoint::ReadTime(read_time),
+            Ok(ReadTimeClass::Expired(_)) => ResumePoint::ExpiredReadTime,
+            Err(_) => ResumePoint::Unknown,
+        },
+    })
 }
 
 fn assign_target_id(requested: i32, next_assigned_id: &mut i32) -> i32 {
@@ -418,34 +410,42 @@ fn initialize_target(
     } = initialization;
     let mut mode = InitialMode::Normal;
     let (watch, changes, filter) = match resume_point.as_ref() {
-        Some(ResumePoint::Revision(revision)) => {
-            match store.snapshot_at(*revision) {
-                Ok(baseline) => resumed_target(
+        Some(ResumePoint::Revision(revision)) => match store.snapshot_at(*revision) {
+            Ok(baseline) => resumed_target(
+                id,
+                database,
+                spec,
+                query_policy,
+                &baseline,
+                snapshot,
+                expected_count,
+            )?,
+            // The local replay floor is a bounded-memory policy, not a terminal
+            // subscription error. Explicitly discard the unavailable baseline
+            // before replaying this target only.
+            Err(SnapshotError::ResetRequired(_) | SnapshotError::FutureRevision { .. }) => {
+                mode = InitialMode::Reset;
+                fresh_target(
                     id,
                     database,
                     spec,
                     query_policy,
-                    &baseline,
                     snapshot,
-                    expected_count,
-                )?,
-                Err(SnapshotError::ResetRequired(_)) => {
-                    // The local replay floor is a bounded-memory policy, not a
-                    // terminal subscription error. Explicitly discard the
-                    // unavailable baseline before replaying this target only.
-                    mode = InitialMode::Reset;
-                    let (watch, initial) = WatchTarget::initialize(
-                        id,
-                        database,
-                        spec,
-                        query_policy.edition(),
-                        snapshot,
-                    )
-                    .map_err(|error| query_status(&error))?;
-                    (watch, initial, InitialFilter::None)
-                }
-                Err(error) => return Err(resume_snapshot_status(error)),
+                    InitialFilter::None,
+                )?
             }
+            Err(error) => return Err(resume_snapshot_status(error)),
+        },
+        Some(ResumePoint::Unknown) => {
+            mode = InitialMode::Reset;
+            fresh_target(
+                id,
+                database,
+                spec,
+                query_policy,
+                snapshot,
+                InitialFilter::None,
+            )?
         }
         Some(ResumePoint::ReadTime(read_time)) => {
             let baseline = store
@@ -461,24 +461,31 @@ fn initialize_target(
                 expected_count,
             )?
         }
-        Some(ResumePoint::ExpiredReadTime) => {
-            let (watch, initial) =
-                WatchTarget::initialize(id, database, spec, query_policy.edition(), snapshot)
-                    .map_err(|error| query_status(&error))?;
-            (watch, initial, InitialFilter::CountOnly)
-        }
-        None => {
-            let (watch, initial) =
-                WatchTarget::initialize(id, database, spec, query_policy.edition(), snapshot)
-                    .map_err(|error| query_status(&error))?;
-            (watch, initial, InitialFilter::None)
-        }
+        Some(ResumePoint::ExpiredReadTime) => fresh_target(
+            id,
+            database,
+            spec,
+            query_policy,
+            snapshot,
+            InitialFilter::CountOnly,
+        )?,
+        None => fresh_target(
+            id,
+            database,
+            spec,
+            query_policy,
+            snapshot,
+            InitialFilter::None,
+        )?,
     };
+    let token = resume_token(store, changes.revision);
     Ok(InitialTarget {
         watch,
         changes,
         filter,
         mode,
+        token,
+        read_time: snapshot.read_time(),
     })
 }
 
@@ -493,8 +500,8 @@ async fn send_initial_target(
             sender,
             TargetChangeType::Reset,
             vec![id],
-            Some(resume_token(initial.changes.revision)),
-            Some(now()),
+            Some(initial.token.clone()),
+            Some(initial.read_time),
         )
         .await?;
     }
@@ -503,13 +510,13 @@ async fn send_initial_target(
             sender,
             TargetChangeType::NoChange,
             Vec::new(),
-            Some(resume_token(initial.changes.revision)),
-            Some(now()),
+            Some(initial.token.clone()),
+            Some(initial.read_time),
         )
         .await?;
     }
     for change in &initial.changes.changes {
-        send_document_change(sender, id, change.clone()).await?;
+        send_document_change(sender, id, change.clone(), initial.read_time).await?;
     }
     match initial.filter {
         InitialFilter::None => {}
@@ -520,24 +527,37 @@ async fn send_initial_target(
             send_count_existence_filter(sender, id, &initial.watch).await?;
         }
     }
-    let read_time = now();
     send_target_change(
         sender,
         TargetChangeType::Current,
         vec![id],
-        Some(resume_token(initial.changes.revision)),
-        Some(read_time),
+        Some(initial.token.clone()),
+        Some(initial.read_time),
     )
     .await?;
     send_target_change(
         sender,
         TargetChangeType::NoChange,
         Vec::new(),
-        Some(resume_token(initial.changes.revision)),
-        Some(read_time),
+        Some(initial.token.clone()),
+        Some(initial.read_time),
     )
     .await?;
     Ok(())
+}
+
+fn fresh_target(
+    id: i32,
+    database: DatabaseName,
+    spec: TargetSpec,
+    query_policy: &QueryPolicy,
+    snapshot: &Snapshot,
+    filter: InitialFilter,
+) -> Result<(WatchTarget, ChangeBatch, InitialFilter), Status> {
+    let (watch, initial) =
+        WatchTarget::initialize(id, database, spec, query_policy.edition(), snapshot)
+            .map_err(|error| query_status(&error))?;
+    Ok((watch, initial, filter))
 }
 
 fn resumed_target(
@@ -677,8 +697,8 @@ async fn refresh_targets(
             sender,
             TargetChangeType::NoChange,
             Vec::new(),
-            Some(resume_token(snapshot.revision())),
-            Some(now()),
+            Some(resume_token(store, snapshot.revision())),
+            Some(snapshot.read_time()),
         )
         .await?;
     }
@@ -759,7 +779,7 @@ async fn refresh_targets_at_snapshot(
             TargetRefresh::Changes(batch) => {
                 for change in batch.changes {
                     changed = true;
-                    send_document_change(sender, id, change).await?;
+                    send_document_change(sender, id, change, snapshot.read_time()).await?;
                 }
             }
         }
@@ -771,6 +791,7 @@ async fn send_document_change(
     sender: &mpsc::Sender<Result<ListenResponse, Status>>,
     target_id: i32,
     change: WatchChange,
+    read_time: Timestamp,
 ) -> Result<(), Status> {
     let response_type = match change.kind {
         ChangeKind::Upsert => ResponseType::DocumentChange(DocumentChange {
@@ -786,12 +807,12 @@ async fn send_document_change(
         ChangeKind::Delete => ResponseType::DocumentDelete(DocumentDelete {
             document: change.key.to_string(),
             removed_target_ids: vec![target_id],
-            read_time: Some(encode_timestamp(now())),
+            read_time: Some(encode_timestamp(read_time)),
         }),
         ChangeKind::Remove => ResponseType::DocumentRemove(DocumentRemove {
             document: change.key.to_string(),
             removed_target_ids: vec![target_id],
-            read_time: Some(encode_timestamp(now())),
+            read_time: Some(encode_timestamp(read_time)),
         }),
     };
     send(
@@ -971,25 +992,24 @@ async fn send(
         .map_err(|_| Status::cancelled("listen client disconnected"))
 }
 
-fn resume_token(revision: Revision) -> Vec<u8> {
-    let mut token = b"firenook-resume-".to_vec();
+const RESUME_TOKEN_PREFIX: &[u8] = b"firenook-resume-";
+
+/// Names a revision of this opened store, so a token kept from an earlier run,
+/// which may count the same revisions over different data, is not taken for one.
+fn resume_token(store: &Store, revision: Revision) -> Vec<u8> {
+    let mut token = RESUME_TOKEN_PREFIX.to_vec();
+    token.extend_from_slice(&store.instance().to_be_bytes());
     token.extend_from_slice(&revision.get().to_be_bytes());
     token
 }
 
-fn decode_resume_token(token: &[u8]) -> Result<Revision, Status> {
-    const PREFIX: &[u8] = b"firenook-resume-";
-    // Tokens issued by releases up to 0.1.0-next.9 carry the project's former
-    // name and the same revision layout; a client that stays connected across
-    // an engine upgrade resumes with one of them.
-    const LEGACY_PREFIX: &[u8] = b"fireside-resume-";
-    let revision = token
-        .strip_prefix(PREFIX)
-        .or_else(|| token.strip_prefix(LEGACY_PREFIX))
-        .and_then(|revision| <[u8; 8]>::try_from(revision).ok())
-        .map(u64::from_be_bytes)
-        .ok_or_else(|| Status::invalid_argument("invalid firenook resume token"))?;
-    Ok(Revision::from_u64(revision))
+/// The revision a token names, if this store issued it.
+fn decode_resume_token(store: &Store, token: &[u8]) -> Option<Revision> {
+    let issued = token.strip_prefix(RESUME_TOKEN_PREFIX)?;
+    let (instance, revision) = issued.split_first_chunk::<8>()?;
+    let revision = <[u8; 8]>::try_from(revision).ok()?;
+    (u64::from_be_bytes(*instance) == store.instance())
+        .then(|| Revision::from_u64(u64::from_be_bytes(revision)))
 }
 
 fn resume_snapshot_status(error: SnapshotError) -> Status {
@@ -1025,15 +1045,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resume_tokens_from_before_the_rename_still_decode() {
+    fn a_resume_token_decodes_only_on_the_store_that_issued_it() {
+        let store = Store::default();
         let revision = Revision::from_u64(42);
-        let current = resume_token(revision);
-        assert!(current.starts_with(b"firenook-resume-"));
-        assert_eq!(decode_resume_token(&current).unwrap(), revision);
-        let mut legacy = b"fireside-resume-".to_vec();
-        legacy.extend_from_slice(&42u64.to_be_bytes());
-        assert_eq!(decode_resume_token(&legacy).unwrap(), revision);
-        assert!(decode_resume_token(b"other-resume-\0\0\0\0\0\0\0\x2a").is_err());
+        let issued = resume_token(&store, revision);
+        assert_eq!(decode_resume_token(&store, &issued), Some(revision));
+        assert_eq!(decode_resume_token(&Store::default(), &issued), None);
+        assert_eq!(
+            decode_resume_token(&store, &issued[..issued.len() - 1]),
+            None
+        );
+        assert_eq!(decode_resume_token(&store, b"other-resume-"), None);
     }
 
     #[test]
@@ -1067,8 +1089,8 @@ mod tests {
         };
 
         assert!(matches!(
-            decode_resume_point(&target),
-            Ok(Some(ResumePoint::ExpiredReadTime))
+            decode_resume_point(&Store::default(), &target),
+            Some(ResumePoint::ExpiredReadTime)
         ));
     }
 }

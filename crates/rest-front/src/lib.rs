@@ -1182,7 +1182,7 @@ fn run_query_blocking(
     let documents = execute(&snapshot, database, &query, state.query_policy.edition())
         .map_err(|error| rest_query_error(&error))?;
     authorize_query(state, database, &query, authorization, &snapshot)?;
-    let read_time = format_timestamp(now_timestamp())?;
+    let read_time = format_timestamp(snapshot.read_time())?;
     let mut responses = documents
         .iter()
         .map(|document| {
@@ -1262,7 +1262,7 @@ fn run_aggregation_query_blocking(
     }
     Ok(Json(JsonValue::Array(vec![json!({
         "result": { "aggregateFields": encode_fields(&fields)? },
-        "readTime": format_timestamp(now_timestamp())?,
+        "readTime": format_timestamp(snapshot.read_time())?,
     })])))
 }
 

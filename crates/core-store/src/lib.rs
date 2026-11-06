@@ -959,6 +959,7 @@ impl BulkCommit<'_> {
 #[derive(Clone)]
 pub struct Store {
     backend: StoreBackend,
+    instance: u64,
     memory_accounting: RuntimeMemoryAccounting,
     commit_observers: Arc<Mutex<Vec<Arc<dyn CommitObserver>>>>,
     /// Set by [`Store::close`]; long reads check it and end early.
@@ -977,6 +978,7 @@ enum StoreBackend {
 #[derive(Clone)]
 pub struct WeakStore {
     backend: WeakBackend,
+    instance: u64,
     memory_accounting: RuntimeMemoryAccounting,
     commit_observers: std::sync::Weak<Mutex<Vec<Arc<dyn CommitObserver>>>>,
     closing: Arc<std::sync::atomic::AtomicBool>,
@@ -998,11 +1000,35 @@ impl WeakStore {
         };
         Some(Store {
             backend,
+            instance: self.instance,
             memory_accounting: self.memory_accounting.clone(),
             commit_observers: self.commit_observers.upgrade()?,
             closing: Arc::clone(&self.closing),
         })
     }
+}
+
+/// The clock, to the microsecond, as Firestore stamps its commits.
+fn clock_microseconds() -> Timestamp {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    Timestamp {
+        seconds: i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX),
+        nanos: elapsed.subsec_micros() * 1_000,
+    }
+}
+
+/// A number for a store being opened, unlike any other store's, in this run of
+/// the emulator or another.
+fn next_store_instance() -> u64 {
+    static OPENED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let started = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    u64::try_from(started.as_nanos() & u128::from(u64::MAX))
+        .unwrap_or_default()
+        .wrapping_add(OPENED.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
 }
 
 impl Store {
@@ -1011,6 +1037,7 @@ impl Store {
     pub fn new(options: StoreOptions) -> Self {
         Self {
             backend: StoreBackend::Memory(Arc::new(Mutex::new(State::new(options)))),
+            instance: next_store_instance(),
             memory_accounting: RuntimeMemoryAccounting::default(),
             commit_observers: Arc::new(Mutex::new(Vec::new())),
             closing: Arc::default(),
@@ -1031,10 +1058,20 @@ impl Store {
     ) -> Result<Self, DiskError> {
         DiskStore::open_watched(directory, options, watch).map(|store| Self {
             backend: StoreBackend::Disk(store),
+            instance: next_store_instance(),
             memory_accounting: RuntimeMemoryAccounting::default(),
             commit_observers: Arc::new(Mutex::new(Vec::new())),
             closing: Arc::default(),
         })
+    }
+
+    /// Tells this opened store from any other, and from this data opened
+    /// again: a revision means something only together with this number,
+    /// because a run of the emulator counts revisions from where its data
+    /// starts, and whatever kept a revision from an earlier run cannot tell.
+    #[must_use]
+    pub const fn instance(&self) -> u64 {
+        self.instance
     }
 
     /// The disk backend's file size; `None` in memory. See
@@ -1092,6 +1129,7 @@ impl Store {
     #[must_use]
     pub fn downgrade(&self) -> WeakStore {
         WeakStore {
+            instance: self.instance,
             backend: match &self.backend {
                 StoreBackend::Memory(inner) => WeakBackend::Memory(Arc::downgrade(inner)),
                 StoreBackend::Disk(store) => WeakBackend::Disk(store.downgrade()),
@@ -1128,9 +1166,11 @@ impl Store {
     pub fn snapshot(&self) -> Snapshot {
         match &self.backend {
             StoreBackend::Memory(inner) => {
-                let state = lock(inner);
+                let mut state = lock(inner);
+                let read_time = state.next_read_time();
                 Snapshot::memory(
                     state.revision,
+                    read_time,
                     state.documents.clone(),
                     state.collections.clone().unwrap_or_default(),
                     state.collection_groups.clone().unwrap_or_default(),
@@ -1348,6 +1388,7 @@ impl Default for Store {
 #[derive(Clone)]
 pub struct Snapshot {
     revision: Revision,
+    read_time: Timestamp,
     documents: SnapshotDocuments,
     logical_usage: LogicalMemoryUsage,
 }
@@ -1379,6 +1420,7 @@ impl Debug for Snapshot {
 impl Snapshot {
     fn memory(
         revision: Revision,
+        read_time: Timestamp,
         documents: OrdMap<DocumentKey, Arc<Document>>,
         collections: CollectionIndex,
         collection_groups: CollectionGroupIndex,
@@ -1386,6 +1428,7 @@ impl Snapshot {
     ) -> Self {
         Self {
             revision,
+            read_time,
             documents: SnapshotDocuments::Memory {
                 documents,
                 collections,
@@ -1397,11 +1440,13 @@ impl Snapshot {
 
     fn disk(
         revision: Revision,
+        read_time: Timestamp,
         documents: disk::DiskSnapshot,
         logical_usage: LogicalMemoryUsage,
     ) -> Self {
         Self {
             revision,
+            read_time,
             documents: SnapshotDocuments::Disk(documents),
             logical_usage,
         }
@@ -1411,6 +1456,15 @@ impl Snapshot {
     #[must_use]
     pub const fn revision(&self) -> Revision {
         self.revision
+    }
+
+    /// The time the data was like this: no earlier than any commit this
+    /// snapshot holds, and earlier than any commit it lacks. A client takes a
+    /// document this snapshot lacks to be absent at this time, and drops a
+    /// commit stamped no later, so the clock read after a snapshot will not do.
+    #[must_use]
+    pub const fn read_time(&self) -> Timestamp {
+        self.read_time
     }
 
     /// Documents and logical bytes visible through this immutable snapshot.
@@ -2380,6 +2434,9 @@ struct State {
     options: StoreOptions,
     revision: Revision,
     last_commit_time: Timestamp,
+    /// The latest read time given to a snapshot; no later commit is stamped
+    /// at or before it.
+    last_read_time: Timestamp,
     documents: OrdMap<DocumentKey, Arc<Document>>,
     collections: Option<CollectionIndex>,
     collection_groups: Option<CollectionGroupIndex>,
@@ -2437,6 +2494,10 @@ impl State {
                 seconds: 0,
                 nanos: 0,
             },
+            last_read_time: Timestamp {
+                seconds: 0,
+                nanos: 0,
+            },
             documents: OrdMap::new(),
             collections: Some(OrdMap::new()),
             collection_groups: Some(OrdMap::new()),
@@ -2470,6 +2531,7 @@ impl State {
             options,
             revision,
             last_commit_time,
+            last_read_time: last_commit_time,
             documents,
             collections: None,
             collection_groups: None,
@@ -2619,6 +2681,7 @@ impl State {
         }
         Ok(Snapshot::memory(
             revision,
+            self.commit_time_at(revision),
             documents,
             collections,
             collection_groups,
@@ -2639,22 +2702,45 @@ impl State {
             .take_while(|point| point.commit_time <= read_time)
             .last()
             .map_or(self.history_floor.revision, |point| point.revision);
-        self.snapshot_at_revision(revision)
+        let mut snapshot = self.snapshot_at_revision(revision)?;
+        snapshot.read_time = read_time;
+        Ok(snapshot)
+    }
+
+    /// When the data was at `revision`, for a snapshot of its past.
+    fn commit_time_at(&self, revision: Revision) -> Timestamp {
+        if revision == self.revision {
+            return self.last_commit_time;
+        }
+        let later = self
+            .commit_times
+            .partition_point(|point| point.revision <= revision);
+        later
+            .checked_sub(1)
+            .map_or(self.history_floor.commit_time, |point| {
+                self.commit_times[point].commit_time
+            })
+    }
+
+    fn latest_time(&self) -> Timestamp {
+        self.last_commit_time.max(self.last_read_time)
+    }
+
+    /// The read time of a snapshot of the current data, taken under the lock
+    /// that commits take. A commit stamped after this is one the snapshot lacks.
+    fn next_read_time(&mut self) -> Timestamp {
+        let read_time = clock_microseconds().max(self.latest_time());
+        self.last_read_time = read_time;
+        read_time
     }
 
     fn next_commit_time(&self) -> Timestamp {
-        let elapsed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        let seconds = i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX);
-        let observed = Timestamp {
-            seconds,
-            nanos: elapsed.subsec_micros() * 1_000,
-        };
-        if observed > self.last_commit_time {
+        let observed = clock_microseconds();
+        let latest = self.latest_time();
+        if observed > latest {
             observed
         } else {
-            self.last_commit_time.saturating_next_microsecond()
+            latest.saturating_next_microsecond()
         }
     }
 
@@ -4108,6 +4194,72 @@ mod tests {
         let long = FirestoreString::new("a Unicode value longer than twenty-three bytes: 世界");
         assert!(long.is_heap_allocated());
         assert_eq!(long, "a Unicode value longer than twenty-three bytes: 世界");
+    }
+
+    #[test]
+    fn a_read_time_sits_between_the_commits_a_snapshot_holds_and_those_it_lacks() {
+        let directory = temporary_directory("read-time");
+        for store in [
+            Store::new(StoreOptions::default()),
+            Store::open_disk(&directory, DiskOptions::default()).unwrap(),
+        ] {
+            let write = |version: i64| {
+                store
+                    .commit(&[Write::Set {
+                        key: DocumentKey::new(database("(default)"), "cities/one").unwrap(),
+                        fields: Fields::from([("v".to_owned(), Value::Integer(version))]),
+                        transforms: Vec::new(),
+                        precondition: Precondition::None,
+                    }])
+                    .unwrap()
+            };
+            let empty = store.snapshot();
+            assert!(
+                empty.read_time() > Timestamp::new(0, 0).unwrap(),
+                "a client ignores a zero read time"
+            );
+            let mut last = empty.read_time();
+            // Fast enough that a commit and a snapshot share a microsecond.
+            for version in 0..2_000 {
+                let held = write(version);
+                let snapshot = store.snapshot();
+                let lacked = write(version);
+                assert!(snapshot.read_time() >= held.commit_time);
+                assert!(snapshot.read_time() >= last, "read times never go back");
+                assert!(lacked.commit_time > snapshot.read_time());
+                assert_eq!(snapshot.revision(), held.revision);
+                last = snapshot.read_time();
+                // Reading at that time finds that very state, on the wire's
+                // microsecond precision.
+                assert_eq!(snapshot.read_time().nanos() % 1_000, 0);
+                let again = store.snapshot_at_time(snapshot.read_time()).unwrap();
+                assert_eq!(again.revision(), snapshot.revision());
+                assert_eq!(again.read_time(), snapshot.read_time());
+                let at_revision = store.snapshot_at(snapshot.revision()).unwrap();
+                assert_eq!(at_revision.read_time(), held.commit_time);
+            }
+        }
+    }
+
+    #[test]
+    fn every_opened_store_has_its_own_instance() {
+        let directory = temporary_directory("instance");
+        let memory = Store::new(StoreOptions::default());
+        assert_eq!(memory.clone().instance(), memory.instance());
+        assert_ne!(
+            Store::new(StoreOptions::default()).instance(),
+            memory.instance()
+        );
+        let disk = Store::open_disk(&directory, DiskOptions::default()).unwrap();
+        let first = disk.instance();
+        assert_eq!(disk.downgrade().upgrade().unwrap().instance(), first);
+        disk.close(std::time::Duration::from_secs(5)).unwrap();
+        let again = Store::open_disk(&directory, DiskOptions::default()).unwrap();
+        assert_ne!(
+            again.instance(),
+            first,
+            "the same data opened again is not the same run"
+        );
     }
 
     #[test]

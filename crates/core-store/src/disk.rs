@@ -451,9 +451,11 @@ impl DiskStore {
     /// Returns an immutable snapshot at the current revision.
     #[must_use]
     pub fn snapshot(&self) -> Snapshot {
-        let state = self.state();
+        let mut state = self.state();
+        let read_time = state.memory.next_read_time();
         Snapshot::disk(
             state.memory.revision,
+            read_time,
             DiskSnapshot::open(&state.database, im::OrdMap::new(), state.field_indexes),
             state.memory.current_documents,
         )
@@ -465,6 +467,7 @@ impl DiskStore {
         let overlay = historical_overlay(&state.memory, revision)?;
         Ok(Snapshot::disk(
             revision,
+            state.memory.commit_time_at(revision),
             DiskSnapshot::open(&state.database, overlay, state.field_indexes),
             state.memory.document_usage_at_revision(revision),
         ))
@@ -489,6 +492,7 @@ impl DiskStore {
         let overlay = historical_overlay(&state.memory, revision)?;
         Ok(Snapshot::disk(
             revision,
+            read_time,
             DiskSnapshot::open(&state.database, overlay, state.field_indexes),
             state.memory.document_usage_at_revision(revision),
         ))
