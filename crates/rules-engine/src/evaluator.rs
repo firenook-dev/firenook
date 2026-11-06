@@ -10,7 +10,7 @@ use time::{Date, Month};
 
 use crate::ast::{
     BinaryOperator, Expr, ExprKind, Function, MatchBlock, Operation, PathPart, PatternSegment,
-    Program, TypeName, UnaryOperator,
+    Program, SEGMENT_SLASH, TypeName, UnaryOperator, decode_path_text,
 };
 use crate::model::{
     AtomicEvaluationResult, Auth, DocumentAccess, EvaluationRequest, EvaluationResult, LatLng,
@@ -628,13 +628,7 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             ExprKind::Index { base, index } => {
                 let base = self.eval_expr(base, environment, functions)?;
                 let index = self.eval_expr(index, environment, functions)?;
-                if matches!(base, EvalValue::QueryData | EvalValue::Constraint(_)) {
-                    let EvalValue::Data(Value::String(name)) = index else {
-                        return Ok(EvalValue::Unknown);
-                    };
-                    return self.field(base, &name);
-                }
-                index_value(base, index)
+                self.index(base, index)
             }
             ExprKind::Slice { base, start, end } => {
                 let base = self.eval_expr(base, environment, functions)?;
@@ -804,25 +798,26 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                     "query field {name:?} does not exist"
                 ))),
             },
-            EvalValue::Resource(resource) => match name {
-                "data" => Ok(EvalValue::Data(Value::Map(resource.data))),
-                "__name__" => Ok(EvalValue::Data(Value::Path(resource.name))),
-                "createTime" => resource.create_time.map_or_else(
-                    || Err(RuntimeError::new("resource createTime is unavailable")),
-                    |value| Ok(EvalValue::Data(Value::Timestamp(value))),
-                ),
-                "updateTime" => resource.update_time.map_or_else(
-                    || Err(RuntimeError::new("resource updateTime is unavailable")),
-                    |value| Ok(EvalValue::Data(Value::Timestamp(value))),
-                ),
-                _ => Err(RuntimeError::new(format!(
-                    "resource field {name:?} does not exist"
-                ))),
-            },
+            EvalValue::Resource(resource) => resource_field(resource, name),
             _ => Err(RuntimeError::new(format!(
                 "field {name:?} is not available on this value"
             ))),
         }
+    }
+
+    /// `base[index]`: a string index on a document or a query's data reads the
+    /// field of that name.
+    fn index(&mut self, base: EvalValue, index: EvalValue) -> Result<EvalValue, RuntimeError> {
+        if matches!(base, EvalValue::QueryData | EvalValue::Constraint(_)) {
+            let EvalValue::Data(Value::String(name)) = index else {
+                return Ok(EvalValue::Unknown);
+            };
+            return self.field(base, &name);
+        }
+        if let (EvalValue::Resource(_), EvalValue::Data(Value::String(name))) = (&base, &index) {
+            return self.field(base, name);
+        }
+        index_value(base, index)
     }
 
     fn eval_call<'program>(
@@ -963,6 +958,18 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                     .map_err(|_| RuntimeError::new(format!("string {value:?} is not a float"))),
                 _ => Err(RuntimeError::new("value cannot be converted to a float")),
             },
+            "path" => {
+                let argument = one_argument(name, arguments)?;
+                if argument.is_symbolic() {
+                    return Ok(EvalValue::Unknown);
+                }
+                match argument {
+                    EvalValue::Data(Value::String(text)) => {
+                        path_from_text(&text).map(|path| EvalValue::Data(Value::Path(path)))
+                    }
+                    _ => Err(RuntimeError::new("path() requires a string")),
+                }
+            }
             "get" | "exists" | "getAfter"
                 if self.request.service == RulesService::FirebaseStorage =>
             {
@@ -1294,6 +1301,106 @@ fn match_pattern_from(
     }
 }
 
+fn resource_field(resource: Resource, name: &str) -> Result<EvalValue, RuntimeError> {
+    match name {
+        "data" => Ok(EvalValue::Data(Value::Map(resource.data))),
+        "id" => Ok(EvalValue::data(
+            resource.name.rsplit('/').next().unwrap_or_default(),
+        )),
+        "__name__" => Ok(EvalValue::Data(Value::Path(rules_document_name(
+            resource.name,
+        )))),
+        "createTime" => resource.create_time.map_or_else(
+            || Err(RuntimeError::new("resource createTime is unavailable")),
+            |value| Ok(EvalValue::Data(Value::Timestamp(value))),
+        ),
+        "updateTime" => resource.update_time.map_or_else(
+            || Err(RuntimeError::new("resource updateTime is unavailable")),
+            |value| Ok(EvalValue::Data(Value::Timestamp(value))),
+        ),
+        _ => Err(RuntimeError::new(format!(
+            "resource field {name:?} does not exist"
+        ))),
+    }
+}
+
+/// A document's name as rules see it: `/databases/{database}/documents/...`,
+/// with no project, whichever form the store names it in.
+fn rules_document_name(name: String) -> String {
+    match name
+        .strip_prefix("projects/")
+        .and_then(|rest| rest.split_once('/'))
+    {
+        Some((_, rest)) => format!("/{rest}"),
+        None => name,
+    }
+}
+
+/// The text of a path as `path()` reads it: its leading slash is optional and
+/// always there afterwards, and no segment may be empty.
+fn path_from_text(text: &str) -> Result<String, RuntimeError> {
+    let invalid = || RuntimeError::new(format!("{text:?} is not a valid path"));
+    let segments = text.strip_prefix('/').unwrap_or(text);
+    if segments.split('/').any(str::is_empty) {
+        return Err(invalid());
+    }
+    let decoded = decode_path_text(segments).ok_or_else(invalid)?;
+    Ok(format!("/{decoded}"))
+}
+
+/// A value as one segment of a path: a slash in it stays inside the segment.
+fn segment_text(value: &EvalValue) -> Result<String, RuntimeError> {
+    match value {
+        EvalValue::Data(Value::String(value)) => Ok(value.replace('/', &SEGMENT_SLASH.to_string())),
+        EvalValue::Data(Value::Integer(value)) => Ok(value.to_string()),
+        EvalValue::Data(Value::Float(value)) => Ok(value.to_string()),
+        EvalValue::Data(Value::Bool(value)) => Ok(value.to_string()),
+        EvalValue::Data(Value::Null) => Ok("null".to_owned()),
+        _ => Err(RuntimeError::new(
+            "a path segment must be a string, number, bool or null",
+        )),
+    }
+}
+
+/// `path.bind(map)`: a segment `{key}` takes that value, and every key must be
+/// used and every such segment bound.
+fn path_method(
+    path: &str,
+    name: &str,
+    arguments: Vec<EvalValue>,
+) -> Result<EvalValue, RuntimeError> {
+    if name != "bind" {
+        return Err(RuntimeError::new(format!(
+            "method {name:?} is not available on a path"
+        )));
+    }
+    let values = data_map(one_argument(name, arguments)?)?;
+    let mut unused = values.keys().map(String::as_str).collect::<BTreeSet<_>>();
+    let mut bound = String::new();
+    for segment in path_segments(path) {
+        bound.push('/');
+        match segment
+            .strip_prefix('{')
+            .and_then(|segment| segment.strip_suffix('}'))
+        {
+            Some(key) => {
+                let value = values
+                    .get(key)
+                    .ok_or_else(|| RuntimeError::new(format!("path binds no value for {key:?}")))?;
+                unused.remove(key);
+                bound.push_str(&segment_text(&EvalValue::Data(value.clone()))?);
+            }
+            None => bound.push_str(segment),
+        }
+    }
+    if let Some(key) = unused.first() {
+        return Err(RuntimeError::new(format!(
+            "path has no segment for {key:?}"
+        )));
+    }
+    Ok(EvalValue::Data(Value::Path(bound)))
+}
+
 fn one_argument(name: &str, arguments: Vec<EvalValue>) -> Result<EvalValue, RuntimeError> {
     let [value]: [EvalValue; 1] = arguments.try_into().map_err(|arguments: Vec<_>| {
         RuntimeError::new(format!(
@@ -1378,17 +1485,16 @@ fn data_bytes(value: EvalValue) -> Result<Vec<u8>, RuntimeError> {
 
 fn path_interpolation(value: EvalValue) -> Result<String, RuntimeError> {
     match value {
-        EvalValue::Data(Value::String(value) | Value::Path(value)) => Ok(value),
-        EvalValue::Data(Value::Integer(value)) => Ok(value.to_string()),
-        _ => Err(RuntimeError::new(
-            "path interpolation requires a string, integer, or path",
-        )),
+        // A path adds its segments, where any other value is one segment.
+        EvalValue::Data(Value::Path(path)) => Ok(path.trim_start_matches('/').to_owned()),
+        value => segment_text(&value),
     }
 }
 
 fn string_coercion(value: EvalValue) -> Result<String, RuntimeError> {
     match value {
-        EvalValue::Data(Value::String(value) | Value::Path(value)) => Ok(value),
+        EvalValue::Data(Value::Path(path)) => Ok(path.replace(SEGMENT_SLASH, "/")),
+        EvalValue::Data(Value::String(value)) => Ok(value),
         EvalValue::Data(Value::Integer(value)) => Ok(value.to_string()),
         EvalValue::Data(Value::Float(value)) => Ok(value.to_string()),
         EvalValue::Data(Value::Bool(value)) => Ok(value.to_string()),
@@ -1733,7 +1839,7 @@ fn index_value(base: EvalValue, index: EvalValue) -> Result<EvalValue, RuntimeEr
             usize::try_from(position)
                 .ok()
                 .and_then(|position| segments.get(position))
-                .map(|segment| EvalValue::data((*segment).to_owned()))
+                .map(|segment| EvalValue::data(segment.replace(SEGMENT_SLASH, "/")))
                 .ok_or_else(|| {
                     RuntimeError::new(format!(
                         "Index out of bound error. Index: [{position}] , size: [{}].",
@@ -1811,6 +1917,7 @@ fn call_method(
     match receiver {
         EvalValue::Namespace(namespace) => call_namespace(namespace, name, arguments),
         EvalValue::Data(Value::String(value)) => string_method(value, name, arguments),
+        EvalValue::Data(Value::Path(value)) => path_method(&value, name, arguments),
         EvalValue::Data(Value::List(value)) => list_method(value, name, arguments),
         EvalValue::Data(Value::Map(value)) => map_method(value, name, arguments),
         // `request.auth` is a map with `uid` and `token` for method calls

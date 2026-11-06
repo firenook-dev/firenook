@@ -22,17 +22,14 @@ const execute = promisify(execFile);
 // of every collection under the parent in the official emulator. No SDK sends
 // it, and the native engine keeps refusing it as an invalid scope.
 const REFUSED = new Set(['empty-id-direct-children']);
-// The parent's refusal is older than this query shape and shares its code, not
-// its wording, with the official emulator.
-const WORDED_DIFFERENTLY = new Set(['parent-is-a-collection']);
 
-function assertQuery(id, actual, expected, wording = true) {
+function assertQuery(id, actual, expected) {
   assert.equal(actual.code, expected.code, `${id} code: ${actual.message ?? ''}`);
   if (expected.code === 0) {
     assert.deepEqual(actual.documents, expected.documents, id);
     assert.deepEqual(actual.fields, expected.fields, `${id} fields`);
     assert.deepEqual(actual.aggregate, expected.aggregate, `${id} aggregate`);
-  } else if (wording) {
+  } else {
     assert.equal(actual.message, expected.message, `${id} message`);
   }
 }
@@ -75,7 +72,7 @@ test('kindless queries and recursiveDelete match the official capture in memory 
           assert.equal(rest.status, 400, `${mode} ${id}`);
           continue;
         }
-        assertQuery(`${mode} ${id} grpc`, grpc, expected.grpc, !WORDED_DIFFERENTLY.has(id));
+        assertQuery(`${mode} ${id} grpc`, grpc, expected.grpc);
         assert.equal(rest.status, expected.rest.status, `${mode} ${id} rest: ${rest.message ?? ''}`);
         assert.deepEqual(rest.documents, expected.rest.documents, `${mode} ${id} rest`);
         assert.equal(rest.message, expected.rest.message, `${mode} ${id} rest message`);

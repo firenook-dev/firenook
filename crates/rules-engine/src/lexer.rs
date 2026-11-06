@@ -267,7 +267,7 @@ impl<'a> Lexer<'a> {
         let Some(previous) = self.tokens.last() else {
             return true;
         };
-        if matches!(&previous.kind, TokenKind::Identifier(value) if value == "match" || value == "return")
+        if matches!(&previous.kind, TokenKind::Identifier(value) if matches!(value.as_str(), "match" | "return" | "if" | "in"))
         {
             return true;
         }
@@ -284,7 +284,7 @@ impl<'a> Lexer<'a> {
         while let Some(character) = self.current() {
             if interpolation_depth == 0 && braces == 0 && literal_parentheses == 0 {
                 if character.is_whitespace()
-                    || matches!(character, ';' | ',' | ')' | ']' | ':' | '&' | '|')
+                    || matches!(character, ';' | ',' | ')' | '[' | ']' | ':' | '&' | '|')
                 {
                     break;
                 }
@@ -384,6 +384,19 @@ fn token_can_end_expression(token: &TokenKind) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_path_can_open_an_expression_and_ends_at_a_bracket() {
+        let tokens = lex("allow get: if /a/$('b')[1] == 'b' && 'x' in /c/d;").expect("lexes");
+        let paths = tokens
+            .iter()
+            .filter_map(|token| match &token.kind {
+                TokenKind::Path(path) => Some(path.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(paths, ["/a/$('b')", "/c/d"]);
+    }
 
     #[test]
     fn distinguishes_paths_from_division() {

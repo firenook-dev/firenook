@@ -45,8 +45,6 @@ difference with its reason:
 
 - The native engine keeps refusing the empty-id selector without
   `allDescendants` (`INVALID_ARGUMENT`).
-- A parent that names a collection is `INVALID_ARGUMENT` in both, with a
-  different wording over gRPC.
 
 The Google client takes about seven seconds to report a refused stream, from
 either emulator, so the read-only cases run concurrently.

@@ -335,3 +335,33 @@ pub(crate) enum TypeName {
     Bytes,
     LatLng,
 }
+
+/// Stands in a path's text for a slash inside one segment, as `/a%2Fb` or
+/// `/a/$('b/c')` make, so that the path still has the segments it was given.
+pub(crate) const SEGMENT_SLASH: char = '\u{1}';
+
+/// Reads the percent escapes of a path's text, as a path literal and `path()`
+/// do. `None` when an escape is not one, or the bytes are not text.
+pub(crate) fn decode_path_text(text: &str) -> Option<String> {
+    if !text.contains('%') {
+        return Some(text.to_owned());
+    }
+    let mut decoded = Vec::with_capacity(text.len());
+    let mut bytes = text.bytes();
+    while let Some(byte) = bytes.next() {
+        if byte != b'%' {
+            decoded.push(byte);
+            continue;
+        }
+        let high = char::from(bytes.next()?).to_digit(16)?;
+        let low = char::from(bytes.next()?).to_digit(16)?;
+        let value = u8::try_from(high * 16 + low).ok()?;
+        if value == b'/' {
+            let mut encoded = [0_u8; 4];
+            decoded.extend_from_slice(SEGMENT_SLASH.encode_utf8(&mut encoded).as_bytes());
+        } else {
+            decoded.push(value);
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
