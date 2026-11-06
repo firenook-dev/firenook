@@ -38,10 +38,14 @@ temporary directory, copies in `app/`, and applies what a local emulator needs:
 - Each backend runs fresh and the app is uninstalled between runs, because state
   carries over otherwise.
 
-## Flaky checks
+## A kept cache
 
-`fs.pending_writes` is reported but does not fail the check. On iOS,
-`hasPendingWrites` can stay true for at least 15 s when a write comes right after
-attaching an `includeMetadataChanges` listener to a new document, mostly on the
-first run after a simulator boot. `fs.pending_writes_after_delay` and
-`fs.pending_writes_existing_doc` do fail the check.
+`--keep-cache` keeps the app's cache between runs and runs firebase-tools twice,
+then Firenook twice, as a device does moving to Firenook. Firenook's runs are each
+compared with firebase-tools' second run, because that one also starts from a cache
+another run left. `fs.kept_cache` is the check that matters there: the first run on
+a fresh device passes it trivially, and a later run passes only if the emulator
+answers a token it did not issue by starting the target over.
+
+No check is exempt from failing. `fs.pending_writes` once was, and the lost write
+behind it is fixed.

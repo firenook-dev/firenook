@@ -8,8 +8,12 @@
 //     [--flutter <flutter>]    the SDK's flutter command (default: on PATH)
 //     [--device <id>]          the simulator or emulator (default: the first found)
 //     [--backends firenook,firebase-tools]
-//     [--runs <n>]             repeat each backend; flaky checks are counted
+//     [--runs <n>]             repeat each backend
 //     [--cold-boot]            restart the simulator before each run
+//     [--keep-cache]           native only: keep the app's cache between runs, and
+//                              run firebase-tools twice, then Firenook twice, as a
+//                              device does moving to Firenook. Each run after the
+//                              first is compared with firebase-tools' second.
 //     [--out <directory>]      where results go (default: a new temporary one)
 //     [--keep]                 keep the generated project for a closer look
 import { execFile, spawn } from 'node:child_process';
@@ -30,10 +34,6 @@ const services = 'auth,firestore,storage,functions';
 const organisation = 'dev.firenook';
 const bundles = { ios: `${organisation}.flutterCheck`, android: `${organisation}.flutter_check` };
 
-// Timing on a client, not a contract: reported, and repeated by --runs, but a
-// difference here alone does not fail the check.
-const FLAKY = new Set(['fs.pending_writes']);
-
 const argument = (name, fallback) => {
   const index = process.argv.indexOf(`--${name}`);
   return index === -1 ? fallback : process.argv[index + 1];
@@ -45,6 +45,8 @@ const binary = resolve(argument('binary', join(repository, 'target/debug/firenoo
 const backends = argument('backends', 'firenook,firebase-tools').split(',');
 const runs = Number(argument('runs', '1'));
 const coldBoot = process.argv.includes('--cold-boot');
+const keepCache = process.argv.includes('--keep-cache');
+if (keepCache && platform === 'web') throw new Error('--keep-cache is for native clients: each web run has a new browser profile');
 const out = resolve(argument('out', await mkdtemp(join(tmpdir(), 'flutter-check-results-'))));
 await mkdir(out, { recursive: true });
 const environment = { ...process.env, FLUTTER_SUPPRESS_ANALYTICS: 'true', CI: process.env.CI ?? '1', NO_COLOR: '1', FORCE_COLOR: '0', FIRENOOK_PLAIN: '1' };
@@ -130,7 +132,7 @@ async function stop(child, signal = 'SIGINT') {
   try { process.kill(-child.pid, 'SIGKILL'); } catch { /* the group is gone */ }
 }
 
-async function resetDevice(device) {
+async function resetDevice(device, firstOfKept) {
   if (platform === 'ios') {
     if (coldBoot) {
       log('restarting the simulator');
@@ -138,9 +140,9 @@ async function resetDevice(device) {
     }
     await execute('xcrun', ['simctl', 'boot', device]).catch(() => {});
     await execute('xcrun', ['simctl', 'bootstatus', device, '-b'], { maxBuffer: 16 * 1024 * 1024 });
-    await execute('xcrun', ['simctl', 'uninstall', device, bundles.ios]).catch(() => {});
+    if (!keepCache || firstOfKept) await execute('xcrun', ['simctl', 'uninstall', device, bundles.ios]).catch(() => {});
   }
-  if (platform === 'android') {
+  if (platform === 'android' && (!keepCache || firstOfKept)) {
     await execute('adb', ['-s', device, 'uninstall', bundles.android]).catch(() => {});
   }
 }
@@ -161,7 +163,7 @@ async function attempt(backend, run, app, template, device, work, attemptNumber)
   if (platform === 'ios') {
     await access(join(app, 'ios/Runner.xcworkspace/contents.xcworkspacedata')).catch(() => generateProject(app));
   }
-  const label = `${platform}-${backend}${runs > 1 ? `-${run}` : ''}`;
+  const label = `${platform}-${backend}${runs > 1 || keepCache ? `-${run}` : ''}`;
   const directory = join(work, 'runs', `${label}-${attemptNumber}`);
   await cp(template, directory, { recursive: true, verbatimSymlinks: true });
   const server = startBackend(backend, directory);
@@ -174,8 +176,9 @@ async function attempt(backend, run, app, template, device, work, attemptNumber)
     while (!serverLog.includes('All emulators ready') && server.exitCode === null && Date.now() < ready) await delay(200);
     if (serverLog.includes('All emulators ready')) {
       log(`${label}: backend ready`);
-      await resetDevice(device);
+      await resetDevice(device, run === 1);
       const args = ['run', '-d', device, '--no-pub', '--target', 'lib/main.dart'];
+      if (keepCache) args.push('--dart-define=KEEP_CACHE=true');
       if (platform === 'web') {
         args.push('--web-browser-flag=--headless=new', '--web-browser-flag=--disable-gpu');
         if (process.platform === 'linux') args.push('--web-browser-flag=--no-sandbox');
@@ -215,13 +218,12 @@ async function attempt(backend, run, app, template, device, work, attemptNumber)
 
 function compare(left, right) {
   const differences = [];
-  const flaky = [];
   for (const name of new Set([...Object.keys(right.results), ...Object.keys(left.results)])) {
     const [a, b] = [left.results[name], right.results[name]];
     if (a && b && a.ok === b.ok && a.detail === b.detail) continue;
-    (FLAKY.has(name) ? flaky : differences).push({ name, [left.backend]: a ?? 'missing', [right.backend]: b ?? 'missing' });
+    differences.push({ name, [left.backend]: a ?? 'missing', [right.backend]: b ?? 'missing' });
   }
-  return { differences, flaky };
+  return differences;
 }
 
 const work = await mkdtemp(join(tmpdir(), `flutter-check-${platform}-`));
@@ -230,15 +232,25 @@ log(`platform ${platform}, device ${device}, results in ${out}`);
 const app = await prepareApp(work);
 const template = await prepareBackend(work);
 const reports = {};
-for (let run = 1; run <= runs; run += 1) {
-  for (const backend of backends) {
+if (keepCache) {
+  const [reference, tested] = ['firebase-tools', 'firenook'];
+  let run = 0;
+  for (const backend of [reference, reference, tested, tested]) {
+    run += 1;
     (reports[backend] ??= []).push(await runOnce(backend, run, app, template, device, work));
+  }
+} else {
+  for (let run = 1; run <= runs; run += 1) {
+    for (const backend of backends) {
+      (reports[backend] ??= []).push(await runOnce(backend, run, app, template, device, work));
+    }
   }
 }
 
 let failed = false;
-const summary = { platform, device, runs, backends: {} };
-for (const backend of backends) {
+const compared = keepCache ? ['firebase-tools', 'firenook'] : backends;
+const summary = { platform, device, runs, keepCache, backends: {} };
+for (const backend of compared) {
   const rows = reports[backend];
   summary.backends[backend] = rows.map((row) => ({
     status: row.status,
@@ -250,23 +262,24 @@ for (const backend of backends) {
     if (row.status !== 'finished') { failed = true; console.log(`${backend} run ${row.run}: ${row.status}`); }
   }
 }
-if (backends.length === 2) {
-  const [first, second] = backends;
+if (compared.length === 2) {
+  const [first, second] = compared;
   summary.differences = [];
-  summary.flaky = [];
-  for (let index = 0; index < runs; index += 1) {
-    const { differences, flaky } = compare(reports[first][index], reports[second][index]);
-    summary.differences.push(...differences);
-    summary.flaky.push(...flaky);
+  if (keepCache) {
+    // The first run had no cache to keep, so it compares with nothing.
+    for (const row of reports[second]) summary.differences.push(...compare(reports[first][1], row));
+  } else {
+    for (let index = 0; index < runs; index += 1) {
+      summary.differences.push(...compare(reports[first][index], reports[second][index]));
+    }
   }
   for (const difference of summary.differences) {
     failed = true;
     console.log(`DIFFERENT ${JSON.stringify(difference)}`);
   }
-  for (const difference of summary.flaky) console.log(`flaky, not failing: ${JSON.stringify(difference)}`);
 }
 await writeFile(join(out, `${platform}-summary.json`), `${JSON.stringify(summary, null, 1)}\n`);
-for (const backend of backends) {
+for (const backend of compared) {
   console.log(`${backend} on ${platform}: ${summary.backends[backend].map((row) => `${row.passed}/${row.checks}`).join(' ')}`);
 }
 console.log(failed ? `${platform}: FAILED` : `${platform}: same on every check`);

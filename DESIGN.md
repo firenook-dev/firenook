@@ -988,6 +988,41 @@ list. This replaces the production-first choice `storage-rules-v1` records as
 `list-prefix-template-matching`: it refused listing `open/` under `match
 /open/{name}`, a rule written for exactly that, and allowed listing `open/sub/`.
 
+### Read times and resume tokens
+
+A client takes a read time to mean "the data was like this then". A document the
+snapshot lacked counts as absent at that time, and a later commit stamped no later
+is dropped as out of date: the write stays pending and never reaches the listener.
+So a read time cannot be the clock read after a snapshot. `Store::snapshot` takes it
+under the lock commits take, no earlier than the last commit, and a later commit is
+stamped after it, even within one microsecond. It is at the microsecond, as read
+times on the wire are, so it can be read at again. Every listener frame and read
+response carries the snapshot's time, deletions included. The JS SDK's stuck
+`hasPendingWrites` came from this, in 54 of 60 rounds, and is
+`listener-write-race.test.mjs` now.
+
+A device keeps a resume token per query in its cache and sends it to whatever
+emulator it meets next: the same one restarted, or another. Production refuses a
+token it did not issue, and only ever sees its own. The official emulator starts the
+target over for any token, recorded in `listen-resume-v1`, and the native engine now
+does that for any token this opened store did not issue, or any read time it cannot
+use. A token names the store's instance as well as a revision, because a run counts
+revisions from where its data starts: without it, a token from an earlier run at the
+same revision looks current, and the client keeps the old documents as if the server
+had confirmed them, with no error. A token from this very run still replays only
+what changed. The empty token the Android SDK sends for a new target is one more
+token that names nothing.
+
+### Paths in rules
+
+A rules path has real segments, recorded from the official runtime in
+`rules-document-paths-v1`. `Value::Path` stays a string for everything that compares
+or joins it, with `SEGMENT_SLASH` standing for a slash inside one segment, which
+`/a%2Fb` and `/a/$('b/c')` make. `string()` and indexing turn it back into a slash.
+A document's name reaches rules without its project, the form the store keeps being
+for the wire. Under Storage, `firestore.get(...).__name__` keeps the project, as
+`storage-rules-v1` records.
+
 ### REST document reads and transaction boundary
 
 `rest-read-options-v1` records independent official-jar HTTP observations before

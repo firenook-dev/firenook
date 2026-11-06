@@ -71,10 +71,11 @@ Future<void> main() async {
   await storage.useStorageEmulator(host, 19199);
   fn.useFunctionsEmulator(host, 15001);
 
-  // A simulator keeps its cache and sign-in between runs.
+  // A simulator keeps its cache and sign-in between runs. --keep-cache runs the
+  // app on what an earlier run left in that cache.
   try {
     await auth.signOut();
-    await db.clearPersistence();
+    if (!const bool.fromEnvironment('KEEP_CACHE')) await db.clearPersistence();
   } catch (_) {}
 
   Future<void> signIn() => auth.signInWithEmailAndPassword(email: email, password: password);
@@ -134,6 +135,20 @@ Future<void> main() async {
 
   // ---------- Firestore ----------
   final public = db.collection('public');
+
+  // A kept cache holds a resume token from the last emulator it talked to. This
+  // emulator holds nothing here, so the server's first word must say so, with no
+  // error and nothing left over.
+  await check('fs.kept_cache', () async {
+    final kept = db.collection('kept');
+    final first = await kept
+        .snapshots(includeMetadataChanges: true)
+        .firstWhere((s) => !s.metadata.isFromCache)
+        .timeout(const Duration(seconds: 15));
+    must(first.docs.isEmpty, 'left over: ${first.docs.map((d) => d.id).join(',')}');
+    await kept.doc('only').set({'v': 1});
+    return 'told it is empty';
+  });
 
   await check('fs.value_types', () async {
     final at = Timestamp.fromMillisecondsSinceEpoch(1700000000000);
