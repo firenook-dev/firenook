@@ -207,10 +207,8 @@ impl Parser {
         }
         self.expect_identifier("return")?;
         let result = self.expression(0)?;
-        self.expect(
-            &TokenKind::Semicolon,
-            "';' after function return expression",
-        )?;
+        // The official emulator and production accept a return without `;`.
+        self.consume(&TokenKind::Semicolon);
         self.expect(&TokenKind::RightBrace, "'}' after function body")?;
         Ok((
             name,
