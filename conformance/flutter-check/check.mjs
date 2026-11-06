@@ -47,7 +47,7 @@ const runs = Number(argument('runs', '1'));
 const coldBoot = process.argv.includes('--cold-boot');
 const keepCache = process.argv.includes('--keep-cache');
 if (keepCache && platform === 'web') throw new Error('--keep-cache is for native clients: each web run has a new browser profile');
-const out = resolve(argument('out', await mkdtemp(join(tmpdir(), 'flutter-check-results-'))));
+const out = resolve(argument('out') ?? await mkdtemp(join(tmpdir(), 'flutter-check-results-')));
 await mkdir(out, { recursive: true });
 const environment = { ...process.env, FLUTTER_SUPPRESS_ANALYTICS: 'true', CI: process.env.CI ?? '1', NO_COLOR: '1', FORCE_COLOR: '0', FIRENOOK_PLAIN: '1' };
 const log = (line) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
