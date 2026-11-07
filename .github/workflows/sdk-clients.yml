@@ -42,8 +42,9 @@ jobs:
             runner: macos-latest
             flutter: macos/flutter_macos_arm64
             archive: zip
+          # On the Ubuntu 26.04 image the emulator never finished booting.
           - platform: android
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             flutter: linux/flutter_linux
             archive: tar.xz
     steps:
@@ -85,11 +86,32 @@ jobs:
           yes | "$sdkmanager" --licenses > /dev/null
           "$sdkmanager" --install platform-tools emulator "system-images;android-35;google_apis;x86_64" > /dev/null
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name check --package "system-images;android-35;google_apis;x86_64"
-          nohup "$ANDROID_HOME/emulator/emulator" -avd check -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          df -h "$HOME" "$RUNNER_TEMP"
+          "$ANDROID_HOME/emulator/emulator" -accel-check
+          # The emulator's log goes out with the results.
+          mkdir -p "$RUNNER_TEMP/results"
+          log="$RUNNER_TEMP/results/emulator.log"
+          nohup "$ANDROID_HOME/emulator/emulator" -avd check -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect > "$log" 2>&1 &
+          emulator=$!
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
           adb="$ANDROID_HOME/platform-tools/adb"
-          "$adb" wait-for-device
-          until [ "$("$adb" shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; do sleep 5; done
+          # An emulator that exits or stalls ends this step with its log, not the job at its time limit.
+          deadline=$((SECONDS + 900))
+          until [ "$("$adb" shell getprop sys.boot_completed 2> /dev/null | tr -d '\r')" = 1 ]; do
+            if ! kill -0 "$emulator" 2> /dev/null; then
+              echo "::error::The emulator exited before it booted"
+              tail -n 100 "$log"
+              exit 1
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::The emulator did not boot within 15 minutes"
+              "$adb" devices
+              tail -n 100 "$log"
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "Booted after $SECONDS s"
       - name: Run the same app against Firenook and firebase-tools
         run: node conformance/flutter-check/check.mjs --platform ${{ matrix.platform }} --out "$RUNNER_TEMP/results"
       - name: Run them on a kept cache, as a device moving from firebase-tools to Firenook
