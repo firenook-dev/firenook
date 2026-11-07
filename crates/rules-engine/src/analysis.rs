@@ -731,6 +731,11 @@ fn checks_written_data<'p>(
         ExprKind::Unary { operand, .. } => checks(operand),
         ExprKind::Binary { left, right, .. } => checks(left) || checks(right),
         ExprKind::Is { value, .. } => checks(value),
+        ExprKind::Conditional {
+            condition,
+            then,
+            otherwise,
+        } => checks(condition) || checks(then) || checks(otherwise),
         ExprKind::Null
         | ExprKind::Bool(_)
         | ExprKind::Integer(_)
@@ -798,6 +803,11 @@ fn reads_upload_size<'p>(
         ExprKind::Unary { operand, .. } => reads(operand),
         ExprKind::Binary { left, right, .. } => reads(left) || reads(right),
         ExprKind::Is { value, .. } => reads(value),
+        ExprKind::Conditional {
+            condition,
+            then,
+            otherwise,
+        } => reads(condition) || reads(then) || reads(otherwise),
         ExprKind::Null
         | ExprKind::Bool(_)
         | ExprKind::Integer(_)
