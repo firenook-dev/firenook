@@ -1,4 +1,6 @@
 rules_version = '2';
+function signedIn() { return request.auth != null; }
+function owns(data) { return false; }
 service cloud.firestore {
   match /databases/{database}/documents {
     match /users/{uid} {
@@ -16,5 +18,11 @@ service cloud.firestore {
       allow read: if request.auth != null
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'staff';
     }
+    match /drafts/{draft} {
+      function owns(data) { return signedIn() && data.owner == request.auth.uid; }
+      allow read: if owns(resource.data);
+      allow create: if signedIn() && titled(request.resource.data);
+    }
   }
 }
+function titled(data) { return data.title is string; }
