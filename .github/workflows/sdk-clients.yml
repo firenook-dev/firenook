@@ -42,7 +42,7 @@ jobs:
             runner: macos-latest
             flutter: macos/flutter_macos_arm64
             archive: zip
-          # On the Ubuntu 26.04 image the emulator never finished booting.
+          # Pinned until the emulator has been run on the Ubuntu 26.04 image.
           - platform: android
             runner: ubuntu-24.04
             flutter: linux/flutter_linux
@@ -85,7 +85,15 @@ jobs:
           sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$sdkmanager" --licenses > /dev/null
           "$sdkmanager" --install platform-tools emulator "system-images;android-35;google_apis;x86_64" > /dev/null
+          # avdmanager and the emulator can disagree on where AVDs live; name one place for both.
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name check --package "system-images;android-35;google_apis;x86_64"
+          if ! "$ANDROID_HOME/emulator/emulator" -list-avds | grep -qx check; then
+            echo "::error::The emulator does not see the AVD avdmanager created"
+            exit 1
+          fi
           df -h "$HOME" "$RUNNER_TEMP"
           "$ANDROID_HOME/emulator/emulator" -accel-check
           # The emulator's log goes out with the results.
