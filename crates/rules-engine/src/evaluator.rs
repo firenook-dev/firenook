@@ -675,6 +675,11 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 }
                 Ok(EvalValue::Data(Value::Bool(is_type(&value, *expected))))
             }
+            ExprKind::Conditional {
+                condition,
+                then,
+                otherwise,
+            } => self.eval_conditional(condition, then, otherwise, environment, functions),
         }
     }
 
@@ -1055,6 +1060,28 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         .map_err(|error| RuntimeError::new(format!("document access failed: {error}")))?;
         cache.insert(path, resource.clone());
         Ok(resource)
+    }
+
+    fn eval_conditional<'program>(
+        &mut self,
+        condition: &'program Expr,
+        then: &'program Expr,
+        otherwise: &'program Expr,
+        environment: &mut BTreeMap<String, EvalValue>,
+        functions: &BTreeMap<String, &'program Function>,
+    ) -> Result<EvalValue, RuntimeError> {
+        // Only the taken branch runs. A query proof that cannot decide the
+        // condition takes neither, even when both would prove the query.
+        let condition = self.eval_expr(condition, environment, functions)?;
+        if self.query_branch.is_some() && condition.is_symbolic() {
+            return Ok(EvalValue::Unknown);
+        }
+        let taken = if data_bool(condition)? {
+            then
+        } else {
+            otherwise
+        };
+        self.eval_expr(taken, environment, functions)
     }
 
     fn eval_binary<'program>(

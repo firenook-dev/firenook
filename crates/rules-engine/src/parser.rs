@@ -341,6 +341,24 @@ impl Parser {
                 continue;
             }
 
+            // `c ? a : b` binds looser than `||` and groups to the right, as
+            // in the official emulator.
+            if minimum_binding_power == 0 && self.consume(&TokenKind::Question) {
+                let then = self.expression(0)?;
+                self.expect(&TokenKind::Colon, "':' in conditional expression")?;
+                let otherwise = self.expression(0)?;
+                left = Expr::new(
+                    ExprKind::Conditional {
+                        condition: Box::new(left),
+                        then: Box::new(then),
+                        otherwise: Box::new(otherwise),
+                    },
+                    start,
+                    self.previous_end(),
+                );
+                continue;
+            }
+
             let Some((operator, left_binding_power, right_binding_power)) = self.binary_operator()
             else {
                 break;

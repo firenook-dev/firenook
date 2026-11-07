@@ -409,6 +409,15 @@ fn collect_direct_calls(expression: &Expr, calls: &mut BTreeSet<String>) {
             collect_direct_calls(right, calls);
         }
         ExprKind::Is { value, .. } => collect_direct_calls(value, calls),
+        ExprKind::Conditional {
+            condition,
+            then,
+            otherwise,
+        } => {
+            collect_direct_calls(condition, calls);
+            collect_direct_calls(then, calls);
+            collect_direct_calls(otherwise, calls);
+        }
         ExprKind::Null
         | ExprKind::Bool(_)
         | ExprKind::Integer(_)

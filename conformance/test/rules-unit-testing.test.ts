@@ -82,6 +82,36 @@ test("custom claims and get() lookups decide as the rules say", async () => {
   await assertFails(getDoc(doc(env.authenticatedContext("erin").firestore(), "orders/o1")));
 });
 
+test("the conditional operator takes one branch, groups to the right and binds looser than ||", async () => {
+  await seed("notes/public", { owner: "alice", public: true });
+  await seed("notes/private", { owner: "alice", public: false, shared: false });
+  await seed("notes/shared", { owner: "alice", public: false, shared: true });
+  await seed("notes/locked", { owner: "alice", locked: true });
+  await seed("notes/open", { owner: "alice", locked: false, archived: false });
+  await seed("notes/odd", { owner: "alice", locked: "yes" });
+  const signedOut = env.unauthenticatedContext().firestore();
+  const alice = env.authenticatedContext("alice").firestore();
+  const bob = env.authenticatedContext("bob").firestore();
+  // Signed out takes the first branch, which never reads request.auth.uid.
+  await assertSucceeds(getDoc(doc(signedOut, "notes/public")));
+  await assertFails(getDoc(doc(signedOut, "notes/private")));
+  // `a ? b : c ? d : e` is `a ? b : (c ? d : e)`.
+  await assertFails(getDoc(doc(signedOut, "notes/shared")));
+  await assertSucceeds(getDoc(doc(alice, "notes/private")));
+  await assertFails(getDoc(doc(bob, "notes/private")));
+  await assertSucceeds(getDoc(doc(bob, "notes/shared")));
+  // A query takes a branch only when its filters decide the condition.
+  await assertSucceeds(getDocs(query(collection(alice, "notes"), where("owner", "==", "alice"))));
+  await assertFails(getDocs(collection(alice, "notes")));
+  await assertFails(getDocs(query(collection(bob, "notes"), where("owner", "==", "alice"))));
+  // `a || b ? c : d` is `(a || b) ? c : d`.
+  await assertFails(updateDoc(doc(alice, "notes/locked"), { title: "x" }));
+  await assertSucceeds(updateDoc(doc(alice, "notes/open"), { title: "x" }));
+  // A condition that is not a boolean is an error.
+  await assertFails(deleteDoc(doc(alice, "notes/odd")));
+  await assertSucceeds(deleteDoc(doc(alice, "notes/open")));
+});
+
 test("clearFirestore empties the database", async () => {
   await seed("posts/p1", { author: "alice" });
   await env.clearFirestore();
