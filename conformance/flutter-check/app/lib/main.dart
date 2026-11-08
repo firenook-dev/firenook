@@ -281,7 +281,10 @@ Future<void> main() async {
     return types.join('>');
   });
   await check('fs.pending_writes', () async {
-    final r = public.doc('pending');
+    // A new name each run: on a kept cache, 'pending' would already be cached
+    // from the last run, and whether that copy or the write reaches the listener
+    // first depends on which call Flutter hands the SDK first.
+    final r = public.doc('pending-${DateTime.now().microsecondsSinceEpoch}');
     final states = <bool>[];
     final done = Completer<void>();
     final sub = r.snapshots(includeMetadataChanges: true).listen((s) {

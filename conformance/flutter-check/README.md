@@ -48,4 +48,5 @@ a fresh device passes it trivially, and a later run passes only if the emulator
 answers a token it did not issue by starting the target over.
 
 No check is exempt from failing. `fs.pending_writes` once was, and the lost write
-behind it is fixed.
+behind it is fixed. It writes a new document on every run, so a kept cache cannot
+already hold it.
