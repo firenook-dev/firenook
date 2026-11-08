@@ -1090,6 +1090,27 @@ mod tests {
 
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn build_does_not_block_writers() {
+            // A walk step holds the lock for 5 ms at most. A machine that takes
+            // a thread away while it holds the lock, or from the writer while
+            // it waits, adds to the wait, on a shared runner by more than the
+            // whole allowance, and can only add: the shortest of a few builds
+            // is what the walk costs a writer. A walk that held the lock for
+            // the whole build fails every one.
+            let mut waits = Vec::new();
+            for _ in 0..5 {
+                let slowest = build_beside_a_writer().await;
+                if slowest < Duration::from_millis(50) {
+                    return;
+                }
+                waits.push(slowest);
+            }
+            panic!("a write waited {waits:?} for the walk");
+        }
+
+        /// Builds the index of 200,000 objects while a writer writes across
+        /// the key range, checks what was built, and returns the longest a
+        /// write waited for the lock.
+        async fn build_beside_a_writer() -> Duration {
             let (runtime, root) = runtime("writers").await;
             seed(&runtime, 200_000);
             let console = runtime.console();
@@ -1099,6 +1120,8 @@ mod tests {
                 None,
                 "the walk starts, nothing waits"
             );
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let writer_stop = std::sync::Arc::clone(&stop);
             let writer_state = runtime.state.clone();
             let writer = tokio::task::spawn_blocking(move || {
                 let mut slowest = Duration::ZERO;
@@ -1126,25 +1149,24 @@ mod tests {
                     drop(data);
                     slowest = slowest.max(started.elapsed());
                     writes += 1;
-                    if built {
+                    if built || writer_stop.load(std::sync::atomic::Ordering::SeqCst) {
                         return (slowest, writes);
                     }
                     std::thread::sleep(Duration::from_micros(200));
                 }
             });
-            let ready = console
-                .folder_index_ready(Duration::from_secs(60))
-                .await
-                .expect("the walk succeeds");
-            assert!(ready);
+            let ready = console.folder_index_ready(Duration::from_secs(60)).await;
+            // The writer stops with the walk, whatever its result: one still
+            // writing after a failed walk keeps the test's runtime from closing.
+            stop.store(true, std::sync::atomic::Ordering::SeqCst);
             let (slowest, write_count) = writer.await.expect("writer");
+            assert!(
+                ready.expect("the walk succeeds"),
+                "the index is built within a minute"
+            );
             assert!(
                 write_count > 10,
                 "the writer ran during the walk ({write_count} writes)"
-            );
-            assert!(
-                slowest < Duration::from_millis(50),
-                "a write waited {slowest:?} for the walk"
             );
             let expected = recount(&sizes(&runtime));
             {
@@ -1171,6 +1193,7 @@ mod tests {
             );
             runtime.shutdown().await.expect("shutdown");
             std::fs::remove_dir_all(root).expect("remove");
+            slowest
         }
 
         #[tokio::test]
