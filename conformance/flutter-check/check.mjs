@@ -18,7 +18,7 @@
 //     [--keep]                 keep the generated project for a closer look
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -147,14 +147,26 @@ async function resetDevice(device, firstOfKept) {
   }
 }
 
-// `flutter run` can lose its own debug connection on a first launch, which says
-// nothing about the backend: a run that ends with no result at all is tried once
-// more, on a fresh backend.
+const labelOf = (backend, run) => `${platform}-${backend}${runs > 1 || keepCache ? `-${run}` : ''}`;
+
+// `flutter run` can lose its own debug connection to the app ("Error initializing
+// DevFS", "Lost connection to device"), which says nothing about the backend. On
+// GitHub's x86 Android emulator one job lost it on 3 of 9 launches, twice in a
+// row on one run. A run that ends with no result at all is tried again on a fresh
+// backend, up to three times; a run with any result is never tried again. The
+// logs of each try that is tried again are kept beside the last one's.
+const tries = 3;
+
 async function runOnce(backend, run, app, template, device, work) {
-  const first = await attempt(backend, run, app, template, device, work, 1);
-  if (first.status === 'finished' || Object.keys(first.results).length > 0) return first;
-  log(`${platform}-${backend}: ${first.status} with no result, trying once more`);
-  return attempt(backend, run, app, template, device, work, 2);
+  const label = labelOf(backend, run);
+  for (let attemptNumber = 1; ; attemptNumber += 1) {
+    const report = await attempt(backend, run, app, template, device, work, attemptNumber);
+    if (report.status === 'finished' || Object.keys(report.results).length > 0 || attemptNumber === tries) return report;
+    log(`${label}: ${report.status} with no result, trying again (${attemptNumber + 1} of ${tries})`);
+    for (const kind of ['app.log', 'backend.log', 'json']) {
+      await rename(join(out, `${label}.${kind}`), join(out, `${label}.try-${attemptNumber}.${kind}`)).catch(() => {});
+    }
+  }
 }
 
 async function attempt(backend, run, app, template, device, work, attemptNumber) {
@@ -163,7 +175,7 @@ async function attempt(backend, run, app, template, device, work, attemptNumber)
   if (platform === 'ios') {
     await access(join(app, 'ios/Runner.xcworkspace/contents.xcworkspacedata')).catch(() => generateProject(app));
   }
-  const label = `${platform}-${backend}${runs > 1 || keepCache ? `-${run}` : ''}`;
+  const label = labelOf(backend, run);
   const directory = join(work, 'runs', `${label}-${attemptNumber}`);
   await cp(template, directory, { recursive: true, verbatimSymlinks: true });
   const server = startBackend(backend, directory);
