@@ -411,23 +411,6 @@ jobs:
         run: node --test conformance/test/auth-popup.test.mjs
       - name: Replay REST read options in memory and disk/WAL
         run: node --test conformance/test/rest-read-options-replay.test.mjs
-      - name: Replay kindless queries and recursiveDelete in memory and disk/WAL
-        run: node --test conformance/test/kindless-query-replay.test.mjs
-      - name: Replay what native SDKs and browsers send to Storage
-        run: node --test conformance/test/storage-native-clients-replay.test.mjs
-      - name: Replay listeners resuming with any token, in memory and disk/WAL
-        run: node --test conformance/test/listen-resume-replay.test.mjs
-      - name: Replay rules paths and document names
-        run: node --test conformance/test/rules-document-paths-replay.test.mjs
-      - name: Check a racing write reaches the real SDK's listener
-        run: node --test conformance/test/listener-write-race.test.mjs
-      - name: Check that Auth and Storage send nothing with Functions off
-        run: node --test conformance/test/no-functions-no-events.test.mjs
-      - name: Verify Storage with the real Firebase SDK in a real browser
-        run: |
-          node conformance/node_modules/playwright/cli.js install --with-deps chromium
-          node --test conformance/test/storage-browser.test.mjs
-          node --test conformance/test/listener-cache-browser.test.mjs
       - name: Verify native coverage reports in a real browser
         run: node --test conformance/test/developer-coverage-browser.test.mjs
       # The previous engine the upgrade check resumes from still needs the
@@ -590,6 +573,48 @@ jobs:
         run: npm run test:official-export-import --prefix conformance
       - name: Export through Firenook and import into Java
         run: npm run test:firenook-export-java-import --prefix conformance
+
+  # The 0.2.2 replays and real-SDK checks run beside the harness: in it they
+  # added 12-14 minutes and took it past its 45.
+  client-replays:
+    name: Client replays and real SDK checks
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.20.0
+          cache: npm
+          cache-dependency-path: conformance/package-lock.json
+      - name: Install current npm
+        run: npm install --global npm@12.0.2
+      - name: Install latest stable Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc --version
+      - name: Install pinned harness dependencies
+        run: npm ci --prefix conformance
+      - name: Replay kindless queries and recursiveDelete in memory and disk/WAL
+        run: node --test conformance/test/kindless-query-replay.test.mjs
+      - name: Replay what native SDKs and browsers send to Storage
+        run: node --test conformance/test/storage-native-clients-replay.test.mjs
+      - name: Replay listeners resuming with any token, in memory and disk/WAL
+        run: node --test conformance/test/listen-resume-replay.test.mjs
+      - name: Replay rules paths and document names
+        run: node --test conformance/test/rules-document-paths-replay.test.mjs
+      - name: Check a racing write reaches the real SDK's listener
+        run: node --test conformance/test/listener-write-race.test.mjs
+      - name: Check that Auth and Storage send nothing with Functions off
+        run: node --test conformance/test/no-functions-no-events.test.mjs
+      - name: Verify Storage with the real Firebase SDK in a real browser
+        run: |
+          node conformance/node_modules/playwright/cli.js install --with-deps chromium
+          node --test conformance/test/storage-browser.test.mjs
+          node --test conformance/test/listener-cache-browser.test.mjs
 
   firebase-js-sdk:
     name: Firebase JS SDK browser integration (${{ matrix.server_mode }}, client ${{ matrix.client_persistence }})
