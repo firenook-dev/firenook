@@ -174,6 +174,7 @@ pub fn router_with_shared_service(
     service: firenook_grpc_front::FirestoreService,
 ) -> Router {
     Router::new()
+        .route("/", get(root).fallback(project_operation))
         .route(
             DOCUMENT_ROUTE,
             get(get_document)
@@ -681,6 +682,13 @@ async fn post_eventarc_trigger(
         .register_v2(&path.project, &parameters.trigger_id, &body)
         .map_err(|error| RestError::invalid(error.to_string()))?;
     Ok(Json(body))
+}
+
+/// `GET /` answers `Ok`, as on the official emulator, with no content type:
+/// readiness checks ask it, such as the guard of an app's rules tests, which
+/// otherwise refuses to run.
+async fn root() -> Response {
+    Response::new(Body::from("Ok\n"))
 }
 
 /// The emulator's project operations, and the answer to every path the
@@ -2693,6 +2701,29 @@ mod tests {
                 .rules_for(&database)
                 .expect("previous rules retained")
         ));
+    }
+
+    /// The official emulator answers `GET /` with `Ok` and nothing else on
+    /// `/`; an app's rules-test guard asks it before running anything.
+    #[tokio::test]
+    async fn the_root_answers_ok_as_the_official_emulator_does() {
+        let application = router(Store::default());
+        let response = application
+            .clone()
+            .oneshot(Request::get("/").body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get(CONTENT_TYPE).is_none());
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .expect("body");
+        assert_eq!(&body[..], b"Ok\n");
+        let other = application
+            .oneshot(Request::post("/").body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        assert_eq!(other.status(), StatusCode::NOT_FOUND);
     }
 
     /// `@firebase/rules-unit-testing` sends its rules as a `fetch` string
