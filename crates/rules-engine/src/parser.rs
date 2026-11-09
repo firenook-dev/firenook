@@ -66,6 +66,10 @@ impl Parser {
         } else {
             None
         };
+        // Functions may also be declared outside the service block, before
+        // or after it.
+        let mut top_level = BTreeMap::new();
+        self.declare_functions(&mut top_level)?;
         self.expect_identifier("service")?;
         let service = match self.take_identifier("service name")?.as_str() {
             "cloud" => {
@@ -96,12 +100,7 @@ impl Parser {
         let mut matches = Vec::new();
         while !self.check(&TokenKind::RightBrace) {
             if self.check_identifier("function") {
-                let (name, function) = self.function()?;
-                if functions.insert(name.clone(), function).is_some() {
-                    return Err(self.error_at_previous(format!(
-                        "function {name:?} is declared more than once"
-                    )));
-                }
+                self.declare_functions(&mut functions)?;
             } else if self.check_identifier("match") {
                 matches.push(self.match_block()?);
             } else {
@@ -109,16 +108,35 @@ impl Parser {
             }
         }
         self.advance();
+        self.declare_functions(&mut top_level)?;
         self.expect(&TokenKind::Eof, "end of rules source")?;
         if matches.is_empty() {
             return Err(self.error_at_previous("service must contain at least one match"));
         }
+        // A function in the service block shadows a top-level one of the
+        // same name.
+        top_level.extend(functions);
         Ok(Program {
             service,
             rules_version,
-            functions,
+            functions: top_level,
             matches,
         })
+    }
+
+    fn declare_functions(
+        &mut self,
+        functions: &mut BTreeMap<String, Function>,
+    ) -> Result<(), ParseError> {
+        while self.check_identifier("function") {
+            let (name, function) = self.function()?;
+            if functions.insert(name.clone(), function).is_some() {
+                return Err(
+                    self.error_at_previous(format!("function {name:?} is declared more than once"))
+                );
+            }
+        }
+        Ok(())
     }
 
     fn match_block(&mut self) -> Result<MatchBlock, ParseError> {

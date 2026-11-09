@@ -71,6 +71,19 @@ test("a post is written by its author and edited only by them", async () => {
   await assertSucceeds(getDocs(query(collection(bob, "posts"), where("author", "==", "alice"))));
 });
 
+test("functions declared outside the service block are callable inside it", async () => {
+  await seed("drafts/d1", { owner: "alice" });
+  const alice = env.authenticatedContext("alice").firestore();
+  const bob = env.authenticatedContext("bob").firestore();
+  // The match block's owns() shadows the top-level one and calls signedIn().
+  await assertSucceeds(getDoc(doc(alice, "drafts/d1")));
+  await assertFails(getDoc(doc(bob, "drafts/d1")));
+  // titled() is declared after the service block.
+  await assertSucceeds(setDoc(doc(bob, "drafts/d2"), { title: "Plan" }));
+  await assertFails(setDoc(doc(bob, "drafts/d3"), { title: 3 }));
+  await assertFails(setDoc(doc(env.unauthenticatedContext().firestore(), "drafts/d4"), { title: "Plan" }));
+});
+
 test("custom claims and get() lookups decide as the rules say", async () => {
   await seed("admin/settings", { open: true });
   await seed("users/dave", { role: "staff" });
