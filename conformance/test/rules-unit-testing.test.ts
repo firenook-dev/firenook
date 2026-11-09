@@ -184,6 +184,23 @@ test("'k' in a map inside a query's data follows the filters below it", async ()
   await assertFails(getDocs(teams));
 });
 
+test("a filter on a field proves it holds a value, unless it asks for null", async () => {
+  await seed("tickets/t1", { status: "open", labels: ["x"] });
+  await seed("boxes/b1", { size: { width: 3 } });
+  const alice = env.authenticatedContext("alice").firestore();
+  const tickets = collection(alice, "tickets");
+  await assertSucceeds(getDocs(query(tickets, where("status", "!=", "archived"))));
+  await assertSucceeds(getDocs(query(tickets, where("status", "not-in", ["archived", "spam"]))));
+  await assertSucceeds(getDocs(query(tickets, where("status", ">", "a"))));
+  await assertSucceeds(getDocs(query(tickets, where("status", "!=", null))));
+  await assertFails(getDocs(query(tickets, where("status", "==", null))));
+  await assertFails(getDocs(query(tickets, orderBy("status"))));
+  await assertFails(getDocs(query(tickets, where("labels", "array-contains", "x"))));
+  const boxes = collection(alice, "boxes");
+  await assertSucceeds(getDocs(query(boxes, where("size.width", ">", 1))));
+  await assertFails(getDocs(query(boxes, where("size.width", "==", null))));
+});
+
 test("clearFirestore empties the database", async () => {
   await seed("posts/p1", { author: "alice" });
   await env.clearFirestore();
