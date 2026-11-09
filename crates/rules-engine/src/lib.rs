@@ -499,6 +499,34 @@ mod tests {
     }
 
     #[test]
+    fn a_function_return_needs_no_semicolon() {
+        for terminator in ["", ";"] {
+            let source = format!(
+                "rules_version = '2'; service cloud.firestore {{
+                   match /databases/{{database}}/documents {{
+                     function signedIn() {{ return request.auth != null{terminator} }}
+                     match /notes/{{id}} {{ allow get: if signedIn(); }}
+                   }}
+                 }}"
+            );
+            let rules = compile(&source).expect("a return with or without ';' compiles");
+            let mut request = EvaluationRequest::new(
+                RequestOperation::Get,
+                "/databases/(default)/documents/notes/n1",
+                Timestamp::new(1, 0),
+            );
+            request.auth = Some(Auth {
+                uid: Some("alice".to_owned()),
+                token: BTreeMap::new(),
+            });
+            assert!(
+                rules.evaluate(&request, &EmptyDocumentAccess).allowed,
+                "terminator {terminator:?}"
+            );
+        }
+    }
+
+    #[test]
     fn rejects_recursive_functions() {
         let source = r"
           rules_version = '2'; service cloud.firestore {
