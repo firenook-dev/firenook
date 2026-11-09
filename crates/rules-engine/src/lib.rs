@@ -628,4 +628,55 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn measures_slices_and_cases_strings_and_slices_lists_as_the_official_emulator_does() {
+        // Verdicts recorded from the official emulator (firebase-tools 15.34.0,
+        // Firestore 1.22.0): size and slices count UTF-16 code units, a slice
+        // must start at an element and end after one, and only ASCII letters
+        // change case.
+        let cases: [(&str, bool); 28] = [
+            ("'🔥'.size() == 2", true),
+            ("'é🔥x'.size() == 4", true),
+            ("'é🔥x'.size() == 3", false),
+            ("'abc'[0:2] == 'ab'", true),
+            ("'abc'[1:1] == ''", true),
+            ("'abc'[2:2] == ''", true),
+            ("'abc'[0:3] == 'abc'", true),
+            ("'abc'[0:0] == ''", false),
+            ("'abc'[3:3] == ''", false),
+            ("'abc'[0:4] == 'abc'", false),
+            ("'abc'[2:1] == ''", false),
+            ("'abc'[-1:2] == 'ab'", false),
+            ("''[0:0] == ''", false),
+            ("'é🔥x'[0:1] == 'é'", true),
+            ("'é🔥x'[1:3] == '🔥'", true),
+            ("'é🔥x'[3:4] == 'x'", true),
+            ("[1, 2, 3, 4][1:3] == [2, 3]", true),
+            ("[1, 2, 3, 4][2:2] == []", true),
+            ("[1, 2, 3, 4][0:0] == []", false),
+            ("[1, 2, 3, 4][4:4] == []", false),
+            ("[1, 2, 3, 4][0:5] == [1, 2, 3, 4]", false),
+            ("'é🔥x'.upper() == 'é🔥X'", true),
+            ("'é🔥x'.upper() == 'É🔥X'", false),
+            ("'ß'.upper() == 'ß'", true),
+            ("'ß'.upper() == 'SS'", false),
+            ("'École'.lower() == 'École'", true),
+            ("'ÉCOLE'.lower() == 'école'", false),
+            ("'Σίσυφος'.lower() == 'σίσυφος'", false),
+        ];
+        for (expression, allowed) in cases {
+            let source = format!(
+                "rules_version = '2'; service cloud.firestore {{ match /databases/{{database}}/documents {{ match /s/{{id}} {{ allow get: if {expression}; }} }} }}"
+            );
+            let rules = compile(&source).expect("rules compile");
+            let path = "/databases/(default)/documents/s/case";
+            let request = EvaluationRequest::new(RequestOperation::Get, path, Timestamp::new(1, 0));
+            assert_eq!(
+                rules.evaluate(&request, &EmptyDocumentAccess).allowed,
+                allowed,
+                "{expression}"
+            );
+        }
+    }
 }

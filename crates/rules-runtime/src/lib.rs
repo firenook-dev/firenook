@@ -523,7 +523,7 @@ impl RulesRuntime {
             project: database.project_id().to_owned(),
         };
         let mut requests = dry_run::write_requests(writes, snapshot, &preview, time);
-        update_missing_documents(writes, snapshot, &mut requests);
+        operation_by_precondition(writes, snapshot, &mut requests);
         Ok(self.evaluate_atomic_context(
             database,
             authorization,
@@ -838,11 +838,14 @@ pub fn write_operation(write: &Write, snapshot: &Snapshot) -> (RequestOperation,
     }
 }
 
-/// A write that requires its document to exist, on a document that is missing
-/// when the write applies, is evaluated as an update with a null `resource`,
-/// as the official emulator does; its commit then fails the precondition. A
-/// document an earlier write of the batch creates is not missing.
-fn update_missing_documents(
+/// The operation a write's precondition asks for, where it differs from what
+/// the document's presence says, as the official emulator evaluates it; the
+/// commit then fails the precondition. A write that requires its document to
+/// exist, on a missing one, is an update with a null `resource`; one that
+/// requires it not to exist, on an existing one, is a create with the existing
+/// document as `resource`. A document an earlier write of the batch creates is
+/// not missing.
+fn operation_by_precondition(
     writes: &[Write],
     snapshot: &Snapshot,
     requests: &mut [EvaluationRequest],
@@ -853,19 +856,19 @@ fn update_missing_documents(
         let present = *exists
             .entry(key)
             .or_insert_with(|| snapshot.get(key).is_some());
-        if !present
-            && matches!(
-                write,
-                Write::Set {
-                    precondition: Precondition::Exists(true),
-                    ..
-                } | Write::Patch {
-                    precondition: Precondition::Exists(true),
-                    ..
+        let required = match write {
+            Write::Set { precondition, .. } | Write::Patch { precondition, .. } => {
+                match precondition {
+                    Precondition::Exists(required) => Some(*required),
+                    _ => None,
                 }
-            )
-        {
-            request.operation = RequestOperation::Update;
+            }
+            _ => None,
+        };
+        match required {
+            Some(true) if !present => request.operation = RequestOperation::Update,
+            Some(false) if present => request.operation = RequestOperation::Create,
+            _ => {}
         }
         let after = match write {
             Write::Delete { .. } => false,
@@ -883,7 +886,16 @@ fn without_precondition(write: &Write) -> Write {
         | Write::Patch { precondition, .. }
         | Write::Delete { precondition, .. }
         | Write::Verify { precondition, .. } => *precondition = Precondition::None,
-        Write::Create { .. } => {}
+        // A create carries its own "must not exist"; its preview is a plain
+        // set, so the rules decide a create of an existing document too.
+        Write::Create { key, fields } => {
+            write = Write::Set {
+                key: key.clone(),
+                fields: std::mem::take(fields),
+                transforms: Vec::new(),
+                precondition: Precondition::None,
+            };
+        }
     }
     write
 }

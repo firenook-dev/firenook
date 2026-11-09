@@ -135,26 +135,32 @@ fn nothing_is_built_before_anyone_subscribes_and_nothing_without_diagnostics() {
     assert_eq!(built(&quiet), 0, "no diagnostics, nothing recorded");
 }
 
-/// A write the store would refuse: a preview reports it, and only a caller
-/// rules apply to needs one. The commit reports the same error to the owner.
+/// A write the store would refuse whatever the rules say: a preview reports
+/// it, and only a caller rules apply to needs one. The commit reports the same
+/// error to the owner. (A precondition is no longer such a refusal: the rules
+/// are decided before it, as on the official emulator.)
 #[test]
 fn the_owner_is_not_previewed() {
     let runtime = RulesRuntime::default();
     let store = Store::new(StoreOptions::default());
     let key = DocumentKey::new(database(), "public/a").expect("key");
-    let create = Write::Create {
+    let increment_by_text = Write::Set {
         key,
         fields: Fields::new(),
+        transforms: vec![firenook_core_store::FieldTransform {
+            path: firenook_core_store::FieldPath::new(["count"]).expect("path"),
+            operation: firenook_core_store::TransformOperation::Increment(
+                firenook_core_store::Value::String("one".into()),
+            ),
+        }],
+        precondition: Precondition::None,
     };
-    store
-        .commit(std::slice::from_ref(&create))
-        .expect("first create");
     let time = StoreTimestamp::new(1_788_200_100, 0).expect("time");
     let judged = |authorization: &Authorization| {
         runtime.evaluate_writes(
             &database(),
             authorization,
-            std::slice::from_ref(&create),
+            std::slice::from_ref(&increment_by_text),
             &store.snapshot(),
             time,
         )
@@ -164,11 +170,72 @@ fn the_owner_is_not_previewed() {
     assert!(owner.allowed);
     assert_eq!(
         store
-            .commit(std::slice::from_ref(&create))
+            .commit(std::slice::from_ref(&increment_by_text))
             .expect_err("the commit refuses it")
             .to_string(),
         refused.to_string()
     );
+}
+
+/// A create of a document that already exists is decided as a create, with
+/// the existing document as `resource`, before its "must not exist": the
+/// official emulator answers `PERMISSION_DENIED` to an update-only rule and
+/// `ALREADY_EXISTS` only once a create rule allows it.
+#[test]
+fn a_create_of_an_existing_document_is_decided_before_it_exists() {
+    let store = Store::new(StoreOptions::default());
+    let key = DocumentKey::new(database(), "users/u1").expect("key");
+    store
+        .commit(&[Write::Set {
+            key: key.clone(),
+            fields: Fields::from([(
+                "name".to_owned(),
+                firenook_core_store::Value::String("old".into()),
+            )]),
+            transforms: Vec::new(),
+            precondition: Precondition::None,
+        }])
+        .expect("seed");
+    let create = Write::Create {
+        key,
+        fields: Fields::from([(
+            "name".to_owned(),
+            firenook_core_store::Value::String("x".into()),
+        )]),
+    };
+    let alice = Authorization::Client(Some(Auth {
+        uid: Some("alice".to_owned()),
+        token: BTreeMap::new(),
+    }));
+    let time = StoreTimestamp::new(1_788_200_100, 0).expect("time");
+    for (allow, allowed) in [
+        ("allow create: if true;", true),
+        ("allow update: if true;", false),
+        ("allow create: if false;", false),
+        ("allow create: if resource == null;", false),
+        ("allow create: if resource.data.name == 'old';", true),
+        ("allow create: if request.resource.data.name == 'x';", true),
+    ] {
+        let runtime = RulesRuntime::default();
+        runtime
+            .install_project(
+                PROJECT,
+                &format!(
+                    "rules_version = '2'; service cloud.firestore {{ match /databases/{{database}}/documents {{ match /users/{{id}} {{ {allow} }} }} }}"
+                ),
+            )
+            .expect("rules");
+        let verdict = runtime
+            .evaluate_writes(
+                &database(),
+                &alice,
+                std::slice::from_ref(&create),
+                &store.snapshot(),
+                time,
+            )
+            .expect("the rules run before the document's existence is checked");
+        assert_eq!(verdict.allowed, allowed, "{allow}");
+    }
 }
 
 #[test]
