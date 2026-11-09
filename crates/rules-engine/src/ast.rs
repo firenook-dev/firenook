@@ -252,6 +252,11 @@ pub(crate) enum ExprKind {
         value: Box<Expr>,
         expected: TypeName,
     },
+    Conditional {
+        condition: Box<Expr>,
+        then: Box<Expr>,
+        otherwise: Box<Expr>,
+    },
 }
 
 impl Expr {
@@ -279,6 +284,11 @@ impl Expr {
             ExprKind::Unary { operand, .. } => operand.node_count(),
             ExprKind::Binary { left, right, .. } => left.node_count() + right.node_count(),
             ExprKind::Is { value, .. } => value.node_count(),
+            ExprKind::Conditional {
+                condition,
+                then,
+                otherwise,
+            } => condition.node_count() + then.node_count() + otherwise.node_count(),
             ExprKind::Null
             | ExprKind::Bool(_)
             | ExprKind::Integer(_)

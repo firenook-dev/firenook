@@ -24,7 +24,7 @@ time 0), `unauthenticatedContext()` (no Authorization header over gRPC) and
 `withSecurityRulesDisabled()` (`Bearer owner`, `Firebase owner`), and empties
 the emulators with `clearFirestore()` and `clearStorage()`.
 
-All 24 tests pass against the official emulator (Firestore 1.22.0, Storage
+All 25 tests pass against the official emulator (Firestore 1.22.0, Storage
 rules runtime 1.1.3, firebase-tools 15.34.0) and against Firenook. Firenook
 `0.2.0-next.8` failed 18 of them: its reload route answered 415 to the
 library's `text/plain` body, so every Firestore environment failed to start.
