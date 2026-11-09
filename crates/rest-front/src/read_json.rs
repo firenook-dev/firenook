@@ -46,6 +46,11 @@ fn value(value: &Value) -> Result<JsonValue, RestError> {
         }
         // Move already normalized children. json! would serialize them again
         // at every ancestor, cloning large nested payloads repeatedly.
+        // An empty map or array is `{}`, as protobuf JSON writes it.
+        Some(ValueType::MapValue(map)) if map.fields.is_empty() => Ok(json!({"mapValue":{}})),
+        Some(ValueType::ArrayValue(array)) if array.values.is_empty() => {
+            Ok(json!({"arrayValue":{}}))
+        }
         Some(ValueType::MapValue(map)) => {
             Ok(object("mapValue", object("fields", fields(&map.fields)?)))
         }
@@ -187,7 +192,7 @@ mod profile {
             {"nullValue":null}, {"doubleValue":"NaN"},
             {"timestampValue":"1970-01-01T00:00:00Z"},
             {"stringValue":"timestampValue +00:00 名称 😀"},
-            {"mapValue":{"fields":{}}}, {"arrayValue":{"values":[]}}
+            {"mapValue":{}}, {"arrayValue":{}}
         ]}});
         for _ in 0..16 {
             nested = json!({"mapValue":{"fields":{"timestampValue":nested}}});

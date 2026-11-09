@@ -240,6 +240,35 @@ pub struct FieldFilter {
     pub value: Value,
 }
 
+impl FieldFilter {
+    /// A query's `fieldFilter`, where a unary filter (`IS_NULL`, `IS_NAN`, …)
+    /// is built directly with `Equal` or `NotEqual` and null or NaN. A field
+    /// filter's equality with null or NaN is never true, as on the official
+    /// emulator: `== null`, `== NaN` and `!= null` match nothing, and
+    /// `!= NaN` matches every value but null. Each stays an equality or an
+    /// inequality, so the query's indexes and implicit order are unchanged.
+    #[must_use]
+    pub fn compared(path: FieldPath, operator: FieldOperator, value: Value) -> Self {
+        let (operator, value) = match (&path, operator) {
+            (FieldPath::Field(_), FieldOperator::Equal) if is_membership_sentinel(&value) => {
+                (FieldOperator::In, Value::Array(vec![value]))
+            }
+            (FieldPath::Field(_), FieldOperator::NotEqual) if matches!(value, Value::Null) => {
+                (FieldOperator::NotIn, Value::Array(vec![Value::Null]))
+            }
+            (FieldPath::Field(_), FieldOperator::NotEqual) if is_membership_sentinel(&value) => {
+                (FieldOperator::NotEqual, Value::Null)
+            }
+            _ => (operator, value),
+        };
+        Self {
+            path,
+            operator,
+            value,
+        }
+    }
+}
+
 /// A field or composite query predicate.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Filter {
@@ -992,7 +1021,7 @@ fn bound_by_filter(filter: &Filter, order: &FieldPath, bounds: &mut FieldOrderRa
                 | FieldOperator::LessThanOrEqual
                 | FieldOperator::GreaterThan
                 | FieldOperator::GreaterThanOrEqual
-                    if matches!(value, Value::Double(number) if number.is_nan()) =>
+                    if is_membership_sentinel(value) =>
                 {
                     bounds.nothing();
                 }
@@ -2265,6 +2294,17 @@ fn field_filter_matches(
         return false;
     };
     match filter.operator {
+        // A range or array-contains on null or NaN is never true; only the
+        // unary filters, which use `Equal` and `NotEqual`, test for them.
+        FieldOperator::LessThan
+        | FieldOperator::LessThanOrEqual
+        | FieldOperator::GreaterThan
+        | FieldOperator::GreaterThanOrEqual
+        | FieldOperator::ArrayContains
+            if is_membership_sentinel(&filter.value) =>
+        {
+            false
+        }
         FieldOperator::Equal => left.compare(&filter.value, edition) == Ordering::Equal,
         FieldOperator::LessThan => {
             left.range_compare(&filter.value, edition) == Some(Ordering::Less)
@@ -2294,8 +2334,10 @@ fn field_filter_matches(
                 false
             }
             Value::Array(_) if matches!(left.as_value(), Some(Value::Null)) => false,
+            // NaN equals nothing, NaN included, so it excludes nothing.
             Value::Array(values) => values
                 .iter()
+                .filter(|right| !is_membership_sentinel(right))
                 .all(|right| left.compare(right, edition) != Ordering::Equal),
             _ => false,
         },
@@ -3162,6 +3204,141 @@ mod tests {
             ids(&database, &snapshot, &array_with_ordinary),
             ["ordinary"]
         );
+    }
+
+    /// Eight documents for the null and NaN verdicts, which were recorded
+    /// from the official emulator (firebase-tools 15.34.0, Firestore 1.22.0).
+    fn assert_null_and_nan_matches(cases: &[(&str, Filter, &[&str])]) {
+        let database = database();
+        let store = Store::default();
+        let documents = [
+            ("vNull", "v", Value::Null),
+            ("vOne", "v", Value::Integer(1)),
+            ("vNaN", "v", Value::Double(f64::NAN)),
+            ("vString", "v", Value::String("a".into())),
+            ("vMissing", "w", Value::Integer(1)),
+            ("aNull", "a", Value::Array(vec![Value::Null])),
+            ("aNaN", "a", Value::Array(vec![Value::Double(f64::NAN)])),
+            ("aOne", "a", Value::Array(vec![Value::Integer(1)])),
+        ];
+        let writes = documents.map(|(id, name, value)| Write::Set {
+            key: DocumentKey::new(database.clone(), format!("f/{id}")).expect("valid key"),
+            fields: BTreeMap::from([(name.to_owned(), value)]),
+            transforms: Vec::new(),
+            precondition: Precondition::None,
+        });
+        store.commit(&writes).expect("seed should commit");
+        let snapshot = store.snapshot();
+        for (name, where_, expected) in cases {
+            let query = Query::new(QueryScope::collection("f").expect("valid scope"))
+                .filter(where_.clone());
+            let mut found = ids(&database, &snapshot, &query);
+            found.sort();
+            assert_eq!(found, *expected, "{name}");
+        }
+    }
+
+    /// A query's `fieldFilter`, as the wire decoders build it.
+    fn raw(path: &str, operator: FieldOperator, value: Value) -> Filter {
+        Filter::Field(FieldFilter::compared(field(path), operator, value))
+    }
+
+    fn nan() -> Value {
+        Value::Double(f64::NAN)
+    }
+
+    /// A field filter's equality with null is never true: `== null` and
+    /// `!= null` match nothing, as does every other comparison with null.
+    #[test]
+    fn field_filters_on_null_match_nothing() {
+        use FieldOperator as Op;
+        let (none, null, one) = (&[][..], || Value::Null, || Value::Integer(1));
+        assert_null_and_nan_matches(&[
+            ("v == null", raw("v", Op::Equal, null()), none),
+            ("v != null", raw("v", Op::NotEqual, null()), none),
+            ("v < null", raw("v", Op::LessThan, null()), none),
+            ("v <= null", raw("v", Op::LessThanOrEqual, null()), none),
+            ("v >= null", raw("v", Op::GreaterThanOrEqual, null()), none),
+            (
+                "v in [null]",
+                raw("v", Op::In, Value::Array(vec![null()])),
+                none,
+            ),
+            (
+                "v not-in [null, 1]",
+                raw("v", Op::NotIn, Value::Array(vec![null(), one()])),
+                none,
+            ),
+            (
+                "a array-contains null",
+                raw("a", Op::ArrayContains, null()),
+                none,
+            ),
+            ("v == 1", raw("v", Op::Equal, one()), &["vOne"]),
+            (
+                "v == null || v == 1",
+                Filter::Or(vec![
+                    raw("v", Op::Equal, null()),
+                    raw("v", Op::Equal, one()),
+                ]),
+                &["vOne"],
+            ),
+            ("IS_NULL", filter("v", Op::Equal, null()), &["vNull"]),
+            (
+                "IS_NOT_NULL",
+                filter("v", Op::NotEqual, null()),
+                &["vNaN", "vOne", "vString"],
+            ),
+        ]);
+        // Each keeps its kind, equality or inequality, for indexes and order.
+        assert_eq!(
+            FieldFilter::compared(field("v"), Op::Equal, null()).operator,
+            Op::In
+        );
+        assert_eq!(
+            FieldFilter::compared(field("v"), Op::NotEqual, null()).operator,
+            Op::NotIn
+        );
+    }
+
+    /// NaN equals nothing, NaN included: `== NaN` matches nothing and
+    /// `!= NaN` every value but null, where the unary filters test for NaN.
+    #[test]
+    fn field_filters_on_nan_never_find_it_equal() {
+        use FieldOperator as Op;
+        let (none, one) = (&[][..], || Value::Integer(1));
+        let present = &["vNaN", "vOne", "vString"][..];
+        assert_null_and_nan_matches(&[
+            ("v == NaN", raw("v", Op::Equal, nan()), none),
+            ("v != NaN", raw("v", Op::NotEqual, nan()), present),
+            ("v <= NaN", raw("v", Op::LessThanOrEqual, nan()), none),
+            (
+                "v in [NaN, 1]",
+                raw("v", Op::In, Value::Array(vec![nan(), one()])),
+                &["vOne"],
+            ),
+            (
+                "v not-in [NaN]",
+                raw("v", Op::NotIn, Value::Array(vec![nan()])),
+                present,
+            ),
+            (
+                "v not-in [NaN, 1]",
+                raw("v", Op::NotIn, Value::Array(vec![nan(), one()])),
+                &["vNaN", "vString"],
+            ),
+            (
+                "a array-contains NaN",
+                raw("a", Op::ArrayContains, nan()),
+                none,
+            ),
+            ("IS_NAN", filter("v", Op::Equal, nan()), &["vNaN"]),
+            (
+                "IS_NOT_NAN",
+                filter("v", Op::NotEqual, nan()),
+                &["vOne", "vString"],
+            ),
+        ]);
     }
 
     #[test]

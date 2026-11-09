@@ -31,6 +31,32 @@ fn message<T: DeserializeOwned>(
     resource: &str,
 ) -> Result<T, RestError> {
     body[field] = json!(resource);
+    protobuf(body)
+}
+
+/// A protobuf message from REST JSON. Protobuf JSON spells a null value
+/// `"nullValue": null`, as Google's responses do and clients send back, or
+/// by a number, but the generated decoder reads a JSON null as no value at
+/// all and only zero as a number, so each is named `NULL_VALUE` first. A
+/// user field called `nullValue` whose value is a spelling of null is no
+/// Firestore value either way, and stays refused.
+fn protobuf<T: DeserializeOwned>(mut body: JsonValue) -> Result<T, RestError> {
+    fn name_nulls(value: &mut JsonValue) {
+        match value {
+            JsonValue::Object(map) => {
+                for (key, item) in map.iter_mut() {
+                    if key == "nullValue" && super::is_null_value(item) {
+                        *item = json!("NULL_VALUE");
+                    } else {
+                        name_nulls(item);
+                    }
+                }
+            }
+            JsonValue::Array(items) => items.iter_mut().for_each(name_nulls),
+            _ => {}
+        }
+    }
+    name_nulls(&mut body);
     serde_json::from_value(body).map_err(|_| RestError::invalid(PAYLOAD_INVALID))
 }
 
@@ -59,8 +85,7 @@ pub(super) async fn create_document(
     headers: &HeaderMap,
     body: &[u8],
 ) -> Result<Json<JsonValue>, RestError> {
-    let document: Document = serde_json::from_value(request_json(body)?)
-        .map_err(|_| RestError::invalid(PAYLOAD_INVALID))?;
+    let document: Document = protobuf(request_json(body)?)?;
     let root = format!(
         "projects/{}/databases/{}/documents",
         path.project, path.database
