@@ -17,6 +17,10 @@ updates:
       # The bloom-filter fixture runs this exact SDK build as its oracle and pins
       # its version and hash; moving it means re-pinning that fixture by hand.
       - dependency-name: "firebase"
+      # Each major takes the firebase major above as a peer (6 needs firebase
+      # 13), so it moves with that re-pin.
+      - dependency-name: "@firebase/rules-unit-testing"
+        update-types: ["version-update:semver-major"]
     groups:
       conformance-dependencies:
         patterns:
