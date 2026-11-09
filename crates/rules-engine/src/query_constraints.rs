@@ -27,14 +27,23 @@ pub(super) fn branches(
                 values
                     .iter()
                     .map(|value| {
+                        // A null or NaN member matches nothing, as the query
+                        // engine answers, but the official emulator still
+                        // reads it as a filter on a value: one that is not
+                        // null, and no more is known of it.
+                        let (operator, value) = if matches!(value, Value::Null)
+                            || matches!(value, Value::Float(number) if number.is_nan())
+                        {
+                            (Op::NotEqual, Value::Null)
+                        } else if field.operator == Op::In {
+                            (Op::Equal, value.clone())
+                        } else {
+                            (Op::ArrayContains, value.clone())
+                        };
                         vec![FieldConstraint {
                             field: field.field.clone(),
-                            operator: if field.operator == Op::In {
-                                Op::Equal
-                            } else {
-                                Op::ArrayContains
-                            },
-                            value: value.clone(),
+                            operator,
+                            value,
                         }]
                     })
                     .collect()
@@ -97,6 +106,7 @@ pub(super) fn field_value(field: Vec<String>, predicates: &[FieldConstraint]) ->
     if let Some(predicate) = predicates
         .iter()
         .find(|predicate| predicate.field == field && predicate.operator == Op::Equal)
+        .filter(|predicate| !null_and_a_value(&field, predicate, predicates))
     {
         return EvalValue::Data(predicate.value.clone());
     }
@@ -162,12 +172,83 @@ pub(super) fn binary(
         ) => return Some(EvalValue::Unknown),
         _ => return None,
     };
+    if matches!(operator, B::Equal | B::NotEqual) {
+        let shape = known_shape(constraint);
+        if matches!(value, Value::Null) {
+            // Any filter that implies the comparison proves it: `IS_NULL`
+            // that the field is null, any other that it is not. A branch
+            // with both matches nothing, and both hold, as on the official
+            // emulator.
+            let null = constraint
+                .predicates
+                .iter()
+                .any(|predicate| predicate.field == constraint.field && is_null_filter(predicate));
+            let proved = if operator == B::Equal {
+                null
+            } else {
+                shape.is_some()
+            };
+            if proved || null || shape.is_some() {
+                return Some(EvalValue::data(proved));
+            }
+        } else if shape == Some(Shape::Map) && !matches!(value, Value::Map(_)) {
+            return Some(EvalValue::data(operator == B::NotEqual));
+        }
+    }
     let proof = constraint
         .predicates
         .iter()
         .filter(|predicate| predicate.field == constraint.field)
         .find_map(|predicate| implies(predicate, operator, value));
     Some(proof.map_or(EvalValue::Unknown, EvalValue::data))
+}
+
+/// What a query's filters say a field holds, whatever it is compared with.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    /// A value that is not null.
+    Value,
+    /// A map: a filter names a field inside it.
+    Map,
+}
+
+/// What the branch's filters prove a field holds. Every filter but
+/// `IS_NULL` (an equality with null, which binds the field to null before
+/// this is asked) matches only documents where its field holds a value, so
+/// the official emulator takes any of them as proof that the field is not
+/// null; a filter on a field inside it proves it is a map.
+fn known_shape(constraint: &Constraint) -> Option<Shape> {
+    let mut shape = None;
+    for predicate in &constraint.predicates {
+        if predicate.field.len() > constraint.field.len()
+            && predicate.field.starts_with(&constraint.field)
+        {
+            return Some(Shape::Map);
+        }
+        if predicate.field == constraint.field && !is_null_filter(predicate) {
+            shape = Some(Shape::Value);
+        }
+    }
+    shape
+}
+
+/// `IS_NULL`: the one filter that matches a field holding null.
+fn is_null_filter(predicate: &FieldConstraint) -> bool {
+    predicate.operator == Op::Equal && matches!(predicate.value, Value::Null)
+}
+
+/// Whether `IS_NULL` on `field` meets a filter that needs a value there,
+/// on the field or one inside it: the branch matches nothing, and the
+/// field is not bound to null, so each filter still proves what it says.
+fn null_and_a_value(
+    field: &[String],
+    predicate: &FieldConstraint,
+    predicates: &[FieldConstraint],
+) -> bool {
+    is_null_filter(predicate)
+        && predicates.iter().any(|other| {
+            other.field.starts_with(field) && !(other.field == field && is_null_filter(other))
+        })
 }
 
 fn implies(predicate: &FieldConstraint, operator: BinaryOperator, value: &Value) -> Option<bool> {

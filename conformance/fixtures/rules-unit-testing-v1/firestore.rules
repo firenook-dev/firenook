@@ -49,6 +49,12 @@ service cloud.firestore {
     match /teams/{team} {
       allow list: if 'lead' in resource.data.roles;
     }
+    match /tickets/{ticket} {
+      allow list: if resource.data.status != null;
+    }
+    match /boxes/{box} {
+      allow list: if resource.data.size.width != null;
+    }
   }
 }
 function titled(data) { return data.title is string; }

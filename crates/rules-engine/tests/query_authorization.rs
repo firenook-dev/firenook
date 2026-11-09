@@ -61,7 +61,12 @@ fn filter(json: &Json) -> QueryFilter {
         };
     }
     QueryFilter::Field(FieldConstraint {
-        field: vec![json["field"].as_str().expect("field").to_owned()],
+        field: json["field"]
+            .as_str()
+            .expect("field")
+            .split('.')
+            .map(str::to_owned)
+            .collect(),
         operator: match json["op"].as_str().expect("operator") {
             "==" => Op::Equal,
             "!=" => Op::NotEqual,
@@ -411,4 +416,128 @@ fn get_reads_a_constrained_field_and_defaults_any_other() {
             "{condition} with {filter:?}: {result:?}"
         );
     }
+}
+
+/// Each list rule over a filter, or over no filter, against the verdict the
+/// official emulator recorded (firebase-tools 15.34.0, Firestore 1.22.0).
+fn assert_list_verdicts(cases: &[(&str, Option<Json>, bool)]) {
+    for (condition, filter, allowed) in cases {
+        let mut case = serde_json::json!({"collection": "records"});
+        if let Some(filter) = filter {
+            case["filter"] = filter.clone();
+        }
+        let source = format!(
+            "rules_version = '2'; service cloud.firestore {{ match /databases/{{db}}/documents/records/{{id}} {{ allow list: if {condition}; }} }}"
+        );
+        let result = compile(&source)
+            .expect("source")
+            .evaluate(&request(&case), &EmptyDocumentAccess);
+        assert_eq!(
+            result.allowed, *allowed,
+            "{condition} with {filter:?}: {result:?}"
+        );
+    }
+}
+
+fn on(field: &str, op: &str, value: Json) -> Json {
+    let mut filter = serde_json::json!({"field": field, "op": op});
+    filter["value"] = value;
+    filter
+}
+
+/// Every filter but `IS_NULL` matches only documents where its field holds a
+/// value, and a filter on a field inside one makes it a map, so the official
+/// emulator takes any of them as proof that the field is not null. A null
+/// member of `in` matches nothing and still names a value.
+#[test]
+fn any_filter_but_is_null_proves_its_field_is_not_null() {
+    let rule = "resource.data.v != null";
+    let any = |filters: Vec<Json>| serde_json::json!({"op": "OR", "filters": filters});
+    assert_list_verdicts(&[
+        (rule, Some(on("v", "!=", "a".into())), true),
+        (rule, Some(on("v", ">", "a".into())), true),
+        (
+            rule,
+            Some(on("v", "not-in", serde_json::json!(["a"]))),
+            true,
+        ),
+        (rule, Some(on("v", "array-contains", "a".into())), true),
+        (rule, Some(on("v", "in", serde_json::json!([null]))), true),
+        (
+            rule,
+            Some(on("v", "in", serde_json::json!([null, "a"]))),
+            true,
+        ),
+        (
+            rule,
+            Some(on("v", "not-in", serde_json::json!([null]))),
+            true,
+        ),
+        (rule, Some(on("v.y", "!=", "a".into())), true),
+        (rule, Some(on("v", "==", Json::Null)), false),
+        (rule, Some(on("w", "==", 1.into())), false),
+        (rule, None, false),
+        (
+            rule,
+            Some(any(vec![
+                on("v", "==", "a".into()),
+                on("v", "!=", "b".into()),
+            ])),
+            true,
+        ),
+        (
+            rule,
+            Some(any(vec![
+                on("v", "!=", "a".into()),
+                on("v", "==", Json::Null),
+            ])),
+            false,
+        ),
+        (
+            "resource.data.get('v', null) != null",
+            Some(on("v", "!=", "a".into())),
+            true,
+        ),
+        ("resource.data.get('v', null) != null", None, false),
+        (
+            "resource.data.m.x != null",
+            Some(on("m.x", ">", "a".into())),
+            true,
+        ),
+        (
+            "resource.data.m.x != null",
+            Some(on("m.x", "==", Json::Null)),
+            false,
+        ),
+        (
+            "'v' in resource.data",
+            Some(on("v", "!=", "a".into())),
+            true,
+        ),
+        (
+            "resource.data.v is string",
+            Some(on("v", "!=", "a".into())),
+            false,
+        ),
+    ]);
+}
+
+/// `IS_NULL` alone proves a field null; a branch that also needs a value
+/// there matches nothing, and each filter still proves what it says. A
+/// filter on a field inside one proves it is a map, and so no string.
+#[test]
+fn is_null_proves_null_and_a_field_inside_proves_a_map() {
+    let rule = "resource.data.v == null";
+    let contradiction = serde_json::json!({"op": "AND", "filters": [on("v", "==", Json::Null), on("v", "!=", "a".into())]});
+    let archived = "resource.data.v != null && resource.data.v != 'archived'";
+    assert_list_verdicts(&[
+        (rule, Some(on("v", "==", Json::Null)), true),
+        (rule, Some(on("v", "in", serde_json::json!([null]))), false),
+        (rule, Some(on("v", "!=", "a".into())), false),
+        (rule, Some(contradiction.clone()), true),
+        ("resource.data.v != null", Some(contradiction), true),
+        (archived, Some(on("v", "<", "a".into())), true),
+        (archived, Some(on("v.y", "!=", "a".into())), true),
+        (archived, Some(on("v", "!=", "a".into())), false),
+    ]);
 }
