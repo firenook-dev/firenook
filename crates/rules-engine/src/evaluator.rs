@@ -720,6 +720,37 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         Ok(EvalValue::Data(Value::Path(path)))
     }
 
+    /// `get(key, default)` on a query's document data. The official emulator
+    /// reads a field that the query's filters constrain (a filter on the
+    /// field or on one inside it) and answers the default for any other field.
+    fn query_get(
+        &mut self,
+        receiver: EvalValue,
+        arguments: Vec<EvalValue>,
+    ) -> Result<EvalValue, RuntimeError> {
+        let [key, default] = exact_arguments::<2>("get", arguments)?;
+        let EvalValue::Data(Value::String(key)) = key else {
+            return Ok(EvalValue::Unknown);
+        };
+        let constrained = {
+            let (mut field, predicates) = match &receiver {
+                EvalValue::Constraint(constraint) => {
+                    (constraint.field.clone(), constraint.predicates.as_slice())
+                }
+                _ => (Vec::new(), self.query_branch.as_deref().unwrap_or_default()),
+            };
+            field.push(key.clone());
+            predicates
+                .iter()
+                .any(|predicate| predicate.field.starts_with(&field))
+        };
+        if constrained {
+            self.field(receiver, &key)
+        } else {
+            Ok(EvalValue::Data(default.into_data()?))
+        }
+    }
+
     fn field(&mut self, base: EvalValue, name: &str) -> Result<EvalValue, RuntimeError> {
         match base {
             EvalValue::QueryResource => Ok(match name {
@@ -855,6 +886,10 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 .collect::<Result<Vec<_>, _>>()?;
             if matches!(receiver, EvalValue::Namespace(Namespace::Firestore)) {
                 return self.firestore_namespace(name, values);
+            }
+            if name == "get" && matches!(receiver, EvalValue::QueryData | EvalValue::Constraint(_))
+            {
+                return self.query_get(receiver, values);
             }
             return call_method(receiver, name, values);
         }
