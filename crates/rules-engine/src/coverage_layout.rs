@@ -114,6 +114,11 @@ impl SourceIndex {
             ExprKind::Unary { operand, .. } => vec![operand],
             ExprKind::Binary { left, right, .. } => vec![left, right],
             ExprKind::Is { value, .. } => vec![value],
+            ExprKind::Conditional {
+                condition,
+                then,
+                otherwise,
+            } => vec![condition, then, otherwise],
         };
         Some(CoverageNode {
             expression_key: crate::ExpressionKey {
@@ -147,6 +152,7 @@ impl SourceIndex {
             ExprKind::Slice { .. } => expression.span.end - 1,
             ExprKind::Unary { operand, .. } => Self::report_end(operand),
             ExprKind::Binary { right, .. } => Self::report_end(right),
+            ExprKind::Conditional { otherwise, .. } => Self::report_end(otherwise),
             _ => expression.span.end,
         }
     }

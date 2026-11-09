@@ -409,6 +409,15 @@ fn collect_direct_calls(expression: &Expr, calls: &mut BTreeSet<String>) {
             collect_direct_calls(right, calls);
         }
         ExprKind::Is { value, .. } => collect_direct_calls(value, calls),
+        ExprKind::Conditional {
+            condition,
+            then,
+            otherwise,
+        } => {
+            collect_direct_calls(condition, calls);
+            collect_direct_calls(then, calls);
+            collect_direct_calls(otherwise, calls);
+        }
         ExprKind::Null
         | ExprKind::Bool(_)
         | ExprKind::Integer(_)
@@ -499,6 +508,34 @@ mod tests {
     }
 
     #[test]
+    fn a_function_return_needs_no_semicolon() {
+        for terminator in ["", ";"] {
+            let source = format!(
+                "rules_version = '2'; service cloud.firestore {{
+                   match /databases/{{database}}/documents {{
+                     function signedIn() {{ return request.auth != null{terminator} }}
+                     match /notes/{{id}} {{ allow get: if signedIn(); }}
+                   }}
+                 }}"
+            );
+            let rules = compile(&source).expect("a return with or without ';' compiles");
+            let mut request = EvaluationRequest::new(
+                RequestOperation::Get,
+                "/databases/(default)/documents/notes/n1",
+                Timestamp::new(1, 0),
+            );
+            request.auth = Some(Auth {
+                uid: Some("alice".to_owned()),
+                token: BTreeMap::new(),
+            });
+            assert!(
+                rules.evaluate(&request, &EmptyDocumentAccess).allowed,
+                "terminator {terminator:?}"
+            );
+        }
+    }
+
+    #[test]
     fn rejects_recursive_functions() {
         let source = r"
           rules_version = '2'; service cloud.firestore {
@@ -547,6 +584,48 @@ mod tests {
                 }
                 other => panic!("unclassified frozen parse observation {other}"),
             }
+        }
+    }
+
+    #[test]
+    fn indexes_a_string_by_utf16_code_unit() {
+        let rules = compile(
+            "rules_version = '2'; service cloud.firestore {
+               match /databases/{database}/documents {
+                 match /s/{id} { allow get: if resource.data.s[resource.data.i] == resource.data.want; }
+               }
+             }",
+        )
+        .expect("rules compile");
+        // Verdicts recorded from the official emulator (firebase-tools 15.31.0).
+        let cases: [(&str, i64, &str, bool); 9] = [
+            ("c123", 0, "c", true),
+            ("c123", 3, "3", true),
+            ("aé", 1, "é", true),
+            ("é🔥x", 0, "é", true),
+            ("é🔥x", 3, "x", true),
+            ("é🔥x", 1, "🔥", false),
+            ("é🔥x", 2, "x", false),
+            ("abc", 3, "", false),
+            ("abc", -1, "c", false),
+        ];
+        for (value, index, want, allowed) in cases {
+            let path = "/databases/(default)/documents/s/case";
+            let mut request =
+                EvaluationRequest::new(RequestOperation::Get, path, Timestamp::new(1, 0));
+            request.resource = Some(Resource::new(
+                path,
+                BTreeMap::from([
+                    ("s".to_owned(), Value::from(value)),
+                    ("i".to_owned(), Value::Integer(index)),
+                    ("want".to_owned(), Value::from(want)),
+                ]),
+            ));
+            assert_eq!(
+                rules.evaluate(&request, &EmptyDocumentAccess).allowed,
+                allowed,
+                "{value:?}[{index}] == {want:?}"
+            );
         }
     }
 }

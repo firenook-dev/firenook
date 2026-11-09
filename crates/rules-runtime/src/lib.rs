@@ -30,7 +30,7 @@ use base64::Engine as _;
 use base64::alphabet;
 use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 use firenook_core_store::{
-    DatabaseName, Document, DocumentKey, Snapshot, Timestamp as StoreTimestamp,
+    DatabaseName, Document, DocumentKey, Precondition, Snapshot, Timestamp as StoreTimestamp,
     Value as StoreValue, Write, WritePreview,
 };
 use firenook_rules_engine::{
@@ -512,13 +512,18 @@ impl RulesRuntime {
                 document_cache_hits: 0,
             });
         }
-        let preview = snapshot.preview_writes(writes, time)?;
+        // The official emulator decides the rules before a write's
+        // precondition, so the preview ignores preconditions; the commit that
+        // follows an allowed verdict still checks them.
+        let unconditioned = writes.iter().map(without_precondition).collect::<Vec<_>>();
+        let preview = snapshot.preview_writes(&unconditioned, time)?;
         let access = SnapshotAccess {
             snapshot: snapshot.clone(),
             preview: Some(preview.clone()),
             project: database.project_id().to_owned(),
         };
-        let requests = dry_run::write_requests(writes, snapshot, &preview, time);
+        let mut requests = dry_run::write_requests(writes, snapshot, &preview, time);
+        update_missing_documents(writes, snapshot, &mut requests);
         Ok(self.evaluate_atomic_context(
             database,
             authorization,
@@ -833,6 +838,56 @@ pub fn write_operation(write: &Write, snapshot: &Snapshot) -> (RequestOperation,
     }
 }
 
+/// A write that requires its document to exist, on a document that is missing
+/// when the write applies, is evaluated as an update with a null `resource`,
+/// as the official emulator does; its commit then fails the precondition. A
+/// document an earlier write of the batch creates is not missing.
+fn update_missing_documents(
+    writes: &[Write],
+    snapshot: &Snapshot,
+    requests: &mut [EvaluationRequest],
+) {
+    let mut exists = BTreeMap::<&DocumentKey, bool>::new();
+    for (write, request) in writes.iter().zip(requests) {
+        let key = write_key(write);
+        let present = *exists
+            .entry(key)
+            .or_insert_with(|| snapshot.get(key).is_some());
+        if !present
+            && matches!(
+                write,
+                Write::Set {
+                    precondition: Precondition::Exists(true),
+                    ..
+                } | Write::Patch {
+                    precondition: Precondition::Exists(true),
+                    ..
+                }
+            )
+        {
+            request.operation = RequestOperation::Update;
+        }
+        let after = match write {
+            Write::Delete { .. } => false,
+            Write::Verify { .. } => present,
+            Write::Create { .. } | Write::Set { .. } | Write::Patch { .. } => true,
+        };
+        exists.insert(key, after);
+    }
+}
+
+fn without_precondition(write: &Write) -> Write {
+    let mut write = write.clone();
+    match &mut write {
+        Write::Set { precondition, .. }
+        | Write::Patch { precondition, .. }
+        | Write::Delete { precondition, .. }
+        | Write::Verify { precondition, .. } => *precondition = Precondition::None,
+        Write::Create { .. } => {}
+    }
+    write
+}
+
 fn write_key(write: &Write) -> &DocumentKey {
     match write {
         Write::Create { key, .. }
@@ -931,6 +986,89 @@ mod tests {
 
     fn database(id: &str) -> DatabaseName {
         DatabaseName::new(PROJECT, id).expect("database")
+    }
+
+    #[test]
+    fn the_rules_decide_an_update_of_a_missing_document_before_its_precondition() {
+        let store = Store::new(StoreOptions::default());
+        let database = database("(default)");
+        let write = Write::Patch {
+            key: DocumentKey::new(database.clone(), "users/bob").expect("key"),
+            fields: Fields::from([("name".to_owned(), StoreValue::String("x".into()))]),
+            update_mask: vec![firenook_core_store::FieldPath::new(["name"]).expect("path")],
+            transforms: Vec::new(),
+            precondition: Precondition::Exists(true),
+        };
+        let alice = Authorization::Client(Some(Auth {
+            uid: Some("alice".to_owned()),
+            token: BTreeMap::new(),
+        }));
+        let time = StoreTimestamp::new(1_788_200_100, 0).expect("time");
+        // Verdicts recorded from the official emulator (firebase-tools 15.31.0):
+        // the update rule runs with a null `resource` and the patched
+        // `request.resource`; only an allowed update then fails its precondition.
+        for (allow, allowed) in [
+            ("allow update: if false;", false),
+            ("allow update: if true;", true),
+            ("allow create: if true;", false),
+            ("allow update: if resource == null;", true),
+            ("allow update: if request.resource.data.name == 'x';", true),
+            (
+                "allow update: if request.resource.data.keys().hasOnly(['name']);",
+                true,
+            ),
+        ] {
+            let runtime = RulesRuntime::default();
+            let source = format!(
+                "rules_version = '2'; service cloud.firestore {{ match /databases/{{database}}/documents {{ match /users/{{id}} {{ {allow} }} }} }}"
+            );
+            runtime.install_project(PROJECT, &source).expect("rules");
+            let verdict = runtime
+                .evaluate_writes(
+                    &database,
+                    &alice,
+                    std::slice::from_ref(&write),
+                    &store.snapshot(),
+                    time,
+                )
+                .expect("a precondition never stops the rules");
+            assert_eq!(verdict.allowed, allowed, "{allow}");
+        }
+        // A document an earlier write of the batch creates is not missing:
+        // the official emulator evaluates the batch as a create.
+        let create_then_update = [
+            Write::Set {
+                key: DocumentKey::new(database.clone(), "users/bob").expect("key"),
+                fields: Fields::from([("name".to_owned(), StoreValue::String("y".into()))]),
+                transforms: Vec::new(),
+                precondition: Precondition::None,
+            },
+            write.clone(),
+        ];
+        for (allow, allowed) in [
+            ("allow create: if true;", true),
+            ("allow update: if true;", false),
+        ] {
+            let runtime = RulesRuntime::default();
+            let source = format!(
+                "rules_version = '2'; service cloud.firestore {{ match /databases/{{database}}/documents {{ match /users/{{id}} {{ {allow} }} }} }}"
+            );
+            runtime.install_project(PROJECT, &source).expect("rules");
+            let verdict = runtime
+                .evaluate_writes(
+                    &database,
+                    &alice,
+                    &create_then_update,
+                    &store.snapshot(),
+                    time,
+                )
+                .expect("preview");
+            assert_eq!(verdict.allowed, allowed, "batch: {allow}");
+        }
+        assert!(matches!(
+            store.commit(&[write]),
+            Err(firenook_core_store::CommitError::ExistencePrecondition { expected: true, .. })
+        ));
     }
 
     #[test]

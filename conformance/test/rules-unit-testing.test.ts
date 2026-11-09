@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { after, before, beforeEach, test } from "node:test";
 import { assertFails, assertSucceeds, initializeTestEnvironment, type RulesTestEnvironment } from "@firebase/rules-unit-testing";
-import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, setDoc, updateDoc, where } from "firebase/firestore";
 import { deleteObject, getBytes, getMetadata, listAll, ref, uploadBytes } from "firebase/storage";
 
 const fixture = new URL("../fixtures/rules-unit-testing-v1/", import.meta.url);
@@ -61,6 +61,23 @@ test("a signed-out client is ruled, not treated as the owner", async () => {
   await assertFails(getDocs(collection(signedOut, "users")));
 });
 
+test("a query's resource.data holds the fields its filters name", async () => {
+  await seed("tasks/t1", { owner: "alice" });
+  await seed("tasks/t2", { title: "Untitled" });
+  const alice = env.authenticatedContext("alice").firestore();
+  await assertSucceeds(getDoc(doc(alice, "tasks/t1")));
+  await assertFails(getDoc(doc(alice, "tasks/t2")));
+  await assertSucceeds(getDocs(query(collection(alice, "tasks"), where("owner", "==", "alice"))));
+  await assertSucceeds(getDocs(query(collection(alice, "tasks"), where("owner", "in", ["alice"]))));
+  await assertFails(getDocs(query(collection(alice, "tasks"), where("owner", "==", "bob"))));
+  // An order is not a filter.
+  await assertFails(getDocs(query(collection(alice, "tasks"), orderBy("owner"))));
+  // A field no filter names is absent, not unknown, so its negation allows.
+  await assertSucceeds(getDocs(collection(alice, "memos")));
+  await assertSucceeds(getDocs(query(collection(alice, "memos"), where("title", "==", "x"))));
+  await assertFails(getDocs(query(collection(alice, "memos"), where("secret", "!=", true))));
+});
+
 test("a post is written by its author and edited only by them", async () => {
   const alice = env.authenticatedContext("alice").firestore();
   await assertSucceeds(setDoc(doc(alice, "posts/p1"), { author: "alice", title: "Hello" }));
@@ -69,6 +86,19 @@ test("a post is written by its author and edited only by them", async () => {
   await assertFails(updateDoc(doc(bob, "posts/p1"), { title: "Mine" }));
   await assertSucceeds(updateDoc(doc(alice, "posts/p1"), { title: "Hi" }));
   await assertSucceeds(getDocs(query(collection(bob, "posts"), where("author", "==", "alice"))));
+});
+
+test("functions declared outside the service block are callable inside it", async () => {
+  await seed("drafts/d1", { owner: "alice" });
+  const alice = env.authenticatedContext("alice").firestore();
+  const bob = env.authenticatedContext("bob").firestore();
+  // The match block's owns() shadows the top-level one and calls signedIn().
+  await assertSucceeds(getDoc(doc(alice, "drafts/d1")));
+  await assertFails(getDoc(doc(bob, "drafts/d1")));
+  // titled() is declared after the service block.
+  await assertSucceeds(setDoc(doc(bob, "drafts/d2"), { title: "Plan" }));
+  await assertFails(setDoc(doc(bob, "drafts/d3"), { title: 3 }));
+  await assertFails(setDoc(doc(env.unauthenticatedContext().firestore(), "drafts/d4"), { title: "Plan" }));
 });
 
 test("custom claims and get() lookups decide as the rules say", async () => {
@@ -80,6 +110,36 @@ test("custom claims and get() lookups decide as the rules say", async () => {
   await assertFails(getDoc(doc(env.authenticatedContext("alice").firestore(), "admin/settings")));
   await assertSucceeds(getDoc(doc(env.authenticatedContext("dave").firestore(), "orders/o1")));
   await assertFails(getDoc(doc(env.authenticatedContext("erin").firestore(), "orders/o1")));
+});
+
+test("the conditional operator takes one branch, groups to the right and binds looser than ||", async () => {
+  await seed("notes/public", { owner: "alice", public: true });
+  await seed("notes/private", { owner: "alice", public: false, shared: false });
+  await seed("notes/shared", { owner: "alice", public: false, shared: true });
+  await seed("notes/locked", { owner: "alice", locked: true });
+  await seed("notes/open", { owner: "alice", locked: false, archived: false });
+  await seed("notes/odd", { owner: "alice", locked: "yes" });
+  const signedOut = env.unauthenticatedContext().firestore();
+  const alice = env.authenticatedContext("alice").firestore();
+  const bob = env.authenticatedContext("bob").firestore();
+  // Signed out takes the first branch, which never reads request.auth.uid.
+  await assertSucceeds(getDoc(doc(signedOut, "notes/public")));
+  await assertFails(getDoc(doc(signedOut, "notes/private")));
+  // `a ? b : c ? d : e` is `a ? b : (c ? d : e)`.
+  await assertFails(getDoc(doc(signedOut, "notes/shared")));
+  await assertSucceeds(getDoc(doc(alice, "notes/private")));
+  await assertFails(getDoc(doc(bob, "notes/private")));
+  await assertSucceeds(getDoc(doc(bob, "notes/shared")));
+  // A query takes a branch only when its filters decide the condition.
+  await assertSucceeds(getDocs(query(collection(alice, "notes"), where("owner", "==", "alice"))));
+  await assertFails(getDocs(collection(alice, "notes")));
+  await assertFails(getDocs(query(collection(bob, "notes"), where("owner", "==", "alice"))));
+  // `a || b ? c : d` is `(a || b) ? c : d`.
+  await assertFails(updateDoc(doc(alice, "notes/locked"), { title: "x" }));
+  await assertSucceeds(updateDoc(doc(alice, "notes/open"), { title: "x" }));
+  // A condition that is not a boolean is an error.
+  await assertFails(deleteDoc(doc(alice, "notes/odd")));
+  await assertSucceeds(deleteDoc(doc(alice, "notes/open")));
 });
 
 test("clearFirestore empties the database", async () => {

@@ -235,6 +235,33 @@ fn unknown_constraints_do_not_become_false_under_negation_or_type_tests() {
 }
 
 #[test]
+fn resource_is_never_null_in_a_query_proof() {
+    let request = request(&serde_json::json!({
+        "collection": "records",
+        "filter": {"field": "createdBy", "op": "==", "value": "query-owner"}
+    }));
+    // Verdicts recorded from the official emulator (firebase-tools 15.31.0).
+    for (condition, allowed) in [
+        ("resource != null", true),
+        ("null != resource", true),
+        ("!(resource == null)", true),
+        ("resource == null", false),
+        (
+            "resource == null || resource.data.createdBy == request.auth.uid",
+            true,
+        ),
+    ] {
+        let source = format!(
+            "rules_version = '2'; service cloud.firestore {{ match /databases/{{db}}/documents/records/{{id}} {{ allow list: if {condition}; }} }}"
+        );
+        let result = compile(&source)
+            .expect("source")
+            .evaluate(&request, &EmptyDocumentAccess);
+        assert_eq!(result.allowed, allowed, "{condition}: {result:?}");
+    }
+}
+
+#[test]
 fn alternatives_do_not_multiply_document_access_budgets() {
     struct Existing;
     impl DocumentAccess for Existing {
@@ -327,5 +354,61 @@ fn replays_query_path_oracles_without_resolving_child_wildcards_to_rows() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn get_reads_a_constrained_field_and_defaults_any_other() {
+    let owner = serde_json::json!({"field": "createdBy", "op": "==", "value": "query-owner"});
+    let other = serde_json::json!({"field": "createdBy", "op": "==", "value": "other-owner"});
+    let either =
+        serde_json::json!({"field": "createdBy", "op": "in", "value": ["query-owner", "carol"]});
+    // Verdicts recorded from the official emulator (firebase-tools 15.31.0).
+    for (condition, filter, allowed) in [
+        (
+            "resource.data.get('createdBy', '') == request.auth.uid",
+            Some(&owner),
+            true,
+        ),
+        (
+            "resource.data.get('createdBy', '') == request.auth.uid",
+            None,
+            false,
+        ),
+        (
+            "resource.data.get('createdBy', '') == request.auth.uid",
+            Some(&other),
+            false,
+        ),
+        (
+            "resource.data.get('createdBy', 'query-owner') == request.auth.uid",
+            None,
+            true,
+        ),
+        (
+            "resource.data.get('createdBy', '') != 'other-owner'",
+            Some(&owner),
+            true,
+        ),
+        (
+            "resource.data.get('createdBy', '') in ['query-owner', 'carol']",
+            Some(&either),
+            true,
+        ),
+    ] {
+        let mut case = serde_json::json!({"collection": "records"});
+        if let Some(filter) = filter {
+            case["filter"] = filter.clone();
+        }
+        let source = format!(
+            "rules_version = '2'; service cloud.firestore {{ match /databases/{{db}}/documents/records/{{id}} {{ allow list: if {condition}; }} }}"
+        );
+        let result = compile(&source)
+            .expect("source")
+            .evaluate(&request(&case), &EmptyDocumentAccess);
+        assert_eq!(
+            result.allowed, allowed,
+            "{condition} with {filter:?}: {result:?}"
+        );
     }
 }

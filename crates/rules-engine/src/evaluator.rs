@@ -671,6 +671,11 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 }
                 Ok(EvalValue::Data(Value::Bool(is_type(&value, *expected))))
             }
+            ExprKind::Conditional {
+                condition,
+                then,
+                otherwise,
+            } => self.eval_conditional(condition, then, otherwise, environment, functions),
         }
     }
 
@@ -718,6 +723,37 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             }
         }
         Ok(EvalValue::Data(Value::Path(path)))
+    }
+
+    /// `get(key, default)` on a query's document data. The official emulator
+    /// reads a field that the query's filters constrain (a filter on the
+    /// field or on one inside it) and answers the default for any other field.
+    fn query_get(
+        &mut self,
+        receiver: EvalValue,
+        arguments: Vec<EvalValue>,
+    ) -> Result<EvalValue, RuntimeError> {
+        let [key, default] = exact_arguments::<2>("get", arguments)?;
+        let EvalValue::Data(Value::String(key)) = key else {
+            return Ok(EvalValue::Unknown);
+        };
+        let constrained = {
+            let (mut field, predicates) = match &receiver {
+                EvalValue::Constraint(constraint) => {
+                    (constraint.field.clone(), constraint.predicates.as_slice())
+                }
+                _ => (Vec::new(), self.query_branch.as_deref().unwrap_or_default()),
+            };
+            field.push(key.clone());
+            predicates
+                .iter()
+                .any(|predicate| predicate.field.starts_with(&field))
+        };
+        if constrained {
+            self.field(receiver, &key)
+        } else {
+            Ok(EvalValue::Data(default.into_data()?))
+        }
     }
 
     fn field(&mut self, base: EvalValue, name: &str) -> Result<EvalValue, RuntimeError> {
@@ -855,6 +891,10 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 .collect::<Result<Vec<_>, _>>()?;
             if matches!(receiver, EvalValue::Namespace(Namespace::Firestore)) {
                 return self.firestore_namespace(name, values);
+            }
+            if name == "get" && matches!(receiver, EvalValue::QueryData | EvalValue::Constraint(_))
+            {
+                return self.query_get(receiver, values);
             }
             return call_method(receiver, name, values);
         }
@@ -1066,6 +1106,28 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         Ok(resource)
     }
 
+    fn eval_conditional<'program>(
+        &mut self,
+        condition: &'program Expr,
+        then: &'program Expr,
+        otherwise: &'program Expr,
+        environment: &mut BTreeMap<String, EvalValue>,
+        functions: &BTreeMap<String, &'program Function>,
+    ) -> Result<EvalValue, RuntimeError> {
+        // Only the taken branch runs. A query proof that cannot decide the
+        // condition takes neither, even when both would prove the query.
+        let condition = self.eval_expr(condition, environment, functions)?;
+        if self.query_branch.is_some() && condition.is_symbolic() {
+            return Ok(EvalValue::Unknown);
+        }
+        let taken = if data_bool(condition)? {
+            then
+        } else {
+            otherwise
+        };
+        self.eval_expr(taken, environment, functions)
+    }
+
     fn eval_binary<'program>(
         &mut self,
         operator: BinaryOperator,
@@ -1127,6 +1189,18 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         let left_field = self.provenance.last.take();
         let right = self.eval_expr(right, environment, functions)?;
         let right_field = self.provenance.last.take();
+        // A query's document data holds the fields its filters name, as the
+        // official emulator answers, so `'f' in resource.data` is decided.
+        if let (BinaryOperator::In, EvalValue::Data(Value::String(key)), EvalValue::QueryData) =
+            (operator, &left, &right)
+        {
+            let predicates = self.query_branch.as_deref().unwrap_or_default();
+            return Ok(EvalValue::data(
+                predicates
+                    .iter()
+                    .any(|predicate| predicate.field.first() == Some(key)),
+            ));
+        }
         if self.provenance.explains
             && self.query_branch.is_some()
             && let Some((field, operator_needed, value)) =
@@ -1855,6 +1929,17 @@ fn index_value(base: EvalValue, index: EvalValue) -> Result<EvalValue, RuntimeEr
                 .cloned()
                 .map(EvalValue::Data)
                 .ok_or_else(|| RuntimeError::new("list index is outside the available range"))
+        }
+        EvalValue::Data(Value::String(value)) => {
+            // The official emulator indexes a string by UTF-16 code unit, as
+            // Java's `charAt` does: "é🔥x"[3] is "x".
+            let index = usize::try_from(data_integer(index)?)
+                .map_err(|_| RuntimeError::new("string index is negative"))?;
+            value
+                .encode_utf16()
+                .nth(index)
+                .map(|unit| EvalValue::data(String::from_utf16_lossy(&[unit])))
+                .ok_or_else(|| RuntimeError::new("string index is outside the available range"))
         }
         EvalValue::Data(Value::Map(values)) => {
             let key = data_string(index)?;
