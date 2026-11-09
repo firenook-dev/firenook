@@ -1746,11 +1746,11 @@ fn decode_field_filter(filter: &Map<String, JsonValue>) -> Result<Filter, RestEr
     let value = filter
         .get("value")
         .ok_or_else(|| RestError::invalid("fieldFilter value is required"))?;
-    Ok(Filter::Field(FieldFilter {
-        path: decode_query_field(field)?,
+    Ok(Filter::Field(FieldFilter::compared(
+        decode_query_field(field)?,
         operator,
-        value: decode_value(value)?,
-    }))
+        decode_value(value)?,
+    )))
 }
 
 fn decode_query_field(path: &str) -> Result<QueryFieldPath, RestError> {
@@ -2092,12 +2092,44 @@ fn decode_document_fields(document: &JsonValue) -> Result<Fields, RestError> {
         .collect()
 }
 
+/// Whether JSON spells `google.protobuf.NullValue`, as protobuf's JSON
+/// parser and so the official emulator read it: JSON null, the name
+/// `NULL_VALUE`, or any 32-bit integer, as a number or a string (`0`, `-1`,
+/// `1e0`, `"1"`). A fraction, a larger number, another name or a boolean is
+/// refused.
+fn is_null_value(spelling: &JsonValue) -> bool {
+    fn int32(text: &str) -> bool {
+        if text.parse::<i32>().is_ok() {
+            return true;
+        }
+        let decimal = text.strip_prefix(['-', '+']).unwrap_or(text);
+        decimal.starts_with(|c: char| c.is_ascii_digit())
+            && decimal
+                .chars()
+                .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '-' | '+'))
+            && text.parse::<f64>().is_ok_and(|number| {
+                number.fract() == 0.0
+                    && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&number)
+            })
+    }
+    match spelling {
+        JsonValue::Null => true,
+        JsonValue::String(text) => text == "NULL_VALUE" || int32(text),
+        JsonValue::Number(number) => int32(&number.to_string()),
+        JsonValue::Bool(_) | JsonValue::Array(_) | JsonValue::Object(_) => false,
+    }
+}
+
 fn decode_value(value: &JsonValue) -> Result<Value, RestError> {
     let object = value
         .as_object()
         .ok_or_else(|| RestError::invalid("Firestore value must be an object"))?;
-    if object.contains_key("nullValue") {
-        return Ok(Value::Null);
+    if let Some(spelling) = object.get("nullValue") {
+        return if is_null_value(spelling) {
+            Ok(Value::Null)
+        } else {
+            Err(RestError::invalid("invalid nullValue"))
+        };
     }
     if let Some(value) = object.get("booleanValue").and_then(JsonValue::as_bool) {
         return Ok(Value::Boolean(value));
@@ -2229,11 +2261,15 @@ fn encode_value(value: &Value) -> Result<JsonValue, RestError> {
             latitude,
             longitude,
         } => json!({ "geoPointValue": { "latitude": latitude, "longitude": longitude } }),
+        // An empty array or map is `{}`, its empty list omitted, as protobuf
+        // JSON and the official emulator write it.
+        Value::Array(values) if values.is_empty() => json!({ "arrayValue": {} }),
         Value::Array(values) => json!({
             "arrayValue": {
                 "values": values.iter().map(encode_value).collect::<Result<Vec<_>, _>>()?
             }
         }),
+        Value::Map(fields) if fields.is_empty() => json!({ "mapValue": {} }),
         Value::Map(fields) => json!({ "mapValue": { "fields": encode_fields(fields)? } }),
         Value::Vector(values) => json!({
             "mapValue": {
@@ -2781,6 +2817,209 @@ mod tests {
             .await
             .expect("commit response");
         assert_eq!(commit.status(), StatusCode::OK);
+    }
+
+    /// One request as the owner: its status and JSON body.
+    async fn owner_json(
+        application: &Router,
+        method: Method,
+        path: &str,
+        body: Option<JsonValue>,
+    ) -> (StatusCode, JsonValue) {
+        let response = application
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(format!(
+                        "/v1/projects/demo-nulls/databases/(default)/documents{path}"
+                    ))
+                    .header(AUTHORIZATION, "Bearer owner")
+                    .body(body.map_or_else(Body::empty, |body| Body::from(body.to_string())))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .expect("body");
+        (
+            status,
+            serde_json::from_slice(&body).unwrap_or(JsonValue::Null),
+        )
+    }
+
+    /// Protobuf JSON's `"nullValue": null`, the spelling every response uses,
+    /// is accepted by the methods that read a protobuf message, as the
+    /// official emulator accepts it (firebase-tools 15.34.0).
+    #[tokio::test]
+    async fn a_null_value_spelled_null_is_written_and_queried_by_every_method() {
+        let application = router(Store::default());
+        let nothing = json!({"nullValue": null});
+        let fields = json!({
+            "x": nothing,
+            "m": {"mapValue": {"fields": {"n": nothing}}},
+            "a": {"arrayValue": {"values": [nothing, {"integerValue": "1"}]}},
+        });
+        let (status, created) = owner_json(
+            &application,
+            Method::POST,
+            "/c?documentId=created",
+            Some(json!({ "fields": fields })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        assert_eq!(created["fields"], fields);
+        let name = "projects/demo-nulls/databases/(default)/documents/c/batched";
+        let (status, batched) = owner_json(
+            &application,
+            Method::POST,
+            ":batchWrite",
+            Some(json!({"writes": [{"update": {"name": name, "fields": fields}}]})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{batched}");
+        let (_, read) = owner_json(&application, Method::GET, "/c/batched", None).await;
+        assert_eq!(read["fields"], fields);
+        let query = json!({
+            "from": [{"collectionId": "c"}],
+            "orderBy": [{"field": {"fieldPath": "x"}}],
+            "startAt": {"values": [nothing], "before": true},
+        });
+        let (status, found) = owner_json(
+            &application,
+            Method::POST,
+            ":runQuery",
+            Some(json!({"structuredQuery": query, "newTransaction": {}})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{found}");
+        assert_eq!(
+            found
+                .as_array()
+                .expect("results")
+                .iter()
+                .filter(|result| result.get("document").is_some())
+                .count(),
+            2
+        );
+        // A field named `nullValue` is a field like any other.
+        let (status, named) = owner_json(
+            &application,
+            Method::POST,
+            "/c?documentId=named",
+            Some(json!({"fields": {"nullValue": nothing}})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{named}");
+        assert_eq!(named["fields"], json!({"nullValue": {"nullValue": null}}));
+        // A JSON null where a value belongs is no value, and stays refused.
+        let (status, _) = owner_json(
+            &application,
+            Method::POST,
+            "/c?documentId=bare",
+            Some(json!({"fields": {"x": JsonValue::Null}})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// `nullValue` is read as protobuf's JSON parser reads an enum, by REST's
+    /// own decoder and on the protobuf path alike, as the official emulator
+    /// reads it (firebase-tools 15.34.0).
+    #[tokio::test]
+    async fn a_null_value_is_spelled_as_protobuf_json_spells_an_enum() {
+        let application = router(Store::default());
+        let accepted = [
+            json!(null),
+            json!("NULL_VALUE"),
+            json!(0),
+            json!(1),
+            json!(-1),
+            json!(2_147_483_647),
+            json!(1.0),
+            json!("0"),
+            json!("1"),
+        ];
+        let refused = [
+            json!(1.5),
+            json!(2_147_483_648_u64),
+            json!("x"),
+            json!("null"),
+            json!("null_value"),
+            json!(" NULL_VALUE"),
+            json!(true),
+            json!({}),
+            json!([]),
+        ];
+        for (index, spelling) in accepted.iter().chain(&refused).enumerate() {
+            let fields = json!({"x": {"nullValue": spelling}});
+            let expected = if index < accepted.len() {
+                StatusCode::OK
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            for (method, path) in [
+                (Method::PATCH, format!("/w/patch-{index}")),
+                (Method::POST, format!("/w?documentId=create-{index}")),
+            ] {
+                let (status, body) = owner_json(
+                    &application,
+                    method.clone(),
+                    &path,
+                    Some(json!({ "fields": fields })),
+                )
+                .await;
+                assert_eq!(status, expected, "{method} {spelling}: {body}");
+                if status == StatusCode::OK {
+                    assert_eq!(body["fields"], json!({"x": {"nullValue": null}}));
+                }
+            }
+        }
+    }
+
+    /// A collection listing spells each value as a single read does, as the
+    /// official emulator lists it: null, NaN and the infinities by name,
+    /// times in `Z`, an empty map or array as `{}`.
+    #[tokio::test]
+    async fn a_listing_spells_values_as_a_single_read_does() {
+        let application = router(Store::default());
+        let fields = json!({
+            "null": {"nullValue": null},
+            "nan": {"doubleValue": "NaN"},
+            "inf": {"doubleValue": "Infinity"},
+            "negInf": {"doubleValue": "-Infinity"},
+            "half": {"doubleValue": 1.5},
+            "time": {"timestampValue": "2026-11-09T01:02:03.456789Z"},
+            "emptyMap": {"mapValue": {}},
+            "emptyArray": {"arrayValue": {}},
+            "map": {"mapValue": {"fields": {"n": {"nullValue": null}, "e": {"arrayValue": {}}}}},
+            "array": {"arrayValue": {"values": [{"nullValue": null}, {"doubleValue": "NaN"}]}},
+        });
+        let (status, _) = owner_json(
+            &application,
+            Method::PATCH,
+            "/kinds/all",
+            Some(json!({ "fields": fields })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, single) = owner_json(&application, Method::GET, "/kinds/all", None).await;
+        let (status, listed) = owner_json(&application, Method::GET, "/kinds", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(single["fields"], fields);
+        assert_eq!(listed["documents"][0], single);
+        assert_eq!(
+            listed
+                .as_object()
+                .expect("listing")
+                .keys()
+                .collect::<Vec<_>>(),
+            ["documents"]
+        );
+        let (_, empty) = owner_json(&application, Method::GET, "/nothing", None).await;
+        assert_eq!(empty, json!({}));
     }
 
     const MULTI_DATABASE_PROJECT: &str = "demo-multi-db";

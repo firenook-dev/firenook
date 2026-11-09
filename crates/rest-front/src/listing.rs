@@ -71,13 +71,21 @@ pub(super) async fn documents(
             .next_page_token
             .clone_from(&result.documents.last().unwrap().name);
     }
-    // This response is serialized from the protobuf message, which writes a
-    // UTC timestamp as `+00:00`; every hand-encoded response here writes
-    // `Z`, and so does Google. A client must not see the same instant
-    // spelled two ways depending on which endpoint answered.
-    let mut listed =
-        serde_json::to_value(result).map_err(|e| RestError::internal(e.to_string()))?;
-    firenook_grpc_front::utc_as_z(&mut listed);
+    // Each document is spelled as a single read spells it: protobuf JSON
+    // would write a null as "NULL_VALUE", NaN and the infinities as null,
+    // and a UTC time as `+00:00`, where Google writes null, "NaN" and `Z`.
+    let mut listed = json!({});
+    if !result.documents.is_empty() {
+        listed["documents"] = result
+            .documents
+            .iter()
+            .map(super::read_json::document)
+            .collect::<Result<Vec<_>, _>>()?
+            .into();
+    }
+    if !result.next_page_token.is_empty() {
+        listed["nextPageToken"] = json!(result.next_page_token);
+    }
     Ok(Json(listed))
 }
 

@@ -247,11 +247,11 @@ fn decode_filter(
             let value = filter
                 .value
                 .ok_or_else(|| Status::invalid_argument("field-filter value is required"))?;
-            Ok(Filter::Field(FieldFilter {
+            Ok(Filter::Field(FieldFilter::compared(
                 path,
                 operator,
-                value: decode_value(value)?,
-            }))
+                decode_value(value)?,
+            )))
         }
         Some(FilterType::CompositeFilter(filter)) => {
             if filter.filters.is_empty() {
