@@ -1856,6 +1856,17 @@ fn index_value(base: EvalValue, index: EvalValue) -> Result<EvalValue, RuntimeEr
                 .map(EvalValue::Data)
                 .ok_or_else(|| RuntimeError::new("list index is outside the available range"))
         }
+        EvalValue::Data(Value::String(value)) => {
+            // The official emulator indexes a string by UTF-16 code unit, as
+            // Java's `charAt` does: "é🔥x"[3] is "x".
+            let index = usize::try_from(data_integer(index)?)
+                .map_err(|_| RuntimeError::new("string index is negative"))?;
+            value
+                .encode_utf16()
+                .nth(index)
+                .map(|unit| EvalValue::data(String::from_utf16_lossy(&[unit])))
+                .ok_or_else(|| RuntimeError::new("string index is outside the available range"))
+        }
         EvalValue::Data(Value::Map(values)) => {
             let key = data_string(index)?;
             values
