@@ -96,7 +96,10 @@ Extensions](functions-and-extensions.md)), `--no-diagnostics`
 ([Configuration](configuration.md)), the port overrides
 `--firestore-websocket-port`, `--hub-port`, `--logging-port`,
 `--eventarc-port` and `--tasks-port` (every other port comes from
-`firebase.json`), `--plain` ([The terminal](terminal.md)) and `--build`.
+`firebase.json`), `--plain` ([The terminal](terminal.md)), `--build`, and
+`--strict-indexes` (refuse a query whose index `firestore.indexes.json` does
+not declare, as production does; without it such a query is answered and the
+missing index is warned of once, see [Configuration](configuration.md)).
 
 `--build` (start and exec) runs each Functions codebase's own build: a start
 runs its `build:watch` script (its `build` when it has none) and waits for the

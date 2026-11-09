@@ -476,6 +476,10 @@ struct SuiteArgs {
     export_on_exit: Option<PathBuf>,
     #[arg(long = "minimum-functions", default_value_t = 1)]
     minimum_functions: usize,
+    /// Refuse a query whose index `firestore.indexes.json` does not declare,
+    /// as production does, instead of answering it with a warning.
+    #[arg(long = "strict-indexes")]
+    strict_indexes: bool,
     #[arg(long = "firestore-memory")]
     firestore_memory: bool,
     /// When acknowledged Firestore and Storage writes reach stable storage.
@@ -1072,6 +1076,7 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
             .transpose()?,
         ports,
         minimum_functions: arguments.minimum_functions,
+        strict_indexes: arguments.strict_indexes,
         launch: arguments
             .launch_context
             .as_deref()

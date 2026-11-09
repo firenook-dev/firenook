@@ -299,7 +299,7 @@ async fn add_target(
         }
     };
     if let TargetSpec::Query(query) = &spec
-        && let Err(error) = context.query_policy.validate(query)
+        && let Err(error) = context.query_policy.validate(database.database_id(), query)
     {
         send_target_error(
             context.sender,

@@ -205,6 +205,17 @@ impl FirestoreService {
         }
     }
 
+    /// This service checking queries under `query_policy` instead: the
+    /// console's own reads, which neither warn of nor are refused for a
+    /// missing index.
+    #[must_use]
+    pub fn with_query_policy(&self, query_policy: QueryPolicy) -> Self {
+        Self {
+            query_policy,
+            ..self.clone()
+        }
+    }
+
     /// Runs a CPU-bound read on the service's bounded read pool; see
     /// [`ReadPool`]. The REST front shares the pool through this method.
     pub async fn run_read<T, F>(&self, operation: F) -> Result<T, Status>
@@ -1025,7 +1036,7 @@ impl Firestore for FirestoreService {
                 query = query.order_by(order.path.clone(), order.direction);
             }
             self.query_policy
-                .validate(&query)
+                .validate(database.database_id(), &query)
                 .map_err(|error| index_status(&error))?;
         }
         let (documents, next_page_token) = {
@@ -1432,7 +1443,7 @@ impl Firestore for FirestoreService {
         let rules_candidate = firenook_rules_runtime::query_candidate(&database, &query)
             .map_err(Status::invalid_argument)?;
         self.query_policy
-            .validate(&query)
+            .validate(database.database_id(), &query)
             .map_err(|error| index_status(&error))?;
         let (token, new_transaction, historical) = match request.consistency_selector {
             None => (Vec::new(), false, None),
@@ -1647,7 +1658,7 @@ impl Firestore for FirestoreService {
         };
         let plan = decode_pipeline(structured)?;
         self.query_policy
-            .validate(&plan.query)
+            .validate(database.database_id(), &plan.query)
             .map_err(|error| index_status(&error))?;
         let snapshot = self.store.snapshot();
         // A pipeline is ruled as the query it runs, a `list`, as the
@@ -1712,7 +1723,7 @@ impl Firestore for FirestoreService {
         let rules_candidate = firenook_rules_runtime::query_candidate(&database, &query)
             .map_err(Status::invalid_argument)?;
         self.query_policy
-            .validate(&query)
+            .validate(database.database_id(), &query)
             .map_err(|error| index_status(&error))?;
         let (token, new_transaction, historical) = match request.consistency_selector {
             None => (Vec::new(), false, None),
@@ -1826,7 +1837,7 @@ impl Firestore for FirestoreService {
         };
         let query = decode_query(None, structured)?;
         self.query_policy
-            .validate(&query)
+            .validate(database.database_id(), &query)
             .map_err(|error| index_status(&error))?;
         let maximum = usize::try_from(request.partition_count)
             .map_err(|_| Status::invalid_argument("partition_count must be positive"))?;

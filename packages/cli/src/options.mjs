@@ -21,7 +21,7 @@ export const KEEP_DATA_DIR = join('.firenook', 'state');
 
 const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'instance', 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'log-verbosity', 'alias', 'add', 'unalias', 'database', 'agent', 'language']);
 const durabilities = new Set(['write-behind', 'per-commit']);
-const switches = new Set(['resume-state', 'keep-data', 'no-diagnostics', 'help', 'offline', 'non-interactive', 'json', 'force', 'debug', 'ui', 'plain', 'adopt', 'dry-run', 'recursive', 'shallow', 'all-collections', 'clear', 'functions', 'no-functions', 'no-copy', 'build', 'yes', 'no-install', 'no-pin']);
+const switches = new Set(['resume-state', 'keep-data', 'no-diagnostics', 'strict-indexes', 'help', 'offline', 'non-interactive', 'json', 'force', 'debug', 'ui', 'plain', 'adopt', 'dry-run', 'recursive', 'shallow', 'all-collections', 'clear', 'functions', 'no-functions', 'no-copy', 'build', 'yes', 'no-install', 'no-pin']);
 // Optional-value options: a bare flag or --name=value.
 const optionalValues = new Set(['inspect-functions']);
 // Official single-letter aliases.

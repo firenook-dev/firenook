@@ -39,11 +39,47 @@ pub enum DatabaseEdition {
     Enterprise,
 }
 
+/// A query that needs an index its database does not declare: production
+/// refuses it with `FAILED_PRECONDITION`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingIndex {
+    /// The database id, `(default)` or a named one.
+    pub database: String,
+    /// The index to declare.
+    pub requirement: IndexRequirement,
+}
+
+/// Told of each missing index once, the first time a query needs it.
+pub type MissingIndexSink = Arc<dyn Fn(&MissingIndex) + Send + Sync>;
+
+/// The declared indexes of each database, and what a query that needs one
+/// they do not declare gets: a warning, a refusal, or both.
+struct IndexPolicy {
+    /// The catalog of a database without its own: the standalone server's
+    /// one file, or nothing declared.
+    fallback: Arc<IndexCatalog>,
+    catalogs: BTreeMap<String, Arc<IndexCatalog>>,
+    strict: bool,
+    warn: Option<MissingIndexSink>,
+    warned: std::sync::Mutex<std::collections::BTreeSet<(String, IndexRequirement)>>,
+}
+
+impl std::fmt::Debug for IndexPolicy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("IndexPolicy")
+            .field("databases", &self.catalogs.keys().collect::<Vec<_>>())
+            .field("strict", &self.strict)
+            .field("warns", &self.warn.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 /// Query behavior shared by every Firestore transport.
 #[derive(Debug, Clone)]
 pub struct QueryPolicy {
     edition: DatabaseEdition,
-    strict_indexes: Option<Arc<IndexCatalog>>,
+    indexes: Option<Arc<IndexPolicy>>,
 }
 
 impl QueryPolicy {
@@ -52,17 +88,49 @@ impl QueryPolicy {
     pub const fn new(edition: DatabaseEdition) -> Self {
         Self {
             edition,
-            strict_indexes: None,
+            indexes: None,
         }
     }
 
-    /// Creates a production-style policy backed by an index catalog.
+    /// Creates a production-style policy that refuses a query whose index
+    /// `catalog` does not declare, for every database.
     #[must_use]
     pub fn strict(edition: DatabaseEdition, catalog: IndexCatalog) -> Self {
+        Self::new(edition).with_indexes(Arc::new(catalog), BTreeMap::new(), true, None)
+    }
+
+    /// Checks each query against the indexes its database declares: those
+    /// in `catalogs`, or `fallback` for a database not listed. A query whose
+    /// index is not declared is reported once to `warn`, and refused when
+    /// `strict`; otherwise its answer is unchanged.
+    #[must_use]
+    pub fn with_indexes(
+        self,
+        fallback: Arc<IndexCatalog>,
+        catalogs: BTreeMap<String, Arc<IndexCatalog>>,
+        strict: bool,
+        warn: Option<MissingIndexSink>,
+    ) -> Self {
+        let checks = strict || warn.is_some();
         Self {
-            edition,
-            strict_indexes: Some(Arc::new(catalog)),
+            edition: self.edition,
+            indexes: checks.then(|| {
+                Arc::new(IndexPolicy {
+                    fallback,
+                    catalogs,
+                    strict,
+                    warn,
+                    warned: std::sync::Mutex::default(),
+                })
+            }),
         }
+    }
+
+    /// This policy without index checks, for the console's own queries,
+    /// which neither warn nor are refused.
+    #[must_use]
+    pub const fn without_index_checks(&self) -> Self {
+        Self::new(self.edition)
     }
 
     /// Returns the database edition used for value comparison.
@@ -71,11 +139,34 @@ impl QueryPolicy {
         self.edition
     }
 
-    /// Rejects queries that need an index absent from strict-mode configuration.
-    pub fn validate(&self, query: &Query) -> Result<(), IndexConfigError> {
-        self.strict_indexes
-            .as_deref()
-            .map_or(Ok(()), |catalog| catalog.validate(query))
+    /// Checks that `database` declares the index `query` needs: a missing
+    /// one is reported once if this policy warns, and refused if it is
+    /// strict. A permissive policy does no work.
+    pub fn validate(&self, database: &str, query: &Query) -> Result<(), IndexConfigError> {
+        let Some(indexes) = self.indexes.as_deref() else {
+            return Ok(());
+        };
+        let catalog = indexes.catalogs.get(database).unwrap_or(&indexes.fallback);
+        let Some(advice) = catalog.advise(query).filter(|advice| !advice.declared) else {
+            return Ok(());
+        };
+        if let Some(warn) = &indexes.warn {
+            let first = indexes
+                .warned
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert((database.to_owned(), advice.requirement.clone()));
+            if first {
+                warn(&MissingIndex {
+                    database: database.to_owned(),
+                    requirement: advice.requirement.clone(),
+                });
+            }
+        }
+        if indexes.strict {
+            return Err(IndexConfigError::Missing(advice.requirement));
+        }
+        Ok(())
     }
 }
 
@@ -354,5 +445,79 @@ mod tests {
             compare_values(&left, &right, DatabaseEdition::Enterprise),
             Ordering::Less
         );
+    }
+}
+
+#[cfg(test)]
+mod index_check_profile {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    use firenook_core_store::Value;
+
+    use super::*;
+
+    /// What `QueryPolicy::validate` costs per query, for each shape, with
+    /// and without index checks: `cargo test --release -p
+    /// firenook-query-engine index_check_cost -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "manual release microprofile, not an elapsed-time CI assertion"]
+    fn index_check_cost() {
+        let field = |name: &str| FieldPath::field([name]).expect("field");
+        let filter = |name: &str, operator, value| {
+            Filter::Field(FieldFilter {
+                path: field(name),
+                operator,
+                value,
+            })
+        };
+        let items = || Query::new(QueryScope::collection("items").expect("scope"));
+        let shapes = [
+            ("all", items()),
+            (
+                "equality",
+                items().filter(Filter::And(vec![
+                    filter("group", FieldOperator::Equal, Value::Integer(3)),
+                    filter("kind", FieldOperator::Equal, Value::Integer(1)),
+                ])),
+            ),
+            (
+                "composite",
+                items()
+                    .filter(Filter::And(vec![
+                        filter("group", FieldOperator::Equal, Value::Integer(3)),
+                        filter("score", FieldOperator::GreaterThan, Value::Integer(100)),
+                    ]))
+                    .order_by(field("score"), Direction::Ascending),
+            ),
+        ];
+        let catalog = IndexCatalog::from_json(
+            r#"{"indexes":[{"collectionGroup":"items","queryScope":"COLLECTION","fields":[
+                {"fieldPath":"kind","order":"ASCENDING"},{"fieldPath":"group","order":"ASCENDING"},
+                {"fieldPath":"score","order":"DESCENDING"}]}]}"#,
+        )
+        .expect("catalog");
+        let checking = QueryPolicy::new(DatabaseEdition::Standard).with_indexes(
+            Arc::default(),
+            BTreeMap::from([("(default)".to_owned(), Arc::new(catalog))]),
+            false,
+            Some(Arc::new(|_: &MissingIndex| {})),
+        );
+        let permissive = QueryPolicy::new(DatabaseEdition::Standard);
+        let rounds = 200_000_u32;
+        for (shape, query) in &shapes {
+            for (label, policy) in [("off", &permissive), ("on", &checking)] {
+                let start = Instant::now();
+                for _ in 0..rounds {
+                    std::hint::black_box(policy.validate("(default)", std::hint::black_box(query)))
+                        .expect("answered");
+                }
+                println!(
+                    "{shape:10} checks {label:3} {:>8.0} ns per query",
+                    start.elapsed().as_secs_f64() * 1e9 / f64::from(rounds)
+                );
+            }
+        }
     }
 }
