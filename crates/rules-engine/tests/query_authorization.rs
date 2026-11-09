@@ -124,6 +124,55 @@ fn request(case: &Json) -> EvaluationRequest {
     request
 }
 
+/// What the official emulator decided in `conformance/fixtures/kindless-query-v1`.
+#[test]
+fn a_query_with_no_collection_needs_a_match_covering_the_whole_subtree() {
+    let decide = |rule: &str, ancestor: Option<&str>| {
+        let source = format!(
+            "rules_version = '2';\nservice cloud.firestore {{ match /databases/{{database}}/documents {{ {rule} }} }}"
+        );
+        let rules = compile(&source).expect("rules");
+        let mut request = request(&serde_json::json!({ "collection": "rules-candidate" }));
+        request.query.scope = Some(QueryScope::AllDescendants {
+            ancestor: ancestor.map(str::to_owned),
+        });
+        rules.evaluate(&request, &Permissions).allowed
+    };
+    for (rule, at_root, under_document) in [
+        ("match /{document=**} { allow read: if true; }", true, true),
+        ("match /{document=**} { allow list: if true; }", true, true),
+        ("match /{document=**} { allow get: if true; }", false, false),
+        (
+            "match /{document=**} { allow read: if false; }",
+            false,
+            false,
+        ),
+        ("match /rd/{doc} { allow read: if true; }", false, false),
+        (
+            "match /{path=**}/sub/{doc} { allow read: if true; }",
+            false,
+            false,
+        ),
+        (
+            "match /top/parent/{rest=**} { allow read: if true; }",
+            false,
+            true,
+        ),
+        (
+            "match /top/{which}/{rest=**} { allow read: if which == 'parent'; }",
+            false,
+            true,
+        ),
+    ] {
+        assert_eq!(decide(rule, None), at_root, "at the root: {rule}");
+        assert_eq!(
+            decide(rule, Some("top/parent")),
+            under_document,
+            "under a document: {rule}"
+        );
+    }
+}
+
 #[test]
 fn replays_both_official_query_oracles_without_any_result_rows() {
     let rules = compile(RULES).expect("oracle source");

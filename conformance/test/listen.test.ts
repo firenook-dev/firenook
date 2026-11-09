@@ -63,7 +63,7 @@ interface ObservedSnapshot {
   readonly ids: readonly string[];
 }
 
-test("raw Listen removes a malformed-token target without closing the stream", async (context) => {
+test("raw Listen answers a malformed token without closing the stream", async (context) => {
   const configuration = resolveTarget(process.env);
   const rawFirestore = createV1Firestore(configuration);
   const runId = randomUUID();
@@ -90,7 +90,9 @@ test("raw Listen removes a malformed-token target without closing the stream", a
       resumeToken: Uint8Array.from([1, 2, 3]),
     },
   });
-  if (configuration.name === "java") {
+  // Production refuses it, and only ever sees tokens it issued. An emulator sees
+  // whatever a device's cache kept, so both emulators start the target over.
+  if (configuration.name !== "cloud") {
     const accepted = await readCheckpoint(responses);
     assert.deepEqual(accepted.documentIds, []);
     assert.deepEqual(accepted.targetChangeTypes, ["ADD", "RESET", "CURRENT"]);

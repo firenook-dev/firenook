@@ -3,7 +3,7 @@ use std::mem::discriminant;
 
 use crate::ast::{
     Allow, BinaryOperator, Expr, ExprKind, Function, MatchBlock, Operation, PathPart,
-    PatternSegment, Program, TypeName, UnaryOperator,
+    PatternSegment, Program, TypeName, UnaryOperator, decode_path_text,
 };
 use crate::lexer::{Token, TokenKind, lex};
 
@@ -678,8 +678,11 @@ fn parse_expression_path(raw: &str, offset: usize) -> Result<ExprKind, ParseErro
     let mut cursor = 0_usize;
     while let Some(relative) = raw[cursor..].find("$(") {
         let start = cursor + relative;
+        if !raw[..start].ends_with('/') {
+            return Err(interpolation_within_a_segment(offset));
+        }
         if start > cursor {
-            parts.push(PathPart::Literal(raw[cursor..start].to_owned()));
+            parts.push(path_literal(&raw[cursor..start], offset)?);
         }
         let expression_start = start + 2;
         let mut depth = 1_usize;
@@ -715,11 +718,30 @@ fn parse_expression_path(raw: &str, offset: usize) -> Result<ExprKind, ParseErro
         parser.expect(&TokenKind::Eof, "end of path interpolation")?;
         parts.push(PathPart::Interpolation(expression));
         cursor = expression_end + 1;
+        if !(raw[cursor..].is_empty() || raw[cursor..].starts_with('/')) {
+            return Err(interpolation_within_a_segment(offset));
+        }
     }
     if cursor < raw.len() {
-        parts.push(PathPart::Literal(raw[cursor..].to_owned()));
+        parts.push(path_literal(&raw[cursor..], offset)?);
     }
     Ok(ExprKind::Path(parts))
+}
+
+fn path_literal(raw: &str, offset: usize) -> Result<PathPart, ParseError> {
+    decode_path_text(raw)
+        .map(PathPart::Literal)
+        .ok_or_else(|| ParseError {
+            message: format!("path {raw:?} has an invalid percent escape"),
+            offset,
+        })
+}
+
+fn interpolation_within_a_segment(offset: usize) -> ParseError {
+    ParseError {
+        message: "a path interpolation must be a whole segment".to_owned(),
+        offset,
+    }
 }
 
 fn parse_type_name(name: &str) -> Option<TypeName> {

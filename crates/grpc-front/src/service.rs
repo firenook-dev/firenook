@@ -14,6 +14,7 @@ use firenook_query_engine::{
     Aggregation as QueryAggregation, DatabaseEdition, Direction as QueryDirection,
     FieldPath as QueryFieldPath, IndexConfigError, Query as StructuredQuery, QueryDocument,
     QueryPolicy, QueryScope, aggregate, compare_values, count, execute, execute_iter, partition,
+    validate_aggregations,
 };
 use firenook_rules_runtime::{
     AtomicEvaluationResult, Authorization, EvaluationResult, RequestOperation, RulesQuery,
@@ -585,6 +586,9 @@ impl FirestoreService {
         snapshot: &Snapshot,
         request_time: Timestamp,
     ) -> Result<(), Status> {
+        if authorization.is_owner() {
+            return Ok(());
+        }
         let writes = decoded
             .iter()
             .map(|decoded| decoded.write.clone())
@@ -1206,7 +1210,7 @@ impl Firestore for FirestoreService {
         } else {
             self.snapshot_for_transaction(&database, &token)?
         };
-        let read_time = Some(encode_system_read_time(now()));
+        let read_time = Some(encode_system_read_time(snapshot.read_time()));
         let request_time = now();
         // Rules decide nothing for the owner, nor where none are installed:
         // the documents are then not converted for an evaluation that never
@@ -1475,7 +1479,7 @@ impl Firestore for FirestoreService {
             )));
         }
         if explain_options.is_none() {
-            let read_time = Some(encode_system_read_time(now()));
+            let read_time = Some(encode_system_read_time(snapshot.read_time()));
             // Planning, and the scan or sort behind a first result, run on
             // the read pool; the query fails as an RPC error exactly as
             // before. The results are then decoded and encoded by a blocking
@@ -1564,7 +1568,7 @@ impl Firestore for FirestoreService {
         };
         let execution_duration = started.elapsed();
         let document_count = documents.len();
-        let read_time = Some(encode_system_read_time(now()));
+        let read_time = Some(encode_system_read_time(snapshot.read_time()));
         let transaction_response = new_transaction.then(|| {
             Ok(RunQueryResponse {
                 transaction: token.clone(),
@@ -1702,6 +1706,8 @@ impl Firestore for FirestoreService {
             .as_ref()
             .map(|_| query_plan_summary(&structured));
         let query = decode_query(parent.as_deref(), structured)?;
+        validate_aggregations(&query, &aggregation.operations)
+            .map_err(|error| query_status(&error))?;
         let rules_query = firenook_rules_runtime::query_policy(&query);
         let rules_candidate = firenook_rules_runtime::query_candidate(&database, &query)
             .map_err(Status::invalid_argument)?;
@@ -1776,7 +1782,7 @@ impl Firestore for FirestoreService {
         }
         responses.push(RunAggregationQueryResponse {
             result: Some(result),
-            read_time: Some(encode_system_read_time(now())),
+            read_time: Some(encode_system_read_time(snapshot.read_time())),
             ..RunAggregationQueryResponse::default()
         });
         if explain_options.is_some() {

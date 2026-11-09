@@ -1,0 +1,209 @@
+{
+ "schemaVersion": 1,
+ "syntheticOnly": true,
+ "project": "demo-firenook-listen-resume",
+ "capturedAt": "2026-11-06T05:11:34.135Z",
+ "oracle": {
+  "firestore": "1.22.0",
+  "jarSha256": "9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c",
+  "node": "v24.20.0",
+  "java": "java version \"25.0.1\" 2025-10-21 LTS",
+  "sdk": "9.3.1"
+ },
+ "issuedToken": "0a0908a2ccfdaacaf29703",
+ "answers": {
+  "no-token": {
+   "frames": [
+    "ADD",
+    "documentChange",
+    "documentChange",
+    "documentChange",
+    "CURRENT",
+    "NO_CHANGE"
+   ],
+   "documents": [
+    "a",
+    "b",
+    "c"
+   ],
+   "ending": "current"
+  },
+  "empty-token": {
+   "frames": [
+    "ADD",
+    "RESET",
+    "documentChange",
+    "documentChange",
+    "documentChange",
+    "CURRENT",
+    "NO_CHANGE"
+   ],
+   "documents": [
+    "a",
+    "b",
+    "c"
+   ],
+   "ending": "current"
+  },
+  "malformed-token": {
+   "frames": [
+    "ADD",
+    "RESET",
+    "documentChange",
+    "documentChange",
+    "documentChange",
+    "CURRENT",
+    "NO_CHANGE"
+   ],
+   "documents": [
+    "a",
+    "b",
+    "c"
+   ],
+   "ending": "current"
+  },
+  "text-token": {
+   "frames": [
+    "ADD",
+    "RESET",
+    "documentChange",
+    "documentChange",
+    "documentChange",
+    "CURRENT",
+    "NO_CHANGE"
+   ],
+   "documents": [
+    "a",
+    "b",
+    "c"
+   ],
+   "ending": "current"
+  },
+  "token-from-the-other-emulator": {
+   "frames": [
+    "ADD",
+    "RESET",
+    "documentChange",
+    "documentChange",
+    "documentChange",
+    "CURRENT",
+    "NO_CHANGE"
+   ],
+   "documents": [
+    "a",
+    "b",
+    "c"
+   ],
+   "ending": "current"
+  },
+  "own-token": {
+   "frames": [
+    "ADD",
+    "RESET",
+    "documentChange",
+    "documentChange",
+    "documentChange",
+    "CURRENT",
+    "NO_CHANGE"
+   ],
+   "documents": [
+    "a",
+    "b",
+    "c"
+   ],
+   "ending": "current"
+  },
+  "read-time-a-day-ago": {
+   "frames": [
+    "ADD",
+    "RESET",
+    "documentChange",
+    "documentChange",
+    "documentChange",
+    "CURRENT",
+    "NO_CHANGE"
+   ],
+   "documents": [
+    "a",
+    "b",
+    "c"
+   ],
+   "ending": "current"
+  },
+  "read-time-a-day-ahead": {
+   "frames": [
+    "ADD",
+    "RESET",
+    "documentChange",
+    "documentChange",
+    "documentChange",
+    "CURRENT",
+    "NO_CHANGE"
+   ],
+   "documents": [
+    "a",
+    "b",
+    "c"
+   ],
+   "ending": "current"
+  },
+  "read-time-with-nanoseconds": {
+   "frames": [
+    "ADD",
+    "RESET",
+    "documentChange",
+    "documentChange",
+    "documentChange",
+    "CURRENT",
+    "NO_CHANGE"
+   ],
+   "documents": [
+    "a",
+    "b",
+    "c"
+   ],
+   "ending": "current"
+  },
+  "read-time-zero": {
+   "frames": [
+    "ADD",
+    "RESET",
+    "documentChange",
+    "documentChange",
+    "documentChange",
+    "CURRENT",
+    "NO_CHANGE"
+   ],
+   "documents": [
+    "a",
+    "b",
+    "c"
+   ],
+   "ending": "current"
+  },
+  "own-token-after-a-restart": {
+   "frames": [
+    "ADD",
+    "RESET",
+    "CURRENT",
+    "NO_CHANGE"
+   ],
+   "documents": [],
+   "ending": "current"
+  },
+  "own-token-after-a-restart-and-a-write": {
+   "frames": [
+    "ADD",
+    "RESET",
+    "documentChange",
+    "CURRENT",
+    "NO_CHANGE"
+   ],
+   "documents": [
+    "after"
+   ],
+   "ending": "current"
+  }
+ },
+ "passed": true
+}

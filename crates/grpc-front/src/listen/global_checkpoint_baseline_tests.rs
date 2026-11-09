@@ -212,7 +212,10 @@ async fn reproduce(disk: bool, mode: AddMode) {
         AddMode::Normal => {}
         AddMode::Once => target.once = true,
         AddMode::ExpiredOpaque => {
-            target.resume_type = Some(ResumeType::ResumeToken(resume_token(initial_revision)));
+            target.resume_type = Some(ResumeType::ResumeToken(resume_token(
+                &store,
+                initial_revision,
+            )));
         }
         AddMode::CountOnly => {
             target.resume_type = Some(ResumeType::ReadTime(pbjson_types::Timestamp {
@@ -238,7 +241,7 @@ async fn reproduce(disk: bool, mode: AddMode) {
     };
     let received_token = checkpoint.resume_token.clone();
     assert_eq!(
-        decode_resume_token(&received_token).unwrap(),
+        decode_resume_token(&store, &received_token).unwrap(),
         committed_revision
     );
     let read_time = checkpoint.read_time.as_ref().unwrap();
@@ -382,15 +385,11 @@ async fn global_checkpoint_rejected_add_does_not_advance_siblings() {
     through_checkpoint(&mut receiver, &mut cache);
     let old_revision = live[&A].watch.revision();
     set(&store, "a", 1);
-    add_target(
-        &context,
-        &mut live,
-        &mut next,
-        database(),
-        query(B, "b", Some(b"malformed".to_vec())),
-    )
-    .await
-    .unwrap();
+    let mut rejected = query(B, "b", None);
+    rejected.target_type = None;
+    add_target(&context, &mut live, &mut next, database(), rejected)
+        .await
+        .unwrap();
     let frame = receiver.try_recv().unwrap().unwrap();
     assert!(
         matches!(frame.response_type, Some(ResponseType::TargetChange(change))

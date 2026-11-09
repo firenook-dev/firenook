@@ -135,6 +135,42 @@ fn nothing_is_built_before_anyone_subscribes_and_nothing_without_diagnostics() {
     assert_eq!(built(&quiet), 0, "no diagnostics, nothing recorded");
 }
 
+/// A write the store would refuse: a preview reports it, and only a caller
+/// rules apply to needs one. The commit reports the same error to the owner.
+#[test]
+fn the_owner_is_not_previewed() {
+    let runtime = RulesRuntime::default();
+    let store = Store::new(StoreOptions::default());
+    let key = DocumentKey::new(database(), "public/a").expect("key");
+    let create = Write::Create {
+        key,
+        fields: Fields::new(),
+    };
+    store
+        .commit(std::slice::from_ref(&create))
+        .expect("first create");
+    let time = StoreTimestamp::new(1_788_200_100, 0).expect("time");
+    let judged = |authorization: &Authorization| {
+        runtime.evaluate_writes(
+            &database(),
+            authorization,
+            std::slice::from_ref(&create),
+            &store.snapshot(),
+            time,
+        )
+    };
+    let refused = judged(&Authorization::Client(None)).expect_err("a client's write is previewed");
+    let owner = judged(&Authorization::Owner).expect("the owner's write is not");
+    assert!(owner.allowed);
+    assert_eq!(
+        store
+            .commit(std::slice::from_ref(&create))
+            .expect_err("the commit refuses it")
+            .to_string(),
+        refused.to_string()
+    );
+}
+
 #[test]
 fn the_owner_skips_the_rules_and_is_never_a_decision() {
     let runtime = diagnostics();

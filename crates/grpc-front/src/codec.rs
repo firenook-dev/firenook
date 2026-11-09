@@ -177,7 +177,8 @@ pub(crate) fn decode_parent(resource: &str) -> Result<(DatabaseName, Option<Stri
     let path = &segments[5..];
     if path.iter().any(|segment| segment.is_empty()) || path.len() % 2 != 0 {
         return Err(Status::invalid_argument(format!(
-            "invalid document parent resource name: {resource}"
+            "Document parent name \"{resource}\" lacks \"/\" at index {}.",
+            resource.len()
         )));
     }
     for segment in path {

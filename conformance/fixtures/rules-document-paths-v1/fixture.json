@@ -1,0 +1,421 @@
+{
+ "schemaVersion": 1,
+ "syntheticOnly": true,
+ "project": "demo-firenook-rules-paths",
+ "capturedAt": "2026-11-06T05:22:35.508Z",
+ "oracle": {
+  "firestore": "1.22.0",
+  "jarSha256": "9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c",
+  "node": "v24.20.0",
+  "java": "java version \"25.0.1\" 2025-10-21 LTS",
+  "sdk": "9.3.1"
+ },
+ "answers": {
+  "is-a-path": {
+   "status": 200
+  },
+  "is-not-a-string": {
+   "status": 403
+  },
+  "equals-the-same-path": {
+   "status": 200
+  },
+  "differs-from-another-path": {
+   "status": 200
+  },
+  "equals-a-literal-with-its-slash": {
+   "status": 200
+  },
+  "equals-a-literal-without-its-slash": {
+   "status": 200
+  },
+  "not-equal-to-a-string": {
+   "status": 403
+  },
+  "string-of-it-keeps-the-text": {
+   "status": 403
+  },
+  "string-of-it-keeps-the-slash": {
+   "status": 200
+  },
+  "first-segment-without-a-slash": {
+   "status": 200
+  },
+  "first-segment-with-a-slash": {
+   "status": 200
+  },
+  "last-segment": {
+   "status": 200
+  },
+  "exists-with-it": {
+   "status": 200
+  },
+  "get-with-it": {
+   "status": 200
+  },
+  "exists-with-a-string-is-an-error": {
+   "status": 403
+  },
+  "exists-for-a-missing-document": {
+   "status": 403
+  },
+  "equals-the-document-name": {
+   "status": 200
+  },
+  "an-integer-is-an-error": {
+   "status": 403
+  },
+  "a-null-is-an-error": {
+   "status": 403
+  },
+  "no-argument-is-an-error": {
+   "status": 403
+  },
+  "two-arguments-is-an-error": {
+   "status": 403
+  },
+  "empty-text": {
+   "status": 403
+  },
+  "a-doubled-slash": {
+   "status": 403
+  },
+  "a-trailing-slash": {
+   "status": 403
+  },
+  "a-trailing-slash-alone": {
+   "status": 403
+  },
+  "the-root-alone": {
+   "status": 403
+  },
+  "two-leading-slashes": {
+   "status": 403
+  },
+  "a-space-in-a-segment": {
+   "status": 200
+  },
+  "a-space-is-kept": {
+   "status": 200
+  },
+  "a-single-segment": {
+   "status": 200
+  },
+  "an-odd-number-of-segments-reads-too": {
+   "status": 403
+  },
+  "a-leading-slash-is-kept": {
+   "status": 200
+  },
+  "an-interpolated-literal": {
+   "status": 200
+  },
+  "interpolating-a-string-in-a-literal": {
+   "status": 200
+  },
+  "interpolating-a-string-function": {
+   "status": 200
+  },
+  "interpolating-an-index": {
+   "status": 200
+  },
+  "interpolating-a-map-key": {
+   "status": 200
+  },
+  "the-name-against-a-literal": {
+   "status": 200
+  },
+  "the-name-against-a-literal-reversed": {
+   "status": 200
+  },
+  "the-name-against-the-request-path": {
+   "status": 200
+  },
+  "the-name-is-a-path": {
+   "status": 200
+  },
+  "the-name-as-a-string": {
+   "status": 200
+  },
+  "the-name-with-a-project": {
+   "status": 403
+  },
+  "the-name-first-segment-databases": {
+   "status": 200
+  },
+  "the-name-first-segment-projects": {
+   "status": 403
+  },
+  "the-name-last-segment": {
+   "status": 200
+  },
+  "the-request-path-as-a-string": {
+   "status": 200
+  },
+  "the-request-path-with-a-project": {
+   "status": 403
+  },
+  "a-percent-escape-is-read-in-a-literal": {
+   "status": 200
+  },
+  "a-percent-escape-is-kept-as-text": {
+   "status": 403
+  },
+  "a-percent-escape-in-string-of-a-literal": {
+   "status": 403
+  },
+  "a-space-in-string-of-a-literal": {
+   "status": 200
+  },
+  "a-percent-escape-through-path": {
+   "status": 403
+  },
+  "a-percent-escape-through-path-is-read": {
+   "status": 200
+  },
+  "string-of-a-spaced-path": {
+   "status": 200
+  },
+  "string-of-a-spaced-path-encoded": {
+   "status": 403
+  },
+  "a-slash-escape-in-a-literal": {
+   "status": 200
+  },
+  "the-name-by-index": {
+   "status": 200
+  },
+  "string-of-a-slash-escape-read": {
+   "status": 200
+  },
+  "string-of-a-slash-escape-kept": {
+   "status": 403
+  },
+  "a-slash-escape-equals-two-segments": {
+   "status": 403
+  },
+  "a-slash-escape-through-path": {
+   "status": 200
+  },
+  "interpolated-slash-one-segment": {
+   "status": 200
+  },
+  "interpolated-slash-two-segments": {
+   "status": 403
+  },
+  "interpolated-slash-equals": {
+   "status": 403
+  },
+  "interpolated-escape-kept": {
+   "status": 200
+  },
+  "interpolated-escape-read": {
+   "status": 403
+  },
+  "a-bad-escape-through-path": {
+   "status": 403
+  },
+  "a-bad-escape-kept-through-path": {
+   "status": 403
+  },
+  "a-bad-escape-in-a-literal": {
+   "rulesRefused": 400
+  },
+  "a-literal-right-after-if": {
+   "status": 200
+  },
+  "a-dot-in-a-literal": {
+   "status": 200
+  },
+  "an-interpolation-then-index": {
+   "status": 200
+  },
+  "a-literal-indexed": {
+   "status": 200
+  },
+  "a-literal-range": {
+   "status": 200
+  },
+  "a-path-range": {
+   "status": 200
+  },
+  "bind-through-path": {
+   "status": 200
+  },
+  "bind-on-a-literal": {
+   "rulesRefused": 400
+  },
+  "bind-an-integer": {
+   "status": 200
+  },
+  "bind-a-missing-key": {
+   "status": 403
+  },
+  "bind-a-missing-key-keeps-it": {
+   "status": 403
+  },
+  "bind-an-extra-key": {
+   "status": 403
+  },
+  "bind-part-of-a-segment": {
+   "status": 403
+  },
+  "bind-part-of-a-segment-kept": {
+   "status": 403
+  },
+  "bind-two-keys": {
+   "status": 200
+  },
+  "bind-a-slash-value": {
+   "status": 200
+  },
+  "bind-a-path-value": {
+   "status": 403
+  },
+  "bind-nothing": {
+   "status": 200
+  },
+  "bind-a-non-map": {
+   "status": 403
+  },
+  "bind-on-the-request-path": {
+   "status": 200
+  },
+  "a-size-of-a-path": {
+   "status": 403
+  },
+  "interpolating-a-path": {
+   "status": 200
+  },
+  "interpolating-a-path-segment": {
+   "status": 200
+  },
+  "interpolating-a-literal": {
+   "status": 200
+  },
+  "interpolating-an-integer": {
+   "status": 200
+  },
+  "interpolating-a-bool-is-an-error": {
+   "status": 200
+  },
+  "interpolating-the-request-path": {
+   "status": 200
+  },
+  "interpolating-inside-a-segment": {
+   "rulesRefused": 400
+  },
+  "interpolating-an-empty-string": {
+   "status": 200
+  },
+  "interpolating-a-bool-reads-as-text": {
+   "status": 200
+  },
+  "interpolating-a-float": {
+   "status": 200
+  },
+  "interpolating-a-float-reads-as-text": {
+   "status": 200
+  },
+  "interpolating-a-null": {
+   "status": 200
+  },
+  "interpolating-a-list": {
+   "status": 403
+  },
+  "interpolating-a-map": {
+   "status": 403
+  },
+  "bind-a-bool": {
+   "status": 200
+  },
+  "bind-a-float": {
+   "status": 200
+  },
+  "bind-a-null": {
+   "status": 200
+  },
+  "bind-a-list": {
+   "status": 403
+  },
+  "bind-a-recursive-template": {
+   "status": 403
+  },
+  "bind-keeps-spaces": {
+   "status": 200
+  },
+  "bind-does-not-read-an-escape": {
+   "status": 200
+  },
+  "the-name-by-index-is-a-path": {
+   "status": 200
+  },
+  "the-id-by-index": {
+   "status": 200
+  },
+  "the-data-by-index": {
+   "status": 200
+  },
+  "the-id": {
+   "status": 200
+  },
+  "the-id-is-a-string": {
+   "status": 200
+  },
+  "the-id-of-a-get": {
+   "status": 200
+  },
+  "the-name-of-a-get": {
+   "status": 200
+  },
+  "the-id-against-a-wildcard": {
+   "status": 200
+  },
+  "a-literal-in-parentheses": {
+   "status": 200
+  },
+  "a-literal-negated-equal": {
+   "status": 200
+  },
+  "a-literal-in-a-list": {
+   "status": 200
+  },
+  "list-the-id": {
+   "status": 403
+  },
+  "list-the-id-differs": {
+   "status": 403
+  },
+  "list-the-id-is-a-string": {
+   "status": 403
+  },
+  "list-the-name-is-a-path": {
+   "status": 403
+  },
+  "list-the-name-equals": {
+   "status": 403
+  },
+  "list-the-name-by-index": {
+   "status": 403
+  },
+  "list-the-id-by-index": {
+   "status": 403
+  },
+  "create-the-id": {
+   "status": 200
+  },
+  "create-the-id-is-a-string": {
+   "status": 200
+  },
+  "create-the-name": {
+   "status": 200
+  },
+  "create-the-name-by-index": {
+   "status": 200
+  },
+  "create-the-name-against-the-request-path": {
+   "status": 200
+  }
+ },
+ "passed": true
+}

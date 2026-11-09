@@ -335,7 +335,7 @@ async fn expired_empty_and_explicit_document_targets_reset_without_stale_documen
 }
 
 #[test]
-fn retained_diff_expected_count_read_time_and_future_errors_are_unchanged() {
+fn retained_diff_expected_count_read_time_and_future_revision_are_handled() {
     let store = Store::default();
     let retained_read_time = set(&store, "quiet/unchanged", 0);
     let checkpoint = store.revision();
@@ -366,23 +366,17 @@ fn retained_diff_expected_count_read_time_and_future_errors_are_unchanged() {
         .expect("existing read-time fallback");
     assert_eq!(expired_read_time.mode, InitialMode::Normal);
     assert_eq!(expired_read_time.filter, InitialFilter::CountOnly);
-    let Err(future) = initialize(
+    let future = initialize(
         &store,
         query(),
         Some(ResumePoint::Revision(Revision::from_u64(
             store.revision().get() + 1,
         ))),
         None,
-    ) else {
-        panic!("future revision must remain invalid")
-    };
-    assert_eq!(future.code(), Code::InvalidArgument);
-    assert_eq!(
-        decode_resume_token(&[1, 2, 3])
-            .expect_err("malformed token")
-            .code(),
-        Code::InvalidArgument
-    );
+    )
+    .expect("a revision this store never reached starts over");
+    assert_eq!(future.mode, InitialMode::Reset);
+    assert_eq!(decode_resume_token(&store, &[1, 2, 3]), None);
 }
 
 #[test]
@@ -405,7 +399,7 @@ fn unavailable_read_time_still_rejects_instead_of_resetting() {
     }
 }
 
-fn document_target(id: i32, path: &str, token: Option<Revision>) -> Target {
+fn document_target(id: i32, path: &str, token: Option<Vec<u8>>) -> Target {
     Target {
         target_id: id,
         target_type: Some(TargetType::Documents(
@@ -413,7 +407,7 @@ fn document_target(id: i32, path: &str, token: Option<Revision>) -> Target {
                 documents: vec![key(path).to_string()],
             },
         )),
-        resume_type: token.map(|revision| ResumeType::ResumeToken(resume_token(revision))),
+        resume_type: token.map(ResumeType::ResumeToken),
         ..Target::default()
     }
 }
@@ -427,7 +421,7 @@ fn drain(receiver: &mut mpsc::Receiver<Result<ListenResponse, Status>>) -> Vec<L
 }
 
 #[tokio::test]
-async fn reset_and_invalid_resume_are_target_local_and_other_targets_remain_live() {
+async fn reset_resume_is_target_local_and_other_targets_remain_live() {
     let fixture = TestStore::new(false);
     let store = &fixture.store;
     set(store, "quiet/target", 0);
@@ -462,7 +456,11 @@ async fn reset_and_invalid_resume_are_target_local_and_other_targets_remain_live
         &mut targets,
         &mut next_id,
         database(),
-        document_target(TARGET_ID, "quiet/target", Some(checkpoint)),
+        document_target(
+            TARGET_ID,
+            "quiet/target",
+            Some(issued_token(store, checkpoint)),
+        ),
     )
     .await
     .expect("expired target resets locally");
@@ -484,28 +482,6 @@ async fn reset_and_invalid_resume_are_target_local_and_other_targets_remain_live
         .collect::<Vec<_>>();
     assert_eq!(deliveries, [vec![7], vec![TARGET_ID]]);
 
-    for token in [
-        vec![1, 2, 3],
-        resume_token(Revision::from_u64(store.revision().get() + 1)),
-    ] {
-        let mut invalid = document_target(29, "quiet/target", None);
-        invalid.resume_type = Some(ResumeType::ResumeToken(token));
-        add_target(&context, &mut targets, &mut next_id, database(), invalid)
-            .await
-            .expect("target-local rejection");
-        let responses = drain(&mut receiver);
-        assert_eq!(responses.len(), 1);
-        let Some(ResponseType::TargetChange(change)) = &responses[0].response_type else {
-            panic!("target error")
-        };
-        assert_eq!(change.target_ids, [29]);
-        assert_eq!(change.target_change_type, TargetChangeType::Remove as i32);
-        assert_eq!(
-            change.cause.as_ref().expect("error cause").code,
-            Code::InvalidArgument as i32
-        );
-        assert_eq!(targets.keys().copied().collect::<Vec<_>>(), [7, TARGET_ID]);
-    }
     set(store, "other/target", 2);
     refresh_targets(store, &rules, &ReadPool::default(), &sender, &mut targets)
         .await
@@ -569,7 +545,11 @@ async fn unauthorized_expired_resume_only_removes_its_target_without_replay() {
         &mut targets,
         &mut next_id,
         database(),
-        document_target(TARGET_ID, "quiet/target", Some(checkpoint)),
+        document_target(
+            TARGET_ID,
+            "quiet/target",
+            Some(issued_token(store, checkpoint)),
+        ),
     )
     .await
     .expect("permission denial is target-local");
@@ -603,4 +583,241 @@ async fn unauthorized_expired_resume_only_removes_its_target_without_replay() {
     assert!(matches!(responses[1].response_type.as_ref(),
         Some(ResponseType::TargetChange(change))
             if change.target_change_type == TargetChangeType::NoChange as i32));
+}
+
+/// The token a store hands out for `revision`.
+fn issued_token(store: &Store, revision: Revision) -> Vec<u8> {
+    resume_token(store, revision)
+}
+
+/// Every read time the frames claim, target checkpoints and deletions alike.
+fn claimed_read_times(frames: &[ListenResponse]) -> Vec<(i64, i32)> {
+    frames
+        .iter()
+        .filter_map(|frame| match frame.response_type.as_ref()? {
+            ResponseType::TargetChange(change) => change.read_time.as_ref(),
+            ResponseType::DocumentDelete(delete) => delete.read_time.as_ref(),
+            ResponseType::DocumentRemove(remove) => remove.read_time.as_ref(),
+            _ => None,
+        })
+        .map(|read_time| (read_time.seconds, read_time.nanos))
+        .collect()
+}
+
+fn as_pair(time: Timestamp) -> (i64, i32) {
+    let time = encode_timestamp(time);
+    (time.seconds, time.nanos)
+}
+
+// A client takes a read time to mean "the data was like this then": a document
+// its snapshot lacked counts as absent at that time, and a commit stamped no
+// later is dropped as out of date, which loses the write.
+#[tokio::test]
+async fn a_read_time_is_earlier_than_a_commit_its_snapshot_did_not_see() {
+    for disk in [false, true] {
+        let fixture = TestStore::new(disk);
+        let store = &fixture.store;
+        let before = as_pair(set(store, "quiet/before", 0));
+        let initial = initialize(store, query(), None, None).expect("initial target");
+        let later = as_pair(set(store, "quiet/after", 1));
+        let claimed = claimed_read_times(&initial_frames(&initial).await);
+        assert!(
+            !claimed.is_empty(),
+            "a target's first frames carry a read time"
+        );
+        for read_time in claimed {
+            assert!(
+                read_time >= before,
+                "{read_time:?} before the commit it holds {before:?}"
+            );
+            assert!(
+                read_time < later,
+                "{read_time:?} not before the commit it lacks {later:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_deletion_is_timed_by_the_snapshot_it_came_from() {
+    for disk in [false, true] {
+        let fixture = TestStore::new(disk);
+        let store = &fixture.store;
+        set(store, "quiet/target", 0);
+        let rules = RulesRuntime::default();
+        let query_policy = QueryPolicy::default();
+        let reads = ReadPool::default();
+        let (sender, mut receiver) = mpsc::channel(32);
+        let context = ListenContext {
+            store,
+            sender: &sender,
+            query_policy: &query_policy,
+            rules: &rules,
+            reads: &reads,
+            authorization: &AuthorizationSource::Owner,
+        };
+        let mut targets = BTreeMap::new();
+        let mut next_id = 1;
+        add_target(
+            &context,
+            &mut targets,
+            &mut next_id,
+            database(),
+            document_target(TARGET_ID, "quiet/target", None),
+        )
+        .await
+        .expect("target opens");
+        drain(&mut receiver);
+        store
+            .commit(&[Write::Delete {
+                key: key("quiet/target"),
+                precondition: Precondition::None,
+            }])
+            .expect("acknowledged delete");
+        let deleted = store.snapshot();
+        let recreated = as_pair(set(store, "quiet/target", 1));
+        refresh_targets_at_snapshot(store, &deleted, &rules, &reads, &sender, &mut targets)
+            .await
+            .expect("refresh at the snapshot");
+        let claimed = claimed_read_times(&drain(&mut receiver));
+        assert!(!claimed.is_empty(), "the deletion carries a read time");
+        for read_time in claimed {
+            assert!(
+                read_time < recreated,
+                "{read_time:?} not before {recreated:?}"
+            );
+        }
+    }
+}
+
+// A device keeps its cache across runs of the emulator, and when it moves
+// between emulators. The official emulator starts such a target over.
+#[tokio::test]
+async fn a_token_that_names_no_state_of_this_store_starts_the_target_over() {
+    for disk in [false, true] {
+        let fixture = TestStore::new(disk);
+        let store = &fixture.store;
+        set(store, "quiet/target", 0);
+        let rules = RulesRuntime::default();
+        let query_policy = QueryPolicy::default();
+        let reads = ReadPool::default();
+        let (sender, mut receiver) = mpsc::channel(32);
+        let context = ListenContext {
+            store,
+            sender: &sender,
+            query_policy: &query_policy,
+            rules: &rules,
+            reads: &reads,
+            authorization: &AuthorizationSource::Owner,
+        };
+        // An earlier run at the very revision this store is at: nothing in
+        // the number tells them apart, and a replay from it would send nothing.
+        let earlier_run = Store::default();
+        set(&earlier_run, "quiet/gone", 0);
+        assert_eq!(earlier_run.revision(), store.revision());
+        let tokens = [
+            (
+                "empty, as the Android SDK sends for a new target",
+                Vec::new(),
+            ),
+            (
+                "from another emulator",
+                vec![0x0a, 0x09, 0x08, 0x9a, 0x9a, 0xb2],
+            ),
+            ("malformed", vec![1, 2, 3]),
+            (
+                "from an earlier run",
+                issued_token(&earlier_run, earlier_run.revision()),
+            ),
+            (
+                "from an earlier, longer run",
+                issued_token(store, Revision::from_u64(store.revision().get() + 1)),
+            ),
+        ];
+        for (reason, token) in tokens {
+            let mut target = document_target(TARGET_ID, "quiet/target", None);
+            target.resume_type = Some(ResumeType::ResumeToken(token));
+            let mut targets = BTreeMap::new();
+            let mut next_id = 1;
+            add_target(&context, &mut targets, &mut next_id, database(), target)
+                .await
+                .unwrap_or_else(|error| panic!("{reason}: {error}"));
+            assert_reset_frames(&drain(&mut receiver), &["quiet/target"]);
+            assert_eq!(
+                targets.keys().copied().collect::<Vec<_>>(),
+                [TARGET_ID],
+                "{reason}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_token_from_this_store_still_replays_only_what_changed() {
+    let fixture = TestStore::new(false);
+    let store = &fixture.store;
+    set(store, "quiet/kept", 0);
+    let checkpoint = store.revision();
+    set(store, "quiet/new", 0);
+    let rules = RulesRuntime::default();
+    let query_policy = QueryPolicy::default();
+    let reads = ReadPool::default();
+    let (sender, mut receiver) = mpsc::channel(32);
+    let context = ListenContext {
+        store,
+        sender: &sender,
+        query_policy: &query_policy,
+        rules: &rules,
+        reads: &reads,
+        authorization: &AuthorizationSource::Owner,
+    };
+    let mut target = document_target(TARGET_ID, "quiet/new", None);
+    target.resume_type = Some(ResumeType::ResumeToken(issued_token(store, checkpoint)));
+    let mut targets = BTreeMap::new();
+    let mut next_id = 1;
+    add_target(&context, &mut targets, &mut next_id, database(), target)
+        .await
+        .expect("target resumes");
+    let frames = drain(&mut receiver);
+    assert!(
+        frames.iter().all(|frame| !matches!(
+            frame.response_type.as_ref(),
+            Some(ResponseType::TargetChange(change))
+                if change.target_change_type == TargetChangeType::Reset as i32
+        )),
+        "a token from this store is not a reset"
+    );
+}
+
+// The official emulator answers a read time in the future by starting over; it
+// is no reason to end the stream and every other target on it.
+#[tokio::test]
+async fn a_read_time_in_the_future_starts_the_target_over() {
+    let fixture = TestStore::new(false);
+    let store = &fixture.store;
+    set(store, "quiet/target", 0);
+    let rules = RulesRuntime::default();
+    let query_policy = QueryPolicy::default();
+    let reads = ReadPool::default();
+    let (sender, mut receiver) = mpsc::channel(32);
+    let context = ListenContext {
+        store,
+        sender: &sender,
+        query_policy: &query_policy,
+        rules: &rules,
+        reads: &reads,
+        authorization: &AuthorizationSource::Owner,
+    };
+    let mut target = document_target(TARGET_ID, "quiet/target", None);
+    let ahead = now().seconds() + 86_400;
+    target.resume_type = Some(ResumeType::ReadTime(pbjson_types::Timestamp {
+        seconds: ahead,
+        nanos: 0,
+    }));
+    let mut targets = BTreeMap::new();
+    let mut next_id = 1;
+    add_target(&context, &mut targets, &mut next_id, database(), target)
+        .await
+        .expect("the stream stays open");
+    assert_reset_frames(&drain(&mut receiver), &["quiet/target"]);
 }

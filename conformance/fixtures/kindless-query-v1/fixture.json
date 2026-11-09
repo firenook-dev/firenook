@@ -1,0 +1,1994 @@
+{
+ "schemaVersion": 1,
+ "syntheticOnly": true,
+ "project": "demo-firenook-kindless",
+ "capturedAt": "2026-11-05T17:53:55.539Z",
+ "oracle": {
+  "firestore": "1.22.0",
+  "jarSha256": "9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c",
+  "node": "v24.20.0",
+  "java": "java version \"25.0.1\" 2025-10-21 LTS",
+  "sdk": "9.3.1"
+ },
+ "seed": [
+  "rd/A",
+  "rd/a",
+  "rd/__id5__",
+  "rd/a/sub/x",
+  "rd/a/sub/x/deep/y",
+  "rd/ghost/sub/z",
+  "rd-sibling/a",
+  "rd0/a",
+  "rc/a",
+  "top/parent",
+  "top/parent/c1/one",
+  "top/parent/c1/one/c2/two",
+  "top/parent/c3/three",
+  "top/other/c1/four"
+ ],
+ "queries": {
+  "root-all": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ]
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rc/a",
+     "rd/__id5__",
+     "rd/A",
+     "rd/a",
+     "rd/a/sub/x",
+     "rd/a/sub/x/deep/y",
+     "rd/ghost/sub/z",
+     "rd-sibling/a",
+     "rd0/a",
+     "top/other/c1/four",
+     "top/parent",
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two",
+     "top/parent/c3/three"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rc/a",
+     "rd/__id5__",
+     "rd/A",
+     "rd/a",
+     "rd/a/sub/x",
+     "rd/a/sub/x/deep/y",
+     "rd/ghost/sub/z",
+     "rd-sibling/a",
+     "rd0/a",
+     "top/other/c1/four",
+     "top/parent",
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two",
+     "top/parent/c3/three"
+    ]
+   }
+  },
+  "root-explicit-empty-id": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "collectionId": "",
+      "allDescendants": true
+     }
+    ]
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rc/a",
+     "rd/__id5__",
+     "rd/A",
+     "rd/a",
+     "rd/a/sub/x",
+     "rd/a/sub/x/deep/y",
+     "rd/ghost/sub/z",
+     "rd-sibling/a",
+     "rd0/a",
+     "top/other/c1/four",
+     "top/parent",
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two",
+     "top/parent/c3/three"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rc/a",
+     "rd/__id5__",
+     "rd/A",
+     "rd/a",
+     "rd/a/sub/x",
+     "rd/a/sub/x/deep/y",
+     "rd/ghost/sub/z",
+     "rd-sibling/a",
+     "rd0/a",
+     "top/other/c1/four",
+     "top/parent",
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two",
+     "top/parent/c3/three"
+    ]
+   }
+  },
+  "under-document": {
+   "parent": "top/parent",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ]
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two",
+     "top/parent/c3/three"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two",
+     "top/parent/c3/three"
+    ]
+   }
+  },
+  "under-missing-document": {
+   "parent": "rd/ghost",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ]
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rd/ghost/sub/z"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rd/ghost/sub/z"
+    ]
+   }
+  },
+  "under-nothing": {
+   "parent": "nope/nope",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ]
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [],
+    "fields": []
+   },
+   "rest": {
+    "status": 200,
+    "documents": []
+   }
+  },
+  "sdk-range-root": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "select": {
+     "fields": [
+      {
+       "fieldPath": "__name__"
+      }
+     ]
+    },
+    "where": {
+     "compositeFilter": {
+      "op": "AND",
+      "filters": [
+       {
+        "fieldFilter": {
+         "field": {
+          "fieldPath": "__name__"
+         },
+         "op": "GREATER_THAN_OR_EQUAL",
+         "value": {
+          "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/rd/__id-9223372036854775808__"
+         }
+        }
+       },
+       {
+        "fieldFilter": {
+         "field": {
+          "fieldPath": "__name__"
+         },
+         "op": "LESS_THAN",
+         "value": {
+          "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/rd\u0000/__id-9223372036854775808__"
+         }
+        }
+       }
+      ]
+     }
+    },
+    "orderBy": [
+     {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "direction": "ASCENDING"
+     }
+    ],
+    "limit": {
+     "value": 5000
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rd/__id5__",
+     "rd/A",
+     "rd/a",
+     "rd/a/sub/x",
+     "rd/a/sub/x/deep/y",
+     "rd/ghost/sub/z"
+    ],
+    "fields": []
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rd/__id5__",
+     "rd/A",
+     "rd/a",
+     "rd/a/sub/x",
+     "rd/a/sub/x/deep/y",
+     "rd/ghost/sub/z"
+    ]
+   }
+  },
+  "sdk-range-sub": {
+   "parent": "top/parent",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "select": {
+     "fields": [
+      {
+       "fieldPath": "__name__"
+      }
+     ]
+    },
+    "where": {
+     "compositeFilter": {
+      "op": "AND",
+      "filters": [
+       {
+        "fieldFilter": {
+         "field": {
+          "fieldPath": "__name__"
+         },
+         "op": "GREATER_THAN_OR_EQUAL",
+         "value": {
+          "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/top/parent/c1/__id-9223372036854775808__"
+         }
+        }
+       },
+       {
+        "fieldFilter": {
+         "field": {
+          "fieldPath": "__name__"
+         },
+         "op": "LESS_THAN",
+         "value": {
+          "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/top/parent/c1\u0000/__id-9223372036854775808__"
+         }
+        }
+       }
+      ]
+     }
+    },
+    "orderBy": [
+     {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "direction": "ASCENDING"
+     }
+    ],
+    "limit": {
+     "value": 5000
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "fields": []
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ]
+   }
+  },
+  "sdk-range-small-limit": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "select": {
+     "fields": [
+      {
+       "fieldPath": "__name__"
+      }
+     ]
+    },
+    "where": {
+     "compositeFilter": {
+      "op": "AND",
+      "filters": [
+       {
+        "fieldFilter": {
+         "field": {
+          "fieldPath": "__name__"
+         },
+         "op": "GREATER_THAN_OR_EQUAL",
+         "value": {
+          "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/top/__id-9223372036854775808__"
+         }
+        }
+       },
+       {
+        "fieldFilter": {
+         "field": {
+          "fieldPath": "__name__"
+         },
+         "op": "LESS_THAN",
+         "value": {
+          "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/top\u0000/__id-9223372036854775808__"
+         }
+        }
+       }
+      ]
+     }
+    },
+    "orderBy": [
+     {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "direction": "ASCENDING"
+     }
+    ],
+    "limit": {
+     "value": 2
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "top/other/c1/four",
+     "top/parent"
+    ],
+    "fields": []
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "top/other/c1/four",
+     "top/parent"
+    ]
+   }
+  },
+  "limit": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "limit": {
+     "value": 3
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rc/a",
+     "rd/__id5__",
+     "rd/A"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rc/a",
+     "rd/__id5__",
+     "rd/A"
+    ]
+   }
+  },
+  "limit-zero": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "limit": {
+     "value": 0
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [],
+    "fields": []
+   },
+   "rest": {
+    "status": 200,
+    "documents": []
+   }
+  },
+  "offset": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "offset": 2,
+    "limit": {
+     "value": 2
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rd/A",
+     "rd/a"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rd/A",
+     "rd/a"
+    ]
+   }
+  },
+  "start-after": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "orderBy": [
+     {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "direction": "ASCENDING"
+     }
+    ],
+    "startAt": {
+     "values": [
+      {
+       "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/rd/a/sub/x"
+      }
+     ],
+     "before": false
+    },
+    "limit": {
+     "value": 2
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rd/a/sub/x/deep/y",
+     "rd/ghost/sub/z"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rd/a/sub/x/deep/y",
+     "rd/ghost/sub/z"
+    ]
+   }
+  },
+  "start-at": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "orderBy": [
+     {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "direction": "ASCENDING"
+     }
+    ],
+    "startAt": {
+     "values": [
+      {
+       "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/rd/a/sub/x"
+      }
+     ],
+     "before": true
+    },
+    "limit": {
+     "value": 2
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rd/a/sub/x",
+     "rd/a/sub/x/deep/y"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rd/a/sub/x",
+     "rd/a/sub/x/deep/y"
+    ]
+   }
+  },
+  "end-before": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "orderBy": [
+     {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "direction": "ASCENDING"
+     }
+    ],
+    "endAt": {
+     "values": [
+      {
+       "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/rd/A"
+      }
+     ],
+     "before": true
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rc/a",
+     "rd/__id5__"
+    ]
+   }
+  },
+  "end-at": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "orderBy": [
+     {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "direction": "ASCENDING"
+     }
+    ],
+    "endAt": {
+     "values": [
+      {
+       "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/rd/A"
+      }
+     ],
+     "before": false
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rc/a",
+     "rd/__id5__",
+     "rd/A"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rc/a",
+     "rd/__id5__",
+     "rd/A"
+    ]
+   }
+  },
+  "name-equal": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "where": {
+     "fieldFilter": {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "op": "EQUAL",
+      "value": {
+       "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/rd/a/sub/x"
+      }
+     }
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rd/a/sub/x"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rd/a/sub/x"
+    ]
+   }
+  },
+  "name-equal-outside-parent": {
+   "parent": "top/parent",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "where": {
+     "fieldFilter": {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "op": "EQUAL",
+      "value": {
+       "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/rd/a"
+      }
+     }
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [],
+    "fields": []
+   },
+   "rest": {
+    "status": 200,
+    "documents": []
+   }
+  },
+  "name-in": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "where": {
+     "fieldFilter": {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "op": "IN",
+      "value": {
+       "arrayValue": {
+        "values": [
+         {
+          "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/rd/a"
+         },
+         {
+          "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/top/parent"
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rd/a",
+     "top/parent"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rd/a",
+     "top/parent"
+    ]
+   }
+  },
+  "name-not-equal": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "where": {
+     "fieldFilter": {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "op": "NOT_EQUAL",
+      "value": {
+       "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/rd/a"
+      }
+     }
+    },
+    "limit": {
+     "value": 2
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rc/a",
+     "rd/__id5__"
+    ]
+   }
+  },
+  "name-not-in": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "where": {
+     "fieldFilter": {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "op": "NOT_IN",
+      "value": {
+       "arrayValue": {
+        "values": [
+         {
+          "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/rc/a"
+         }
+        ]
+       }
+      }
+     }
+    },
+    "limit": {
+     "value": 2
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rd/__id5__",
+     "rd/A"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rd/__id5__",
+     "rd/A"
+    ]
+   }
+  },
+  "name-or": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "where": {
+     "compositeFilter": {
+      "op": "OR",
+      "filters": [
+       {
+        "fieldFilter": {
+         "field": {
+          "fieldPath": "__name__"
+         },
+         "op": "EQUAL",
+         "value": {
+          "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/rc/a"
+         }
+        }
+       },
+       {
+        "fieldFilter": {
+         "field": {
+          "fieldPath": "__name__"
+         },
+         "op": "EQUAL",
+         "value": {
+          "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/rd0/a"
+         }
+        }
+       }
+      ]
+     }
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rc/a",
+     "rd0/a"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rc/a",
+     "rd0/a"
+    ]
+   }
+  },
+  "name-greater-than": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "where": {
+     "fieldFilter": {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "op": "GREATER_THAN",
+      "value": {
+       "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/top/parent/c1/one"
+      }
+     }
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "top/parent/c1/one/c2/two",
+     "top/parent/c3/three"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "top/parent/c1/one/c2/two",
+     "top/parent/c3/three"
+    ]
+   }
+  },
+  "name-not-a-reference": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "where": {
+     "fieldFilter": {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "op": "GREATER_THAN",
+      "value": {
+       "stringValue": "rd"
+      }
+     }
+    }
+   },
+   "grpc": {
+    "code": 3,
+    "message": "__key__ filter value must be a Key"
+   },
+   "rest": {
+    "status": 400,
+    "message": "__key__ filter value must be a Key",
+    "errorStatus": "INVALID_ARGUMENT"
+   }
+  },
+  "name-descending": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "orderBy": [
+     {
+      "field": {
+       "fieldPath": "__name__"
+      },
+      "direction": "DESCENDING"
+     }
+    ],
+    "limit": {
+     "value": 3
+    }
+   },
+   "grpc": {
+    "code": 9,
+    "message": "Firestore does not support descending key scans"
+   },
+   "rest": {
+    "status": 400,
+    "message": "Firestore does not support descending key scans",
+    "errorStatus": "FAILED_PRECONDITION"
+   }
+  },
+  "field-equal": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "where": {
+     "fieldFilter": {
+      "field": {
+       "fieldPath": "n"
+      },
+      "op": "EQUAL",
+      "value": {
+       "integerValue": "1"
+      }
+     }
+    }
+   },
+   "grpc": {
+    "code": 3,
+    "message": "kind is required for filter: n"
+   },
+   "rest": {
+    "status": 400,
+    "message": "kind is required for filter: n",
+    "errorStatus": "INVALID_ARGUMENT"
+   }
+  },
+  "field-inequality": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "where": {
+     "fieldFilter": {
+      "field": {
+       "fieldPath": "n"
+      },
+      "op": "GREATER_THAN",
+      "value": {
+       "integerValue": "12"
+      }
+     }
+    }
+   },
+   "grpc": {
+    "code": 3,
+    "message": "kind is required for all orders except __key__ ascending"
+   },
+   "rest": {
+    "status": 400,
+    "message": "kind is required for all orders except __key__ ascending",
+    "errorStatus": "INVALID_ARGUMENT"
+   }
+  },
+  "field-unary": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "where": {
+     "unaryFilter": {
+      "field": {
+       "fieldPath": "missing"
+      },
+      "op": "IS_NULL"
+     }
+    }
+   },
+   "grpc": {
+    "code": 3,
+    "message": "kind is required for filter: missing"
+   },
+   "rest": {
+    "status": 400,
+    "message": "kind is required for filter: missing",
+    "errorStatus": "INVALID_ARGUMENT"
+   }
+  },
+  "field-order": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "orderBy": [
+     {
+      "field": {
+       "fieldPath": "n"
+      },
+      "direction": "ASCENDING"
+     }
+    ],
+    "limit": {
+     "value": 2
+    }
+   },
+   "grpc": {
+    "code": 3,
+    "message": "kind is required for all orders except __key__ ascending"
+   },
+   "rest": {
+    "status": 400,
+    "message": "kind is required for all orders except __key__ ascending",
+    "errorStatus": "INVALID_ARGUMENT"
+   }
+  },
+  "field-in-composite": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "where": {
+     "compositeFilter": {
+      "op": "AND",
+      "filters": [
+       {
+        "fieldFilter": {
+         "field": {
+          "fieldPath": "__name__"
+         },
+         "op": "GREATER_THAN",
+         "value": {
+          "referenceValue": "projects/demo-firenook-kindless/databases/(default)/documents/rd/a"
+         }
+        }
+       },
+       {
+        "fieldFilter": {
+         "field": {
+          "fieldPath": "n"
+         },
+         "op": "EQUAL",
+         "value": {
+          "integerValue": "1"
+         }
+        }
+       }
+      ]
+     }
+    }
+   },
+   "grpc": {
+    "code": 3,
+    "message": "kind is required for filter: n"
+   },
+   "rest": {
+    "status": 400,
+    "message": "kind is required for filter: n",
+    "errorStatus": "INVALID_ARGUMENT"
+   }
+  },
+  "select-field": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "select": {
+     "fields": [
+      {
+       "fieldPath": "n"
+      }
+     ]
+    },
+    "limit": {
+     "value": 1
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rc/a"
+    ],
+    "fields": [
+     "n"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rc/a"
+    ]
+   }
+  },
+  "nearest": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ],
+    "findNearest": {
+     "vectorField": {
+      "fieldPath": "v"
+     },
+     "queryVector": {
+      "mapValue": {
+       "fields": {
+        "__type__": {
+         "stringValue": "__vector__"
+        },
+        "value": {
+         "arrayValue": {
+          "values": [
+           {
+            "doubleValue": 1
+           }
+          ]
+         }
+        }
+       }
+      }
+     },
+     "distanceMeasure": "EUCLIDEAN",
+     "limit": {
+      "value": 1
+     }
+    }
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [],
+    "fields": []
+   },
+   "rest": {
+    "status": 200,
+    "documents": []
+   }
+  },
+  "empty-id-direct-children": {
+   "parent": "",
+   "structuredQuery": {
+    "from": [
+     {
+      "collectionId": "",
+      "allDescendants": false
+     }
+    ]
+   },
+   "grpc": {
+    "code": 0,
+    "documents": [
+     "rc/a",
+     "rd/__id5__",
+     "rd/A",
+     "rd/a",
+     "rd-sibling/a",
+     "rd0/a",
+     "top/parent"
+    ],
+    "fields": [
+     "n",
+     "nested",
+     "tag"
+    ]
+   },
+   "rest": {
+    "status": 200,
+    "documents": [
+     "rc/a",
+     "rd/__id5__",
+     "rd/A",
+     "rd/a",
+     "rd-sibling/a",
+     "rd0/a",
+     "top/parent"
+    ]
+   }
+  },
+  "parent-is-a-collection": {
+   "parent": "top",
+   "structuredQuery": {
+    "from": [
+     {
+      "allDescendants": true
+     }
+    ]
+   },
+   "grpc": {
+    "code": 3,
+    "message": "Document parent name \"projects/demo-firenook-kindless/databases/(default)/documents/top\" lacks \"/\" at index 65."
+   },
+   "rest": {
+    "status": 400,
+    "message": "Document parent name \"projects/demo-firenook-kindless/databases/(default)/documents/top\" lacks \"/\" at index 65.",
+    "errorStatus": "INVALID_ARGUMENT"
+   }
+  }
+ },
+ "aggregations": {
+  "count-root": {
+   "code": 0,
+   "documents": [],
+   "fields": [],
+   "aggregate": {
+    "c": {
+     "integerValue": "14",
+     "valueType": "integerValue"
+    }
+   }
+  },
+  "count-under-document": {
+   "code": 0,
+   "documents": [],
+   "fields": [],
+   "aggregate": {
+    "c": {
+     "integerValue": "3",
+     "valueType": "integerValue"
+    }
+   }
+  },
+  "count-sdk-range": {
+   "code": 0,
+   "documents": [],
+   "fields": [],
+   "aggregate": {
+    "c": {
+     "integerValue": "6",
+     "valueType": "integerValue"
+    }
+   }
+  },
+  "count-limit": {
+   "code": 0,
+   "documents": [],
+   "fields": [],
+   "aggregate": {
+    "c": {
+     "integerValue": "4",
+     "valueType": "integerValue"
+    }
+   }
+  },
+  "sum": {
+   "code": 3,
+   "message": "kind is required for all orders except __key__ ascending"
+  }
+ },
+ "listens": {
+  "root": {
+   "code": 0,
+   "documents": [
+    "rc/a",
+    "rd-sibling/a",
+    "rd/A",
+    "rd/__id5__",
+    "rd/a",
+    "rd/a/sub/x",
+    "rd/a/sub/x/deep/y",
+    "rd/ghost/sub/z",
+    "rd0/a",
+    "top/other/c1/four",
+    "top/parent",
+    "top/parent/c1/one",
+    "top/parent/c1/one/c2/two",
+    "top/parent/c3/three"
+   ],
+   "changes": []
+  },
+  "sdk-range": {
+   "code": 0,
+   "documents": [
+    "rd/A",
+    "rd/__id5__",
+    "rd/a",
+    "rd/a/sub/x",
+    "rd/a/sub/x/deep/y",
+    "rd/ghost/sub/z"
+   ],
+   "changes": []
+  },
+  "changes-under-document": {
+   "code": 0,
+   "documents": [
+    "top/parent/c1/one",
+    "top/parent/c1/one/c2/two",
+    "top/parent/c3/three"
+   ],
+   "changes": []
+  },
+  "control-collection": {
+   "code": 0,
+   "documents": [
+    "top/parent/c1/one"
+   ],
+   "changes": [
+    "changed top/parent/c1/added",
+    "changed top/parent/c1/added",
+    "changed top/parent/c1/one",
+    "changed top/parent/c1/one"
+   ]
+  }
+ },
+ "rules": {
+  "allow-all": {
+   "user": {
+    "root": 0,
+    "rootDocuments": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 0
+   },
+   "signed-out": {
+    "root": 0,
+    "rootDocuments": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 0
+   },
+   "owner": {
+    "root": 0,
+    "rootDocuments": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 0
+   }
+  },
+  "signed-in": {
+   "user": {
+    "root": 0,
+    "rootDocuments": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 0
+   },
+   "signed-out": {
+    "root": 7,
+    "rootDocuments": [],
+    "underDocument": 7,
+    "underDocumentDocuments": [],
+    "listen": 7
+   },
+   "owner": {
+    "root": 0,
+    "rootDocuments": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 0
+   }
+  },
+  "list-only": {
+   "user": {
+    "root": 0,
+    "rootDocuments": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 0
+   },
+   "signed-out": {
+    "root": 0,
+    "rootDocuments": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 0
+   },
+   "owner": {
+    "root": 0,
+    "rootDocuments": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 0
+   }
+  },
+  "get-only": {
+   "user": {
+    "root": 7,
+    "rootDocuments": [],
+    "underDocument": 7,
+    "underDocumentDocuments": [],
+    "listen": 7
+   },
+   "signed-out": {
+    "root": 7,
+    "rootDocuments": [],
+    "underDocument": 7,
+    "underDocumentDocuments": [],
+    "listen": 7
+   },
+   "owner": {
+    "root": 0,
+    "rootDocuments": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 0
+   }
+  },
+  "one-collection": {
+   "user": {
+    "root": 7,
+    "rootDocuments": [],
+    "underDocument": 7,
+    "underDocumentDocuments": [],
+    "listen": 7
+   },
+   "signed-out": {
+    "root": 7,
+    "rootDocuments": [],
+    "underDocument": 7,
+    "underDocumentDocuments": [],
+    "listen": 7
+   },
+   "owner": {
+    "root": 0,
+    "rootDocuments": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 0
+   }
+  },
+  "one-group": {
+   "user": {
+    "root": 7,
+    "rootDocuments": [],
+    "underDocument": 7,
+    "underDocumentDocuments": [],
+    "listen": 7
+   },
+   "signed-out": {
+    "root": 7,
+    "rootDocuments": [],
+    "underDocument": 7,
+    "underDocumentDocuments": [],
+    "listen": 7
+   },
+   "owner": {
+    "root": 0,
+    "rootDocuments": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 0
+   }
+  },
+  "one-subtree": {
+   "user": {
+    "root": 7,
+    "rootDocuments": [],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 7
+   },
+   "signed-out": {
+    "root": 7,
+    "rootDocuments": [],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 7
+   },
+   "owner": {
+    "root": 0,
+    "rootDocuments": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 0
+   }
+  },
+  "wildcard-subtree": {
+   "user": {
+    "root": 7,
+    "rootDocuments": [],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 7
+   },
+   "signed-out": {
+    "root": 7,
+    "rootDocuments": [],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 7
+   },
+   "owner": {
+    "root": 0,
+    "rootDocuments": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 0
+   }
+  },
+  "deny-all": {
+   "user": {
+    "root": 7,
+    "rootDocuments": [],
+    "underDocument": 7,
+    "underDocumentDocuments": [],
+    "listen": 7
+   },
+   "signed-out": {
+    "root": 7,
+    "rootDocuments": [],
+    "underDocument": 7,
+    "underDocumentDocuments": [],
+    "listen": 7
+   },
+   "owner": {
+    "root": 0,
+    "rootDocuments": [
+     "rc/a",
+     "rd/__id5__"
+    ],
+    "underDocument": 0,
+    "underDocumentDocuments": [
+     "top/parent/c1/one",
+     "top/parent/c1/one/c2/two"
+    ],
+    "listen": 0
+   }
+  }
+ },
+ "databases": {
+  "named": {
+   "code": 0,
+   "documents": [
+    "elsewhere/x",
+    "rd/only-in-tenant"
+   ],
+   "fields": [
+    "n"
+   ]
+  },
+  "default": [
+   "rc/a",
+   "rd/__id5__",
+   "rd/A",
+   "rd/a",
+   "rd/a/sub/x",
+   "rd/a/sub/x/deep/y",
+   "rd/ghost/sub/z",
+   "rd-sibling/a",
+   "rd0/a",
+   "top/other/c1/four",
+   "top/parent",
+   "top/parent/c1/one",
+   "top/parent/c1/one/c2/two",
+   "top/parent/c3/three"
+  ],
+  "afterRecursiveDelete": {
+   "named": {
+    "code": 0,
+    "documents": [
+     "elsewhere/x"
+    ],
+    "fields": [
+     "n"
+    ]
+   },
+   "default": [
+    "rc/a",
+    "rd/__id5__",
+    "rd/A",
+    "rd/a",
+    "rd/a/sub/x",
+    "rd/a/sub/x/deep/y",
+    "rd/ghost/sub/z",
+    "rd-sibling/a",
+    "rd0/a",
+    "top/other/c1/four",
+    "top/parent",
+    "top/parent/c1/one",
+    "top/parent/c1/one/c2/two",
+    "top/parent/c3/three"
+   ]
+  }
+ },
+ "sdk": {
+  "root-collection": {
+   "ok": true,
+   "left": [
+    "rc/a",
+    "rd-sibling/a",
+    "rd0/a",
+    "top/other/c1/four",
+    "top/parent",
+    "top/parent/c1/one",
+    "top/parent/c1/one/c2/two",
+    "top/parent/c3/three"
+   ]
+  },
+  "document": {
+   "ok": true,
+   "left": [
+    "rc/a",
+    "rd/__id5__",
+    "rd/A",
+    "rd/a",
+    "rd/a/sub/x",
+    "rd/a/sub/x/deep/y",
+    "rd/ghost/sub/z",
+    "rd-sibling/a",
+    "rd0/a",
+    "top/other/c1/four"
+   ]
+  },
+  "subcollection": {
+   "ok": true,
+   "left": [
+    "rc/a",
+    "rd/__id5__",
+    "rd/A",
+    "rd/a",
+    "rd/a/sub/x",
+    "rd/a/sub/x/deep/y",
+    "rd/ghost/sub/z",
+    "rd-sibling/a",
+    "rd0/a",
+    "top/other/c1/four",
+    "top/parent",
+    "top/parent/c3/three"
+   ]
+  },
+  "document-under-collection": {
+   "ok": true,
+   "left": [
+    "rc/a",
+    "rd/__id5__",
+    "rd/A",
+    "rd/ghost/sub/z",
+    "rd-sibling/a",
+    "rd0/a",
+    "top/other/c1/four",
+    "top/parent",
+    "top/parent/c1/one",
+    "top/parent/c1/one/c2/two",
+    "top/parent/c3/three"
+   ]
+  },
+  "missing-document-with-children": {
+   "ok": true,
+   "left": [
+    "rc/a",
+    "rd/__id5__",
+    "rd/A",
+    "rd/a",
+    "rd/a/sub/x",
+    "rd/a/sub/x/deep/y",
+    "rd-sibling/a",
+    "rd0/a",
+    "top/other/c1/four",
+    "top/parent",
+    "top/parent/c1/one",
+    "top/parent/c1/one/c2/two",
+    "top/parent/c3/three"
+   ]
+  },
+  "nothing-there": {
+   "ok": true,
+   "left": [
+    "rc/a",
+    "rd/__id5__",
+    "rd/A",
+    "rd/a",
+    "rd/a/sub/x",
+    "rd/a/sub/x/deep/y",
+    "rd/ghost/sub/z",
+    "rd-sibling/a",
+    "rd0/a",
+    "top/other/c1/four",
+    "top/parent",
+    "top/parent/c1/one",
+    "top/parent/c1/one/c2/two",
+    "top/parent/c3/three"
+   ]
+  },
+  "more-than-one-page": {
+   "ok": true,
+   "left": [
+    "rc/a",
+    "rd/__id5__",
+    "rd/A",
+    "rd/a",
+    "rd/a/sub/x",
+    "rd/a/sub/x/deep/y",
+    "rd/ghost/sub/z",
+    "rd-sibling/a",
+    "rd0/a",
+    "top/other/c1/four",
+    "top/parent",
+    "top/parent/c1/one",
+    "top/parent/c1/one/c2/two",
+    "top/parent/c3/three"
+   ]
+  },
+  "custom-writer": {
+   "ok": true,
+   "deleted": [
+    "top/parent/c1/one",
+    "top/parent/c1/one/c2/two"
+   ],
+   "left": [
+    "rc/a",
+    "rd/__id5__",
+    "rd/A",
+    "rd/a",
+    "rd/a/sub/x",
+    "rd/a/sub/x/deep/y",
+    "rd/ghost/sub/z",
+    "rd-sibling/a",
+    "rd0/a",
+    "top/other/c1/four",
+    "top/parent",
+    "top/parent/c3/three"
+   ]
+  }
+ },
+ "passed": true
+}

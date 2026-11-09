@@ -604,6 +604,13 @@ fn render_request(out: &mut Out, request: &EvaluationRequest) {
                 out.push(ancestor);
             }
         }
+        (Some(QueryScope::AllDescendants { ancestor }), RequestOperation::List) => {
+            out.push("all documents");
+            if let Some(ancestor) = ancestor {
+                out.push(" under ");
+                out.push(ancestor);
+            }
+        }
         _ => out.push(relative_path(&request.path)),
     }
     out.push(")");

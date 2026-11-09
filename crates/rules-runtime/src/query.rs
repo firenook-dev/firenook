@@ -39,6 +39,9 @@ pub fn query_policy(query: &Query) -> RulesQuery {
                 collection_id: collection_id.clone(),
                 ancestor: query.ancestor_ref().map(str::to_owned),
             },
+            QueryScope::AllDescendants => RulesScope::AllDescendants {
+                ancestor: query.ancestor_ref().map(str::to_owned),
+            },
         }),
     }
 }
@@ -55,6 +58,10 @@ pub fn query_candidate(database: &DatabaseName, query: &Query) -> Result<Documen
         QueryScope::CollectionGroup(collection) => query.ancestor_ref().map_or_else(
             || collection.clone(),
             |ancestor| format!("{ancestor}/{collection}"),
+        ),
+        QueryScope::AllDescendants => query.ancestor_ref().map_or_else(
+            || "rules-candidate".to_owned(),
+            |ancestor| format!("{ancestor}/rules-candidate"),
         ),
     };
     DocumentKey::new(database.clone(), format!("{collection}/rules-candidate"))

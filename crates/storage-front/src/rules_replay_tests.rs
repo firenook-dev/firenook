@@ -64,18 +64,6 @@ const DIVERGENCES: &[(&str, &str, u16, &str)] = &[
         "request-method-undefined: production defines request.method",
     ),
     (
-        "path-matching",
-        "root-recursive-list-one-segment-is-path",
-        200,
-        "list-prefix-template-matching: production indexes a one-segment recursive binding",
-    ),
-    (
-        "path-matching",
-        "list-exact-match-single-wildcard",
-        200,
-        "list-prefix-template-matching: production matches /la/{x} for a list on /la/q",
-    ),
-    (
         "bypass-json-api",
         "json-patch-anonymous",
         200,
@@ -404,6 +392,19 @@ async fn replays_every_recorded_emulator_program() {
                     .decode(body["base64"].as_str().expect("base64"))
                     .expect("body bytes")
             });
+            // This corpus is from firebase-tools 15.22, which ignored a one-shot
+            // upload's Content-Type. 15.34 reads it, as storage-native-clients-v1
+            // pins, so its one-shot uploads go without one here and what it
+            // recorded about everything else still holds.
+            if request["method"] == "POST"
+                && path.starts_with("/v0/")
+                && !headers.contains_key("x-goog-upload-protocol")
+                && !headers
+                    .get("content-type")
+                    .is_some_and(|value| value.starts_with("multipart/"))
+            {
+                headers.remove("content-type");
+            }
             let actual = send(
                 &runtime,
                 request["method"].as_str().expect("method"),

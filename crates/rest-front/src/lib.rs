@@ -28,8 +28,8 @@ use firenook_export_format::{ExportedDocument, write_export};
 use firenook_functions_bridge::TriggerRegistry;
 use firenook_query_engine::{
     Aggregation, DatabaseEdition, Direction, DistanceMeasure, FieldFilter, FieldOperator,
-    FieldPath as QueryFieldPath, Filter, Limit, Query as StructuredQuery, QueryPolicy, QueryScope,
-    aggregate, count, execute,
+    FieldPath as QueryFieldPath, Filter, Limit, Query as StructuredQuery, QueryError, QueryPolicy,
+    QueryScope, aggregate, count, execute, validate_aggregations,
 };
 use firenook_rules_runtime::RequestOperation;
 use firenook_rules_runtime::{Authorization, RulesRuntime, SnapshotAccess, evaluation_request};
@@ -174,6 +174,7 @@ pub fn router_with_shared_service(
     service: firenook_grpc_front::FirestoreService,
 ) -> Router {
     Router::new()
+        .route("/", get(root).fallback(project_operation))
         .route(
             DOCUMENT_ROUTE,
             get(get_document)
@@ -683,6 +684,13 @@ async fn post_eventarc_trigger(
     Ok(Json(body))
 }
 
+/// `GET /` answers `Ok`, as on the official emulator, with no content type:
+/// readiness checks ask it, such as the guard of an app's rules tests, which
+/// otherwise refuses to run.
+async fn root() -> Response {
+    Response::new(Body::from("Ok\n"))
+}
+
 /// The emulator's project operations, and the answer to every path the
 /// router does not know: a JSON `NOT_FOUND` whatever the request's body.
 async fn project_operation(
@@ -1180,9 +1188,9 @@ fn run_query_blocking(
         .map_err(|error| RestError::streaming_failed_precondition(error.to_string()))?;
     let snapshot = state.store.snapshot();
     let documents = execute(&snapshot, database, &query, state.query_policy.edition())
-        .map_err(|error| RestError::invalid(error.to_string()))?;
+        .map_err(|error| rest_query_error(&error))?;
     authorize_query(state, database, &query, authorization, &snapshot)?;
-    let read_time = format_timestamp(now_timestamp())?;
+    let read_time = format_timestamp(snapshot.read_time())?;
     let mut responses = documents
         .iter()
         .map(|document| {
@@ -1228,6 +1236,7 @@ fn run_aggregation_query_blocking(
         .validate(&query)
         .map_err(|error| RestError::streaming_failed_precondition(error.to_string()))?;
     let (operations, count_bounds) = decode_aggregations(aggregation_query)?;
+    validate_aggregations(&query, &operations).map_err(|error| rest_query_error(&error))?;
     let snapshot = state.store.snapshot();
     // A count needs no document payloads: it is answered from the lazy scan
     // (or the store's indexes) exactly as the gRPC service answers it. Every
@@ -1261,7 +1270,7 @@ fn run_aggregation_query_blocking(
     }
     Ok(Json(JsonValue::Array(vec![json!({
         "result": { "aggregateFields": encode_fields(&fields)? },
-        "readTime": format_timestamp(now_timestamp())?,
+        "readTime": format_timestamp(snapshot.read_time())?,
     })])))
 }
 
@@ -1328,6 +1337,43 @@ fn require_atomic_allowed(
             firenook_rules_runtime::EvaluationResult::denial_message,
         );
     Err(RestError::permission_denied(message))
+}
+
+/// What a collection selector asks for, and whether it reaches all descendants.
+/// Only an all-descendants selector may leave the collection out.
+fn decode_query_scope(
+    selector: &Map<String, JsonValue>,
+    parent: Option<&str>,
+) -> Result<(QueryScope, bool), RestError> {
+    let all_descendants = selector
+        .get("allDescendants")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false);
+    let collection = match selector.get("collectionId").and_then(JsonValue::as_str) {
+        Some(collection) => collection,
+        None if all_descendants => "",
+        None => return Err(RestError::invalid("collectionId is required")),
+    };
+    let scope = if all_descendants && collection.is_empty() {
+        Ok(QueryScope::AllDescendants)
+    } else if all_descendants {
+        QueryScope::collection_group(collection)
+    } else {
+        QueryScope::collection(parent.map_or_else(
+            || collection.to_owned(),
+            |parent| format!("{parent}/{collection}"),
+        ))
+    }
+    .map_err(|error| RestError::invalid(error.to_string()))?;
+    Ok((scope, all_descendants))
+}
+
+fn rest_query_error(error: &QueryError) -> RestError {
+    if error.is_failed_precondition() {
+        RestError::failed_precondition(error.to_string())
+    } else {
+        RestError::invalid(error.to_string())
+    }
 }
 
 fn decode_aggregations(
@@ -1451,23 +1497,7 @@ fn decode_query(
     let selector = selector
         .as_object()
         .ok_or_else(|| RestError::invalid("collection selector must be an object"))?;
-    let collection = selector
-        .get("collectionId")
-        .and_then(JsonValue::as_str)
-        .ok_or_else(|| RestError::invalid("collectionId is required"))?;
-    let all_descendants = selector
-        .get("allDescendants")
-        .and_then(JsonValue::as_bool)
-        .unwrap_or(false);
-    let scope = if all_descendants {
-        QueryScope::collection_group(collection)
-    } else {
-        QueryScope::collection(parent.map_or_else(
-            || collection.to_owned(),
-            |parent| format!("{parent}/{collection}"),
-        ))
-    }
-    .map_err(|error| RestError::invalid(error.to_string()))?;
+    let (scope, all_descendants) = decode_query_scope(selector, parent)?;
     let mut query = StructuredQuery::new(scope);
     if all_descendants && let Some(parent) = parent {
         query = query
@@ -2360,6 +2390,15 @@ impl RestError {
         }
     }
 
+    fn failed_precondition(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            code: "FAILED_PRECONDITION",
+            message: message.into(),
+            streaming: false,
+        }
+    }
+
     fn streaming_failed_precondition(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
@@ -2662,6 +2701,29 @@ mod tests {
                 .rules_for(&database)
                 .expect("previous rules retained")
         ));
+    }
+
+    /// The official emulator answers `GET /` with `Ok` and nothing else on
+    /// `/`; an app's rules-test guard asks it before running anything.
+    #[tokio::test]
+    async fn the_root_answers_ok_as_the_official_emulator_does() {
+        let application = router(Store::default());
+        let response = application
+            .clone()
+            .oneshot(Request::get("/").body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get(CONTENT_TYPE).is_none());
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .expect("body");
+        assert_eq!(&body[..], b"Ok\n");
+        let other = application
+            .oneshot(Request::post("/").body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        assert_eq!(other.status(), StatusCode::NOT_FOUND);
     }
 
     /// `@firebase/rules-unit-testing` sends its rules as a `fetch` string
