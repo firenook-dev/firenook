@@ -6,6 +6,12 @@ service cloud.firestore {
     match /users/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
+    match /tasks/{task} {
+      allow get, list: if 'owner' in resource.data && resource.data.owner == request.auth.uid;
+    }
+    match /memos/{memo} {
+      allow list: if !('secret' in resource.data);
+    }
     match /posts/{post} {
       allow read: if true;
       allow create: if request.auth != null && request.resource.data.author == request.auth.uid;

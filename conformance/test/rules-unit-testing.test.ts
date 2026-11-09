@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { after, before, beforeEach, test } from "node:test";
 import { assertFails, assertSucceeds, initializeTestEnvironment, type RulesTestEnvironment } from "@firebase/rules-unit-testing";
-import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, setDoc, updateDoc, where } from "firebase/firestore";
 import { deleteObject, getBytes, getMetadata, listAll, ref, uploadBytes } from "firebase/storage";
 
 const fixture = new URL("../fixtures/rules-unit-testing-v1/", import.meta.url);
@@ -59,6 +59,23 @@ test("a signed-out client is ruled, not treated as the owner", async () => {
   await assertSucceeds(getDoc(doc(signedOut, "posts/p1")));
   await assertSucceeds(getDocs(collection(signedOut, "posts")));
   await assertFails(getDocs(collection(signedOut, "users")));
+});
+
+test("a query's resource.data holds the fields its filters name", async () => {
+  await seed("tasks/t1", { owner: "alice" });
+  await seed("tasks/t2", { title: "Untitled" });
+  const alice = env.authenticatedContext("alice").firestore();
+  await assertSucceeds(getDoc(doc(alice, "tasks/t1")));
+  await assertFails(getDoc(doc(alice, "tasks/t2")));
+  await assertSucceeds(getDocs(query(collection(alice, "tasks"), where("owner", "==", "alice"))));
+  await assertSucceeds(getDocs(query(collection(alice, "tasks"), where("owner", "in", ["alice"]))));
+  await assertFails(getDocs(query(collection(alice, "tasks"), where("owner", "==", "bob"))));
+  // An order is not a filter.
+  await assertFails(getDocs(query(collection(alice, "tasks"), orderBy("owner"))));
+  // A field no filter names is absent, not unknown, so its negation allows.
+  await assertSucceeds(getDocs(collection(alice, "memos")));
+  await assertSucceeds(getDocs(query(collection(alice, "memos"), where("title", "==", "x"))));
+  await assertFails(getDocs(query(collection(alice, "memos"), where("secret", "!=", true))));
 });
 
 test("a post is written by its author and edited only by them", async () => {

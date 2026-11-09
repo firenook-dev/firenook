@@ -1189,6 +1189,18 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         let left_field = self.provenance.last.take();
         let right = self.eval_expr(right, environment, functions)?;
         let right_field = self.provenance.last.take();
+        // A query's document data holds the fields its filters name, as the
+        // official emulator answers, so `'f' in resource.data` is decided.
+        if let (BinaryOperator::In, EvalValue::Data(Value::String(key)), EvalValue::QueryData) =
+            (operator, &left, &right)
+        {
+            let predicates = self.query_branch.as_deref().unwrap_or_default();
+            return Ok(EvalValue::data(
+                predicates
+                    .iter()
+                    .any(|predicate| predicate.field.first() == Some(key)),
+            ));
+        }
         if self.provenance.explains
             && self.query_branch.is_some()
             && let Some((field, operator_needed, value)) =
