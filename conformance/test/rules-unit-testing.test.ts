@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { after, before, beforeEach, test } from "node:test";
 import { assertFails, assertSucceeds, initializeTestEnvironment, type RulesTestEnvironment } from "@firebase/rules-unit-testing";
-import { collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, deleteDoc, doc, documentId, getDoc, getDocs, orderBy, query, setDoc, updateDoc, where } from "firebase/firestore";
 import { deleteObject, getBytes, getMetadata, listAll, ref, uploadBytes } from "firebase/storage";
 
 const fixture = new URL("../fixtures/rules-unit-testing-v1/", import.meta.url);
@@ -140,6 +140,48 @@ test("the conditional operator takes one branch, groups to the right and binds l
   // A condition that is not a boolean is an error.
   await assertFails(deleteDoc(doc(alice, "notes/odd")));
   await assertSucceeds(deleteDoc(doc(alice, "notes/open")));
+});
+
+test("a string is measured and sliced by UTF-16 code unit, and only its ASCII letters change case", async () => {
+  const words: Record<string, Record<string, unknown>> = {
+    ascii: { text: "abc", units: 3, from: 1, to: 3, part: "bc", upper: "ABC" },
+    emoji: { text: "é🔥x", units: 4, from: 1, to: 3, part: "🔥", upper: "é🔥X" },
+    empty: { text: "abc", units: 3, from: 1, to: 1, part: "", upper: "ABC" },
+    codepoints: { text: "é🔥x", units: 3, from: 1, to: 2, part: "🔥", upper: "é🔥X" },
+    unicodeCase: { text: "é🔥x", units: 4, from: 1, to: 3, part: "🔥", upper: "É🔥X" },
+    // A slice must start at an element and end after one: [0:0] is an error.
+    endAtZero: { text: "abc", units: 3, from: 0, to: 0, part: "", upper: "ABC" },
+  };
+  for (const [id, data] of Object.entries(words)) await seed(`words/${id}`, data);
+  const alice = env.authenticatedContext("alice").firestore();
+  for (const id of ["ascii", "emoji", "empty"]) await assertSucceeds(getDoc(doc(alice, `words/${id}`)));
+  for (const id of ["codepoints", "unicodeCase", "endAtZero"]) await assertFails(getDoc(doc(alice, `words/${id}`)));
+});
+
+test("a query that names its documents by id is decided on those documents as they are", async () => {
+  await seed("cards/mine", { owner: "alice" });
+  await seed("cards/bobs", { owner: "bob" });
+  await seed("slots/taken", { x: 1 });
+  const alice = env.authenticatedContext("alice").firestore();
+  const cards = collection(alice, "cards");
+  await assertSucceeds(getDocs(query(cards, where(documentId(), "==", "mine"))));
+  await assertFails(getDocs(query(cards, where(documentId(), "==", "bobs"))));
+  // A missing document has a null resource: no owner, so denied.
+  await assertFails(getDocs(query(cards, where("owner", "==", "alice"), where(documentId(), "==", "missing"))));
+  await assertFails(getDocs(query(cards, where("owner", "==", "alice"), where(documentId(), "in", ["mine", "missing"]))));
+  // The other filters do not decide it: the named document does.
+  await assertSucceeds(getDocs(query(cards, where("owner", "==", "bob"), where(documentId(), "==", "mine"))));
+  const slots = collection(alice, "slots");
+  await assertSucceeds(getDocs(query(slots, where(documentId(), "==", "empty"))));
+  await assertFails(getDocs(query(slots, where(documentId(), "==", "taken"))));
+});
+
+test("'k' in a map inside a query's data follows the filters below it", async () => {
+  await seed("teams/t1", { roles: { lead: { uid: "alice" }, staff: 2 } });
+  const teams = collection(env.authenticatedContext("alice").firestore(), "teams");
+  await assertSucceeds(getDocs(query(teams, where("roles.lead.uid", "==", "alice"))));
+  await assertFails(getDocs(query(teams, where("roles.staff", "==", 2))));
+  await assertFails(getDocs(teams));
 });
 
 test("clearFirestore empties the database", async () => {

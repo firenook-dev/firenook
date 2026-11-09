@@ -35,6 +35,20 @@ service cloud.firestore {
       allow read: if owns(resource.data);
       allow create: if signedIn() && titled(request.resource.data);
     }
+    match /words/{word} {
+      allow get: if resource.data.text.size() == resource.data.units
+        && resource.data.text[resource.data.from:resource.data.to] == resource.data.part
+        && resource.data.text.upper() == resource.data.upper;
+    }
+    match /cards/{card} {
+      allow list: if resource.data.owner == request.auth.uid;
+    }
+    match /slots/{slot} {
+      allow list: if resource == null;
+    }
+    match /teams/{team} {
+      allow list: if 'lead' in resource.data.roles;
+    }
   }
 }
 function titled(data) { return data.title is string; }

@@ -179,7 +179,37 @@ fn evaluate_with_state<A: DocumentAccess + ?Sized>(
     } else {
         vec![None]
     };
-    for branch in branches {
+    'branches: for branch in branches {
+        // A branch that names its documents by id is decided on each of
+        // them as it stands, as the official emulator does: every one must
+        // be allowed, a missing one with a null `resource`.
+        if let Some(paths) = branch.as_deref().and_then(pinned_paths) {
+            evaluator.query_branch = None;
+            for path in paths {
+                evaluator.allowed = false;
+                let resource = match access.get(&path) {
+                    Ok(resource) => resource,
+                    Err(error) => {
+                        evaluator.record_error(RuntimeError::new(format!(
+                            "document access failed: {error}"
+                        )));
+                        break 'branches;
+                    }
+                };
+                evaluator.pinned = Some(PinnedDocument { path, resource });
+                for block in &program.matches {
+                    evaluator.walk(block, &[], &functions);
+                    if evaluator.allowed {
+                        break;
+                    }
+                }
+                evaluator.pinned = None;
+                if !evaluator.allowed {
+                    break 'branches;
+                }
+            }
+            continue;
+        }
         evaluator.allowed = false;
         evaluator.query_branch = branch;
         for block in &program.matches {
@@ -301,9 +331,51 @@ struct Evaluator<'a, 'observer, A: DocumentAccess + ?Sized> {
     refused_by: Vec<RefusingAllow>,
     call_depth: usize,
     query_branch: Option<Vec<crate::FieldConstraint>>,
+    /// A document a list query's branch names by its id: the rules run on
+    /// it as it is, by its path, instead of proving the branch's filters.
+    pinned: Option<PinnedDocument>,
     trace: Option<&'a mut EvaluationTrace>,
     observer: Option<&'a mut (dyn CoverageObserver + 'observer)>,
     provenance: QueryProvenance,
+}
+
+/// One document a list query names by its id (`documentId() ==`, or one value
+/// of `in`), as it stands: the official emulator decides such a branch on the
+/// document itself, null when it is missing, and not on the other filters.
+struct PinnedDocument {
+    path: String,
+    resource: Option<Resource>,
+}
+
+/// Whether a value read from a query's document data is a map: the data
+/// itself, or a field a filter names a field inside.
+fn is_query_map(value: &EvalValue) -> bool {
+    match value {
+        EvalValue::QueryData => true,
+        EvalValue::Constraint(constraint) => constraint.predicates.iter().any(|predicate| {
+            predicate.field.len() > constraint.field.len()
+                && predicate.field.starts_with(&constraint.field)
+        }),
+        _ => false,
+    }
+}
+
+/// The documents a query branch names by id, by their rules paths, or `None`
+/// when the branch names none and is proved from its filters as usual.
+fn pinned_paths(branch: &[FieldConstraint]) -> Option<Vec<String>> {
+    let paths = branch
+        .iter()
+        .filter(|constraint| {
+            constraint.operator == crate::ConstraintOperator::Equal
+                && constraint.field.len() == 1
+                && constraint.field[0] == "__name__"
+        })
+        .filter_map(|constraint| match &constraint.value {
+            Value::Path(name) => Some(rules_document_name(name.clone())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    (!paths.is_empty()).then_some(paths)
 }
 
 /// Which document field a list-query proof value was read from, kept only
@@ -366,9 +438,35 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             refused_by: Vec::new(),
             call_depth: 0,
             query_branch: None,
+            pinned: None,
             trace,
             observer,
             provenance,
+        }
+    }
+
+    /// What `resource` is in this evaluation: a query proof's symbolic
+    /// document, a Storage object, a document a query names by id, or the
+    /// request's document; null when there is none.
+    fn resource_value(&self) -> EvalValue {
+        let document = |resource: &Option<Resource>| {
+            resource
+                .clone()
+                .map_or(EvalValue::Data(Value::Null), EvalValue::Resource)
+        };
+        if self.query_branch.is_some() {
+            EvalValue::QueryResource
+        } else if self.request.service == RulesService::FirebaseStorage {
+            self.request
+                .storage_resource
+                .as_ref()
+                .map_or(EvalValue::Data(Value::Null), |object| {
+                    EvalValue::Data(object.to_value())
+                })
+        } else if let Some(pinned) = &self.pinned {
+            document(&pinned.resource)
+        } else {
+            document(&self.request.resource)
         }
     }
 
@@ -399,7 +497,11 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         } else if self.request.storage_lists_folder {
             query_constraints::child_bindings(&pattern, &self.request.path)
         } else {
-            match_pattern(&pattern, &self.request.path).map(|bindings| {
+            let path = self
+                .pinned
+                .as_ref()
+                .map_or(&self.request.path, |pinned| &pinned.path);
+            match_pattern(&pattern, path).map(|bindings| {
                 bindings
                     .into_iter()
                     .map(|(name, value)| (name, EvalValue::Data(value)))
@@ -408,24 +510,7 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         };
         if let Some(mut environment) = bindings {
             environment.insert("request".to_owned(), EvalValue::Request);
-            environment.insert(
-                "resource".to_owned(),
-                if self.query_branch.is_some() {
-                    EvalValue::QueryResource
-                } else if self.request.service == RulesService::FirebaseStorage {
-                    self.request
-                        .storage_resource
-                        .as_ref()
-                        .map_or(EvalValue::Data(Value::Null), |object| {
-                            EvalValue::Data(object.to_value())
-                        })
-                } else {
-                    self.request
-                        .resource
-                        .clone()
-                        .map_or(EvalValue::Data(Value::Null), EvalValue::Resource)
-                },
-            );
+            environment.insert("resource".to_owned(), self.resource_value());
             for allow in &block.allows {
                 if !allow
                     .operations
@@ -737,23 +822,31 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         let EvalValue::Data(Value::String(key)) = key else {
             return Ok(EvalValue::Unknown);
         };
-        let constrained = {
-            let (mut field, predicates) = match &receiver {
-                EvalValue::Constraint(constraint) => {
-                    (constraint.field.clone(), constraint.predicates.as_slice())
-                }
-                _ => (Vec::new(), self.query_branch.as_deref().unwrap_or_default()),
-            };
-            field.push(key.clone());
-            predicates
-                .iter()
-                .any(|predicate| predicate.field.starts_with(&field))
-        };
-        if constrained {
+        if self.query_names(&receiver, &key).unwrap_or(false) {
             self.field(receiver, &key)
         } else {
             Ok(EvalValue::Data(default.into_data()?))
         }
+    }
+
+    /// Whether the query's branch names `key` in `receiver`, a query's
+    /// document data or a map inside it: a filter on that field or on one
+    /// inside it, as the official emulator decides `get(key, default)` and
+    /// `key in`. `None` for any other receiver.
+    fn query_names(&self, receiver: &EvalValue, key: &str) -> Option<bool> {
+        let (mut field, predicates) = match receiver {
+            EvalValue::Constraint(constraint) => {
+                (constraint.field.clone(), constraint.predicates.as_slice())
+            }
+            EvalValue::QueryData => (Vec::new(), self.query_branch.as_deref().unwrap_or_default()),
+            _ => return None,
+        };
+        field.push(key.to_owned());
+        Some(
+            predicates
+                .iter()
+                .any(|predicate| predicate.field.starts_with(&field)),
+        )
     }
 
     fn field(&mut self, base: EvalValue, name: &str) -> Result<EvalValue, RuntimeError> {
@@ -1189,17 +1282,17 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         let left_field = self.provenance.last.take();
         let right = self.eval_expr(right, environment, functions)?;
         let right_field = self.provenance.last.take();
-        // A query's document data holds the fields its filters name, as the
-        // official emulator answers, so `'f' in resource.data` is decided.
-        if let (BinaryOperator::In, EvalValue::Data(Value::String(key)), EvalValue::QueryData) =
-            (operator, &left, &right)
+        // A query's document data, and each map inside it, holds the fields
+        // its filters name, as the official emulator answers, so
+        // `'f' in resource.data` and `'g' in resource.data.f` are decided. A
+        // field is a map when a filter names one inside it; a filter on the
+        // field itself, such as `array-contains`, leaves `in` to the proof.
+        if operator == BinaryOperator::In
+            && let EvalValue::Data(Value::String(key)) = &left
+            && is_query_map(&right)
+            && let Some(named) = self.query_names(&right, key)
         {
-            let predicates = self.query_branch.as_deref().unwrap_or_default();
-            return Ok(EvalValue::data(
-                predicates
-                    .iter()
-                    .any(|predicate| predicate.field.first() == Some(key)),
-            ));
+            return Ok(EvalValue::data(named));
         }
         if self.provenance.explains
             && self.query_branch.is_some()
@@ -1953,6 +2046,28 @@ fn index_value(base: EvalValue, index: EvalValue) -> Result<EvalValue, RuntimeEr
     }
 }
 
+/// The range a list or string slice `[start:end]` takes, as the official
+/// emulator checks it: `start` must be an element's index and `end` one past
+/// an element's, so `0 <= start < size`, `1 <= end <= size` and
+/// `start <= end`. An empty value has no slice at all.
+fn slice_range(
+    start: Option<EvalValue>,
+    end: Option<EvalValue>,
+    size: usize,
+) -> Result<std::ops::Range<usize>, RuntimeError> {
+    let start = start.map(data_integer).transpose()?.unwrap_or(0);
+    let end = end
+        .map(data_integer)
+        .transpose()?
+        .unwrap_or(i64::try_from(size).unwrap_or(i64::MAX));
+    let start = usize::try_from(start).map_err(|_| RuntimeError::new("slice start is negative"))?;
+    let end = usize::try_from(end).map_err(|_| RuntimeError::new("slice end is negative"))?;
+    if start >= size || end == 0 || end > size || start > end {
+        return Err(RuntimeError::new("slice is outside the available range"));
+    }
+    Ok(start..end)
+}
+
 fn slice_value(
     base: EvalValue,
     start: Option<EvalValue>,
@@ -1960,6 +2075,13 @@ fn slice_value(
 ) -> Result<EvalValue, RuntimeError> {
     let values = match base {
         EvalValue::Data(Value::List(values)) => values,
+        EvalValue::Data(Value::String(value)) => {
+            let units = value.encode_utf16().collect::<Vec<_>>();
+            let range = slice_range(start, end, units.len())?;
+            // A slice that splits a surrogate pair keeps U+FFFD in its place,
+            // as the index does: a Rust string cannot hold half a pair.
+            return Ok(EvalValue::data(String::from_utf16_lossy(&units[range])));
+        }
         EvalValue::Data(Value::Path(path)) => {
             let segments = path_segments(&path);
             let start = start.map(data_integer).transpose()?.unwrap_or(0);
@@ -1979,19 +2101,14 @@ fn slice_value(
                 segments[start..end].join("/")
             ))));
         }
-        _ => return Err(RuntimeError::new("only lists and paths can be sliced")),
+        _ => {
+            return Err(RuntimeError::new(
+                "only lists, strings and paths can be sliced",
+            ));
+        }
     };
-    let start = start.map(data_integer).transpose()?.unwrap_or(0);
-    let end = end
-        .map(data_integer)
-        .transpose()?
-        .unwrap_or(i64::try_from(values.len()).unwrap_or(i64::MAX));
-    let start = usize::try_from(start).map_err(|_| RuntimeError::new("slice start is negative"))?;
-    let end = usize::try_from(end).map_err(|_| RuntimeError::new("slice end is negative"))?;
-    if start > end || end > values.len() {
-        return Err(RuntimeError::new("slice is outside the available range"));
-    }
-    Ok(EvalValue::Data(Value::List(values[start..end].to_vec())))
+    let range = slice_range(start, end, values.len())?;
+    Ok(EvalValue::Data(Value::List(values[range].to_vec())))
 }
 
 fn call_method(
@@ -2052,19 +2169,23 @@ fn string_method(
     arguments: Vec<EvalValue>,
 ) -> Result<EvalValue, RuntimeError> {
     match name {
+        // A string is measured, indexed and sliced by UTF-16 code unit, as on
+        // the official emulator: "🔥".size() is 2.
         "size" => {
             no_arguments(name, arguments)?;
             Ok(EvalValue::Data(Value::Integer(
-                i64::try_from(value.chars().count()).unwrap_or(i64::MAX),
+                i64::try_from(value.encode_utf16().count()).unwrap_or(i64::MAX),
             )))
         }
+        // The official emulator changes the case of ASCII letters only:
+        // "é🔥x".upper() is "é🔥X", and "ß" and Greek stay as they are.
         "lower" => {
             no_arguments(name, arguments)?;
-            Ok(EvalValue::data(value.to_lowercase()))
+            Ok(EvalValue::data(value.to_ascii_lowercase()))
         }
         "upper" => {
             no_arguments(name, arguments)?;
-            Ok(EvalValue::data(value.to_uppercase()))
+            Ok(EvalValue::data(value.to_ascii_uppercase()))
         }
         "trim" => {
             no_arguments(name, arguments)?;
