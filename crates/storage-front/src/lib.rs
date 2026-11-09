@@ -1258,7 +1258,7 @@ async fn v0_list(
             console: via_console(&headers),
         },
     )?;
-    let delimiter = query.get("delimiter").map(String::as_str);
+    let delimiter = listing_delimiter(&query);
     let page_token = query.get("pageToken").map(String::as_str);
     let maximum = query
         .get("maxResults")
@@ -1648,7 +1648,7 @@ async fn gcs_list(
     let origin = request_origin(&headers, &state.config.origin);
     let query = query_fields(query.as_deref());
     let prefix = query.get("prefix").map_or("", String::as_str);
-    let delimiter = query.get("delimiter").map(String::as_str);
+    let delimiter = listing_delimiter(&query);
     let page_token = query.get("pageToken").map(String::as_str);
     let maximum = query
         .get("maxResults")
@@ -2909,6 +2909,15 @@ fn content_type(headers: &HeaderMap) -> &str {
         .unwrap_or("application/octet-stream")
 }
 
+/// A listing's `delimiter`. An empty one is none, as Cloud Storage and the
+/// official emulator read `delimiter=`: every object under the prefix.
+fn listing_delimiter(query: &BTreeMap<String, String>) -> Option<&str> {
+    query
+        .get("delimiter")
+        .map(String::as_str)
+        .filter(|delimiter| !delimiter.is_empty())
+}
+
 fn query_fields(query: Option<&str>) -> BTreeMap<String, String> {
     query.map_or_else(BTreeMap::new, |query| {
         url::form_urlencoded::parse(query.as_bytes())
@@ -3483,6 +3492,83 @@ mod tests {
 
         runtime.shutdown().await.expect("shutdown");
         std::fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    /// An empty `delimiter=` lists as no delimiter on both listing APIs, as
+    /// the official emulator lists it (firebase-tools 15.34.0).
+    #[tokio::test]
+    async fn an_empty_delimiter_lists_every_object_under_the_prefix() {
+        let (runtime, _dispatches, root) = runtime("empty-delimiter", None).await;
+        for name in ["probe%2Fa.md", "probe%2Fnested%2Fb.md", "top.txt"] {
+            let response = runtime
+                .application()
+                .oneshot(request(
+                    Method::POST,
+                    &format!(
+                        "/upload/storage/v1/b/{DEFAULT_BUCKET}/o?uploadType=media&name={name}"
+                    ),
+                    Body::from("x"),
+                ))
+                .await
+                .expect("upload");
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+        let list = |uri: String| {
+            let application = runtime.application();
+            async move {
+                let response = application
+                    .oneshot(request(Method::GET, &uri, Body::empty()))
+                    .await
+                    .expect("list");
+                assert_eq!(response.status(), StatusCode::OK, "{uri}");
+                let body: JsonValue = serde_json::from_slice(
+                    &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
+                )
+                .expect("listing JSON");
+                let names = |key: &str, field: Option<&str>| {
+                    body[key]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|entry| {
+                            field
+                                .map_or(entry, |field| &entry[field])
+                                .as_str()
+                                .unwrap()
+                                .to_owned()
+                        })
+                        .collect::<Vec<_>>()
+                };
+                (names("items", Some("name")), names("prefixes", None))
+            }
+        };
+        for api in [
+            format!("/storage/v1/b/{DEFAULT_BUCKET}/o"),
+            format!("/v0/b/{DEFAULT_BUCKET}/o"),
+        ] {
+            let under = vec!["probe/a.md".to_owned(), "probe/nested/b.md".to_owned()];
+            assert_eq!(
+                list(format!("{api}?prefix=probe%2F&delimiter=")).await,
+                (under.clone(), vec![])
+            );
+            assert_eq!(
+                list(format!("{api}?prefix=probe%2F")).await,
+                (under, vec![])
+            );
+            assert_eq!(
+                list(format!("{api}?delimiter=")).await.0,
+                ["probe/a.md", "probe/nested/b.md", "top.txt"]
+            );
+            assert_eq!(
+                list(format!("{api}?prefix=probe%2F&delimiter=%2F")).await,
+                (
+                    vec!["probe/a.md".to_owned()],
+                    vec!["probe/nested/".to_owned()]
+                )
+            );
+        }
+        runtime.shutdown().await.expect("clean stop");
+        std::fs::remove_dir_all(root).expect("remove owned test state");
     }
 
     #[tokio::test]
