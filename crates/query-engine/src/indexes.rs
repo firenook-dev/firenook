@@ -32,14 +32,14 @@ pub enum IndexMode {
 }
 
 /// One field in a missing index requirement.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IndexRequirementField {
     pub field_path: String,
     pub mode: IndexMode,
 }
 
 /// A production-style index requirement derived from a structured query.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IndexRequirement {
     pub collection_group: String,
     pub query_scope: IndexScope,
@@ -66,6 +66,78 @@ impl IndexRequirement {
             },
             "fields": self.fields.iter().map(IndexRequirementField::config_entry).collect::<Vec<_>>(),
         })
+    }
+
+    /// Where this belongs in `firestore.indexes.json`, and the entry to add:
+    /// a composite index under `indexes`, or, for one field, a field override
+    /// under `fieldOverrides`. An override replaces the field's automatic
+    /// indexes, so the entry keeps them beside the one required.
+    #[must_use]
+    pub fn declaration(&self) -> (&'static str, serde_json::Value) {
+        let [field] = self.fields.as_slice() else {
+            return ("indexes", self.config_entry());
+        };
+        let index = |scope: IndexScope, mode: IndexMode| {
+            let mut entry = field_mode_entry(mode);
+            entry["queryScope"] = serde_json::json!(match scope {
+                IndexScope::Collection => "COLLECTION",
+                IndexScope::CollectionGroup => "COLLECTION_GROUP",
+            });
+            entry
+        };
+        let mut indexes = [
+            IndexMode::Ordered(IndexDirection::Ascending),
+            IndexMode::Ordered(IndexDirection::Descending),
+            IndexMode::ArrayContains,
+        ]
+        .map(|mode| index(IndexScope::Collection, mode))
+        .to_vec();
+        let required = index(self.query_scope, field.mode);
+        if !indexes.contains(&required) {
+            indexes.push(required);
+        }
+        (
+            "fieldOverrides",
+            serde_json::json!({
+                "collectionGroup": self.collection_group,
+                "fieldPath": field.field_path,
+                "indexes": indexes,
+            }),
+        )
+    }
+
+    /// What a developer is told of a query that needs this index: what is
+    /// missing, and the entry to copy into `firestore.indexes.json`.
+    #[must_use]
+    pub fn missing_message(&self) -> String {
+        let (list, entry) = self.declaration();
+        let entry = serde_json::to_string_pretty(&entry).unwrap_or_else(|_| entry.to_string());
+        let (kind, scope) = match (self.is_composite(), self.query_scope) {
+            (true, _) => ("a composite index", ""),
+            (false, IndexScope::CollectionGroup) => {
+                ("a single-field index", " for collection group queries")
+            }
+            (false, IndexScope::Collection) => ("a single-field index", ""),
+        };
+        format!(
+            "The query requires {kind} on \"{}\"{scope} that firestore.indexes.json does not declare. Add to its \"{list}\":\n{entry}",
+            self.collection_group
+        )
+    }
+}
+
+/// A field's index mode as `firestore.indexes.json` spells it, without the
+/// field path.
+fn field_mode_entry(mode: IndexMode) -> serde_json::Value {
+    match mode {
+        IndexMode::Ordered(IndexDirection::Ascending) => serde_json::json!({"order": "ASCENDING"}),
+        IndexMode::Ordered(IndexDirection::Descending) => {
+            serde_json::json!({"order": "DESCENDING"})
+        }
+        IndexMode::ArrayContains => serde_json::json!({"arrayConfig": "CONTAINS"}),
+        IndexMode::Vector(dimension) => {
+            serde_json::json!({"vectorConfig": {"dimension": dimension, "flat": {}}})
+        }
     }
 }
 
@@ -141,11 +213,11 @@ impl IndexCatalog {
             return Ok(());
         }
 
-        if let Some(requirement) = manual_requirement(&collection_group, scope, &usages) {
-            if self.indexes.iter().any(|index| index == &requirement) {
+        if let Some(need) = composite_need(&collection_group, scope, &usages, query) {
+            if self.serves(&need) {
                 return Ok(());
             }
-            return Err(IndexConfigError::Missing(requirement));
+            return Err(IndexConfigError::Missing(need.requirement));
         }
 
         for usage in usages.values() {
@@ -185,6 +257,54 @@ impl IndexCatalog {
             declared: self.validate(query).is_ok(),
             requirement,
         })
+    }
+
+    /// Whether the declared indexes serve a query that needs a composite
+    /// one, by the rules Firestore documents
+    /// (firebase.google.com/docs/firestore/query-data/index-overview):
+    ///
+    /// - One index serves it when it holds the query's equality and
+    ///   array-contains fields first, in any order and, for an equality,
+    ///   either direction, then exactly the query's ordering, direction for
+    ///   direction (a reversed index is another index).
+    /// - Several indexes serve a query of equalities and an `orderBy` alone
+    ///   ("index merging"), when each ends with exactly that ordering and
+    ///   between them they hold every equality field. A range or inequality
+    ///   filter needs the one index.
+    fn serves(&self, need: &CompositeNeed) -> bool {
+        let (prefix, ordering) = need.requirement.fields.split_at(need.prefix);
+        let candidates = self
+            .indexes
+            .iter()
+            .filter(|index| {
+                index.collection_group == need.requirement.collection_group
+                    && index.query_scope == need.requirement.query_scope
+            })
+            .filter_map(|index| {
+                let lead = index.fields.len().checked_sub(ordering.len())?;
+                (index.fields[lead..] == *ordering).then(|| &index.fields[..lead])
+            });
+        let mut covered = BTreeSet::new();
+        for lead in candidates {
+            let fields = lead
+                .iter()
+                .map(|field| {
+                    prefix
+                        .iter()
+                        .position(|wanted| prefix_field_matches(wanted, field))
+                })
+                .collect::<Option<BTreeSet<_>>>();
+            let Some(fields) = fields.filter(|fields| fields.len() == lead.len()) else {
+                continue;
+            };
+            if fields.len() == prefix.len() {
+                return true;
+            }
+            if need.mergeable {
+                covered.extend(fields);
+            }
+        }
+        need.mergeable && covered.len() == prefix.len()
     }
 
     fn single_field_available(
@@ -324,17 +444,47 @@ fn collect_filter_usages(filter: &Filter, usages: &mut BTreeMap<String, FieldUsa
     }
 }
 
-fn manual_requirement(
+/// The composite index a query needs: the one to declare, how many of its
+/// leading fields are equality or array-contains fields, which an index may
+/// hold in any order, and whether merged indexes may serve it.
+struct CompositeNeed {
+    requirement: IndexRequirement,
+    prefix: usize,
+    mergeable: bool,
+}
+
+/// Whether a declared index field serves a query's equality or
+/// array-contains field: the same field, ordered either way for an equality
+/// ("you can use an ascending or descending index mode"), or array-contains.
+fn prefix_field_matches(wanted: &IndexRequirementField, declared: &IndexRequirementField) -> bool {
+    wanted.field_path == declared.field_path
+        && match (wanted.mode, declared.mode) {
+            (IndexMode::Ordered(_), IndexMode::Ordered(_)) => true,
+            (wanted, declared) => wanted == declared,
+        }
+}
+
+/// The composite index `query` needs, or `None` when single-field indexes
+/// serve it. Its fields are the array-contains and equality fields, then the
+/// query's ordering as Firestore normalizes it: the `orderBy` fields, then
+/// each other inequality field in field-path order, in the direction of the
+/// last `orderBy` (ascending without one), then a vector field.
+fn composite_need(
     collection_group: &str,
     scope: IndexScope,
     usages: &BTreeMap<String, FieldUsage>,
-) -> Option<IndexRequirement> {
+    query: &Query,
+) -> Option<CompositeNeed> {
     let vector = usages.values().find_map(|usage| {
         usage.special_modes.iter().find_map(|mode| match mode {
             IndexMode::Vector(dimension) => Some((usage, *dimension)),
             IndexMode::Ordered(_) | IndexMode::ArrayContains => None,
         })
     });
+    let contains = usages
+        .values()
+        .filter(|usage| usage.special_modes.contains(&IndexMode::ArrayContains))
+        .collect::<Vec<_>>();
     let equality = usages
         .values()
         .filter(|usage| usage.equality && !usage.inequality && usage.order.is_none())
@@ -343,37 +493,33 @@ fn manual_requirement(
         .values()
         .filter(|usage| usage.inequality || usage.order.is_some())
         .collect::<Vec<_>>();
+    let constrained = !equality.is_empty() || !contains.is_empty();
     let requires_manual = vector.is_some()
         || range_or_order.len() > 1
-        || (!equality.is_empty() && range_or_order.iter().any(|usage| !usage.equality));
+        || (constrained && range_or_order.iter().any(|usage| !usage.equality));
     if !requires_manual {
         return None;
     }
 
-    let mut fields = Vec::new();
-    for usage in usages
-        .values()
-        .filter(|usage| usage.special_modes.contains(&IndexMode::ArrayContains))
-    {
-        fields.push(IndexRequirementField {
+    let mut fields = contains
+        .iter()
+        .map(|usage| IndexRequirementField {
             field_path: usage.path.clone(),
             mode: IndexMode::ArrayContains,
-        });
-    }
-    for usage in equality {
-        fields.push(IndexRequirementField {
-            field_path: usage.path.clone(),
-            mode: IndexMode::Ordered(IndexDirection::Ascending),
-        });
-    }
-    for usage in range_or_order {
-        if fields.iter().any(|field| field.field_path == usage.path) {
-            continue;
+        })
+        .collect::<Vec<_>>();
+    fields.extend(equality.iter().map(|usage| IndexRequirementField {
+        field_path: usage.path.clone(),
+        mode: IndexMode::Ordered(IndexDirection::Ascending),
+    }));
+    let prefix = fields.len();
+    for (path, direction) in ordering(query, usages) {
+        if fields.iter().all(|field| field.field_path != path) {
+            fields.push(IndexRequirementField {
+                field_path: path,
+                mode: IndexMode::Ordered(direction),
+            });
         }
-        fields.push(IndexRequirementField {
-            field_path: usage.path.clone(),
-            mode: IndexMode::Ordered(usage.order.unwrap_or(IndexDirection::Ascending)),
-        });
     }
     if let Some((vector, dimension)) = vector
         && fields.iter().all(|field| field.field_path != vector.path)
@@ -383,11 +529,73 @@ fn manual_requirement(
             mode: IndexMode::Vector(dimension),
         });
     }
-    requires_manual.then(|| IndexRequirement {
-        collection_group: collection_group.to_owned(),
-        query_scope: scope,
-        fields,
+    Some(CompositeNeed {
+        requirement: IndexRequirement {
+            collection_group: collection_group.to_owned(),
+            query_scope: scope,
+            fields,
+        },
+        prefix,
+        // Merging serves equalities and an order alone.
+        mergeable: vector.is_none() && !usages.values().any(|usage| usage.inequality),
     })
+}
+
+/// The ordered fields of `query`, as Firestore normalizes them: each
+/// `orderBy` in turn, then every other inequality field in field-path order
+/// with the direction of the last `orderBy`, without the implicit document
+/// name.
+fn ordering(query: &Query, usages: &BTreeMap<String, FieldUsage>) -> Vec<(String, IndexDirection)> {
+    let mut ordered = query
+        .orders_ref()
+        .iter()
+        .filter_map(|order| {
+            Some((
+                order.path.config_name()?,
+                IndexDirection::from(order.direction),
+            ))
+        })
+        .collect::<Vec<_>>();
+    let direction = query
+        .orders_ref()
+        .last()
+        .map_or(IndexDirection::Ascending, |order| order.direction.into());
+    let mut inequalities = BTreeSet::new();
+    if let Some(filter) = query.filter_ref() {
+        collect_inequality_paths(filter, &mut inequalities);
+    }
+    for path in inequalities {
+        if let Some(name) = path.config_name()
+            && usages.contains_key(&name)
+            && ordered.iter().all(|(ordered, _)| *ordered != name)
+        {
+            ordered.push((name, direction));
+        }
+    }
+    ordered
+}
+
+fn collect_inequality_paths(filter: &Filter, paths: &mut BTreeSet<crate::query::FieldPath>) {
+    match filter {
+        Filter::Field(filter) => {
+            if matches!(
+                filter.operator,
+                FieldOperator::LessThan
+                    | FieldOperator::LessThanOrEqual
+                    | FieldOperator::GreaterThan
+                    | FieldOperator::GreaterThanOrEqual
+                    | FieldOperator::NotEqual
+                    | FieldOperator::NotIn
+            ) {
+                paths.insert(filter.path.clone());
+            }
+        }
+        Filter::And(filters) | Filter::Or(filters) => {
+            for filter in filters {
+                collect_inequality_paths(filter, paths);
+            }
+        }
+    }
 }
 
 fn query_target(scope: &StructuredQueryScope) -> (String, IndexScope) {
@@ -599,11 +807,7 @@ impl Display for IndexConfigError {
             Self::InvalidDefinition(error) => {
                 write!(formatter, "invalid index definition: {error}")
             }
-            Self::Missing(requirement) => write!(
-                formatter,
-                "query requires a {:?} index on {} with fields {:?}",
-                requirement.query_scope, requirement.collection_group, requirement.fields
-            ),
+            Self::Missing(requirement) => formatter.write_str(&requirement.missing_message()),
         }
     }
 }
@@ -739,5 +943,252 @@ mod tests {
             catalog.validate(&missing),
             Err(IndexConfigError::Missing(_))
         ));
+    }
+
+    /// A catalog of the composite indexes on `items`, each spelled as
+    /// `"a"`, `"a desc"` or `"a contains"`.
+    fn declared(scope: &str, indexes: &[&[&str]]) -> IndexCatalog {
+        let indexes = indexes
+            .iter()
+            .map(|fields| {
+                let fields = fields
+                    .iter()
+                    .map(|field| match field.split_once(' ') {
+                        Some((path, "desc")) => {
+                            format!(r#"{{"fieldPath":"{path}","order":"DESCENDING"}}"#)
+                        }
+                        Some((path, "contains")) => {
+                            format!(r#"{{"fieldPath":"{path}","arrayConfig":"CONTAINS"}}"#)
+                        }
+                        _ => format!(r#"{{"fieldPath":"{field}","order":"ASCENDING"}}"#),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!(
+                    r#"{{"collectionGroup":"items","queryScope":"{scope}","fields":[{fields}]}}"#
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        IndexCatalog::from_json(&format!(r#"{{"indexes":[{indexes}]}}"#)).expect("catalog")
+    }
+
+    fn filter(name: &str, operator: FieldOperator, value: Value) -> Filter {
+        Filter::Field(FieldFilter {
+            path: field(name),
+            operator,
+            value,
+        })
+    }
+
+    fn items() -> Query {
+        Query::new(StructuredQueryScope::collection("items").expect("valid scope"))
+    }
+
+    fn needed(catalog: &IndexCatalog, query: &Query) -> Option<Vec<String>> {
+        let advice = catalog.advise(query)?;
+        (!advice.declared).then(|| {
+            advice
+                .requirement
+                .fields
+                .iter()
+                .map(|field| match field.mode {
+                    IndexMode::Ordered(IndexDirection::Descending) => {
+                        format!("{} desc", field.field_path)
+                    }
+                    IndexMode::ArrayContains => format!("{} contains", field.field_path),
+                    _ => field.field_path.clone(),
+                })
+                .collect()
+        })
+    }
+
+    /// Equality fields serve in any order and either direction; the
+    /// ordering after them must match exactly, and a reversed index is
+    /// another index (firebase.google.com/docs/firestore/query-data/index-overview).
+    #[test]
+    fn an_index_serves_equalities_in_any_order_and_direction_then_exactly_the_ordering() {
+        let query = items()
+            .filter(Filter::And(vec![equality("a"), equality("d")]))
+            .order_by(field("b"), Direction::Ascending);
+        assert_eq!(
+            needed(&declared("COLLECTION", &[&["d", "a", "b"]]), &query),
+            None
+        );
+        assert_eq!(
+            needed(&declared("COLLECTION", &[&["a desc", "d", "b"]]), &query),
+            None
+        );
+        assert_eq!(
+            needed(&declared("COLLECTION", &[&["a", "d", "b desc"]]), &query),
+            Some(vec!["a".into(), "d".into(), "b".into()])
+        );
+        // An extra field leaves the documents without it out of the index.
+        assert!(needed(&declared("COLLECTION", &[&["a", "x", "d", "b"]]), &query).is_some());
+        // A collection group index does not serve a collection query.
+        assert!(needed(&declared("COLLECTION_GROUP", &[&["a", "d", "b"]]), &query).is_some());
+
+        let descending = items()
+            .filter(equality("country"))
+            .order_by(field("population"), Direction::Descending);
+        assert_eq!(
+            needed(
+                &declared("COLLECTION", &[&["country", "population"]]),
+                &descending
+            ),
+            Some(vec!["country".into(), "population desc".into()])
+        );
+        assert_eq!(
+            needed(
+                &declared("COLLECTION", &[&["country desc", "population desc"]]),
+                &descending
+            ),
+            None
+        );
+    }
+
+    /// "For queries with multiple equality (==) clauses and, optionally, an
+    /// orderBy clause, Cloud Firestore can re-use existing indexes", each
+    /// ending with the order; a range filter needs the one index.
+    #[test]
+    fn indexes_merge_for_equalities_and_an_order_but_not_for_a_range() {
+        let ordered = items()
+            .filter(Filter::And(vec![equality("a"), equality("d")]))
+            .order_by(field("c"), Direction::Ascending);
+        let merged = declared("COLLECTION", &[&["a", "c"], &["d desc", "c"]]);
+        assert_eq!(needed(&merged, &ordered), None);
+        assert!(needed(&declared("COLLECTION", &[&["a", "c"]]), &ordered).is_some());
+        assert!(
+            needed(
+                &declared("COLLECTION", &[&["a", "c"], &["d", "c desc"]]),
+                &ordered
+            )
+            .is_some()
+        );
+        let in_list = items()
+            .filter(Filter::And(vec![
+                equality("a"),
+                filter(
+                    "d",
+                    FieldOperator::In,
+                    Value::Array(vec![Value::Integer(1)]),
+                ),
+            ]))
+            .order_by(field("c"), Direction::Ascending);
+        assert_eq!(needed(&merged, &in_list), None);
+
+        let ranged = items().filter(Filter::And(vec![
+            equality("a"),
+            equality("d"),
+            filter("c", FieldOperator::GreaterThan, Value::Integer(5)),
+        ]));
+        assert_eq!(
+            needed(&merged, &ranged),
+            Some(vec!["a".into(), "d".into(), "c".into()])
+        );
+        assert_eq!(
+            needed(&declared("COLLECTION", &[&["d", "a", "c"]]), &ranged),
+            None
+        );
+    }
+
+    /// The ordering is the `orderBy` fields in turn, then each other
+    /// inequality field in field-path order, in the direction of the last
+    /// `orderBy` (cloud.google.com/firestore/docs/reference/rest/v1/StructuredQuery).
+    #[test]
+    fn the_ordering_follows_order_by_then_inequality_fields_in_path_order() {
+        let ranges = items().filter(Filter::And(vec![
+            filter("salary", FieldOperator::GreaterThan, Value::Integer(1)),
+            filter("experience", FieldOperator::GreaterThan, Value::Integer(0)),
+        ]));
+        assert_eq!(
+            needed(&IndexCatalog::default(), &ranges),
+            Some(vec!["experience".into(), "salary".into()])
+        );
+        let after_order = items()
+            .filter(filter("x", FieldOperator::GreaterThan, Value::Integer(1)))
+            .order_by(field("y"), Direction::Descending);
+        assert_eq!(
+            needed(&IndexCatalog::default(), &after_order),
+            Some(vec!["y desc".into(), "x desc".into()])
+        );
+        let explicit = items()
+            .filter(equality("a"))
+            .order_by(field("z"), Direction::Ascending)
+            .order_by(field("b"), Direction::Ascending);
+        assert_eq!(
+            needed(&IndexCatalog::default(), &explicit),
+            Some(vec!["a".into(), "z".into(), "b".into()])
+        );
+        assert!(needed(&declared("COLLECTION", &[&["a", "b", "z"]]), &explicit).is_some());
+    }
+
+    /// array-contains is served beside equalities by single-field indexes,
+    /// and beside an order on another field only by a composite index.
+    #[test]
+    fn array_contains_needs_a_composite_index_only_beside_an_order() {
+        let contains = filter(
+            "tags",
+            FieldOperator::ArrayContains,
+            Value::String("x".into()),
+        );
+        let with_equality =
+            items().filter(Filter::And(vec![contains.clone(), equality("capital")]));
+        assert_eq!(IndexCatalog::default().advise(&with_equality), None);
+        let ordered = items()
+            .filter(contains)
+            .order_by(field("created"), Direction::Descending);
+        assert_eq!(
+            needed(&IndexCatalog::default(), &ordered),
+            Some(vec!["tags contains".into(), "created desc".into()])
+        );
+        assert_eq!(
+            needed(
+                &declared("COLLECTION", &[&["tags contains", "created desc"]]),
+                &ordered
+            ),
+            None
+        );
+    }
+
+    /// Equalities alone, and one inequality ordered by its own field, need
+    /// no composite index.
+    #[test]
+    fn single_field_indexes_serve_equalities_and_one_ordered_inequality() {
+        let equalities = items().filter(Filter::And(vec![
+            equality("a"),
+            equality("b"),
+            equality("c"),
+        ]));
+        assert_eq!(IndexCatalog::default().advise(&equalities), None);
+        let one_range = items()
+            .filter(filter(
+                "population",
+                FieldOperator::GreaterThan,
+                Value::Integer(2),
+            ))
+            .order_by(field("population"), Direction::Descending);
+        assert_eq!(IndexCatalog::default().advise(&one_range), None);
+    }
+
+    /// A single-field index a collection group query needs is declared by a
+    /// field override, which keeps the field's automatic indexes.
+    #[test]
+    fn a_missing_single_field_index_is_declared_by_an_override_that_keeps_the_defaults() {
+        let group = Query::new(StructuredQueryScope::collection_group("items").expect("scope"))
+            .filter(equality("a"));
+        let advice = IndexCatalog::default()
+            .advise(&group)
+            .expect("an override is needed");
+        let (list, entry) = advice.requirement.declaration();
+        assert_eq!(list, "fieldOverrides");
+        assert_eq!(entry["fieldPath"], "a");
+        assert_eq!(entry["indexes"].as_array().expect("indexes").len(), 4);
+        assert!(advice.requirement.missing_message().starts_with(
+            "The query requires a single-field index on \"items\" for collection group queries"
+        ));
+        let catalog = IndexCatalog::from_json(&format!(r#"{{"fieldOverrides":[{entry}]}}"#))
+            .expect("catalog");
+        assert!(catalog.advise(&group).expect("advice").declared);
     }
 }

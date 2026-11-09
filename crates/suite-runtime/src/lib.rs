@@ -38,7 +38,9 @@ use firenook_functions_runtime::{
 };
 use firenook_grpc_front::FirestoreService;
 use firenook_pubsub_front::{SchedulerRuntime, router_with_printer as pubsub_router};
-use firenook_query_engine::{DatabaseEdition, IndexCatalog, QueryPolicy};
+use firenook_query_engine::{
+    DatabaseEdition, IndexCatalog, MissingIndex, MissingIndexSink, QueryPolicy,
+};
 use firenook_rest_front::router_with_shared_service as rest_router;
 use firenook_rules_engine::{DocumentAccess as _, DocumentAccessError, Resource};
 use firenook_rules_runtime::request_history::RequestHistory;
@@ -333,6 +335,10 @@ pub struct SuiteConfig {
     pub export_on_exit: Option<PathBuf>,
     pub ports: SuitePorts,
     pub minimum_functions: usize,
+    /// `--strict-indexes`: refuse a query whose composite index its
+    /// database's `firestore.indexes.json` does not declare, as production
+    /// does. Off, such a query is answered and warned about once.
+    pub strict_indexes: bool,
     /// `--launch-context`: what the npm CLI knew when it started the engine
     /// (why each service is not started, the `firebase.json` entries it
     /// skipped, the command as typed), so the console can say why a section
@@ -1376,7 +1382,8 @@ fn prepare_firestore(
     if !config.services.firestore {
         return Ok(None);
     }
-    let query_policy = query_policy()?;
+    let catalogs = index_catalogs(config)?;
+    let query_policy = query_policy(config, catalogs.clone());
     let firestore_rules = firestore_rules(config)?;
     let request_history = firestore_rules.request_history();
     // The console's editor replaces a database's ruleset in the same
@@ -1409,11 +1416,13 @@ fn prepare_firestore(
                 firestore_rules.with_origin(firenook_rules_runtime::DenialOrigin::Console);
             rest_router(
                 store.clone(),
-                query_policy,
+                query_policy.without_index_checks(),
                 None,
                 console_rules.clone(),
                 triggers.clone(),
-                service.with_rules(console_rules),
+                service
+                    .with_rules(console_rules)
+                    .with_query_policy(query_policy.without_index_checks()),
             )
         },
         changes: ChangeFeed::attach(store),
@@ -1430,7 +1439,7 @@ fn prepare_firestore(
             store,
             &config.project_id,
             DatabaseEdition::Standard,
-            index_catalogs(config),
+            catalogs,
         ),
         rules: RulesEditor::new(
             &rules_for_console,
@@ -1948,16 +1957,21 @@ impl OpeningWatch {
 
 /// Every configured index file, parsed once and kept per database id.
 ///
-/// The suite enforces none of them, as the official local emulator does not,
-/// but the console's explain endpoint reads them to tell a developer whether
-/// the composite index their query needs is one the project already declares.
-/// A database with no index file gets no entry, which is the same answer as
-/// an empty catalog: nothing is declared.
+/// The suite answers every query, as the official local emulator does, but
+/// warns once of each index a query needs that its database does not
+/// declare, refuses such a query with `--strict-indexes`, and the console's
+/// explain endpoint says whether a query's index is declared. A database
+/// with no index file gets no entry, which is the same answer as an empty
+/// catalog: nothing is declared.
 ///
 /// The official emulator never reads an index file, so one that cannot be
 /// read or parsed is no reason to refuse a start: it is said once, and that
-/// database's queries are explained as if it declared no index.
-fn index_catalogs(config: &SuiteConfig) -> BTreeMap<String, Arc<IndexCatalog>> {
+/// database's queries are checked as if it declared no index. With
+/// `--strict-indexes` it is, since every query needing an index would then be
+/// refused for a mistake in the file.
+fn index_catalogs(
+    config: &SuiteConfig,
+) -> Result<BTreeMap<String, Arc<IndexCatalog>>, SuiteRuntimeError> {
     let mut catalogs = BTreeMap::new();
     for database in &config.firestore_databases {
         let Some(path) = &database.indexes else {
@@ -1970,9 +1984,15 @@ fn index_catalogs(config: &SuiteConfig) -> BTreeMap<String, Arc<IndexCatalog>> {
             Ok(catalog) => {
                 catalogs.insert(database.database_id.clone(), Arc::new(catalog));
             }
+            Err(error) if config.strict_indexes => {
+                return Err(failure(format!(
+                    "--strict-indexes needs the Firestore indexes in {}, which were not read: {error}",
+                    path.display()
+                )));
+            }
             Err(error) => {
                 let message = format!(
-                    "the Firestore indexes in {} were not read ({error}); the console explains the queries of database \"{}\" as if it declared none",
+                    "the Firestore indexes in {} were not read ({error}); the queries of database \"{}\" are checked as if it declared none",
                     path.display(),
                     database.database_id
                 );
@@ -1985,24 +2005,46 @@ fn index_catalogs(config: &SuiteConfig) -> BTreeMap<String, Arc<IndexCatalog>> {
             }
         }
     }
-    catalogs
+    Ok(catalogs)
 }
 
-/// The suite enforces no index file, as the official local emulator does
-/// not.
-fn query_policy() -> Result<QueryPolicy, SuiteRuntimeError> {
-    suite_query_policy(None)
+/// The suite answers a query whose index its database's
+/// `firestore.indexes.json` does not declare, as the official local emulator
+/// does, and says so once per missing index, since production refuses it;
+/// `--strict-indexes` refuses it as production does.
+fn query_policy(
+    config: &SuiteConfig,
+    catalogs: BTreeMap<String, Arc<IndexCatalog>>,
+) -> QueryPolicy {
+    let warn: MissingIndexSink = Arc::new(|missing: &MissingIndex| {
+        let message = missing_index_message(missing);
+        terminal::print(
+            "WARN",
+            "firestore",
+            &message,
+            &format!("firenook: {message}"),
+        );
+    });
+    QueryPolicy::new(DatabaseEdition::Standard).with_indexes(
+        Arc::default(),
+        catalogs,
+        config.strict_indexes,
+        Some(warn),
+    )
 }
 
-fn suite_query_policy(indexes: Option<&str>) -> Result<QueryPolicy, SuiteRuntimeError> {
-    if let Some(source) = indexes {
-        IndexCatalog::from_json(source)
-            .map_err(|error| failure(format!("invalid Firestore indexes: {error}")))?;
-    }
-    // The official local emulator loads the configured index file but does not
-    // enforce production index availability. Strict enforcement remains an
-    // explicit standalone `--strict-indexes` mode.
-    Ok(QueryPolicy::new(DatabaseEdition::Standard))
+/// What a developer is told, once, of a query this suite answers and
+/// production refuses for want of an index.
+fn missing_index_message(missing: &MissingIndex) -> String {
+    let database = if missing.database == "(default)" {
+        String::new()
+    } else {
+        format!(" (database \"{}\")", missing.database)
+    };
+    format!(
+        "production would refuse a query answered here{database} (--strict-indexes refuses it here too). {}",
+        missing.requirement.missing_message()
+    )
 }
 
 /// Installs each configured database's rules under its own database id, so
@@ -3461,9 +3503,7 @@ mod tests {
     }
 
     #[test]
-    fn suite_indexes_are_validated_but_queries_remain_emulator_permissive() {
-        let policy = suite_query_policy(Some(r#"{"indexes":[],"fieldOverrides":[]}"#))
-            .expect("valid index configuration");
+    fn a_query_needing_an_undeclared_index_is_answered_and_warned_of_once_or_refused_when_strict() {
         let query = Query::new(QueryScope::collection("permissions").expect("collection")).filter(
             Filter::And(vec![
                 Filter::Field(FieldFilter {
@@ -3474,15 +3514,67 @@ mod tests {
                 Filter::Field(FieldFilter {
                     path: FieldPath::parse_wire("subscriptionQuota.periodEndDate").expect("field"),
                     operator: FieldOperator::LessThanOrEqual,
-                    value: firenook_core_store::Value::Null,
+                    value: firenook_core_store::Value::Integer(5),
                 }),
             ]),
         );
+        let warned = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink: MissingIndexSink = {
+            let warned = Arc::clone(&warned);
+            Arc::new(move |missing: &MissingIndex| {
+                warned.lock().unwrap().push(missing_index_message(missing));
+            })
+        };
+        let policy = |strict: bool, catalog: &str| {
+            QueryPolicy::new(DatabaseEdition::Standard).with_indexes(
+                Arc::default(),
+                BTreeMap::from([(
+                    "(default)".to_owned(),
+                    Arc::new(IndexCatalog::from_json(catalog).expect("catalog")),
+                )]),
+                strict,
+                Some(Arc::clone(&sink)),
+            )
+        };
+        let undeclared = policy(false, r#"{"indexes":[]}"#);
+        for _ in 0..3 {
+            undeclared
+                .validate("(default)", &query)
+                .expect("answered, as the official emulator answers it");
+        }
+        let messages = warned.lock().unwrap().clone();
+        assert_eq!(messages.len(), 1, "once per missing index: {messages:?}");
+        assert!(
+            messages[0].starts_with("production would refuse a query answered here (--strict-indexes refuses it here too). The query requires a composite index on \"permissions\""),
+            "{}",
+            messages[0]
+        );
+        assert!(messages[0].contains("\"fieldPath\": \"subscriptionQuota.periodEndDate\""));
+        // Another database's own file is consulted, and it is named.
+        undeclared.validate("other", &query).expect("answered");
+        assert!(warned.lock().unwrap()[1].contains("(database \"other\")"));
 
-        policy
-            .validate(&query)
-            .expect("the official suite does not enforce production indexes");
-        assert!(suite_query_policy(Some("not-json")).is_err());
+        let refused = policy(true, r#"{"indexes":[]}"#)
+            .validate("(default)", &query)
+            .expect_err("refused as production refuses it");
+        assert!(
+            refused
+                .to_string()
+                .starts_with("The query requires a composite index")
+        );
+        let declared = r#"{"indexes":[{"collectionGroup":"permissions","queryScope":"COLLECTION","fields":[
+            {"fieldPath":"subscriptionQuota.active","order":"ASCENDING"},
+            {"fieldPath":"subscriptionQuota.periodEndDate","order":"ASCENDING"}]}]}"#;
+        policy(true, declared)
+            .validate("(default)", &query)
+            .expect("declared");
+        // The console's own queries are neither warned of nor refused.
+        let before = warned.lock().unwrap().len();
+        policy(true, r#"{"indexes":[]}"#)
+            .without_index_checks()
+            .validate("(default)", &query)
+            .expect("the console's query");
+        assert_eq!(warned.lock().unwrap().len(), before);
     }
 
     #[test]

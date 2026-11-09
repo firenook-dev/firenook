@@ -181,6 +181,7 @@ export function prepareLaunch(diagnostic, options, mode = 'start', typed = [], {
   if (debugLog) args.push('--debug-log', debugLog);
   if (options['inspect-functions'] !== undefined) args.push(options['inspect-functions'] === true ? '--inspect-functions' : `--inspect-functions=${options['inspect-functions']}`);
   if (options.offline) args.push('--offline');
+  if (options['strict-indexes']) args.push('--strict-indexes');
   for (const [name, port] of Object.entries(p.ports)) args.push(`--${name}-port`, String(port));
   for (const bucket of options['storage-bucket']) args.push('--storage-bucket', bucket);
   if (p.imported) args.push('--import', p.imported);

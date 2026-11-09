@@ -1184,7 +1184,7 @@ fn run_query_blocking(
     let query = decode_query(structured, parent)?;
     state
         .query_policy
-        .validate(&query)
+        .validate(database.database_id(), &query)
         .map_err(|error| RestError::streaming_failed_precondition(error.to_string()))?;
     let snapshot = state.store.snapshot();
     let documents = execute(&snapshot, database, &query, state.query_policy.edition())
@@ -1233,7 +1233,7 @@ fn run_aggregation_query_blocking(
     let query = decode_query(structured, parent)?;
     state
         .query_policy
-        .validate(&query)
+        .validate(database.database_id(), &query)
         .map_err(|error| RestError::streaming_failed_precondition(error.to_string()))?;
     let (operations, count_bounds) = decode_aggregations(aggregation_query)?;
     validate_aggregations(&query, &operations).map_err(|error| rest_query_error(&error))?;

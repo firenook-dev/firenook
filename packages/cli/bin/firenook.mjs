@@ -63,8 +63,8 @@ Start/exec: --only auth,functions,firestore,storage,pubsub (extensions=functions
   runs in .firenook/state, with or without --import), --state-dir DIR, --resume-state,
   --storage-bucket target=bucket (repeatable), --host HOST, --allowed-hosts NAME,..., --ui,
   --minimum-functions N, --inspect-functions[=PORT], --offline, --durability write-behind|per-commit,
-  --no-diagnostics, --firestore-websocket-port N, --hub-port N, --logging-port N, --eventarc-port N,
-  --tasks-port N, --plain (the log a pipe or CI gets), --build (each Functions codebase's build:watch first).
+  --no-diagnostics, --strict-indexes, --firestore-websocket-port N, --hub-port N, --logging-port N,
+  --eventarc-port N, --tasks-port N, --plain (the log a pipe or CI gets), --build (each codebase's build:watch).
 
 firebase.json service subsets, storage {rules} or targets, several Firestore databases, ui.enabled and
 singleProjectMode are honoured; database/hosting/dataconnect/apphosting entries are skipped with a

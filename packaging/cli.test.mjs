@@ -142,6 +142,8 @@ test('options preserve argv; no ignored flags, duplicate options or shell interp
   assert.deepEqual(parsed.command,['echo','hello;touch nope']);
   assert.deepEqual(parsed.positionals,[]);
   assert.equal(parseOptions(['--no-diagnostics']).options['no-diagnostics'], true);
+  assert.equal(parseOptions(['--strict-indexes']).options['strict-indexes'], true);
+  assert.throws(() => parseOptions(['--strict-indexes=false']));
   assert.equal(parseOptions(['--allowed-hosts', 'console.example.test']).options['allowed-hosts'], 'console.example.test');
   assert.throws(() => parseOptions(['--allowed-hosts']));
   assert.throws(() => parseOptions(['--no-diagnostics=false']));
@@ -506,6 +508,8 @@ test('state and credential isolation stay outside original config and seed', () 
   assert.ok(!launch.args.includes('--firestore-memory'));
   assert.ok(!launch.args.includes('--no-diagnostics'));
   assert.ok(prepareLaunch(diagnostic, {...options, 'no-diagnostics': true}).args.includes('--no-diagnostics'));
+  assert.ok(!launch.args.includes('--strict-indexes'));
+  assert.ok(prepareLaunch(diagnostic, {...options, 'strict-indexes': true}).args.includes('--strict-indexes'));
   assert.ok(!launch.args.includes('--allowed-hosts'));
   const named = prepareLaunch(diagnostic, {...options, 'allowed-hosts': 'console.example.test,dev.example.test'}).args;
   assert.equal(named[named.indexOf('--allowed-hosts') + 1], 'console.example.test,dev.example.test');
