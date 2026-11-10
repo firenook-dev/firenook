@@ -1,3 +1,70 @@
+# 0.2.2 — real SDK clients, Security Rules from the community, and missing-index warnings
+
+- Pin the engine to `070297f1c1fb75b328556c3481af26cf7b5dcacc`, main after
+  every 0.2.2 pull request merged (the merge of
+  [PR #168](https://github.com/firenook-dev/firenook/pull/168)). CI
+  ([run 42623788558](https://github.com/firenook-dev/firenook/actions/runs/42623788558)),
+  the five-platform packed-install matrix
+  ([run 42623942308](https://github.com/firenook-dev/firenook/actions/runs/42623942308))
+  and the real SDK clients on Android, iOS and the web
+  ([run 42624224278](https://github.com/firenook-dev/firenook/actions/runs/42624224278))
+  passed on it.
+- **Thank you.** @harshmandan reported seven Security Rules and Firestore
+  differences (#138 to #144) and fixed five of them (#146 to #150);
+  @staticshock fixed three more (#152 to #154); @10eputzen reported
+  `recursiveDelete` (#155) and the REST null spelling (#158); @jmsarn
+  reported the Storage delimiter (#157). Every one was checked against the
+  official emulator before it was merged.
+- **Real clients, on every platform.** The same FlutterFire app now runs
+  against Firenook and firebase-tools on Android, iOS and the web, also on a
+  device cache kept from one to the other, and 47 of 47 checks agree. What
+  it found is fixed:
+  - Android: every Firestore listener and server read failed, because the
+    SDK's empty resume token was refused. A token this store did not issue
+    now starts the target over, as on firebase-tools.
+  - A write landing while a listener attached could leave
+    `hasPendingWrites` stuck and the change unseen.
+  - Native iOS uploads, browser `uploadBytesResumable` over 256 KB,
+    `listAll` under a one-segment rule, and Android's `10.0.2.2` address
+    for resumable uploads now work.
+- **Firestore.**
+  - The Admin SDK's `recursiveDelete` works (#155).
+  - REST accepts `"nullValue": null` on every method and lists null, NaN
+    and the infinities as a single read does (#158). An empty map or array
+    is written `{}`.
+  - A raw filter's equality with null or NaN is never true, as officially;
+    `IS_NULL`, `IS_NAN` and the SDKs' null filters are unchanged.
+  - Admin SDK writes skip the rules work they never needed.
+- **Security Rules.**
+  - The conditional operator `c ? a : b`, a `return` without `;`,
+    functions declared outside the service block, string indexing and
+    slices by UTF-16 code unit, `size()`, `upper()` and `lower()` as the
+    official emulator counts and cases them.
+  - List rules: `resource.data.get()`, `resource != null`,
+    `'f' in resource.data` and in a map inside it, a query that names its
+    documents by id decided on those documents (#143), and any filter but
+    `IS_NULL` taken as proof that its field holds a value, so
+    `where('status', '!=', 'archived')` passes
+    `allow list: if resource.data.status != null`.
+  - Writes: the rules decide before a missing document's `NOT_FOUND` or an
+    existing one's `ALREADY_EXISTS` (#144).
+  - Paths have real segments: `path()`, `.bind()` and `resource.id`.
+- **Missing-index warnings.** A query that needs a composite index your
+  `firestore.indexes.json` does not declare is still answered, as on the
+  official emulator, and is warned of once, with the entry to copy.
+  `emulators:start --strict-indexes` refuses it as production does.
+  Declared indexes are matched as Firestore documents it: equality fields
+  in any order and direction, merged indexes, the implicit order of
+  inequality fields.
+- **Storage.** An empty `delimiter=` lists every object under the prefix
+  (#157).
+- **Emulator suite.** Auth and Storage send no lifecycle events when
+  Functions is not running.
+- **MCP Registry.** Firenook is listed as `io.github.firenook-dev/firenook`.
+- No port or data format changed: 0.2.2 opens what 0.2.1 saved as it is,
+  and 0.2.1 opens what 0.2.2 saves.
+- Published straight to `latest`, as 0.2.1 was.
+
 # 0.2.1 — sign-in from any address, and a sign-in page in the console's look
 
 - Pin the engine to `6556f79b2fda6ccc53c4700aff5fffc029939cde`, the merge of
