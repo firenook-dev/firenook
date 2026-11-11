@@ -31,10 +31,11 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use firenook_console_front::FirestoreIndexes;
 use firenook_core_store::DatabaseName;
 use firenook_rules_runtime::{LoadError, RulesOrigin, RulesRuntime, source_hash};
 use firenook_storage_front::{RulesScope, StorageRulesHandle, StorageRuntime};
-use firenook_suite_front::LoggingRuntime;
+use firenook_suite_front::{LogInput, LoggingRuntime};
 use notify::{EventKind, RecursiveMode, Watcher as _};
 use tokio::sync::watch;
 
@@ -69,6 +70,23 @@ pub(crate) trait RulesTarget: Send + Sync {
     /// Records what is wrong with the file (`None` once it is fine again)
     /// and announces the pass.
     fn set_file_problems(&self, problems: Option<FileProblem>);
+    /// What the file puts in force, as the log lines say: `rules`.
+    fn holds(&self) -> &'static str {
+        "rules"
+    }
+    /// What a file that cannot be put in force did, as the log lines say.
+    fn refused(&self) -> &'static str {
+        "did not compile"
+    }
+    /// Why the file cannot be put in force, as the log lines say it.
+    fn describe(&self, problem: &FileProblem) -> String {
+        problem.to_string()
+    }
+    /// The console's record of one check: reloaded (`problem` false) or
+    /// not.
+    fn log_input(&self, problem: bool, message: String) -> LogInput {
+        crate::console_wiring::observe::rules_file_input(self.service(), problem, message)
+    }
 }
 
 /// A Firestore database's rules file.
@@ -148,10 +166,75 @@ impl RulesTarget for StorageTarget {
     }
 }
 
-/// Every configured rules file the suite watches: each Firestore database
-/// with a rules file (its runtime is the console's Firestore runtime, the
-/// one every Firestore front evaluates against), and each Storage scope
-/// `firebase.json` names a file for (none for a demo project's open
+/// A Firestore database's index file: saved, it is put in force for the
+/// database's queries and explanations, and every index the console lists
+/// as missing is asked whether it is declared now.
+pub(crate) struct IndexesTarget {
+    pub(crate) database_id: String,
+    pub(crate) path: PathBuf,
+    pub(crate) indexes: FirestoreIndexes,
+    /// The hash ([`source_hash`]) of the source in force, when the file was
+    /// put in force at all.
+    pub(crate) in_force: Mutex<Option<String>>,
+}
+
+impl RulesTarget for IndexesTarget {
+    fn service(&self) -> &'static str {
+        "firestore"
+    }
+
+    fn label(&self) -> String {
+        format!("database \"{}\" indexes", self.database_id)
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn in_force_hash(&self) -> Option<String> {
+        lock(&self.in_force).clone()
+    }
+
+    fn install(&self, source: &str) -> Result<(), FileProblem> {
+        self.indexes
+            .install(&self.database_id, source)
+            .map_err(LoadError::unreadable)?;
+        *lock(&self.in_force) = Some(source_hash(source));
+        Ok(())
+    }
+
+    fn set_file_problems(&self, problems: Option<FileProblem>) {
+        let problem = problems.map(|problem| self.describe(&problem));
+        self.indexes.set_file_problem(&self.database_id, problem);
+    }
+
+    fn holds(&self) -> &'static str {
+        "indexes"
+    }
+
+    fn refused(&self) -> &'static str {
+        "are not valid"
+    }
+
+    /// The parser's own words, which name the line and column themselves.
+    fn describe(&self, problem: &FileProblem) -> String {
+        problem
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
+    fn log_input(&self, problem: bool, message: String) -> LogInput {
+        crate::console_wiring::observe::indexes_file_input(&self.database_id, problem, message)
+    }
+}
+
+/// Every configured file the suite watches: each Firestore database's rules
+/// file (its runtime is the console's Firestore runtime, the one every
+/// Firestore front evaluates against) and index file, and each Storage scope
+/// `firebase.json` names a rules file for (none for a demo project's open
 /// default rules).
 pub(crate) fn rules_watch_targets(
     config: &SuiteConfig,
@@ -178,6 +261,17 @@ pub(crate) fn rules_watch_targets(
                 runtime: parts.rules_runtime.clone(),
             }));
         }
+        for entry in &config.firestore_databases {
+            let Some(path) = &entry.indexes else {
+                continue;
+            };
+            targets.push(Arc::new(IndexesTarget {
+                database_id: entry.database_id.clone(),
+                path: path.clone(),
+                indexes: parts.indexes.clone(),
+                in_force: Mutex::new(parts.index_hashes.get(&entry.database_id).cloned()),
+            }));
+        }
     }
     if let Some(rules) = storage.and_then(|storage| storage.console().rules()) {
         for scope in rules.scopes() {
@@ -200,9 +294,9 @@ pub(crate) enum Level {
     Warn,
 }
 
-/// Where the watcher's log lines go, with the service they are about:
+/// Where the watcher's log lines go, with the file they are about:
 /// stdout/stderr and the Emulator UI log in the suite, a list in tests.
-pub(crate) type Report = Arc<dyn Fn(&'static str, Level, String) + Send + Sync>;
+pub(crate) type Report = Arc<dyn Fn(&dyn RulesTarget, Level, String) + Send + Sync>;
 
 /// A running watcher; stopping it (or dropping it) ends the notifications.
 pub(crate) struct RulesWatcher {
@@ -228,11 +322,12 @@ pub(crate) fn spawn(
     logging: &LoggingRuntime,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let Some(first_service) = targets.first().map(|target| target.service()) else {
+    let Some(first) = targets.first().cloned() else {
         return;
     };
     let sink = logging.clone();
-    let report: Report = Arc::new(move |service, level, message| {
+    let report: Report = Arc::new(move |target, level, message| {
+        let service = target.service();
         let line = format!("firenook {service}: {message}");
         let level_name = match level {
             Level::Info => "INFO",
@@ -240,11 +335,7 @@ pub(crate) fn spawn(
         };
         crate::terminal::print(level_name, service, &message, &line);
         // The same record as always, with its kind for the console.
-        sink.emit(crate::console_wiring::observe::rules_file_input(
-            service,
-            level == Level::Warn,
-            message,
-        ));
+        sink.emit(target.log_input(level == Level::Warn, message));
     });
     match RulesWatcher::start(targets, Arc::clone(&report)) {
         Ok(watcher) => {
@@ -255,9 +346,11 @@ pub(crate) fn spawn(
             });
         }
         Err(message) => report(
-            first_service,
+            first.as_ref(),
             Level::Warn,
-            format!("rules files are not watched, so a change needs a restart: {message}"),
+            format!(
+                "rules and index files are not watched, so a change needs a restart: {message}"
+            ),
         ),
     }
 }
@@ -397,17 +490,17 @@ fn wait_for_quiet(woken: &mpsc::Receiver<()>, stopped: &AtomicBool) -> bool {
 
 /// One pass over one target's file.
 fn check(target: &dyn RulesTarget, report: &Report) {
-    let service = target.service();
     let label = target.label();
+    let holds = target.holds();
     let path = target.path().display();
     let source = match std::fs::read_to_string(target.path()) {
         Ok(source) => source,
         Err(error) => {
             report(
-                service,
+                target,
                 Level::Warn,
                 format!(
-                    "{label} file {path} could not be read; the rules in force are unchanged: {error}"
+                    "{label} file {path} could not be read; the {holds} in force are unchanged: {error}"
                 ),
             );
             target.set_file_problems(Some(LoadError::unreadable(format!(
@@ -426,19 +519,17 @@ fn check(target: &dyn RulesTarget, report: &Report) {
     }
     match target.install(&source) {
         Ok(()) => {
-            report(
-                service,
-                Level::Info,
-                format!("{label} reloaded from {path}"),
-            );
+            report(target, Level::Info, format!("{label} reloaded from {path}"));
             target.set_file_problems(None);
         }
         Err(error) => {
             report(
-                service,
+                target,
                 Level::Warn,
                 format!(
-                    "{label} in {path} did not compile; the rules in force are unchanged: {error}"
+                    "{label} in {path} {}; the {holds} in force are unchanged: {}",
+                    target.refused(),
+                    target.describe(&error)
                 ),
             );
             target.set_file_problems(Some(error));
@@ -496,8 +587,8 @@ mod tests {
                     path: file.clone(),
                     runtime: runtime.clone(),
                 })],
-                Arc::new(move |service, level, line| {
-                    assert_eq!(service, "firestore");
+                Arc::new(move |target: &dyn RulesTarget, level, line| {
+                    assert_eq!(target.service(), "firestore");
                     lock(&collected).push((level, line));
                 }),
             )
@@ -695,7 +786,9 @@ mod tests {
                 }),
                 storage.clone(),
             ],
-            Arc::new(move |service, level, line| lock(&collected).push((service, level, line))),
+            Arc::new(move |target: &dyn RulesTarget, level, line| {
+                lock(&collected).push((target.service(), level, line));
+            }),
         )
         .expect("watching starts");
         let changed = "rules_version = '2';\nservice firebase.storage {}\n";
@@ -738,6 +831,137 @@ mod tests {
             "{:?}",
             lock(&lines)
         );
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    /// `orders` where `status ==` ordered by `total` descending, and a
+    /// `--strict-indexes` policy over `indexes`' catalogs.
+    fn strict_orders(
+        indexes: &FirestoreIndexes,
+        missing: Arc<firenook_query_engine::MissingIndexes>,
+    ) -> (
+        firenook_query_engine::QueryPolicy,
+        firenook_query_engine::Query,
+    ) {
+        use firenook_query_engine::{
+            DatabaseEdition, Direction, FieldFilter, FieldOperator, FieldPath, Filter, Query,
+            QueryPolicy, QueryScope,
+        };
+        let policy = QueryPolicy::new(DatabaseEdition::Standard).with_indexes(
+            Arc::clone(indexes.catalogs()),
+            true,
+            Some(missing),
+        );
+        let query = Query::new(QueryScope::collection("orders").expect("scope"))
+            .filter(Filter::Field(FieldFilter {
+                path: FieldPath::field(["status"]).expect("field"),
+                operator: FieldOperator::Equal,
+                value: firenook_core_store::Value::Integer(1),
+            }))
+            .order_by(
+                FieldPath::field(["total"]).expect("field"),
+                Direction::Descending,
+            );
+        (policy, query)
+    }
+
+    /// Writes `source` to `file` until `done` holds, writing again now and
+    /// then, as [`Fixture::write_until`] does.
+    fn write_index_until(file: &Path, source: &str, lines: &Lines, mut done: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut next_write = Instant::now();
+        while !done() {
+            assert!(
+                Instant::now() < deadline,
+                "the watcher never acted on the index file; lines: {:?}",
+                lock(lines)
+            );
+            if Instant::now() >= next_write {
+                std::fs::write(file, source).expect("write");
+                next_write = Instant::now() + Duration::from_secs(4);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// A saved index file is put in force: a query it declares the index
+    /// for passes `--strict-indexes` with no restart, and a file that is not
+    /// valid keeps the indexes in force and says why, without a position of
+    /// its own in front of the parser's.
+    #[test]
+    fn a_saved_index_file_takes_effect_and_a_broken_one_keeps_the_indexes() {
+        let directory =
+            std::env::temp_dir().join(format!("firenook-index-watch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("directory");
+        let file = directory.join("firestore.indexes.json");
+        let empty = r#"{"indexes":[],"fieldOverrides":[]}"#;
+        std::fs::write(&file, empty).expect("write");
+        let missing = Arc::new(firenook_query_engine::MissingIndexes::new(None));
+        let indexes = FirestoreIndexes::new(
+            Arc::default(),
+            Arc::clone(&missing),
+            true,
+            [("(default)".to_owned(), file.clone(), None)],
+        );
+        let (policy, query) = strict_orders(&indexes, missing);
+        policy
+            .validate("(default)", &query)
+            .expect_err("refused: the file declares nothing");
+
+        let lines: Lines = Arc::new(Mutex::new(Vec::new()));
+        let collected = Arc::clone(&lines);
+        let watcher = RulesWatcher::start(
+            vec![Arc::new(IndexesTarget {
+                database_id: "(default)".to_owned(),
+                path: file.clone(),
+                indexes: indexes.clone(),
+                in_force: Mutex::new(Some(source_hash(empty))),
+            })],
+            Arc::new(move |target: &dyn RulesTarget, level, line| {
+                lock(&collected).push((target.service(), level, line));
+            }),
+        )
+        .expect("watching starts");
+        let declared = r#"{"indexes":[{"collectionGroup":"orders","queryScope":"COLLECTION","fields":[
+            {"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"total","order":"DESCENDING"}]}]}"#;
+        write_index_until(&file, declared, &lines, || {
+            policy.validate("(default)", &query).is_ok()
+        });
+        assert!(indexes.list().indexes[0].declared);
+        let reloaded = format!(
+            "database \"(default)\" indexes reloaded from {}",
+            file.display()
+        );
+        assert!(
+            lock(&lines)
+                .iter()
+                .any(|(service, level, line)| *service == "firestore"
+                    && *level == Level::Info
+                    && *line == reloaded),
+            "{:?}",
+            lock(&lines)
+        );
+
+        write_index_until(&file, r#"{"indexes": ["#, &lines, || {
+            indexes.list().files[0].problem.is_some()
+        });
+        watcher.stop();
+        let problem = indexes.list().files[0].problem.clone().expect("a problem");
+        assert!(problem.starts_with("invalid index JSON"), "{problem}");
+        let said = lock(&lines).last().cloned().expect("a line");
+        assert_eq!(said.1, Level::Warn);
+        assert!(
+            said.2.starts_with(&format!(
+                "database \"(default)\" indexes in {} are not valid; the indexes in force are unchanged: invalid index JSON",
+                file.display()
+            )),
+            "{}",
+            said.2
+        );
+        policy
+            .validate("(default)", &query)
+            .expect("the indexes in force are unchanged");
         let _ = std::fs::remove_dir_all(&directory);
     }
 
@@ -816,7 +1040,9 @@ mod tests {
             let collected = Arc::clone(&lines);
             let watcher = RulesWatcher::start(
                 targets,
-                Arc::new(move |service, level, line| lock(&collected).push((service, level, line))),
+                Arc::new(move |target: &dyn RulesTarget, level, line| {
+                    lock(&collected).push((target.service(), level, line));
+                }),
             )
             .expect("watching starts");
             Self {

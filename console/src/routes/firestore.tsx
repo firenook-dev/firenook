@@ -13,6 +13,8 @@ const searchSchema = z.object({
   as: z.string().optional(),
   doc: z.string().optional(),
   tab: z.enum(['fields', 'json']).optional(),
+  // The missing indexes panel, open.
+  indexes: z.boolean().optional(),
   // Another project the app used, shown instead of the emulator's own
   // (the shell's foreign-project banner links here with it).
   project: z.string().optional(),

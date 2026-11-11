@@ -1079,7 +1079,7 @@ test('the MCP server negotiates the protocol, lists its tools and validates call
   assert.deepEqual(await server.handle(rpc(3, 'ping')), {jsonrpc:'2.0', id:3, result:{}});
   const list = await server.handle(rpc(4, 'tools/list'));
   assert.deepEqual(list.result.tools.map(tool => tool.name), ['firenook_status', 'emulators_export',
-    'firestore_get', 'firestore_query', 'firestore_count', 'firestore_set', 'firestore_delete', 'firestore_list_collections',
+    'firestore_get', 'firestore_query', 'firestore_count', 'firestore_set', 'firestore_delete', 'firestore_list_collections', 'firestore_missing_indexes',
     'auth_list_users', 'auth_get_user', 'auth_create_user', 'auth_delete_user', 'auth_oob_codes', 'auth_verification_codes',
     'auth_mint_token', 'auth_set_claims', 'auth_remove_claims', 'auth_disable_user', 'auth_enable_user', 'auth_revoke_tokens', 'auth_list_tenants',
     'storage_list', 'storage_get_metadata', 'storage_read', 'storage_upload', 'storage_delete', 'storage_copy', 'storage_move',
@@ -1292,6 +1292,14 @@ test('MCP console tools: logs, function calls, rules, Auth, Storage files, Event
     const source = "rules_version = '2';\nservice cloud.firestore {\n  match /orders/{id} {\n    allow read: if request.auth.uid == resource.data.owner;\n  }\n}\n";
     if (route === 'GET /firestore/rules') return reply(200, {database:query.database ?? '(default)', source, enforced:true, path:'/p/firestore.rules', hash:'h1', fileSource:source, fileProblems:[]});
     if (route === 'GET /storage/rules') return fail(503, 'unavailable', 'Storage runs without rules here.');
+    if (route === 'GET /firestore/indexes/missing') {
+      const entry = {collectionGroup:'orders', queryScope:'COLLECTION', fields:[{fieldPath:'status', order:'ASCENDING'}, {fieldPath:'total', order:'DESCENDING'}]};
+      const item = (database, declared) => ({database, collectionGroup:'orders', scope:'collection', fields:[], composite:true, section:'indexes', entry,
+        query:{target:'users/u1/orders', collectionGroup:false, filters:[{field:'status', op:'=='}], disjunction:false, orders:[{field:'total', descending:true}]},
+        queries:3, firstSeen:'2026-11-11T01:00:00Z', lastSeen:'2026-11-11T01:02:00Z', declared});
+      return reply(200, {strict:false, indexes:[item('(default)', false), item('archive', true)], unlisted:0,
+        files:[{database:'(default)', path:'/p/firestore.indexes.json', problem:null}, {database:'archive', path:'/p/archive.indexes.json', problem:'invalid index JSON: EOF while parsing'}]});
+    }
     const allows = uid => [{line:4, from:source.indexOf('request.auth.uid'), to:source.indexOf(';\n  }'), outcome:uid === 'alice' ? 'allow' : 'deny'}];
     if (route === 'POST /firestore/rules/evaluate') {
       const [request] = body.requests;
@@ -1336,6 +1344,16 @@ test('MCP console tools: logs, function calls, rules, Auth, Storage files, Event
       assert.deepEqual(consoleRequest(mark, 'POST /functions/invocations/eb524d-8/replay').body, {});
       assert.deepEqual({id:replay.id, replayOf:replay.replayOf, outcome:replay.outcome, status:replay.status, contentType:replay.contentType, body:replay.body}, {id:'eb524d-9', replayOf:'eb524d-8', outcome:'succeeded', status:200, contentType:'application/json', body:{ok:true}});
       assert.match((await callTool('functions_replay_call', {id:'gone-1'}, true)).error, /HTTP 404/);
+      // Missing Firestore indexes.
+      const missing = await callTool('firestore_missing_indexes', {});
+      assert.deepEqual(missing, {missing:1, refusedHere:false, indexes:[{database:'(default)', file:'/p/firestore.indexes.json', addTo:'indexes',
+        entry:{collectionGroup:'orders', queryScope:'COLLECTION', fields:[{fieldPath:'status', order:'ASCENDING'}, {fieldPath:'total', order:'DESCENDING'}]},
+        query:{collection:'users/u1/orders', where:[{field:'status', op:'=='}], orderBy:[{field:'total', direction:'desc'}]}, queries:3,
+        firstSeen:'2026-11-11T01:00:00Z', lastSeen:'2026-11-11T01:02:00Z'}],
+        fileProblems:[{database:'archive', file:'/p/archive.indexes.json', problem:'invalid index JSON: EOF while parsing'}]});
+      const all = await callTool('firestore_missing_indexes', {includeDeclared:true, database:'archive'});
+      assert.deepEqual(all.indexes.map(item => [item.database, item.declared]), [['archive', true]]);
+      assert.equal(all.missing, 0);
       // Security Rules.
       const rules = await callTool('rules_get', {});
       assert.equal(rules.firestore.enforced, true);
@@ -1637,12 +1655,12 @@ test('firenook mcp over stdio writes only JSON-RPC lines to stdout', async () =>
     assert.ok(responses.every(response => response.jsonrpc === '2.0' && ('result' in response || 'error' in response)), 'every stdout line is a JSON-RPC response');
     const byId = Object.fromEntries(responses.map(response => [response.id, response]));
     assert.equal(byId[1].result.protocolVersion, '2025-06-18');
-    assert.equal(byId[2].result.tools.length, 13, 'status and export, six Firestore tools and five Functions tools');
+    assert.equal(byId[2].result.tools.length, 14, 'status and export, seven Firestore tools and five Functions tools');
     assert.equal(text(byId[3]).running, true);
     assert.equal(text(byId[4]).data.name, 'Alice');
     assert.deepEqual(byId[5].result, {});
     assert.deepEqual(byId.null, {jsonrpc:'2.0', id:null, error:{code:-32700, message:'Parse error'}});
     assert.equal(responses.length, 6);
-    assert.match(stderr, /firenook mcp .*: 13 tools over stdio for project demo-fixture \(from --project\); local emulators only/);
+    assert.match(stderr, /firenook mcp .*: 14 tools over stdio for project demo-fixture \(from --project\); local emulators only/);
   } finally { fake.running = fake.base; }
 });

@@ -235,6 +235,15 @@ pub mod kinds {
     /// The official clear route emptied a database; payload `{ database,
     /// documents }`.
     pub const FIRESTORE_CLEARED: &str = "firestore.cleared";
+    /// A query needed an index its database's index file does not declare,
+    /// so production would refuse it (once per index); payload `{ database,
+    /// collectionGroup, queryScope, section, entry }`.
+    pub const FIRESTORE_INDEX_MISSING: &str = "firestore.index.missing";
+    /// An index file put in force after a change; payload `{ database }`.
+    pub const FIRESTORE_INDEXES_RELOADED: &str = "firestore.indexes.reloaded";
+    /// An index file that could not be read or is not valid; the indexes in
+    /// force are unchanged.
+    pub const FIRESTORE_INDEXES_FILE_ERROR: &str = "firestore.indexes.fileError";
     /// A request named another project than the suite's.
     pub const PROJECT_MISMATCH: &str = "project.mismatch";
     /// An `--import` folder was loaded.
@@ -260,6 +269,9 @@ pub mod kinds {
         problem(RULES_FILE_ERROR, "Rules file error"),
         marker(RULES_APPLIED, "Rules applied"),
         marker(FIRESTORE_CLEARED, "Firestore cleared"),
+        problem(FIRESTORE_INDEX_MISSING, "Index missing"),
+        marker(FIRESTORE_INDEXES_RELOADED, "Indexes reloaded"),
+        problem(FIRESTORE_INDEXES_FILE_ERROR, "Index file error"),
         problem(PROJECT_MISMATCH, "Another project id"),
         marker(IMPORT_DONE, "Data imported"),
         marker(DATA_EXPORTED, "Data exported"),
@@ -487,6 +499,9 @@ mod tests {
             "rules.fileError",
             "rules.applied",
             "firestore.cleared",
+            "firestore.index.missing",
+            "firestore.indexes.reloaded",
+            "firestore.indexes.fileError",
             "project.mismatch",
             "import.done",
             "data.exported",
@@ -531,6 +546,8 @@ mod tests {
                 "pubsub.schedule",
                 "tasks.failed",
                 "project.mismatch",
+                "firestore.index.missing",
+                "firestore.indexes.fileError",
             ]
             .into_iter()
             .collect()
@@ -543,6 +560,7 @@ mod tests {
                 "rules.reloaded",
                 "rules.applied",
                 "firestore.cleared",
+                "firestore.indexes.reloaded",
                 "data.reset",
                 "data.exported",
                 "import.done",

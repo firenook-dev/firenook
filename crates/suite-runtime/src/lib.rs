@@ -19,8 +19,8 @@ use axum::serve::{ListenerExt as _, TapIo};
 use firenook_auth_front::AuthRuntime;
 use firenook_console_front::{
     AllowedHosts, CONSOLE_PATH, ChangeFeed, ComputeParts, ConsoleFeatures, ConsoleServices,
-    DatabaseCatalog, FirestoreConsole, ForeignProjects, JobRegistry, Late, QueryExplainer,
-    RulesEditor, RulesEvaluator, SchemaIndex, Shutdown, console_router,
+    DatabaseCatalog, FirestoreConsole, FirestoreIndexes, ForeignProjects, JobRegistry, Late,
+    QueryExplainer, RulesEditor, RulesEvaluator, SchemaIndex, Shutdown, console_router,
 };
 use firenook_core_store::{
     DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
@@ -39,7 +39,8 @@ use firenook_functions_runtime::{
 use firenook_grpc_front::FirestoreService;
 use firenook_pubsub_front::{SchedulerRuntime, router_with_printer as pubsub_router};
 use firenook_query_engine::{
-    DatabaseEdition, IndexCatalog, MissingIndex, MissingIndexSink, QueryPolicy,
+    DatabaseEdition, IndexCatalog, IndexCatalogs, MissingIndex, MissingIndexSink, MissingIndexes,
+    QueryPolicy,
 };
 use firenook_rest_front::router_with_shared_service as rest_router;
 use firenook_rules_engine::{DocumentAccess as _, DocumentAccessError, Resource};
@@ -541,6 +542,11 @@ struct ConsoleFirestoreParts {
     schema: SchemaIndex,
     databases: DatabaseCatalog,
     explain: QueryExplainer,
+    /// The indexes in force and those production would refuse queries for,
+    /// which the file watcher replaces when an index file is saved.
+    indexes: FirestoreIndexes,
+    /// The hash of each index file put in force at start, by database id.
+    index_hashes: BTreeMap<String, String>,
     rules: RulesEditor,
     rules_evaluator: RulesEvaluator,
     /// The runtime every Firestore front evaluates against, which the rules
@@ -771,6 +777,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                     schema: parts.schema,
                     databases: parts.databases,
                     explain: parts.explain,
+                    indexes: parts.indexes,
                     rules: parts.rules,
                     rules_evaluator: parts.rules_evaluator,
                     requests: requests.clone(),
@@ -1382,8 +1389,19 @@ fn prepare_firestore(
     if !config.services.firestore {
         return Ok(None);
     }
-    let catalogs = index_catalogs(config)?;
-    let query_policy = query_policy(config, catalogs.clone());
+    let start_indexes = index_catalogs(config)?;
+    let catalogs = Arc::new(IndexCatalogs::new(Arc::default(), start_indexes.catalogs));
+    let missing = Arc::new(MissingIndexes::new(Some(missing_index_sink(
+        logging,
+        config.strict_indexes,
+    ))));
+    let indexes = FirestoreIndexes::new(
+        Arc::clone(&catalogs),
+        Arc::clone(&missing),
+        config.strict_indexes,
+        start_indexes.files,
+    );
+    let query_policy = query_policy(config, catalogs, missing);
     let firestore_rules = firestore_rules(config)?;
     let request_history = firestore_rules.request_history();
     // The console's editor replaces a database's ruleset in the same
@@ -1439,8 +1457,10 @@ fn prepare_firestore(
             store,
             &config.project_id,
             DatabaseEdition::Standard,
-            catalogs,
+            Arc::clone(indexes.catalogs()),
         ),
+        indexes,
+        index_hashes: start_indexes.hashes,
         rules: RulesEditor::new(
             &rules_for_console,
             &config.project_id,
@@ -1955,34 +1975,45 @@ impl OpeningWatch {
     }
 }
 
-/// Every configured index file, parsed once and kept per database id.
-///
-/// The suite answers every query, as the official local emulator does, but
-/// warns once of each index a query needs that its database does not
-/// declare, refuses such a query with `--strict-indexes`, and the console's
-/// explain endpoint says whether a query's index is declared. A database
-/// with no index file gets no entry, which is the same answer as an empty
-/// catalog: nothing is declared.
-///
-/// The official emulator never reads an index file, so one that cannot be
+/// Each database's index file as read at start.
+struct StartIndexes {
+    /// The catalog of each database whose file was read.
+    catalogs: BTreeMap<String, Arc<IndexCatalog>>,
+    /// Each configured file, with why it was not read when it was not.
+    files: Vec<(String, PathBuf, Option<String>)>,
+    /// The hash of each file read, by database id.
+    hashes: BTreeMap<String, String>,
+}
+
+/// The index file of each database that configures one. One that cannot be
 /// read or parsed is no reason to refuse a start: it is said once, and that
-/// database's queries are checked as if it declared no index. With
-/// `--strict-indexes` it is, since every query needing an index would then be
-/// refused for a mistake in the file.
-fn index_catalogs(
-    config: &SuiteConfig,
-) -> Result<BTreeMap<String, Arc<IndexCatalog>>, SuiteRuntimeError> {
-    let mut catalogs = BTreeMap::new();
+/// database's queries are checked as if it declared no index until the file
+/// is saved again. With `--strict-indexes` it is, since every query needing
+/// an index would then be refused for a mistake in the file.
+fn index_catalogs(config: &SuiteConfig) -> Result<StartIndexes, SuiteRuntimeError> {
+    let mut start = StartIndexes {
+        catalogs: BTreeMap::new(),
+        files: Vec::new(),
+        hashes: BTreeMap::new(),
+    };
     for database in &config.firestore_databases {
         let Some(path) = &database.indexes else {
             continue;
         };
-        let catalog = std::fs::read_to_string(path)
+        let read = std::fs::read_to_string(path)
             .map_err(|error| error.to_string())
-            .and_then(|source| IndexCatalog::from_json(&source).map_err(|error| error.to_string()));
-        match catalog {
-            Ok(catalog) => {
-                catalogs.insert(database.database_id.clone(), Arc::new(catalog));
+            .and_then(|source| {
+                IndexCatalog::from_json(&source)
+                    .map(|catalog| (catalog, firenook_rules_runtime::source_hash(&source)))
+                    .map_err(|error| error.to_string())
+            });
+        let problem = match read {
+            Ok((catalog, hash)) => {
+                start
+                    .catalogs
+                    .insert(database.database_id.clone(), Arc::new(catalog));
+                start.hashes.insert(database.database_id.clone(), hash);
+                None
             }
             Err(error) if config.strict_indexes => {
                 return Err(failure(format!(
@@ -2002,49 +2033,68 @@ fn index_catalogs(
                     &message,
                     &format!("firenook: {message}"),
                 );
+                Some(error)
             }
-        }
+        };
+        start
+            .files
+            .push((database.database_id.clone(), path.clone(), problem));
     }
-    Ok(catalogs)
+    Ok(start)
 }
 
 /// The suite answers a query whose index its database's
 /// `firestore.indexes.json` does not declare, as the official local emulator
-/// does, and says so once per missing index, since production refuses it;
-/// `--strict-indexes` refuses it as production does.
+/// does, lists it for the console and the MCP tools, and says so once per
+/// missing index, since production refuses it; `--strict-indexes` refuses
+/// it as production does.
 fn query_policy(
     config: &SuiteConfig,
-    catalogs: BTreeMap<String, Arc<IndexCatalog>>,
+    catalogs: Arc<IndexCatalogs>,
+    missing: Arc<MissingIndexes>,
 ) -> QueryPolicy {
-    let warn: MissingIndexSink = Arc::new(|missing: &MissingIndex| {
-        let message = missing_index_message(missing);
+    QueryPolicy::new(DatabaseEdition::Standard).with_indexes(
+        catalogs,
+        config.strict_indexes,
+        Some(missing),
+    )
+}
+
+/// Says a missing index once: in the plain log and on the terminal screen,
+/// and to the console's log as a `firestore.index.missing` problem.
+fn missing_index_sink(logging: &LoggingRuntime, strict: bool) -> MissingIndexSink {
+    let logging = logging.clone();
+    Arc::new(move |missing: &MissingIndex| {
+        let message = missing_index_message(missing, strict);
         terminal::print(
             "WARN",
             "firestore",
             &message,
             &format!("firenook: {message}"),
         );
-    });
-    QueryPolicy::new(DatabaseEdition::Standard).with_indexes(
-        Arc::default(),
-        catalogs,
-        config.strict_indexes,
-        Some(warn),
-    )
+        logging.emit(console_wiring::observe::index_missing_input(
+            missing, message,
+        ));
+    })
 }
 
-/// What a developer is told, once, of a query this suite answers and
-/// production refuses for want of an index.
-fn missing_index_message(missing: &MissingIndex) -> String {
+/// What a developer is told, once, of a query production refuses for want
+/// of an index: answered here, or refused here too under
+/// `--strict-indexes`.
+fn missing_index_message(missing: &MissingIndex, strict: bool) -> String {
     let database = if missing.database == "(default)" {
         String::new()
     } else {
         format!(" (database \"{}\")", missing.database)
     };
-    format!(
-        "production would refuse a query answered here{database} (--strict-indexes refuses it here too). {}",
-        missing.requirement.missing_message()
-    )
+    let said = if strict {
+        format!("refused a query{database} as production would (--strict-indexes)")
+    } else {
+        format!(
+            "production would refuse a query answered here{database}; --strict-indexes refuses it here too"
+        )
+    };
+    format!("{said}. {}", missing.requirement.missing_message())
 }
 
 /// Installs each configured database's rules under its own database id, so
@@ -3522,18 +3572,23 @@ mod tests {
         let sink: MissingIndexSink = {
             let warned = Arc::clone(&warned);
             Arc::new(move |missing: &MissingIndex| {
-                warned.lock().unwrap().push(missing_index_message(missing));
+                warned
+                    .lock()
+                    .unwrap()
+                    .push(missing_index_message(missing, false));
             })
         };
         let policy = |strict: bool, catalog: &str| {
             QueryPolicy::new(DatabaseEdition::Standard).with_indexes(
-                Arc::default(),
-                BTreeMap::from([(
-                    "(default)".to_owned(),
-                    Arc::new(IndexCatalog::from_json(catalog).expect("catalog")),
-                )]),
+                Arc::new(IndexCatalogs::new(
+                    Arc::default(),
+                    BTreeMap::from([(
+                        "(default)".to_owned(),
+                        Arc::new(IndexCatalog::from_json(catalog).expect("catalog")),
+                    )]),
+                )),
                 strict,
-                Some(Arc::clone(&sink)),
+                Some(Arc::new(MissingIndexes::new(Some(Arc::clone(&sink))))),
             )
         };
         let undeclared = policy(false, r#"{"indexes":[]}"#);
@@ -3545,7 +3600,7 @@ mod tests {
         let messages = warned.lock().unwrap().clone();
         assert_eq!(messages.len(), 1, "once per missing index: {messages:?}");
         assert!(
-            messages[0].starts_with("production would refuse a query answered here (--strict-indexes refuses it here too). The query requires a composite index on \"permissions\""),
+            messages[0].starts_with("production would refuse a query answered here; --strict-indexes refuses it here too. The query requires a composite index on \"permissions\""),
             "{}",
             messages[0]
         );
@@ -3575,6 +3630,29 @@ mod tests {
             .validate("(default)", &query)
             .expect("the console's query");
         assert_eq!(warned.lock().unwrap().len(), before);
+
+        // Under --strict-indexes the warning says the query was refused.
+        let refused_said = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let told = Arc::clone(&refused_said);
+        let strict = QueryPolicy::new(DatabaseEdition::Standard).with_indexes(
+            Arc::new(IndexCatalogs::default()),
+            true,
+            Some(Arc::new(MissingIndexes::new(Some(Arc::new(
+                move |missing: &MissingIndex| {
+                    told.lock()
+                        .unwrap()
+                        .push(missing_index_message(missing, true));
+                },
+            ))))),
+        );
+        strict.validate("(default)", &query).expect_err("refused");
+        assert!(
+            refused_said.lock().unwrap()[0].starts_with(
+                "refused a query as production would (--strict-indexes). The query requires a composite index"
+            ),
+            "{:?}",
+            refused_said.lock().unwrap()
+        );
     }
 
     #[test]

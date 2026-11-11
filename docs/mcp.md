@@ -115,6 +115,7 @@ are always served.
 | `firestore_set` | write a document (replace, or `merge` top-level fields) |
 | `firestore_delete` | delete a document or collection (`recursive` for everything beneath) |
 | `firestore_list_collections` | collection ids at the root or under a document |
+| `firestore_missing_indexes` | *console*: the indexes production would refuse the app's queries for, with the entry to add to `firestore.indexes.json`, the first query that needed each and how many did; `includeDeclared` also lists those a saved file declares now |
 
 ### `auth`
 

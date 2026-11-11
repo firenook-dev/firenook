@@ -2511,6 +2511,25 @@ indenting: paste instead (`pasteRules`).
   engine's own. The console explains the query the person wrote: the grid's
   `DEFAULT_LIMIT` page size is dropped (`queryToExplain`), because explaining
   with it reports a floor of one page and a strategy our paging chose.
+- Missing indexes (`i`, the toolbar's count, `?indexes=true`): `GET
+  /console/api/v1/firestore/indexes/missing` is the engine's list
+  (`FirestoreIndexes` in `crates/console-front/src/indexes.rs` over
+  `MissingIndexes` in query-engine): every index an app query needed that
+  the database's index file does not declare, with the first query's shape
+  (fields and operators, never values), the query count, first and last
+  seen, the entry and its section (`indexes`, or `fieldOverrides` for one
+  field), and whether the file in force declares it now. The suite's file
+  watcher puts a saved index file in force (`IndexesTarget` in
+  `rules_watch.rs`), so a row turns to declared while the page watches. The
+  `firestore.indexes` topic is invalidation only: at once for an index
+  listed, declared or missing again and a file's problem, at most every two
+  seconds for counts alone, so a flood of queries never refetches on every
+  one. The toolbar button (`missing-indexes.tsx`) is absent until a query
+  needs an index; the Data page's `firestore.indexes` badge counts the ones
+  still missing; the warning is also the `firestore.index.missing` problem
+  in the log. The console's own queries are exempt
+  (`without_index_checks`). Journeys: `e2e/firestore-indexes.spec.ts`, each
+  on a dedicated engine so the list never reaches the other journeys.
 - Export (the grid's footer, ⌘K): `src/firestore/export.ts` pages the whole
   result with `cursorAfter`, the same cursor builder the grid pages with,
   and **without the preview header** — a file must never carry a value cut

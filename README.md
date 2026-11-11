@@ -91,7 +91,7 @@ the same `npx firenook mcp`. Nothing leaves your machine.
 
 | Service | Port | Highlights |
 | --- | ---: | --- |
-| Firestore | 8080 | Native and web SDKs, realtime listeners, Security Rules, named databases, official import and export, a warning (or with `--strict-indexes` a refusal) for a query whose index `firestore.indexes.json` does not declare |
+| Firestore | 8080 | Native and web SDKs, realtime listeners, Security Rules, named databases, official import and export, a warning and a console list (or with `--strict-indexes` a refusal) for a query whose index `firestore.indexes.json` does not declare |
 | Authentication | 9099 | Every operation of the official Auth emulator: password, email link, phone, anonymous, custom tokens, test sign-in with Google, Apple and other providers, MFA, passkeys, tenants, blocking functions |
 | Cloud Storage | 9199 | Firebase and Cloud Storage APIs, Security Rules evaluated natively, including `firestore.get()` and `exists()` |
 | Cloud Functions | 5001 | HTTP, callable and streaming functions; Firestore, Storage, Auth, Pub/Sub, Eventarc, schedule and task-queue triggers; reload on save; `--inspect-functions`; `functions:invoke` for any trigger |

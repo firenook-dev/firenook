@@ -41,7 +41,15 @@ export const firestore: ConsoleSection = {
   // writing who may do what, not reading what there is — with a URL of its
   // own, the way Firebase's own console files them.
   pages: [
-    { to: '/firestore', label: 'Data', exact: true, keywords: 'documents collections grid query' },
+    {
+      to: '/firestore',
+      label: 'Data',
+      exact: true,
+      // The indexes production would refuse the app's queries for, until
+      // the index file declares them.
+      badges: ['firestore.indexes'],
+      keywords: 'documents collections grid query indexes',
+    },
     {
       to: '/firestore/rules',
       label: 'Rules',

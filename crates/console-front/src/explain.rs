@@ -12,7 +12,6 @@
 //! on who is asking, and the count is the engine's own, so the console labels
 //! it as such rather than implying a client would see those documents.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -20,8 +19,8 @@ use axum::Json;
 use axum::extract::State;
 use firenook_core_store::{DatabaseName, Store};
 use firenook_query_engine::{
-    DatabaseEdition, IndexAdvice, IndexCatalog, IndexDirection, IndexMode, IndexScope, Limit,
-    Query, QueryCandidates, QueryStrategy, execute, plan,
+    DatabaseEdition, IndexAdvice, IndexCatalogs, IndexDirection, IndexMode, IndexRequirement,
+    IndexScope, Limit, Query, QueryCandidates, QueryStrategy, execute, plan,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
@@ -117,7 +116,10 @@ pub struct ExplainIndex {
     /// `collection` or `collectionGroup`.
     pub scope: String,
     pub fields: Vec<ExplainIndexField>,
-    /// The entry to paste into `firestore.indexes.json`, already formatted.
+    /// Where the entry goes in `firestore.indexes.json`: `indexes`, or
+    /// `fieldOverrides` for a single field.
+    pub section: String,
+    /// The entry to paste there, already formatted.
     pub config_entry: String,
 }
 
@@ -153,27 +155,26 @@ pub struct QueryExplainer {
     store: Store,
     project: Arc<str>,
     edition: DatabaseEdition,
-    /// The declared indexes of each database that configures a file; a
-    /// database without one declares nothing.
-    indexes: Arc<BTreeMap<String, Arc<IndexCatalog>>>,
+    /// The declared indexes of each database in force now, replaced when an
+    /// index file is saved; a database without a file declares nothing.
+    indexes: Arc<IndexCatalogs>,
 }
 
 impl QueryExplainer {
-    /// An explainer over `project`'s store. `indexes` holds the catalog
-    /// parsed from each database's index file; a database with no entry
-    /// declares nothing, so every requirement is reported as missing.
+    /// An explainer over `project`'s store, reading the indexes each
+    /// database declares now from `indexes`.
     #[must_use]
     pub fn new(
         store: &Store,
         project: &str,
         edition: DatabaseEdition,
-        indexes: BTreeMap<String, Arc<IndexCatalog>>,
+        indexes: Arc<IndexCatalogs>,
     ) -> Self {
         Self {
             store: store.clone(),
             project: Arc::from(project),
             edition,
-            indexes: Arc::new(indexes),
+            indexes,
         }
     }
 
@@ -226,9 +227,7 @@ impl QueryExplainer {
             elapsed_micros: u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
             index: self
                 .indexes
-                .get(database_id)
-                .cloned()
-                .unwrap_or_default()
+                .catalog(database_id)
                 .advise(&query)
                 .as_ref()
                 .map(index),
@@ -245,7 +244,7 @@ fn limit_reached(query: &Query, matched: usize) -> bool {
     }
 }
 
-const fn scope_name(scope: IndexScope) -> &'static str {
+pub(crate) const fn scope_name(scope: IndexScope) -> &'static str {
     match scope {
         IndexScope::Collection => "collection",
         IndexScope::CollectionGroup => "collectionGroup",
@@ -279,33 +278,38 @@ const fn strategy(strategy: QueryStrategy) -> ExplainStrategy {
 }
 
 fn index(advice: &IndexAdvice) -> ExplainIndex {
-    let entry = advice.requirement.config_entry();
+    let (section, entry) = advice.requirement.declaration();
     ExplainIndex {
         declared: advice.declared,
         composite: advice.requirement.is_composite(),
         collection_group: advice.requirement.collection_group.clone(),
         scope: scope_name(advice.requirement.query_scope).to_owned(),
-        fields: advice
-            .requirement
-            .fields
-            .iter()
-            .map(|field| ExplainIndexField {
-                field_path: field.field_path.clone(),
-                mode: match field.mode {
-                    IndexMode::Ordered(IndexDirection::Ascending) => "ascending",
-                    IndexMode::Ordered(IndexDirection::Descending) => "descending",
-                    IndexMode::ArrayContains => "arrayContains",
-                    IndexMode::Vector(_) => "vector",
-                }
-                .to_owned(),
-                dimension: match field.mode {
-                    IndexMode::Vector(dimension) => Some(dimension),
-                    IndexMode::Ordered(_) | IndexMode::ArrayContains => None,
-                },
-            })
-            .collect(),
+        fields: index_fields(&advice.requirement),
+        section: section.to_owned(),
         config_entry: serde_json::to_string_pretty(&entry).unwrap_or_else(|_| entry.to_string()),
     }
+}
+
+/// An index's fields as `firestore.indexes.json` spells their modes.
+pub(crate) fn index_fields(requirement: &IndexRequirement) -> Vec<ExplainIndexField> {
+    requirement
+        .fields
+        .iter()
+        .map(|field| ExplainIndexField {
+            field_path: field.field_path.clone(),
+            mode: match field.mode {
+                IndexMode::Ordered(IndexDirection::Ascending) => "ascending",
+                IndexMode::Ordered(IndexDirection::Descending) => "descending",
+                IndexMode::ArrayContains => "arrayContains",
+                IndexMode::Vector(_) => "vector",
+            }
+            .to_owned(),
+            dimension: match field.mode {
+                IndexMode::Vector(dimension) => Some(dimension),
+                IndexMode::Ordered(_) | IndexMode::ArrayContains => None,
+            },
+        })
+        .collect()
 }
 
 /// `POST /explain`: how this query runs, and what it needs in production.
@@ -322,9 +326,12 @@ async fn explain(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use firenook_core_store::{DocumentKey, Fields, Value, Write};
+    use firenook_query_engine::IndexCatalog;
     use tower::ServiceExt as _;
 
     use super::*;
@@ -352,7 +359,12 @@ mod tests {
     }
 
     fn explainer(indexes: BTreeMap<String, Arc<IndexCatalog>>) -> QueryExplainer {
-        QueryExplainer::new(&store(), PROJECT, DatabaseEdition::Standard, indexes)
+        QueryExplainer::new(
+            &store(),
+            PROJECT,
+            DatabaseEdition::Standard,
+            Arc::new(IndexCatalogs::new(Arc::default(), indexes)),
+        )
     }
 
     async fn ask(explainer: QueryExplainer, body: serde_json::Value) -> (StatusCode, JsonValue) {
@@ -425,6 +437,7 @@ mod tests {
         assert_eq!(body["index"]["fields"][0]["fieldPath"], "status");
         assert_eq!(body["index"]["fields"][0]["mode"], "ascending");
         assert_eq!(body["index"]["fields"][1]["fieldPath"], "total");
+        assert_eq!(body["index"]["section"], "indexes");
         // What we tell people to paste has to be what the engine accepts.
         let entry = body["index"]["configEntry"].as_str().expect("an entry");
         let catalog = IndexCatalog::from_json(&format!("{{\"indexes\":[{entry}]}}"))
@@ -436,6 +449,44 @@ mod tests {
             body["index"]["declared"], true,
             "declaring the printed entry must satisfy the query: {body}"
         );
+    }
+
+    /// A collection group filter on one field needs that field's
+    /// collection-group index, which goes under `fieldOverrides` (keeping
+    /// the field's automatic indexes), not under `indexes`.
+    #[tokio::test]
+    async fn a_collection_group_filter_on_one_field_is_a_field_override() {
+        let body = || {
+            serde_json::json!({
+                "structuredQuery": {
+                    "from": [{ "collectionId": "orders", "allDescendants": true }],
+                    "where": {
+                        "fieldFilter": {
+                            "field": { "fieldPath": "status" },
+                            "op": "EQUAL",
+                            "value": { "stringValue": "open" },
+                        }
+                    },
+                }
+            })
+        };
+        let (status, answer) = ask(explainer(BTreeMap::new()), body()).await;
+        assert_eq!(status, StatusCode::OK, "{answer}");
+        assert_eq!(answer["index"]["composite"], false);
+        assert_eq!(answer["index"]["scope"], "collectionGroup");
+        assert_eq!(answer["index"]["section"], "fieldOverrides");
+        let entry = answer["index"]["configEntry"].as_str().expect("an entry");
+        let catalog = IndexCatalog::from_json(&format!("{{\"fieldOverrides\":[{entry}]}}"))
+            .expect("the entry we print is a valid index file");
+        let (_, answer) = ask(
+            explainer(BTreeMap::from([(
+                "(default)".to_owned(),
+                Arc::new(catalog),
+            )])),
+            body(),
+        )
+        .await;
+        assert_eq!(answer["index"]["declared"], true, "{answer}");
     }
 
     #[tokio::test]
@@ -462,7 +513,7 @@ mod tests {
             .collect::<Vec<_>>();
         disk.commit(&writes).expect("commit");
         let explainer =
-            QueryExplainer::new(&disk, PROJECT, DatabaseEdition::Standard, BTreeMap::new());
+            QueryExplainer::new(&disk, PROJECT, DatabaseEdition::Standard, Arc::default());
         let (status, body) = ask(explainer, composite_body()).await;
         drop(disk);
         let _ = std::fs::remove_dir_all(&directory);

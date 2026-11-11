@@ -61,13 +61,19 @@ database (`Cloud Firestore Emulator does not support multiple databases yet.`)
 and then loads no rules at all.
 
 The official emulator answers every query, so one that needs a composite
-index passes there and fails in production. `emulators:start` answers it too,
-and warns once per missing index, in the plain log and the terminal screen,
+index passes there and fails in production. `emulators:start` and
+`emulators:exec` answer it too, and warn once per missing index, in the plain
+log, the terminal screen and the console's log (`firestore.index.missing`),
 with the entry to copy into that database's `firestore.indexes.json` (a field
 override that keeps the field's automatic indexes when a collection group
-query needs a single-field one). `--strict-indexes` refuses the query with
-`FAILED_PRECONDITION`, as production does. The console's own queries are
-neither warned of nor refused. Whether an index serves a query follows
+query needs a single-field one). The console's Firestore page lists every
+missing index with the first query that needed it (its fields and operators,
+never its values) and how many did, and the MCP tool
+`firestore_missing_indexes` answers the same list. `--strict-indexes`
+refuses the query with `FAILED_PRECONDITION`, as production does. The index
+file is watched like the rules file: saved, it is in force for the next
+query, with no restart, and one that is not valid leaves the indexes in force
+and says why. The console's own queries are neither warned of nor refused. Whether an index serves a query follows
 Firestore's documented rules: equality (`==`, `in`) and array-contains fields
 first, in any order, an equality field in either direction; then exactly the
 query's ordering (its `orderBy` fields, then each other inequality field in

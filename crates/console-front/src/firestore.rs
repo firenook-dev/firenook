@@ -35,6 +35,7 @@ use crate::databases::DatabaseCatalog;
 use crate::explain::QueryExplainer;
 use crate::firestore_search::FirestoreSearch;
 use crate::http::forwarded;
+use crate::indexes::FirestoreIndexes;
 use crate::jobs::JobHandle;
 use crate::live::badges::{BadgeKind, BadgeNoun};
 use crate::live::replay::{ReplayOptions, replay_topic};
@@ -84,6 +85,8 @@ pub struct FirestoreConsole {
     pub databases: DatabaseCatalog,
     /// How a query runs and what it would require in production.
     pub explain: QueryExplainer,
+    /// The indexes in force, and those production would refuse queries for.
+    pub indexes: FirestoreIndexes,
     /// The security rules, as text that can be changed.
     pub rules: RulesEditor,
     /// Dry runs, recorded decisions explained, and a draft's impact.
@@ -660,6 +663,7 @@ pub(crate) fn firestore_router(console: FirestoreConsole) -> Router {
         .router()
         .merge(console.databases.router())
         .merge(console.explain.router())
+        .merge(console.indexes.router())
         .merge(console.rules_evaluator.router())
         .merge(console.rules.router());
     if let Some(requests) = console.requests {
@@ -679,6 +683,11 @@ fn rules_badge_noun() -> BadgeNoun {
     BadgeNoun::new("rules file does not compile", "rules files do not compile")
 }
 
+/// What the `firestore.indexes` badge counts.
+fn indexes_badge_noun() -> BadgeNoun {
+    BadgeNoun::new("index missing", "indexes missing")
+}
+
 impl Section for FirestoreSection {
     fn statuses(&self) -> Vec<SectionStatus> {
         vec![SectionStatus::ready("firestore")]
@@ -694,6 +703,14 @@ impl Section for FirestoreSection {
                 .handle("firestore.rules", BadgeKind::Gauge, rules_badge_noun()),
             context.shutdown.clone(),
         );
+        // The indexes still missing: those a query needed and the files in
+        // force do not declare.
+        self.0.indexes.spawn_badge(
+            context
+                .badges
+                .handle("firestore.indexes", BadgeKind::Gauge, indexes_badge_noun()),
+            context.shutdown.clone(),
+        );
         Router::new().nest("/firestore", firestore_router(self.0.clone()))
     }
 
@@ -701,6 +718,7 @@ impl Section for FirestoreSection {
         let mut topics: Vec<Arc<dyn LiveTopic>> = vec![
             Arc::new(self.0.changes.topic()),
             Arc::new(self.0.rules.topic()),
+            Arc::new(self.0.indexes.topic()),
         ];
         // The rules decisions, while diagnostics record them.
         if let Some(feed) = decisions::DecisionFeed::start(

@@ -218,7 +218,7 @@ function IndexCard({ index }: { index: NonNullable<Explanation['index']> }) {
 }
 
 /** The arrow or word that stands for a field's index mode. */
-function modeMark(field: NonNullable<Explanation['index']>['fields'][number]): string {
+export function modeMark(field: NonNullable<Explanation['index']>['fields'][number]): string {
   switch (field.mode) {
     case 'ascending':
       return '\u2191'

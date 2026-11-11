@@ -22,6 +22,7 @@ mod firestore_search;
 mod foreign;
 mod guard;
 mod http;
+mod indexes;
 mod instance;
 mod jobs;
 mod json;
@@ -75,6 +76,10 @@ pub use foreign::{ForeignProject, ForeignProjects};
 pub use guard::{
     ACTIVITY_HEADER, AllowedHosts, CAUSE_HEADER_PREFIX, CONSOLE_HEADER, EXECUTION_HEADER,
     KEEP_TOKENS_HEADER, METADATA_HEADER, PREVIEW_HEADER,
+};
+pub use indexes::{
+    FirestoreIndexes, IndexFileStatus, IndexesChanged, MissingIndexItem, MissingIndexList,
+    MissingIndexQuery, QueryFilterShape,
 };
 pub use jobs::{BulkTarget, Job, JobError, JobList, JobRegistry, JobState};
 pub use late::Late;
@@ -814,6 +819,8 @@ mod tests {
         SubcollectionsSnapshot::export_all(config).expect("TypeScript bindings written");
         DatabaseList::export_all(config).expect("TypeScript bindings written");
         Explanation::export_all(config).expect("TypeScript bindings written");
+        MissingIndexList::export_all(config).expect("TypeScript bindings written");
+        IndexesChanged::export_all(config).expect("TypeScript bindings written");
         RulesDocument::export_all(config).expect("TypeScript bindings written");
         RulesInstalled::export_all(config).expect("TypeScript bindings written");
         RulesDiagnostic::export_all(config).expect("TypeScript bindings written");

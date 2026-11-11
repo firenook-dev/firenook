@@ -20,6 +20,13 @@ recent problems, snapshots and resets. It follows the engine live over one
 connection per browser, links a thing in one section to where it shows in
 another, and works without network access.
 
+On the Firestore page, a query the app ran that production would refuse for
+want of an index puts a count in the toolbar and on the Data page's badge.
+It opens (`i`, or `?indexes=true`) a list of those indexes, each with the
+query that needed it, how many queries did and the entry to copy, or all of
+them at once as an index file. Saving `firestore.indexes.json` turns each
+row to declared while you watch.
+
 Google's Emulator UI is not served since `0.2.0-next.3`. The port's root
 sends the browser to the console, and the official UI's addresses
 (`/firestore/…`, `/auth`, `/storage/…`, `/extensions/…`, `/logs?q=…`) lead

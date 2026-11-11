@@ -116,6 +116,7 @@ describe('whether the index needs acting on', () => {
     collectionGroup: 'users',
     scope: 'collection',
     fields: [{ fieldPath: 'plan', mode: 'ascending', dimension: null }],
+    section: 'indexes',
     configEntry: '{}',
   }
 
