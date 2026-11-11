@@ -207,6 +207,57 @@ async fn rest_transaction_commits_preserve_native_read_conflicts_and_rules() {
     );
 }
 
+/// #169: two transactions read the same missing document and both write
+/// it. Whether the read was a single-document GET or a batchGet, the second
+/// commit is ABORTED and the first one's write stands, so no update is lost.
+#[tokio::test]
+async fn a_missing_document_read_in_a_transaction_is_checked_at_commit() {
+    let (router, _) = seeded().await;
+    let name = format!("{}/notes/seq", &ROOT[4..]);
+    let write = |token: &str, seq: &str| {
+        json!({"transaction":token,"writes":[{"update":{
+            "name":name,
+            "fields":{"seq":{"integerValue":seq}}
+        }}]})
+    };
+    for read in ["get", "batchGet"] {
+        request(&router, "/notes/seq", "DELETE", JsonValue::Null, true).await;
+        let first = transaction(&router, false).await;
+        let second = transaction(&router, false).await;
+        for token in [&first, &second] {
+            let status = if read == "get" {
+                let path = format!("/notes/seq?transaction={}", query_value(token));
+                request(&router, &path, "GET", JsonValue::Null, true)
+                    .await
+                    .0
+            } else {
+                request(
+                    &router,
+                    ":batchGet",
+                    "POST",
+                    json!({"documents":[name], "transaction":token}),
+                    true,
+                )
+                .await
+                .0
+            };
+            let expected = if read == "get" {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::OK
+            };
+            assert_eq!(status, expected, "{read} of the missing document");
+        }
+        let (status, _) = request(&router, ":commit", "POST", write(&first, "1"), true).await;
+        assert_eq!(status, StatusCode::OK, "{read}: the first commit");
+        let (status, result) = request(&router, ":commit", "POST", write(&second, "2"), true).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{read}: the second commit");
+        assert_eq!(result["error"]["status"], "ABORTED", "{read}");
+        let (_, stored) = request(&router, "/notes/seq", "GET", JsonValue::Null, true).await;
+        assert_eq!(stored["fields"]["seq"]["integerValue"], "1", "{read}");
+    }
+}
+
 #[tokio::test]
 async fn rest_get_masks_and_denials_match_captured_observations() {
     let (router, _) = seeded().await;

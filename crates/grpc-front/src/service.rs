@@ -948,10 +948,13 @@ impl Firestore for FirestoreService {
             RulesQuery::default(),
             read_write_transaction,
         )?;
-        let document = snapshot
-            .get(&key)
-            .ok_or_else(|| Status::not_found(format!("document not found: {key}")))?;
-        self.record_read(&token, &key, Some(&document));
+        // A transaction's read of a missing document is a read too: recorded
+        // as absent before the answer, so a commit after someone else created
+        // it is ABORTED, as batchGet's read of it already was (#169).
+        let document = snapshot.get(&key);
+        self.record_read(&token, &key, document.as_deref());
+        let document =
+            document.ok_or_else(|| Status::not_found(format!("document not found: {key}")))?;
         Ok(Response::new(encode_document_masked(
             &key,
             &document,
