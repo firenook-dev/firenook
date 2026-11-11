@@ -77,6 +77,8 @@ export interface DataTableProps<Row> {
   ariaLabel: string
   rows: readonly Row[]
   rowKey: (row: Row) => string
+  /** What a row's buttons are named after ("Actions for …"); default: its key. */
+  rowLabel?: ((row: Row) => string) | undefined
   columns: readonly DataTableColumn<Row>[]
   /** Where dragged widths and hidden columns are remembered (localStorage), e.g. 'auth.users'. */
   memoryKey: string
@@ -210,6 +212,7 @@ export function DataTable<Row>({
   ariaLabel,
   rows,
   rowKey,
+  rowLabel,
   columns,
   memoryKey,
   sort,
@@ -859,7 +862,7 @@ export function DataTable<Row>({
                     zebra={position % 2 === 1}
                     idBase={idBase}
                     columns={rowColumns}
-                    label={key}
+                    label={rowLabel ? rowLabel(row) : key}
                     check={check}
                     openable={openable}
                     menu={rowMenu !== undefined}

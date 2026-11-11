@@ -54,6 +54,7 @@ fn prepared(name: &str) -> Prepared {
             schema: console.schema,
             databases: console.databases,
             explain: console.explain,
+            indexes: console.indexes,
             rules: console.rules,
             rules_evaluator: console.rules_evaluator,
             requests: None,

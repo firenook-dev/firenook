@@ -630,6 +630,58 @@ pub(crate) fn rules_file_input(service: &'static str, problem: bool, message: St
     }
 }
 
+/// A query needed an index its database's file does not declare: the
+/// `firestore.index.missing` problem, said once per index, with the entry to
+/// add. The console only: the official feed never carried it.
+pub(crate) fn index_missing_input(
+    missing: &firenook_query_engine::MissingIndex,
+    message: String,
+) -> LogInput {
+    let (section, entry) = missing.requirement.declaration();
+    LogInput {
+        level: LogLevel::Warn,
+        service: "firestore".to_owned(),
+        kind: Some(kinds::FIRESTORE_INDEX_MISSING),
+        message,
+        payload: Some(json!({
+            "database": missing.database,
+            "collectionGroup": missing.requirement.collection_group,
+            "queryScope": match missing.requirement.query_scope {
+                firenook_query_engine::IndexScope::Collection => "COLLECTION",
+                firenook_query_engine::IndexScope::CollectionGroup => "COLLECTION_GROUP",
+            },
+            "section": section,
+            "entry": entry,
+        })),
+        legacy_level: Some("WARN"),
+        audience: Audience::Console,
+        ..LogInput::default()
+    }
+}
+
+/// A check of a database's index file: put in force
+/// (`firestore.indexes.reloaded`), or one that could not be read or is not
+/// valid (`firestore.indexes.fileError`).
+pub(crate) fn indexes_file_input(database: &str, problem: bool, message: String) -> LogInput {
+    LogInput {
+        level: if problem {
+            LogLevel::Warn
+        } else {
+            LogLevel::Info
+        },
+        service: "firestore".to_owned(),
+        kind: Some(if problem {
+            kinds::FIRESTORE_INDEXES_FILE_ERROR
+        } else {
+            kinds::FIRESTORE_INDEXES_RELOADED
+        }),
+        message,
+        payload: Some(json!({ "database": database })),
+        legacy_level: Some(if problem { "WARN" } else { "INFO" }),
+        ..LogInput::default()
+    }
+}
+
 /// The level an event carried, as the official feed has always written it.
 fn legacy_level(level: &str) -> &'static str {
     match level {

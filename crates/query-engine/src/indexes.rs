@@ -74,25 +74,38 @@ impl IndexRequirement {
     /// indexes, so the entry keeps them beside the one required.
     #[must_use]
     pub fn declaration(&self) -> (&'static str, serde_json::Value) {
+        self.declaration_in(&IndexCatalog::default())
+    }
+
+    /// [`Self::declaration`] for the file `catalog` was read from: a field
+    /// that already has an override there keeps it, with the index required
+    /// added, since a second override for one field is not a valid file.
+    #[must_use]
+    pub fn declaration_in(&self, catalog: &IndexCatalog) -> (&'static str, serde_json::Value) {
         let [field] = self.fields.as_slice() else {
             return ("indexes", self.config_entry());
         };
-        let index = |scope: IndexScope, mode: IndexMode| {
-            let mut entry = field_mode_entry(mode);
-            entry["queryScope"] = serde_json::json!(match scope {
-                IndexScope::Collection => "COLLECTION",
-                IndexScope::CollectionGroup => "COLLECTION_GROUP",
-            });
-            entry
+        let required = SingleFieldIndex {
+            scope: self.query_scope,
+            mode: field.mode,
         };
-        let mut indexes = [
-            IndexMode::Ordered(IndexDirection::Ascending),
-            IndexMode::Ordered(IndexDirection::Descending),
-            IndexMode::ArrayContains,
-        ]
-        .map(|mode| index(IndexScope::Collection, mode))
-        .to_vec();
-        let required = index(self.query_scope, field.mode);
+        let existing = catalog.field_overrides.iter().find(|override_| {
+            override_.collection_group == self.collection_group
+                && override_.field_path == field.field_path
+        });
+        let mut indexes = match existing {
+            Some(existing) => existing.indexes.iter().copied().collect::<Vec<_>>(),
+            None => [
+                IndexMode::Ordered(IndexDirection::Ascending),
+                IndexMode::Ordered(IndexDirection::Descending),
+                IndexMode::ArrayContains,
+            ]
+            .map(|mode| SingleFieldIndex {
+                scope: IndexScope::Collection,
+                mode,
+            })
+            .to_vec(),
+        };
         if !indexes.contains(&required) {
             indexes.push(required);
         }
@@ -101,9 +114,16 @@ impl IndexRequirement {
             serde_json::json!({
                 "collectionGroup": self.collection_group,
                 "fieldPath": field.field_path,
-                "indexes": indexes,
+                "indexes": indexes.iter().map(SingleFieldIndex::config_entry).collect::<Vec<_>>(),
             }),
         )
+    }
+
+    /// Reads one entry of the file's `indexes`.
+    pub fn from_entry(entry: &serde_json::Value) -> Result<Self, IndexConfigError> {
+        RawIndex::deserialize(entry)
+            .map_err(|error| IndexConfigError::InvalidDefinition(error.to_string()))
+            .and_then(Self::try_from)
     }
 
     /// What a developer is told of a query that needs this index: what is
@@ -356,10 +376,70 @@ impl TryFrom<RawFieldOverride> for FieldOverride {
     }
 }
 
+/// One index of a field override: the scope its queries run in and the
+/// field's mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct SingleFieldIndex {
-    scope: IndexScope,
-    mode: IndexMode,
+pub struct SingleFieldIndex {
+    pub scope: IndexScope,
+    pub mode: IndexMode,
+}
+
+impl SingleFieldIndex {
+    /// Reads one index of a field override's `indexes`.
+    pub fn from_entry(entry: &serde_json::Value) -> Result<Self, IndexConfigError> {
+        let raw = RawIndexMode::deserialize(entry)
+            .map_err(|error| IndexConfigError::InvalidDefinition(error.to_string()))?;
+        Ok(Self {
+            scope: raw.query_scope.into(),
+            mode: raw.mode()?,
+        })
+    }
+
+    /// This index as `firestore.indexes.json` spells it.
+    #[must_use]
+    pub fn config_entry(&self) -> serde_json::Value {
+        let mut entry = field_mode_entry(self.mode);
+        entry["queryScope"] = serde_json::json!(match self.scope {
+            IndexScope::Collection => "COLLECTION",
+            IndexScope::CollectionGroup => "COLLECTION_GROUP",
+        });
+        entry
+    }
+}
+
+/// One entry of the file's `fieldOverrides`: the indexes one field has in
+/// place of the automatic ones (none: the field is not indexed at all), and
+/// whether documents expire by it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldOverrideEntry {
+    pub collection_group: String,
+    pub field_path: String,
+    pub indexes: Vec<SingleFieldIndex>,
+    pub ttl: bool,
+}
+
+impl FieldOverrideEntry {
+    /// Reads one entry of the file's `fieldOverrides`.
+    pub fn from_entry(entry: &serde_json::Value) -> Result<Self, IndexConfigError> {
+        let raw = RawFieldOverride::deserialize(entry)
+            .map_err(|error| IndexConfigError::InvalidDefinition(error.to_string()))?;
+        let indexes = raw
+            .indexes
+            .iter()
+            .map(|index| {
+                Ok(SingleFieldIndex {
+                    scope: index.query_scope.into(),
+                    mode: index.mode()?,
+                })
+            })
+            .collect::<Result<_, IndexConfigError>>()?;
+        Ok(Self {
+            collection_group: raw.collection_group,
+            field_path: raw.field_path,
+            indexes,
+            ttl: raw.ttl,
+        })
+    }
 }
 
 #[derive(Debug, Default)]
@@ -710,6 +790,8 @@ struct RawFieldOverride {
     field_path: String,
     #[serde(default)]
     indexes: Vec<RawIndexMode>,
+    #[serde(default)]
+    ttl: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1190,5 +1272,72 @@ mod tests {
         let catalog = IndexCatalog::from_json(&format!(r#"{{"fieldOverrides":[{entry}]}}"#))
             .expect("catalog");
         assert!(catalog.advise(&group).expect("advice").declared);
+    }
+
+    /// A field the file already overrides keeps its override: the entry is
+    /// that override with the index required added, not a second override,
+    /// and an exemption it makes stays made.
+    #[test]
+    fn a_field_already_overridden_keeps_its_override_with_the_index_added() {
+        let catalog = IndexCatalog::from_json(
+            r#"{"fieldOverrides":[{"collectionGroup":"items","fieldPath":"a","ttl":true,
+                "indexes":[{"order":"ASCENDING","queryScope":"COLLECTION"}]}]}"#,
+        )
+        .expect("catalog");
+        let group = Query::new(StructuredQueryScope::collection_group("items").expect("scope"))
+            .filter(equality("a"));
+        let advice = catalog.advise(&group).expect("advice");
+        assert!(!advice.declared);
+        let (list, entry) = advice.requirement.declaration_in(&catalog);
+        assert_eq!(list, "fieldOverrides");
+        assert_eq!(
+            entry["indexes"],
+            serde_json::json!([
+                {"order": "ASCENDING", "queryScope": "COLLECTION"},
+                {"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"},
+            ])
+        );
+        let read = FieldOverrideEntry::from_entry(&entry).expect("an override");
+        assert_eq!(read.indexes.len(), 2);
+        assert!(!read.ttl);
+        let declared = IndexCatalog::from_json(&format!(r#"{{"fieldOverrides":[{entry}]}}"#))
+            .expect("catalog");
+        assert!(declared.advise(&group).expect("advice").declared);
+    }
+
+    /// One entry of the file reads as the catalog reads it: the implicit
+    /// `__name__` dropped, the CLI's `mode` alias accepted, a bad mode said.
+    #[test]
+    fn one_entry_reads_as_the_catalog_reads_it() {
+        let entry = serde_json::json!({
+            "collectionGroup": "items",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {"fieldPath": "a", "mode": "ASCENDING"},
+                {"fieldPath": "b", "order": "DESCENDING"},
+                {"fieldPath": "__name__", "order": "DESCENDING"},
+            ],
+        });
+        let read = IndexRequirement::from_entry(&entry).expect("an index");
+        assert_eq!(read.fields.len(), 2);
+        assert_eq!(read.config_entry()["fields"][0]["order"], "ASCENDING");
+        let bad = serde_json::json!({"collectionGroup": "items", "fields": [{"fieldPath": "a"}]});
+        assert!(matches!(
+            IndexRequirement::from_entry(&bad),
+            Err(IndexConfigError::InvalidDefinition(_))
+        ));
+        assert_eq!(
+            SingleFieldIndex::from_entry(&serde_json::json!({"arrayConfig": "CONTAINS"}))
+                .expect("an index"),
+            SingleFieldIndex {
+                scope: IndexScope::Collection,
+                mode: IndexMode::ArrayContains,
+            }
+        );
+        let ttl = FieldOverrideEntry::from_entry(
+            &serde_json::json!({"collectionGroup": "items", "fieldPath": "at", "ttl": true, "indexes": []}),
+        )
+        .expect("an override");
+        assert!(ttl.ttl && ttl.indexes.is_empty());
     }
 }

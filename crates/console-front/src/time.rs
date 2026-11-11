@@ -13,6 +13,13 @@ pub(crate) fn rfc3339(value: Timestamp) -> String {
         .unwrap_or_default()
 }
 
+/// A clock time in RFC 3339.
+pub(crate) fn rfc3339_system(value: std::time::SystemTime) -> String {
+    OffsetDateTime::from(value)
+        .format(&Rfc3339)
+        .unwrap_or_default()
+}
+
 /// Now, in RFC 3339.
 pub(crate) fn rfc3339_now() -> String {
     OffsetDateTime::now_utc()

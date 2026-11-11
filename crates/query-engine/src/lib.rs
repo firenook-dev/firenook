@@ -14,11 +14,16 @@ use std::sync::Arc;
 use firenook_core_store::{Value, compare_resource_paths};
 
 mod indexes;
+mod missing;
 mod query;
 
 pub use indexes::{
-    IndexAdvice, IndexCatalog, IndexConfigError, IndexDirection, IndexMode, IndexRequirement,
-    IndexRequirementField, IndexScope,
+    FieldOverrideEntry, IndexAdvice, IndexCatalog, IndexConfigError, IndexDirection, IndexMode,
+    IndexRequirement, IndexRequirementField, IndexScope, SingleFieldIndex,
+};
+pub use missing::{
+    IndexCatalogs, MISSING_INDEXES_LISTED, MissingIndexChange, MissingIndexListener,
+    MissingIndexRecord, MissingIndexes, QueryShape, ShapeFilter, ShapeOrder,
 };
 pub use query::{
     Aggregation, Cursor, Direction, DistanceMeasure, FieldFilter, FieldOperator, FieldPath, Filter,
@@ -53,26 +58,12 @@ pub struct MissingIndex {
 pub type MissingIndexSink = Arc<dyn Fn(&MissingIndex) + Send + Sync>;
 
 /// The declared indexes of each database, and what a query that needs one
-/// they do not declare gets: a warning, a refusal, or both.
+/// they do not declare gets: listed (and warned of once), refused, or both.
+#[derive(Debug)]
 struct IndexPolicy {
-    /// The catalog of a database without its own: the standalone server's
-    /// one file, or nothing declared.
-    fallback: Arc<IndexCatalog>,
-    catalogs: BTreeMap<String, Arc<IndexCatalog>>,
+    catalogs: Arc<IndexCatalogs>,
     strict: bool,
-    warn: Option<MissingIndexSink>,
-    warned: std::sync::Mutex<std::collections::BTreeSet<(String, IndexRequirement)>>,
-}
-
-impl std::fmt::Debug for IndexPolicy {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("IndexPolicy")
-            .field("databases", &self.catalogs.keys().collect::<Vec<_>>())
-            .field("strict", &self.strict)
-            .field("warns", &self.warn.is_some())
-            .finish_non_exhaustive()
-    }
+    missing: Option<Arc<MissingIndexes>>,
 }
 
 /// Query behavior shared by every Firestore transport.
@@ -96,31 +87,32 @@ impl QueryPolicy {
     /// `catalog` does not declare, for every database.
     #[must_use]
     pub fn strict(edition: DatabaseEdition, catalog: IndexCatalog) -> Self {
-        Self::new(edition).with_indexes(Arc::new(catalog), BTreeMap::new(), true, None)
+        Self::new(edition).with_indexes(
+            Arc::new(IndexCatalogs::new(Arc::new(catalog), BTreeMap::new())),
+            true,
+            None,
+        )
     }
 
-    /// Checks each query against the indexes its database declares: those
-    /// in `catalogs`, or `fallback` for a database not listed. A query whose
-    /// index is not declared is reported once to `warn`, and refused when
-    /// `strict`; otherwise its answer is unchanged.
+    /// Checks each query against the indexes its database declares now in
+    /// `catalogs`. A query whose index is not declared is counted in
+    /// `missing` (which warns of it once), and refused when `strict`;
+    /// otherwise its answer is unchanged.
     #[must_use]
     pub fn with_indexes(
         self,
-        fallback: Arc<IndexCatalog>,
-        catalogs: BTreeMap<String, Arc<IndexCatalog>>,
+        catalogs: Arc<IndexCatalogs>,
         strict: bool,
-        warn: Option<MissingIndexSink>,
+        missing: Option<Arc<MissingIndexes>>,
     ) -> Self {
-        let checks = strict || warn.is_some();
+        let checks = strict || missing.is_some();
         Self {
             edition: self.edition,
             indexes: checks.then(|| {
                 Arc::new(IndexPolicy {
-                    fallback,
                     catalogs,
                     strict,
-                    warn,
-                    warned: std::sync::Mutex::default(),
+                    missing,
                 })
             }),
         }
@@ -140,28 +132,19 @@ impl QueryPolicy {
     }
 
     /// Checks that `database` declares the index `query` needs: a missing
-    /// one is reported once if this policy warns, and refused if it is
-    /// strict. A permissive policy does no work.
+    /// one is counted (and warned of when that is news) if this policy
+    /// lists them, and refused if it is strict. A permissive policy does no
+    /// work.
     pub fn validate(&self, database: &str, query: &Query) -> Result<(), IndexConfigError> {
         let Some(indexes) = self.indexes.as_deref() else {
             return Ok(());
         };
-        let catalog = indexes.catalogs.get(database).unwrap_or(&indexes.fallback);
+        let catalog = indexes.catalogs.catalog(database);
         let Some(advice) = catalog.advise(query).filter(|advice| !advice.declared) else {
             return Ok(());
         };
-        if let Some(warn) = &indexes.warn {
-            let first = indexes
-                .warned
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert((database.to_owned(), advice.requirement.clone()));
-            if first {
-                warn(&MissingIndex {
-                    database: database.to_owned(),
-                    requirement: advice.requirement.clone(),
-                });
-            }
+        if let Some(missing) = &indexes.missing {
+            missing.record(database, &advice.requirement, query);
         }
         if indexes.strict {
             return Err(IndexConfigError::Missing(advice.requirement));
@@ -491,6 +474,14 @@ mod index_check_profile {
                     ]))
                     .order_by(field("score"), Direction::Ascending),
             ),
+            (
+                // Needs (group, kind desc), which the catalog does not
+                // declare: the path that lists and counts it.
+                "missing",
+                items()
+                    .filter(filter("group", FieldOperator::Equal, Value::Integer(3)))
+                    .order_by(field("kind"), Direction::Descending),
+            ),
         ];
         let catalog = IndexCatalog::from_json(
             r#"{"indexes":[{"collectionGroup":"items","queryScope":"COLLECTION","fields":[
@@ -499,10 +490,14 @@ mod index_check_profile {
         )
         .expect("catalog");
         let checking = QueryPolicy::new(DatabaseEdition::Standard).with_indexes(
-            Arc::default(),
-            BTreeMap::from([("(default)".to_owned(), Arc::new(catalog))]),
+            Arc::new(IndexCatalogs::new(
+                Arc::default(),
+                BTreeMap::from([("(default)".to_owned(), Arc::new(catalog))]),
+            )),
             false,
-            Some(Arc::new(|_: &MissingIndex| {})),
+            Some(Arc::new(MissingIndexes::new(Some(Arc::new(
+                |_: &MissingIndex| {},
+            ))))),
         );
         let permissive = QueryPolicy::new(DatabaseEdition::Standard);
         let rounds = 200_000_u32;

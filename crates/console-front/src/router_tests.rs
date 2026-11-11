@@ -2,6 +2,7 @@
 //! what the request guard lets through and what it refuses.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
@@ -33,7 +34,13 @@ pub(crate) fn firestore_console(store: &Store) -> FirestoreConsole {
         changes: ChangeFeed::attach(store),
         schema: schema.clone(),
         databases: DatabaseCatalog::new(store, PROJECT, Vec::new()),
-        explain: QueryExplainer::new(store, PROJECT, DatabaseEdition::Standard, BTreeMap::new()),
+        explain: QueryExplainer::new(store, PROJECT, DatabaseEdition::Standard, Arc::default()),
+        indexes: crate::indexes::FirestoreIndexes::new(
+            Arc::default(),
+            Arc::new(firenook_query_engine::MissingIndexes::new(None)),
+            false,
+            [],
+        ),
         rules: RulesEditor::new(&rules, PROJECT, BTreeMap::new()).with_schema(&schema),
         rules_evaluator: RulesEvaluator::new(&rules, store, PROJECT),
         requests: Some(firenook_suite_front::requests_router(

@@ -30,7 +30,7 @@ export default defineConfig({
     permissions: ['clipboard-read', 'clipboard-write'],
   },
   projects: [
-    project('data', /[\\/](console(-gate)?|firestore|rules)\.spec\.ts$/, 'data'),
+    project('data', /[\\/](console(-gate)?|firestore(-indexes)?|rules)\.spec\.ts$/, 'data'),
     project('auth', /[\\/]auth(-[\w-]+)?\.spec\.ts$/, 'auth'),
     project('storage', /[\\/]storage(-[\w-]+)?\.spec\.ts$/, 'storage'),
     project('compute', /[\\/](functions|extensions|eventarc)(-[\w-]+)?\.spec\.ts$/, 'compute'),

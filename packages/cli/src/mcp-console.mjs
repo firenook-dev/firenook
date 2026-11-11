@@ -225,6 +225,27 @@ const RULES_TOOLS = [
     }},
 ];
 
+// ── Firestore indexes ─────────────────────────────────────────────────────
+// The engine answers a query whose composite index the project has not
+// declared, as the official emulator does; production refuses it. The engine
+// keeps each such index, and saving the index file puts it in force at once.
+const indexQuery = query => ({...(query.collectionGroup ? {collectionGroup:query.target} : {collection:query.target}), where:query.filters,
+  ...(query.disjunction ? {or:true} : {}), orderBy:query.orders.map(order => ({field:order.field, direction:order.descending ? 'desc' : 'asc'}))});
+const FIRESTORE_TOOLS = [
+  {name:'firestore_missing_indexes', group:'firestore', description:'The indexes production would refuse the app\'s queries for: each one a query needed that its database\'s index file (firestore.indexes.json) does not declare, with the entry to add under indexes or fieldOverrides, the first query that needed it (fields and operators, no values), how many did and when; saving the file puts it in force at once.',
+    inputSchema:schema({database:DATABASE_ID, includeDeclared:boolean('Also list the indexes a saved file declares now; default only the missing ones')}),
+    async run({database, includeDeclared = false}, context) {
+      const {body} = await consoleCall(context, '/firestore/indexes/missing');
+      const files = new Map(body.files.map(file => [file.database, file.path]));
+      const items = body.indexes.filter(item => (database === undefined || item.database === database) && (includeDeclared || !item.declared));
+      return {missing:items.filter(item => !item.declared).length, refusedHere:body.strict,
+        indexes:items.map(item => ({database:item.database, ...(item.declared ? {declared:true} : {}), file:files.get(item.database) ?? null, addTo:item.section, entry:item.entry,
+          query:indexQuery(item.query), queries:item.queries, firstSeen:item.firstSeen, lastSeen:item.lastSeen})),
+        ...(body.unlisted ? {unlistedQueries:body.unlisted} : {}),
+        ...(body.files.some(file => file.problem) ? {fileProblems:body.files.filter(file => file.problem).map(file => ({database:file.database, file:file.path, problem:file.problem}))} : {})};
+    }},
+];
+
 // ── Auth ──────────────────────────────────────────────────────────────────
 const TENANT = string('Tenant id; omit for a project-level user');
 const USERS = {uid:string('Account id'), uids:strings('Several account ids (instead of uid)'), tenant:TENANT};
@@ -563,4 +584,4 @@ const SCHEDULES_TOOLS = [
     }},
 ];
 
-export const CONSOLE_TOOLS = [...FUNCTION_CALLS_TOOLS, ...LOGS_TOOLS, ...RULES_TOOLS, ...AUTH_TOOLS, ...RESET_TOOLS, ...STORAGE_TOOLS, ...EVENTARC_TOOLS, ...EXTENSIONS_TOOLS, ...PUBSUB_TOOLS, ...TASKS_TOOLS, ...SCHEDULES_TOOLS];
+export const CONSOLE_TOOLS = [...FIRESTORE_TOOLS, ...FUNCTION_CALLS_TOOLS, ...LOGS_TOOLS, ...RULES_TOOLS, ...AUTH_TOOLS, ...RESET_TOOLS, ...STORAGE_TOOLS, ...EVENTARC_TOOLS, ...EXTENSIONS_TOOLS, ...PUBSUB_TOOLS, ...TASKS_TOOLS, ...SCHEDULES_TOOLS];

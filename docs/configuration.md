@@ -43,12 +43,15 @@ How Firenook reads `firebase.json`, `.firebaserc` and the command line, and what
 - **Firestore** accepts the object form or an array of `{database, rules,
   indexes}` entries (one entry may omit `database` for `(default)`); the
   engine serves every listed database. A query whose index the database's
-  index file does not declare is answered, as officially, and warned of once
-  with the entry to add; `--strict-indexes` refuses it, as production does
-  ([Compatibility](../COMPATIBILITY.md)). The console reads the files to say
-  whether a query's index is declared. One that cannot be read or parsed is
-  a warning, not a refusal (the official emulator never reads it), except
-  with `--strict-indexes`.
+  index file does not declare is answered, as officially, warned of once with
+  the entry to add and listed on the console's Firestore Indexes page, which
+  adds it to the file;
+  `--strict-indexes` refuses it, as production does
+  ([Compatibility](../COMPATIBILITY.md)). Each index file is watched like a
+  rules file: a save is in force for the next query, with no restart. One
+  that cannot be read or parsed is a warning, not a refusal (the official
+  emulator never reads it), except with `--strict-indexes` at start; saved
+  so later, it leaves the indexes in force and says why.
 - **Functions** need `--minimum-functions` at `1` only when a codebase or
   extensions are configured and selected; otherwise the CLI passes `0`, and
   the engine drops Functions (with Eventarc and Tasks) with a notice when

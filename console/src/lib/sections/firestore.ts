@@ -1,4 +1,4 @@
-// Firestore's registry entry: the data page and the rules page, and where a
+// Firestore's registry entry: the data, rules and indexes pages, and where a
 // collection, a document or a rules decision opens when ⌘K finds one or
 // another section's payload points at one.
 
@@ -36,10 +36,10 @@ export const firestore: ConsoleSection = {
   area: 'data',
   icon: DatabaseIcon,
   summary:
-    'Path bar, document grid with inferred columns, a query builder that runs the same engine query the app runs, and view-as-user over the rules engine. Security rules have their own page: an editor that knows the language, every decision with the line and values behind it, a playground and saved tests.',
-  // Rules are their own page, not a mode of the data view: a different job —
-  // writing who may do what, not reading what there is — with a URL of its
-  // own, the way Firebase's own console files them.
+    "Path bar, document grid with inferred columns, a query builder that runs the same engine query the app runs, and view-as-user over the rules engine. Security rules have their own page: an editor that knows the language, every decision with the line and values behind it, a playground and saved tests. Indexes have theirs: the indexes in firestore.indexes.json, the ones the app's queries are missing, and Add and Remove that save the file.",
+  // Rules and indexes are pages of their own, not modes of the data view:
+  // different jobs — writing who may do what, declaring what queries may
+  // ask — with URLs of their own, the way Firebase's own console files them.
   pages: [
     { to: '/firestore', label: 'Data', exact: true, keywords: 'documents collections grid query' },
     {
@@ -49,6 +49,14 @@ export const firestore: ConsoleSection = {
       // so its count lands on the right page the day it does.
       badges: ['firestore.rules', 'firestore.denials'],
       keywords: 'security permissions decisions playground',
+    },
+    {
+      to: '/firestore/indexes',
+      label: 'Indexes',
+      // The indexes production would refuse the app's queries for, until
+      // the index file declares them.
+      badges: ['firestore.indexes'],
+      keywords: 'composite indexes field overrides firestore.indexes.json missing',
     },
   ],
   projectScope: true,

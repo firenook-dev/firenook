@@ -19,6 +19,11 @@ composite: boolean, collectionGroup: string,
  */
 scope: string, fields: Array<ExplainIndexField>, 
 /**
- * The entry to paste into `firestore.indexes.json`, already formatted.
+ * Where the entry goes in `firestore.indexes.json`: `indexes`, or
+ * `fieldOverrides` for a single field.
+ */
+section: string, 
+/**
+ * The entry to paste there, already formatted.
  */
 configEntry: string, };

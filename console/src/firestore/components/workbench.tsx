@@ -31,6 +31,7 @@ import { DeleteDialog, type DeleteTarget } from './delete-dialog'
 import { ExplainPanel } from './explain-panel'
 import { Grid } from './grid'
 import { Inspector } from './inspector'
+import { MissingIndexesLink } from './missing-indexes'
 import { NewMenu } from './new-menu'
 import { PathBar } from './path-bar'
 import { QueryLine, useMatchCount } from './query-line'
@@ -239,6 +240,10 @@ function WorkbenchData({
           onRetry={() => liveChannel.retry()}
           testId="live-state"
         />
+        {/* Said only once a query has needed an index the file does not
+            declare: a report on the whole database, like the two beside it,
+            and the way to the Indexes page that lists them. */}
+        <MissingIndexesLink />
         {/* Not a property of the query below: the identity applies to every
             read the workbench makes, the schema tree and inspector included.
             The security rules it reads through have a page of their own in
