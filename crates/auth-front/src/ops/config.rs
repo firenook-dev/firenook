@@ -10,13 +10,69 @@ use crate::util::is_absolute_uri;
 
 const BLOCKING_EVENTS: &[&str] = &["beforeCreate", "beforeSignIn"];
 
-pub fn get_config(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiError> {
-    rt.scope(ctx, |scope| {
+pub async fn get_config(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiError> {
+    let (config, set) = rt.scope(ctx, |scope| {
         ensure!(
             !scope.is_tenant(),
             "((Can only get top-level configurations on agent projects.))"
         );
-        Ok(JsonValue::Object(scope.agent_ref().config.clone()))
+        let agent = scope.agent_ref();
+        Ok((agent.config.clone(), agent.blocking_set))
+    })?;
+    Ok(JsonValue::Object(
+        with_registered(rt, ctx, config, set).await,
+    ))
+}
+
+/// The configuration as the official emulator holds it: its Functions
+/// emulator writes the blocking functions it found into `blockingFunctions`
+/// whenever it loads them. Here they are looked up instead, so until an
+/// `updateConfig` sets `blockingFunctions` the answer carries the ones Auth
+/// would call now, each as `{functionUri}`, with `forwardInboundCredentials`
+/// (#175).
+async fn with_registered(
+    rt: &Runtime,
+    ctx: &Ctx,
+    mut config: JsonMap<String, JsonValue>,
+    set: bool,
+) -> JsonMap<String, JsonValue> {
+    if set {
+        return config;
+    }
+    let targets = rt.blocking_targets(&ctx.project_id).await;
+    let mut triggers = JsonMap::new();
+    for (event, target) in [
+        ("beforeCreate", &targets.before_create),
+        ("beforeSignIn", &targets.before_sign_in),
+    ] {
+        if let Some(target) = target {
+            triggers.insert(event.to_owned(), json!({ "functionUri": target.uri }));
+        }
+    }
+    if !triggers.is_empty() {
+        config.insert(
+            "blockingFunctions".to_owned(),
+            json!({
+                "triggers": triggers,
+                "forwardInboundCredentials": {
+                    "accessToken": targets.forward_access_token,
+                    "idToken": targets.forward_id_token,
+                    "refreshToken": targets.forward_refresh_token,
+                },
+            }),
+        );
+    }
+    config
+}
+
+/// Whether an `updateConfig` with this mask sets `blockingFunctions`: no mask
+/// replaces the whole configuration, `blockingFunctions` itself, or a field
+/// under it.
+fn sets_blocking(update_mask: Option<&str>) -> bool {
+    update_mask.is_none_or(|mask| {
+        mask.split(',')
+            .map(str::trim)
+            .any(|field| field == "blockingFunctions" || field.starts_with("blockingFunctions."))
     })
 }
 
@@ -49,19 +105,31 @@ fn update_config_impl(
             "INVALID_BLOCKING_FUNCTION : ((Expected an absolute URI with valid scheme and host.))"
         );
     }
-    Ok(JsonValue::Object(
-        scope.agent().update_config(body, update_mask),
-    ))
+    let agent = scope.agent();
+    if sets_blocking(update_mask) {
+        agent.blocking_set = true;
+    }
+    Ok(JsonValue::Object(agent.update_config(body, update_mask)))
 }
 
-pub fn update_config(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiError> {
-    rt.scope(ctx, |scope| {
-        update_config_impl(
-            scope,
-            &ctx.body,
-            ctx.query_str("updateMask").filter(|mask| !mask.is_empty()),
-        )
-    })
+pub async fn update_config(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiError> {
+    let mask = ctx.query_str("updateMask").filter(|mask| !mask.is_empty());
+    let (config, set) = rt.scope(ctx, |scope| {
+        let updated = update_config_impl(scope, &ctx.body, mask)?;
+        let config = match updated {
+            JsonValue::Object(config) => config,
+            _ => JsonMap::new(),
+        };
+        Ok((config, scope.agent_ref().blocking_set))
+    })?;
+    // A change to the blocking functions changes what sign-up and sign-in
+    // call: the console's Settings follows it.
+    if sets_blocking(mask) {
+        rt.blocking_changed();
+    }
+    Ok(JsonValue::Object(
+        with_registered(rt, ctx, config, set).await,
+    ))
 }
 
 fn emulator_config(scope: &crate::state::Scope<'_>) -> JsonValue {

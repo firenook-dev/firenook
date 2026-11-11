@@ -136,11 +136,12 @@ pub(crate) async fn before_finish(context: &HookContext<'_>) {
     }
 }
 
-/// Functions reloaded and routing was refreshed for the inventory: the
-/// blocking functions Auth calls may have changed, so the console's
+/// Functions reloaded and routing was refreshed for the inventory: as the
+/// official Functions emulator registers its blocking functions with Auth
+/// after each load, they are what Auth calls again, and the console's
 /// `auth.hooks` topic tells Settings.
 pub(crate) fn inventory_refreshed(context: &HookContext<'_>, _inventory: &FunctionsInventory) {
     if let Some(auth) = context.auth {
-        auth.blocking_changed();
+        auth.functions_registered();
     }
 }

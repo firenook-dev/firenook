@@ -1359,6 +1359,110 @@ async fn lifecycle_events_name_their_user_and_paused_ones_are_counted() {
 }
 
 // ------------------------------------------------------------------
+// #175: the project configuration lists the blocking functions the
+// Functions emulator registered, and a PATCH of blockingFunctions decides
+// what sign-up calls, as the official emulator answers (firebase-tools
+// 15.34.0): the registered triggers until a PATCH, an empty one turns them
+// off, a PATCH puts them back, and the next load of the functions registers
+// them again.
+
+#[tokio::test]
+async fn the_project_config_lists_and_patches_the_blocking_functions() {
+    // Port 1 refuses at once: a call to a blocking function fails the sign-up
+    // (500, as the function cannot be reached), where none called is 200.
+    let create = "http://127.0.0.1:1/demo-auth/us-central1/beforecreated";
+    let sign_in = "http://127.0.0.1:1/demo-auth/us-central1/beforesignedin";
+    let runtime = test_runtime();
+    runtime.set_blocking_functions(Arc::new(Registered(BlockingFunctions {
+        before_create: Some(create.to_owned()),
+        before_sign_in: Some(sign_in.to_owned()),
+        ..BlockingFunctions::default()
+    })));
+    let config = "/identitytoolkit.googleapis.com/v2/projects/demo-auth/config";
+    let patch = format!("{config}?updateMask=blockingFunctions");
+    let registered = json!({
+        "triggers": {
+            "beforeCreate": { "functionUri": create },
+            "beforeSignIn": { "functionUri": sign_in },
+        },
+        "forwardInboundCredentials": { "accessToken": false, "idToken": false, "refreshToken": false },
+    });
+    let sign_up = |email: &'static str| {
+        let runtime = &runtime;
+        async move {
+            call(
+                runtime,
+                Method::POST,
+                "/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake",
+                &json!({ "email": email, "password": "secret123", "returnSecureToken": true }),
+            )
+            .await
+            .0
+        }
+    };
+
+    let (status, body) = call(&runtime, Method::GET, config, &json!({})).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["blockingFunctions"], registered);
+    assert_ne!(
+        sign_up("before@example.com").await,
+        200,
+        "beforeCreate is called"
+    );
+
+    // An empty PATCH turns them off: listed as none, and not called.
+    let (status, body) = call(
+        &runtime,
+        Method::PATCH,
+        &patch,
+        &json!({ "blockingFunctions": {} }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["blockingFunctions"], json!({}));
+    let (_, body) = call(&runtime, Method::GET, config, &json!({})).await;
+    assert_eq!(body["blockingFunctions"], json!({}));
+    assert_eq!(
+        sign_up("cleared@example.com").await,
+        200,
+        "no blocking function is called"
+    );
+
+    // Put back, they are called again.
+    let (status, body) = call(
+        &runtime,
+        Method::PATCH,
+        &patch,
+        &json!({ "blockingFunctions": registered }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["blockingFunctions"], registered);
+    assert_ne!(
+        sign_up("restored@example.com").await,
+        200,
+        "beforeCreate is called again"
+    );
+
+    // Cleared, then the functions load again: they are registered again.
+    call(
+        &runtime,
+        Method::PATCH,
+        &patch,
+        &json!({ "blockingFunctions": {} }),
+    )
+    .await;
+    runtime.functions_registered();
+    let (_, body) = call(&runtime, Method::GET, config, &json!({})).await;
+    assert_eq!(body["blockingFunctions"], registered);
+    assert_ne!(
+        sign_up("reloaded@example.com").await,
+        200,
+        "registered again, it is called"
+    );
+}
+
+// ------------------------------------------------------------------
 // The console's hooks card: which blocking functions would run, and a tick
 // whenever that may have changed.
 
@@ -1420,10 +1524,9 @@ async fn blocking_targets_resolve_config_first_and_changes_tick() {
             source: HookSource::Config
         })
     );
-    assert_eq!(
-        targets.before_sign_in.as_ref().map(|hook| hook.source),
-        Some(HookSource::Functions)
-    );
+    // The PATCH replaced the blocking functions, as the official emulator's
+    // configuration is replaced: the one it left out is not called (#175).
+    assert_eq!(targets.before_sign_in, None);
     assert!(
         !targets.forward_id_token,
         "the configuration's forwarding applies"

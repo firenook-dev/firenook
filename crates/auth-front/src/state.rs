@@ -1123,6 +1123,13 @@ pub struct AgentState {
     /// Configuration changes since the last drain (`observe`).
     #[serde(skip)]
     pub(crate) notices: Vec<Notice>,
+    /// An `updateConfig` set `blockingFunctions` since the Functions emulator
+    /// last registered its blocking functions. The configuration alone then
+    /// says which functions sign-up and sign-in call, as the official
+    /// emulator's does after such a PATCH; its Functions emulator registers
+    /// them again each time it loads, and so does a restart here (#175).
+    #[serde(skip)]
+    pub blocking_set: bool,
 }
 
 impl Default for AgentState {
@@ -1133,6 +1140,7 @@ impl Default for AgentState {
             tenants: BTreeMap::new(),
             mutations: 0,
             notices: Vec::new(),
+            blocking_set: false,
         }
     }
 }
