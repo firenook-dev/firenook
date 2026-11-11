@@ -1,0 +1,1308 @@
+{
+  "schemaVersion": 1,
+  "target": "official-java-emulator",
+  "firebaseToolsVersion": "15.35.0",
+  "javaJarSha256": "9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c",
+  "capturedAt": "2026-11-11T16:25:36.033Z",
+  "credentialsStored": false,
+  "rulesSourceSha256": "b3a7610c4081d036d185f01c4c84067b0a038a4c8f4f36ac5b00cc23b88fef2a",
+  "projectId": "demo-firenook-contributed-rooms",
+  "allowCases": 10,
+  "denyCases": 19,
+  "seed": [
+    {
+      "path": "rooms/r1",
+      "fields": {
+        "title": {
+          "stringValue": "First room"
+        },
+        "visibility": {
+          "stringValue": "open"
+        },
+        "note": {
+          "stringValue": ""
+        }
+      }
+    },
+    {
+      "path": "rooms/r2",
+      "fields": {
+        "title": {
+          "stringValue": "Second room"
+        },
+        "visibility": {
+          "stringValue": "closed"
+        },
+        "note": {
+          "stringValue": ""
+        }
+      }
+    },
+    {
+      "path": "rooms/r1/members/u-member",
+      "fields": {
+        "since": {
+          "integerValue": "1"
+        }
+      }
+    },
+    {
+      "path": "rooms/r1/members/u-lead",
+      "fields": {
+        "since": {
+          "integerValue": "1"
+        }
+      }
+    },
+    {
+      "path": "rooms/r2/members/u-outsider",
+      "fields": {
+        "since": {
+          "integerValue": "1"
+        }
+      }
+    },
+    {
+      "path": "rooms/r1/entries/e1",
+      "fields": {
+        "quantity": {
+          "integerValue": "5"
+        },
+        "open": {
+          "booleanValue": true
+        }
+      }
+    },
+    {
+      "path": "rooms/r1/entries/e2",
+      "fields": {
+        "quantity": {
+          "integerValue": "7"
+        },
+        "open": {
+          "booleanValue": false
+        }
+      }
+    },
+    {
+      "path": "marks/yellow",
+      "fields": {
+        "label": {
+          "stringValue": "Yellow"
+        },
+        "counter": {
+          "integerValue": "1"
+        }
+      }
+    }
+  ],
+  "cases": [
+    {
+      "id": "member-get-room",
+      "feature": "function-outside-service",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-member",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "documents/rooms/r1"
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/rooms/r1",
+          "fields": {
+            "title": {
+              "stringValue": "First room"
+            },
+            "visibility": {
+              "stringValue": "open"
+            },
+            "note": {
+              "stringValue": ""
+            }
+          },
+          "createTime": "2026-11-11T16:25:35.275297Z",
+          "updateTime": "2026-11-11T16:25:35.275297Z"
+        }
+      }
+    },
+    {
+      "id": "anonymous-get-room",
+      "feature": "function-outside-service",
+      "expected": "DENY",
+      "auth": null,
+      "request": {
+        "method": "GET",
+        "path": "documents/rooms/r1"
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'get' @ L26",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "lead-create-room",
+      "feature": "conditional-operator",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-lead",
+        "claims": {
+          "role": "lead"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/new",
+                "fields": {
+                  "title": {
+                    "stringValue": "Room"
+                  },
+                  "visibility": {
+                    "stringValue": "open"
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "created",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "writeResults": [
+            {
+              "updateTime": "2026-11-11T16:25:35.585546Z",
+              "transformResults": [
+                {
+                  "timestampValue": "2026-11-11T16:25:35.565Z"
+                }
+              ]
+            }
+          ],
+          "commitTime": "2026-11-11T16:25:35.585546Z"
+        }
+      }
+    },
+    {
+      "id": "member-create-room",
+      "feature": "conditional-operator",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-member",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/new2",
+                "fields": {
+                  "title": {
+                    "stringValue": "Room"
+                  },
+                  "visibility": {
+                    "stringValue": "open"
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "created",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'create' @ L29, false for 'update' @ L39",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "anonymous-create-room",
+      "feature": "conditional-operator",
+      "expected": "DENY",
+      "auth": null,
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/new3",
+                "fields": {
+                  "title": {
+                    "stringValue": "Room"
+                  },
+                  "visibility": {
+                    "stringValue": "open"
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "created",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'create' @ L29, false for 'update' @ L39",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-room-unknown-field",
+      "feature": "keys-hasOnly-hasAll",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-lead",
+        "claims": {
+          "role": "lead"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/new4",
+                "fields": {
+                  "title": {
+                    "stringValue": "Room"
+                  },
+                  "visibility": {
+                    "stringValue": "open"
+                  },
+                  "secret": {
+                    "booleanValue": true
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "created",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L29:24 for 'create' @ L29, evaluation error at L39:24 for 'update' @ L39, false for 'create' @ L29",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-room-missing-field",
+      "feature": "keys-hasOnly-hasAll",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-lead",
+        "claims": {
+          "role": "lead"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/new5",
+                "fields": {
+                  "title": {
+                    "stringValue": "Room"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'create' @ L29, evaluation error at L39:24 for 'update' @ L39, false for 'create' @ L29",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-room-title-not-string",
+      "feature": "type-and-value-checks",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-lead",
+        "claims": {
+          "role": "lead"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/new6",
+                "fields": {
+                  "title": {
+                    "integerValue": "42"
+                  },
+                  "visibility": {
+                    "stringValue": "open"
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "created",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L29:24 for 'create' @ L29, evaluation error at L39:24 for 'update' @ L39, false for 'create' @ L29",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-room-title-too-long",
+      "feature": "type-and-value-checks",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-lead",
+        "claims": {
+          "role": "lead"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/new7",
+                "fields": {
+                  "title": {
+                    "stringValue": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  },
+                  "visibility": {
+                    "stringValue": "open"
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "created",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L29:24 for 'create' @ L29, evaluation error at L39:24 for 'update' @ L39, false for 'create' @ L29",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-room-visibility-not-listed",
+      "feature": "type-and-value-checks",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-lead",
+        "claims": {
+          "role": "lead"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/new8",
+                "fields": {
+                  "title": {
+                    "stringValue": "Room"
+                  },
+                  "visibility": {
+                    "stringValue": "half-open"
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "created",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L29:24 for 'create' @ L29, evaluation error at L39:24 for 'update' @ L39, false for 'create' @ L29",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "update-room-allowed-field",
+      "feature": "diff-affectedKeys",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-lead",
+        "claims": {
+          "role": "lead"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/r1",
+                "fields": {
+                  "note": {
+                    "stringValue": "new"
+                  }
+                }
+              },
+              "updateMask": {
+                "fieldPaths": [
+                  "note"
+                ]
+              },
+              "currentDocument": {
+                "exists": true
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "writeResults": [
+            {
+              "updateTime": "2026-11-11T16:25:35.713699Z"
+            }
+          ],
+          "commitTime": "2026-11-11T16:25:35.713699Z"
+        }
+      }
+    },
+    {
+      "id": "update-room-locked-field",
+      "feature": "diff-affectedKeys",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-lead",
+        "claims": {
+          "role": "lead"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/r1",
+                "fields": {
+                  "visibility": {
+                    "stringValue": "closed"
+                  }
+                }
+              },
+              "updateMask": {
+                "fieldPaths": [
+                  "visibility"
+                ]
+              },
+              "currentDocument": {
+                "exists": true
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L39:24 for 'update' @ L39, false for 'update' @ L39",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "lead-delete-room",
+      "feature": "diff-affectedKeys",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-lead",
+        "claims": {
+          "role": "lead"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "delete": "{documents}/rooms/r1"
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'delete' @ L43",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "outsider-get-entry",
+      "feature": "exists-on-other-document",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-outsider",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "documents/rooms/r1/entries/e1"
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L52:23 for 'get' @ L52, false for 'get' @ L52",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "member-get-entry",
+      "feature": "exists-on-other-document",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-member",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "documents/rooms/r1/entries/e1"
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/rooms/r1/entries/e1",
+          "fields": {
+            "quantity": {
+              "integerValue": "5"
+            },
+            "open": {
+              "booleanValue": true
+            }
+          },
+          "createTime": "2026-11-11T16:25:35.275297Z",
+          "updateTime": "2026-11-11T16:25:35.275297Z"
+        }
+      }
+    },
+    {
+      "id": "member-list-foreign-members",
+      "feature": "exists-on-other-document",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-member",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents/rooms/r2:runQuery",
+        "body": {
+          "structuredQuery": {
+            "from": [
+              {
+                "collectionId": "members"
+              }
+            ]
+          }
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L47:24 for 'list' @ L47, false for 'list' @ L47",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "member-query-entries-with-field",
+      "feature": "field-check-in-list-proof",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-member",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents/rooms/r1:runQuery",
+        "body": {
+          "structuredQuery": {
+            "from": [
+              {
+                "collectionId": "entries"
+              }
+            ],
+            "where": {
+              "fieldFilter": {
+                "field": {
+                  "fieldPath": "open"
+                },
+                "op": "EQUAL",
+                "value": {
+                  "booleanValue": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "observed": {
+        "status": 200,
+        "body": [
+          {
+            "document": {
+              "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/rooms/r1/entries/e1",
+              "fields": {
+                "quantity": {
+                  "integerValue": "5"
+                },
+                "open": {
+                  "booleanValue": true
+                }
+              },
+              "createTime": "2026-11-11T16:25:35.275297Z",
+              "updateTime": "2026-11-11T16:25:35.275297Z"
+            },
+            "readTime": "2026-11-11T16:25:35.829021Z",
+            "done": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "outsider-query-entries-with-field",
+      "feature": "field-check-in-list-proof",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-outsider",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents/rooms/r1:runQuery",
+        "body": {
+          "structuredQuery": {
+            "from": [
+              {
+                "collectionId": "entries"
+              }
+            ],
+            "where": {
+              "fieldFilter": {
+                "field": {
+                  "fieldPath": "open"
+                },
+                "op": "EQUAL",
+                "value": {
+                  "booleanValue": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L55:24 for 'list' @ L55, false for 'list' @ L55",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-entry-without-optional-field",
+      "feature": "get-with-default",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-member",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/r1/entries/e3",
+                "fields": {
+                  "open": {
+                    "booleanValue": true
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "writeResults": [
+            {
+              "updateTime": "2026-11-11T16:25:35.896808Z"
+            }
+          ],
+          "commitTime": "2026-11-11T16:25:35.896808Z"
+        }
+      }
+    },
+    {
+      "id": "create-entry-over-limit",
+      "feature": "get-with-default",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-member",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/r1/entries/e4",
+                "fields": {
+                  "quantity": {
+                    "integerValue": "101"
+                  },
+                  "open": {
+                    "booleanValue": true
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'create' @ L58, evaluation error at L63:26 for 'update' @ L63, false for 'create' @ L58",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-entry-not-integer",
+      "feature": "get-with-default",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-member",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/r1/entries/e5",
+                "fields": {
+                  "quantity": {
+                    "doubleValue": 1.5
+                  },
+                  "open": {
+                    "booleanValue": true
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'create' @ L58, evaluation error at L63:26 for 'update' @ L63, false for 'create' @ L58",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "update-entry-in-open-room",
+      "feature": "get-on-parent-document",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-member",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/r1/entries/e1",
+                "fields": {
+                  "quantity": {
+                    "integerValue": "6"
+                  }
+                }
+              },
+              "updateMask": {
+                "fieldPaths": [
+                  "quantity"
+                ]
+              },
+              "currentDocument": {
+                "exists": true
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "writeResults": [
+            {
+              "updateTime": "2026-11-11T16:25:35.939901Z"
+            }
+          ],
+          "commitTime": "2026-11-11T16:25:35.939901Z"
+        }
+      }
+    },
+    {
+      "id": "create-room-with-null-field",
+      "feature": "null-values-on-write",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-lead",
+        "claims": {
+          "role": "lead"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/rooms/new9",
+                "fields": {
+                  "title": {
+                    "stringValue": "Room"
+                  },
+                  "visibility": {
+                    "stringValue": "open"
+                  },
+                  "note": {
+                    "nullValue": null
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "created",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "writeResults": [
+            {
+              "updateTime": "2026-11-11T16:25:35.955622Z",
+              "transformResults": [
+                {
+                  "timestampValue": "2026-11-11T16:25:35.951Z"
+                }
+              ]
+            }
+          ],
+          "commitTime": "2026-11-11T16:25:35.955622Z"
+        }
+      }
+    },
+    {
+      "id": "anonymous-query-missing-document-id",
+      "feature": "query-pinned-to-document-id",
+      "expected": "DENY",
+      "auth": null,
+      "request": {
+        "method": "POST",
+        "path": "documents:runQuery",
+        "body": {
+          "structuredQuery": {
+            "from": [
+              {
+                "collectionId": "rooms"
+              }
+            ],
+            "where": {
+              "fieldFilter": {
+                "field": {
+                  "fieldPath": "__name__"
+                },
+                "op": "EQUAL",
+                "value": {
+                  "referenceValue": "{documents}/rooms/missing"
+                }
+              }
+            }
+          }
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'list' @ L27",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "member-query-missing-document-id",
+      "feature": "query-pinned-to-document-id",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-member",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:runQuery",
+        "body": {
+          "structuredQuery": {
+            "from": [
+              {
+                "collectionId": "rooms"
+              }
+            ],
+            "where": {
+              "fieldFilter": {
+                "field": {
+                  "fieldPath": "__name__"
+                },
+                "op": "EQUAL",
+                "value": {
+                  "referenceValue": "{documents}/rooms/missing"
+                }
+              }
+            }
+          }
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L27:22 for 'list' @ L27",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "get-matching-document-id",
+      "feature": "regex-on-document-id",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-member",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "documents/marks/yellow"
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/marks/yellow",
+          "fields": {
+            "label": {
+              "stringValue": "Yellow"
+            },
+            "counter": {
+              "integerValue": "1"
+            }
+          },
+          "createTime": "2026-11-11T16:25:35.275297Z",
+          "updateTime": "2026-11-11T16:25:35.275297Z"
+        }
+      }
+    },
+    {
+      "id": "get-non-matching-document-id",
+      "feature": "regex-on-document-id",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-member",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "documents/marks/YELLOW_1"
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'get' @ L71",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-mark-both-fields",
+      "feature": "keys-hasAny",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-member",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/marks/blue",
+                "fields": {
+                  "label": {
+                    "stringValue": "Blue"
+                  },
+                  "counter": {
+                    "integerValue": "2"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "writeResults": [
+            {
+              "updateTime": "2026-11-11T16:25:36.016333Z"
+            }
+          ],
+          "commitTime": "2026-11-11T16:25:36.016333Z"
+        }
+      }
+    },
+    {
+      "id": "create-mark-wrong-type",
+      "feature": "keys-hasAny",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-member",
+        "claims": {
+          "role": "member"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/marks/red",
+                "fields": {
+                  "label": {
+                    "stringValue": "Red"
+                  },
+                  "counter": {
+                    "stringValue": "two"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'create' @ L73",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    }
+  ]
+}
