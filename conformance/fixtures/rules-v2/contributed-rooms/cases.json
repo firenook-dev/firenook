@@ -3,94 +3,94 @@
   "target": "official-java-emulator",
   "firebaseToolsVersion": "15.35.0",
   "javaJarSha256": "9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c",
-  "capturedAt": "2026-11-11T16:06:22.790Z",
+  "capturedAt": "2026-11-11T16:25:36.033Z",
   "credentialsStored": false,
-  "rulesSourceSha256": "b69de63ab0de7378ecd4eab9ad655d08e9b72510077e5f401c531e6c9d88b190",
+  "rulesSourceSha256": "b3a7610c4081d036d185f01c4c84067b0a038a4c8f4f36ac5b00cc23b88fef2a",
   "projectId": "demo-firenook-contributed-rooms",
   "allowCases": 10,
   "denyCases": 19,
   "seed": [
     {
-      "path": "raeume/r1",
+      "path": "rooms/r1",
       "fields": {
-        "titel": {
-          "stringValue": "Erster Raum"
+        "title": {
+          "stringValue": "First room"
         },
-        "sichtbarkeit": {
-          "stringValue": "offen"
+        "visibility": {
+          "stringValue": "open"
         },
-        "notiz": {
+        "note": {
           "stringValue": ""
         }
       }
     },
     {
-      "path": "raeume/r2",
+      "path": "rooms/r2",
       "fields": {
-        "titel": {
-          "stringValue": "Zweiter Raum"
+        "title": {
+          "stringValue": "Second room"
         },
-        "sichtbarkeit": {
-          "stringValue": "geschlossen"
+        "visibility": {
+          "stringValue": "closed"
         },
-        "notiz": {
+        "note": {
           "stringValue": ""
         }
       }
     },
     {
-      "path": "raeume/r1/mitglieder/u-mitglied",
+      "path": "rooms/r1/members/u-member",
       "fields": {
-        "seit": {
+        "since": {
           "integerValue": "1"
         }
       }
     },
     {
-      "path": "raeume/r1/mitglieder/u-leitung",
+      "path": "rooms/r1/members/u-lead",
       "fields": {
-        "seit": {
+        "since": {
           "integerValue": "1"
         }
       }
     },
     {
-      "path": "raeume/r2/mitglieder/u-fremder",
+      "path": "rooms/r2/members/u-outsider",
       "fields": {
-        "seit": {
+        "since": {
           "integerValue": "1"
         }
       }
     },
     {
-      "path": "raeume/r1/eintraege/e1",
+      "path": "rooms/r1/entries/e1",
       "fields": {
-        "menge": {
+        "quantity": {
           "integerValue": "5"
         },
-        "offen": {
+        "open": {
           "booleanValue": true
         }
       }
     },
     {
-      "path": "raeume/r1/eintraege/e2",
+      "path": "rooms/r1/entries/e2",
       "fields": {
-        "menge": {
+        "quantity": {
           "integerValue": "7"
         },
-        "offen": {
+        "open": {
           "booleanValue": false
         }
       }
     },
     {
-      "path": "marken/gelb",
+      "path": "marks/yellow",
       "fields": {
-        "bezeichnung": {
-          "stringValue": "Gelb"
+        "label": {
+          "stringValue": "Yellow"
         },
-        "zaehler": {
+        "counter": {
           "integerValue": "1"
         }
       }
@@ -102,32 +102,32 @@
       "feature": "function-outside-service",
       "expected": "ALLOW",
       "auth": {
-        "uid": "u-mitglied",
+        "uid": "u-member",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
         "method": "GET",
-        "path": "documents/raeume/r1"
+        "path": "documents/rooms/r1"
       },
       "observed": {
         "status": 200,
         "body": {
-          "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/raeume/r1",
+          "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/rooms/r1",
           "fields": {
-            "titel": {
-              "stringValue": "Erster Raum"
+            "title": {
+              "stringValue": "First room"
             },
-            "sichtbarkeit": {
-              "stringValue": "offen"
+            "visibility": {
+              "stringValue": "open"
             },
-            "notiz": {
+            "note": {
               "stringValue": ""
             }
           },
-          "createTime": "2026-11-11T16:06:21.973172Z",
-          "updateTime": "2026-11-11T16:06:21.973172Z"
+          "createTime": "2026-11-11T16:25:35.275297Z",
+          "updateTime": "2026-11-11T16:25:35.275297Z"
         }
       }
     },
@@ -138,7 +138,7 @@
       "auth": null,
       "request": {
         "method": "GET",
-        "path": "documents/raeume/r1"
+        "path": "documents/rooms/r1"
       },
       "observed": {
         "status": 403,
@@ -156,9 +156,9 @@
       "feature": "conditional-operator",
       "expected": "ALLOW",
       "auth": {
-        "uid": "u-leitung",
+        "uid": "u-lead",
         "claims": {
-          "rolle": "leitung"
+          "role": "lead"
         }
       },
       "request": {
@@ -168,19 +168,19 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/neu",
+                "name": "{documents}/rooms/new",
                 "fields": {
-                  "titel": {
-                    "stringValue": "Raum"
+                  "title": {
+                    "stringValue": "Room"
                   },
-                  "sichtbarkeit": {
-                    "stringValue": "offen"
+                  "visibility": {
+                    "stringValue": "open"
                   }
                 }
               },
               "updateTransforms": [
                 {
-                  "fieldPath": "angelegt",
+                  "fieldPath": "created",
                   "setToServerValue": "REQUEST_TIME"
                 }
               ]
@@ -193,15 +193,15 @@
         "body": {
           "writeResults": [
             {
-              "updateTime": "2026-11-11T16:06:22.341477Z",
+              "updateTime": "2026-11-11T16:25:35.585546Z",
               "transformResults": [
                 {
-                  "timestampValue": "2026-11-11T16:06:22.322Z"
+                  "timestampValue": "2026-11-11T16:25:35.565Z"
                 }
               ]
             }
           ],
-          "commitTime": "2026-11-11T16:06:22.341477Z"
+          "commitTime": "2026-11-11T16:25:35.585546Z"
         }
       }
     },
@@ -210,9 +210,9 @@
       "feature": "conditional-operator",
       "expected": "DENY",
       "auth": {
-        "uid": "u-mitglied",
+        "uid": "u-member",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
@@ -222,19 +222,19 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/neu2",
+                "name": "{documents}/rooms/new2",
                 "fields": {
-                  "titel": {
-                    "stringValue": "Raum"
+                  "title": {
+                    "stringValue": "Room"
                   },
-                  "sichtbarkeit": {
-                    "stringValue": "offen"
+                  "visibility": {
+                    "stringValue": "open"
                   }
                 }
               },
               "updateTransforms": [
                 {
-                  "fieldPath": "angelegt",
+                  "fieldPath": "created",
                   "setToServerValue": "REQUEST_TIME"
                 }
               ]
@@ -265,19 +265,19 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/neu3",
+                "name": "{documents}/rooms/new3",
                 "fields": {
-                  "titel": {
-                    "stringValue": "Raum"
+                  "title": {
+                    "stringValue": "Room"
                   },
-                  "sichtbarkeit": {
-                    "stringValue": "offen"
+                  "visibility": {
+                    "stringValue": "open"
                   }
                 }
               },
               "updateTransforms": [
                 {
-                  "fieldPath": "angelegt",
+                  "fieldPath": "created",
                   "setToServerValue": "REQUEST_TIME"
                 }
               ]
@@ -301,9 +301,9 @@
       "feature": "keys-hasOnly-hasAll",
       "expected": "DENY",
       "auth": {
-        "uid": "u-leitung",
+        "uid": "u-lead",
         "claims": {
-          "rolle": "leitung"
+          "role": "lead"
         }
       },
       "request": {
@@ -313,22 +313,22 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/neu4",
+                "name": "{documents}/rooms/new4",
                 "fields": {
-                  "titel": {
-                    "stringValue": "Raum"
+                  "title": {
+                    "stringValue": "Room"
                   },
-                  "sichtbarkeit": {
-                    "stringValue": "offen"
+                  "visibility": {
+                    "stringValue": "open"
                   },
-                  "heimlich": {
+                  "secret": {
                     "booleanValue": true
                   }
                 }
               },
               "updateTransforms": [
                 {
-                  "fieldPath": "angelegt",
+                  "fieldPath": "created",
                   "setToServerValue": "REQUEST_TIME"
                 }
               ]
@@ -352,9 +352,9 @@
       "feature": "keys-hasOnly-hasAll",
       "expected": "DENY",
       "auth": {
-        "uid": "u-leitung",
+        "uid": "u-lead",
         "claims": {
-          "rolle": "leitung"
+          "role": "lead"
         }
       },
       "request": {
@@ -364,10 +364,10 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/neu5",
+                "name": "{documents}/rooms/new5",
                 "fields": {
-                  "titel": {
-                    "stringValue": "Raum"
+                  "title": {
+                    "stringValue": "Room"
                   }
                 }
               }
@@ -391,9 +391,9 @@
       "feature": "type-and-value-checks",
       "expected": "DENY",
       "auth": {
-        "uid": "u-leitung",
+        "uid": "u-lead",
         "claims": {
-          "rolle": "leitung"
+          "role": "lead"
         }
       },
       "request": {
@@ -403,19 +403,19 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/neu6",
+                "name": "{documents}/rooms/new6",
                 "fields": {
-                  "titel": {
+                  "title": {
                     "integerValue": "42"
                   },
-                  "sichtbarkeit": {
-                    "stringValue": "offen"
+                  "visibility": {
+                    "stringValue": "open"
                   }
                 }
               },
               "updateTransforms": [
                 {
-                  "fieldPath": "angelegt",
+                  "fieldPath": "created",
                   "setToServerValue": "REQUEST_TIME"
                 }
               ]
@@ -439,9 +439,9 @@
       "feature": "type-and-value-checks",
       "expected": "DENY",
       "auth": {
-        "uid": "u-leitung",
+        "uid": "u-lead",
         "claims": {
-          "rolle": "leitung"
+          "role": "lead"
         }
       },
       "request": {
@@ -451,19 +451,19 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/neu7",
+                "name": "{documents}/rooms/new7",
                 "fields": {
-                  "titel": {
+                  "title": {
                     "stringValue": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                   },
-                  "sichtbarkeit": {
-                    "stringValue": "offen"
+                  "visibility": {
+                    "stringValue": "open"
                   }
                 }
               },
               "updateTransforms": [
                 {
-                  "fieldPath": "angelegt",
+                  "fieldPath": "created",
                   "setToServerValue": "REQUEST_TIME"
                 }
               ]
@@ -487,9 +487,9 @@
       "feature": "type-and-value-checks",
       "expected": "DENY",
       "auth": {
-        "uid": "u-leitung",
+        "uid": "u-lead",
         "claims": {
-          "rolle": "leitung"
+          "role": "lead"
         }
       },
       "request": {
@@ -499,19 +499,19 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/neu8",
+                "name": "{documents}/rooms/new8",
                 "fields": {
-                  "titel": {
-                    "stringValue": "Raum"
+                  "title": {
+                    "stringValue": "Room"
                   },
-                  "sichtbarkeit": {
-                    "stringValue": "halboffen"
+                  "visibility": {
+                    "stringValue": "half-open"
                   }
                 }
               },
               "updateTransforms": [
                 {
-                  "fieldPath": "angelegt",
+                  "fieldPath": "created",
                   "setToServerValue": "REQUEST_TIME"
                 }
               ]
@@ -535,9 +535,9 @@
       "feature": "diff-affectedKeys",
       "expected": "ALLOW",
       "auth": {
-        "uid": "u-leitung",
+        "uid": "u-lead",
         "claims": {
-          "rolle": "leitung"
+          "role": "lead"
         }
       },
       "request": {
@@ -547,16 +547,16 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/r1",
+                "name": "{documents}/rooms/r1",
                 "fields": {
-                  "notiz": {
-                    "stringValue": "neu"
+                  "note": {
+                    "stringValue": "new"
                   }
                 }
               },
               "updateMask": {
                 "fieldPaths": [
-                  "notiz"
+                  "note"
                 ]
               },
               "currentDocument": {
@@ -571,10 +571,10 @@
         "body": {
           "writeResults": [
             {
-              "updateTime": "2026-11-11T16:06:22.470444Z"
+              "updateTime": "2026-11-11T16:25:35.713699Z"
             }
           ],
-          "commitTime": "2026-11-11T16:06:22.470444Z"
+          "commitTime": "2026-11-11T16:25:35.713699Z"
         }
       }
     },
@@ -583,9 +583,9 @@
       "feature": "diff-affectedKeys",
       "expected": "DENY",
       "auth": {
-        "uid": "u-leitung",
+        "uid": "u-lead",
         "claims": {
-          "rolle": "leitung"
+          "role": "lead"
         }
       },
       "request": {
@@ -595,16 +595,16 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/r1",
+                "name": "{documents}/rooms/r1",
                 "fields": {
-                  "sichtbarkeit": {
-                    "stringValue": "geschlossen"
+                  "visibility": {
+                    "stringValue": "closed"
                   }
                 }
               },
               "updateMask": {
                 "fieldPaths": [
-                  "sichtbarkeit"
+                  "visibility"
                 ]
               },
               "currentDocument": {
@@ -630,9 +630,9 @@
       "feature": "diff-affectedKeys",
       "expected": "DENY",
       "auth": {
-        "uid": "u-leitung",
+        "uid": "u-lead",
         "claims": {
-          "rolle": "leitung"
+          "role": "lead"
         }
       },
       "request": {
@@ -641,7 +641,7 @@
         "body": {
           "writes": [
             {
-              "delete": "{documents}/raeume/r1"
+              "delete": "{documents}/rooms/r1"
             }
           ]
         }
@@ -662,14 +662,14 @@
       "feature": "exists-on-other-document",
       "expected": "DENY",
       "auth": {
-        "uid": "u-fremder",
+        "uid": "u-outsider",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
         "method": "GET",
-        "path": "documents/raeume/r1/eintraege/e1"
+        "path": "documents/rooms/r1/entries/e1"
       },
       "observed": {
         "status": 403,
@@ -687,29 +687,29 @@
       "feature": "exists-on-other-document",
       "expected": "ALLOW",
       "auth": {
-        "uid": "u-mitglied",
+        "uid": "u-member",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
         "method": "GET",
-        "path": "documents/raeume/r1/eintraege/e1"
+        "path": "documents/rooms/r1/entries/e1"
       },
       "observed": {
         "status": 200,
         "body": {
-          "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/raeume/r1/eintraege/e1",
+          "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/rooms/r1/entries/e1",
           "fields": {
-            "menge": {
+            "quantity": {
               "integerValue": "5"
             },
-            "offen": {
+            "open": {
               "booleanValue": true
             }
           },
-          "createTime": "2026-11-11T16:06:21.973172Z",
-          "updateTime": "2026-11-11T16:06:21.973172Z"
+          "createTime": "2026-11-11T16:25:35.275297Z",
+          "updateTime": "2026-11-11T16:25:35.275297Z"
         }
       }
     },
@@ -718,19 +718,19 @@
       "feature": "exists-on-other-document",
       "expected": "DENY",
       "auth": {
-        "uid": "u-mitglied",
+        "uid": "u-member",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
         "method": "POST",
-        "path": "documents/raeume/r2:runQuery",
+        "path": "documents/rooms/r2:runQuery",
         "body": {
           "structuredQuery": {
             "from": [
               {
-                "collectionId": "mitglieder"
+                "collectionId": "members"
               }
             ]
           }
@@ -752,25 +752,25 @@
       "feature": "field-check-in-list-proof",
       "expected": "ALLOW",
       "auth": {
-        "uid": "u-mitglied",
+        "uid": "u-member",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
         "method": "POST",
-        "path": "documents/raeume/r1:runQuery",
+        "path": "documents/rooms/r1:runQuery",
         "body": {
           "structuredQuery": {
             "from": [
               {
-                "collectionId": "eintraege"
+                "collectionId": "entries"
               }
             ],
             "where": {
               "fieldFilter": {
                 "field": {
-                  "fieldPath": "offen"
+                  "fieldPath": "open"
                 },
                 "op": "EQUAL",
                 "value": {
@@ -786,19 +786,19 @@
         "body": [
           {
             "document": {
-              "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/raeume/r1/eintraege/e1",
+              "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/rooms/r1/entries/e1",
               "fields": {
-                "menge": {
+                "quantity": {
                   "integerValue": "5"
                 },
-                "offen": {
+                "open": {
                   "booleanValue": true
                 }
               },
-              "createTime": "2026-11-11T16:06:21.973172Z",
-              "updateTime": "2026-11-11T16:06:21.973172Z"
+              "createTime": "2026-11-11T16:25:35.275297Z",
+              "updateTime": "2026-11-11T16:25:35.275297Z"
             },
-            "readTime": "2026-11-11T16:06:22.572512Z",
+            "readTime": "2026-11-11T16:25:35.829021Z",
             "done": true
           }
         ]
@@ -809,25 +809,25 @@
       "feature": "field-check-in-list-proof",
       "expected": "DENY",
       "auth": {
-        "uid": "u-fremder",
+        "uid": "u-outsider",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
         "method": "POST",
-        "path": "documents/raeume/r1:runQuery",
+        "path": "documents/rooms/r1:runQuery",
         "body": {
           "structuredQuery": {
             "from": [
               {
-                "collectionId": "eintraege"
+                "collectionId": "entries"
               }
             ],
             "where": {
               "fieldFilter": {
                 "field": {
-                  "fieldPath": "offen"
+                  "fieldPath": "open"
                 },
                 "op": "EQUAL",
                 "value": {
@@ -854,9 +854,9 @@
       "feature": "get-with-default",
       "expected": "ALLOW",
       "auth": {
-        "uid": "u-mitglied",
+        "uid": "u-member",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
@@ -866,9 +866,9 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/r1/eintraege/e3",
+                "name": "{documents}/rooms/r1/entries/e3",
                 "fields": {
-                  "offen": {
+                  "open": {
                     "booleanValue": true
                   }
                 }
@@ -882,10 +882,10 @@
         "body": {
           "writeResults": [
             {
-              "updateTime": "2026-11-11T16:06:22.637158Z"
+              "updateTime": "2026-11-11T16:25:35.896808Z"
             }
           ],
-          "commitTime": "2026-11-11T16:06:22.637158Z"
+          "commitTime": "2026-11-11T16:25:35.896808Z"
         }
       }
     },
@@ -894,9 +894,9 @@
       "feature": "get-with-default",
       "expected": "DENY",
       "auth": {
-        "uid": "u-mitglied",
+        "uid": "u-member",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
@@ -906,12 +906,12 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/r1/eintraege/e4",
+                "name": "{documents}/rooms/r1/entries/e4",
                 "fields": {
-                  "menge": {
+                  "quantity": {
                     "integerValue": "101"
                   },
-                  "offen": {
+                  "open": {
                     "booleanValue": true
                   }
                 }
@@ -936,9 +936,9 @@
       "feature": "get-with-default",
       "expected": "DENY",
       "auth": {
-        "uid": "u-mitglied",
+        "uid": "u-member",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
@@ -948,12 +948,12 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/r1/eintraege/e5",
+                "name": "{documents}/rooms/r1/entries/e5",
                 "fields": {
-                  "menge": {
+                  "quantity": {
                     "doubleValue": 1.5
                   },
-                  "offen": {
+                  "open": {
                     "booleanValue": true
                   }
                 }
@@ -978,9 +978,9 @@
       "feature": "get-on-parent-document",
       "expected": "ALLOW",
       "auth": {
-        "uid": "u-mitglied",
+        "uid": "u-member",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
@@ -990,16 +990,16 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/r1/eintraege/e1",
+                "name": "{documents}/rooms/r1/entries/e1",
                 "fields": {
-                  "menge": {
+                  "quantity": {
                     "integerValue": "6"
                   }
                 }
               },
               "updateMask": {
                 "fieldPaths": [
-                  "menge"
+                  "quantity"
                 ]
               },
               "currentDocument": {
@@ -1014,10 +1014,10 @@
         "body": {
           "writeResults": [
             {
-              "updateTime": "2026-11-11T16:06:22.680448Z"
+              "updateTime": "2026-11-11T16:25:35.939901Z"
             }
           ],
-          "commitTime": "2026-11-11T16:06:22.680448Z"
+          "commitTime": "2026-11-11T16:25:35.939901Z"
         }
       }
     },
@@ -1026,9 +1026,9 @@
       "feature": "null-values-on-write",
       "expected": "ALLOW",
       "auth": {
-        "uid": "u-leitung",
+        "uid": "u-lead",
         "claims": {
-          "rolle": "leitung"
+          "role": "lead"
         }
       },
       "request": {
@@ -1038,22 +1038,22 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/raeume/neu9",
+                "name": "{documents}/rooms/new9",
                 "fields": {
-                  "titel": {
-                    "stringValue": "Raum"
+                  "title": {
+                    "stringValue": "Room"
                   },
-                  "sichtbarkeit": {
-                    "stringValue": "offen"
+                  "visibility": {
+                    "stringValue": "open"
                   },
-                  "notiz": {
+                  "note": {
                     "nullValue": null
                   }
                 }
               },
               "updateTransforms": [
                 {
-                  "fieldPath": "angelegt",
+                  "fieldPath": "created",
                   "setToServerValue": "REQUEST_TIME"
                 }
               ]
@@ -1066,15 +1066,15 @@
         "body": {
           "writeResults": [
             {
-              "updateTime": "2026-11-11T16:06:22.695975Z",
+              "updateTime": "2026-11-11T16:25:35.955622Z",
               "transformResults": [
                 {
-                  "timestampValue": "2026-11-11T16:06:22.690Z"
+                  "timestampValue": "2026-11-11T16:25:35.951Z"
                 }
               ]
             }
           ],
-          "commitTime": "2026-11-11T16:06:22.695975Z"
+          "commitTime": "2026-11-11T16:25:35.955622Z"
         }
       }
     },
@@ -1090,7 +1090,7 @@
           "structuredQuery": {
             "from": [
               {
-                "collectionId": "raeume"
+                "collectionId": "rooms"
               }
             ],
             "where": {
@@ -1100,7 +1100,7 @@
                 },
                 "op": "EQUAL",
                 "value": {
-                  "referenceValue": "{documents}/raeume/gibtesnicht"
+                  "referenceValue": "{documents}/rooms/missing"
                 }
               }
             }
@@ -1123,9 +1123,9 @@
       "feature": "query-pinned-to-document-id",
       "expected": "DENY",
       "auth": {
-        "uid": "u-mitglied",
+        "uid": "u-member",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
@@ -1135,7 +1135,7 @@
           "structuredQuery": {
             "from": [
               {
-                "collectionId": "raeume"
+                "collectionId": "rooms"
               }
             ],
             "where": {
@@ -1145,7 +1145,7 @@
                 },
                 "op": "EQUAL",
                 "value": {
-                  "referenceValue": "{documents}/raeume/gibtesnicht"
+                  "referenceValue": "{documents}/rooms/missing"
                 }
               }
             }
@@ -1168,29 +1168,29 @@
       "feature": "regex-on-document-id",
       "expected": "ALLOW",
       "auth": {
-        "uid": "u-mitglied",
+        "uid": "u-member",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
         "method": "GET",
-        "path": "documents/marken/gelb"
+        "path": "documents/marks/yellow"
       },
       "observed": {
         "status": 200,
         "body": {
-          "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/marken/gelb",
+          "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/marks/yellow",
           "fields": {
-            "bezeichnung": {
-              "stringValue": "Gelb"
+            "label": {
+              "stringValue": "Yellow"
             },
-            "zaehler": {
+            "counter": {
               "integerValue": "1"
             }
           },
-          "createTime": "2026-11-11T16:06:21.973172Z",
-          "updateTime": "2026-11-11T16:06:21.973172Z"
+          "createTime": "2026-11-11T16:25:35.275297Z",
+          "updateTime": "2026-11-11T16:25:35.275297Z"
         }
       }
     },
@@ -1199,14 +1199,14 @@
       "feature": "regex-on-document-id",
       "expected": "DENY",
       "auth": {
-        "uid": "u-mitglied",
+        "uid": "u-member",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
         "method": "GET",
-        "path": "documents/marken/GELB_1"
+        "path": "documents/marks/YELLOW_1"
       },
       "observed": {
         "status": 403,
@@ -1224,9 +1224,9 @@
       "feature": "keys-hasAny",
       "expected": "ALLOW",
       "auth": {
-        "uid": "u-mitglied",
+        "uid": "u-member",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
@@ -1236,12 +1236,12 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/marken/blau",
+                "name": "{documents}/marks/blue",
                 "fields": {
-                  "bezeichnung": {
-                    "stringValue": "Blau"
+                  "label": {
+                    "stringValue": "Blue"
                   },
-                  "zaehler": {
+                  "counter": {
                     "integerValue": "2"
                   }
                 }
@@ -1255,10 +1255,10 @@
         "body": {
           "writeResults": [
             {
-              "updateTime": "2026-11-11T16:06:22.772755Z"
+              "updateTime": "2026-11-11T16:25:36.016333Z"
             }
           ],
-          "commitTime": "2026-11-11T16:06:22.772755Z"
+          "commitTime": "2026-11-11T16:25:36.016333Z"
         }
       }
     },
@@ -1267,9 +1267,9 @@
       "feature": "keys-hasAny",
       "expected": "DENY",
       "auth": {
-        "uid": "u-mitglied",
+        "uid": "u-member",
         "claims": {
-          "rolle": "mitglied"
+          "role": "member"
         }
       },
       "request": {
@@ -1279,13 +1279,13 @@
           "writes": [
             {
               "update": {
-                "name": "{documents}/marken/rot",
+                "name": "{documents}/marks/red",
                 "fields": {
-                  "bezeichnung": {
-                    "stringValue": "Rot"
+                  "label": {
+                    "stringValue": "Red"
                   },
-                  "zaehler": {
-                    "stringValue": "zwei"
+                  "counter": {
+                    "stringValue": "two"
                   }
                 }
               }

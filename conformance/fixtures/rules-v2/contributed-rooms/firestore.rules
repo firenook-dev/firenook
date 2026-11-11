@@ -5,7 +5,7 @@ rules_version = '2';
 // rulesets use.
 
 // A function outside the service block.
-function angemeldet() {
+function signedIn() {
   return request.auth != null;
 }
 
@@ -13,67 +13,67 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // The conditional operator inside a function (#138).
-    function istLeitung() {
-      return (request.auth != null ? request.auth.token.rolle : 'gast') == 'leitung';
+    function isLead() {
+      return (request.auth != null ? request.auth.token.role : 'guest') == 'lead';
     }
 
-    function istMitglied(raumId) {
-      return angemeldet()
-        && exists(/databases/$(database)/documents/raeume/$(raumId)/mitglieder/$(request.auth.uid));
+    function isMember(roomId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid));
     }
 
-    match /raeume/{raumId} {
-      allow get: if istMitglied(raumId);
-      allow list: if angemeldet() && resource.data.sichtbarkeit == 'offen';
+    match /rooms/{roomId} {
+      allow get: if isMember(roomId);
+      allow list: if signedIn() && resource.data.visibility == 'open';
 
-      allow create: if istLeitung()
-        && request.resource.data.keys().hasOnly(['titel', 'sichtbarkeit', 'angelegt', 'notiz'])
-        && request.resource.data.keys().hasAll(['titel', 'sichtbarkeit', 'angelegt'])
-        && request.resource.data.titel is string
-        && request.resource.data.titel.size() <= 40
-        && request.resource.data.sichtbarkeit in ['offen', 'geschlossen']
-        && request.resource.data.angelegt == request.time;
+      allow create: if isLead()
+        && request.resource.data.keys().hasOnly(['title', 'visibility', 'created', 'note'])
+        && request.resource.data.keys().hasAll(['title', 'visibility', 'created'])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 40
+        && request.resource.data.visibility in ['open', 'closed']
+        && request.resource.data.created == request.time;
 
       // resource != null first: a create has no resource, and diff() on it is
       // an evaluation error rather than a verdict.
-      allow update: if istLeitung()
+      allow update: if isLead()
         && resource != null
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['titel', 'notiz']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'note']);
 
       allow delete: if false;
 
-      match /mitglieder/{uid} {
-        allow get: if angemeldet() && uid == request.auth.uid;
-        allow list: if istMitglied(raumId);
-        allow write: if istLeitung();
+      match /members/{uid} {
+        allow get: if signedIn() && uid == request.auth.uid;
+        allow list: if isMember(roomId);
+        allow write: if isLead();
       }
 
-      match /eintraege/{eintragId} {
-        allow get: if istMitglied(raumId);
+      match /entries/{entryId} {
+        allow get: if isMember(roomId);
 
         // A field check in the proof of a list query (#154).
-        allow list: if istMitglied(raumId) && 'offen' in resource.data;
+        allow list: if isMember(roomId) && 'open' in resource.data;
 
         // get(key, default) on the payload.
-        allow create: if istMitglied(raumId)
-          && request.resource.data.get('menge', 0) is int
-          && request.resource.data.get('menge', 0) <= 100;
+        allow create: if isMember(roomId)
+          && request.resource.data.get('quantity', 0) is int
+          && request.resource.data.get('quantity', 0) <= 100;
 
         // A lookup of the parent document.
-        allow update: if istMitglied(raumId)
-          && get(/databases/$(database)/documents/raeume/$(raumId)).data.sichtbarkeit == 'offen';
+        allow update: if isMember(roomId)
+          && get(/databases/$(database)/documents/rooms/$(roomId)).data.visibility == 'open';
 
-        allow delete: if istLeitung();
+        allow delete: if isLead();
       }
     }
 
-    match /marken/{markeId} {
-      allow get: if angemeldet() && markeId.matches('^[a-z0-9-]+$');
-      allow list: if angemeldet();
-      allow create: if angemeldet()
-        && request.resource.data.bezeichnung is string
-        && request.resource.data.zaehler is int
-        && request.resource.data.keys().hasAny(['bezeichnung', 'zaehler']);
+    match /marks/{markId} {
+      allow get: if signedIn() && markId.matches('^[a-z0-9-]+$');
+      allow list: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.label is string
+        && request.resource.data.counter is int
+        && request.resource.data.keys().hasAny(['label', 'counter']);
     }
   }
 }
