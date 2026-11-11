@@ -22,6 +22,7 @@ import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as AuthActivityRouteImport } from './routes/auth_.activity'
 import { Route as AuthInboxRouteImport } from './routes/auth_.inbox'
 import { Route as AuthSettingsRouteImport } from './routes/auth_.settings'
+import { Route as FirestoreIndexesRouteImport } from './routes/firestore_.indexes'
 import { Route as FirestoreRulesRouteImport } from './routes/firestore_.rules'
 import { Route as FunctionsInvocationsRouteImport } from './routes/functions_.invocations'
 import { Route as PubsubSchemasRouteImport } from './routes/pubsub_.schemas'
@@ -92,6 +93,11 @@ const AuthSettingsRoute = AuthSettingsRouteImport.update({
   path: '/auth/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FirestoreIndexesRoute = FirestoreIndexesRouteImport.update({
+  id: '/firestore_/indexes',
+  path: '/firestore/indexes',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FirestoreRulesRoute = FirestoreRulesRouteImport.update({
   id: '/firestore_/rules',
   path: '/firestore/rules',
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/auth/activity': typeof AuthActivityRoute
   '/auth/inbox': typeof AuthInboxRoute
   '/auth/settings': typeof AuthSettingsRoute
+  '/firestore/indexes': typeof FirestoreIndexesRoute
   '/firestore/rules': typeof FirestoreRulesRoute
   '/functions/invocations': typeof FunctionsInvocationsRoute
   '/pubsub/schemas': typeof PubsubSchemasRoute
@@ -146,6 +153,7 @@ export interface FileRoutesByTo {
   '/auth/activity': typeof AuthActivityRoute
   '/auth/inbox': typeof AuthInboxRoute
   '/auth/settings': typeof AuthSettingsRoute
+  '/firestore/indexes': typeof FirestoreIndexesRoute
   '/firestore/rules': typeof FirestoreRulesRoute
   '/functions/invocations': typeof FunctionsInvocationsRoute
   '/pubsub/schemas': typeof PubsubSchemasRoute
@@ -166,6 +174,7 @@ export interface FileRoutesById {
   '/auth_/activity': typeof AuthActivityRoute
   '/auth_/inbox': typeof AuthInboxRoute
   '/auth_/settings': typeof AuthSettingsRoute
+  '/firestore_/indexes': typeof FirestoreIndexesRoute
   '/firestore_/rules': typeof FirestoreRulesRoute
   '/functions_/invocations': typeof FunctionsInvocationsRoute
   '/pubsub_/schemas': typeof PubsubSchemasRoute
@@ -187,6 +196,7 @@ export interface FileRouteTypes {
     | '/auth/activity'
     | '/auth/inbox'
     | '/auth/settings'
+    | '/firestore/indexes'
     | '/firestore/rules'
     | '/functions/invocations'
     | '/pubsub/schemas'
@@ -206,6 +216,7 @@ export interface FileRouteTypes {
     | '/auth/activity'
     | '/auth/inbox'
     | '/auth/settings'
+    | '/firestore/indexes'
     | '/firestore/rules'
     | '/functions/invocations'
     | '/pubsub/schemas'
@@ -225,6 +236,7 @@ export interface FileRouteTypes {
     | '/auth_/activity'
     | '/auth_/inbox'
     | '/auth_/settings'
+    | '/firestore_/indexes'
     | '/firestore_/rules'
     | '/functions_/invocations'
     | '/pubsub_/schemas'
@@ -245,6 +257,7 @@ export interface RootRouteChildren {
   AuthActivityRoute: typeof AuthActivityRoute
   AuthInboxRoute: typeof AuthInboxRoute
   AuthSettingsRoute: typeof AuthSettingsRoute
+  FirestoreIndexesRoute: typeof FirestoreIndexesRoute
   FirestoreRulesRoute: typeof FirestoreRulesRoute
   FunctionsInvocationsRoute: typeof FunctionsInvocationsRoute
   PubsubSchemasRoute: typeof PubsubSchemasRoute
@@ -344,6 +357,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthSettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/firestore_/indexes': {
+      id: '/firestore_/indexes'
+      path: '/firestore/indexes'
+      fullPath: '/firestore/indexes'
+      preLoaderRoute: typeof FirestoreIndexesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/firestore_/rules': {
       id: '/firestore_/rules'
       path: '/firestore/rules'
@@ -389,6 +409,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthActivityRoute: AuthActivityRoute,
   AuthInboxRoute: AuthInboxRoute,
   AuthSettingsRoute: AuthSettingsRoute,
+  FirestoreIndexesRoute: FirestoreIndexesRoute,
   FirestoreRulesRoute: FirestoreRulesRoute,
   FunctionsInvocationsRoute: FunctionsInvocationsRoute,
   PubsubSchemasRoute: PubsubSchemasRoute,

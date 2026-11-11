@@ -31,7 +31,7 @@ import { DeleteDialog, type DeleteTarget } from './delete-dialog'
 import { ExplainPanel } from './explain-panel'
 import { Grid } from './grid'
 import { Inspector } from './inspector'
-import { MissingIndexesButton, MissingIndexesPanel, useIndexesPanel } from './missing-indexes'
+import { MissingIndexesLink } from './missing-indexes'
 import { NewMenu } from './new-menu'
 import { PathBar } from './path-bar'
 import { QueryLine, useMatchCount } from './query-line'
@@ -79,7 +79,6 @@ function WorkbenchBody() {
   const exportOpen = useExportDialog((state) => state.open)
   const setExportOpen = useExportDialog((state) => state.setOpen)
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
-  const [indexes, setIndexes] = useIndexesPanel()
 
   // The selection and hidden columns belong to one collection.
   const selectionScope = `${workbench.slot}|${workbench.collectionPath}|${workbench.group}`
@@ -125,11 +124,6 @@ function WorkbenchBody() {
       run: () => setExplain(!useQueryLine.getState().explain),
     },
     {
-      key: 'i',
-      label: 'Show the missing indexes',
-      run: () => setIndexes(!indexes),
-    },
-    {
       // The scope is a menu so both scopes are named, but flipping it stays
       // one keystroke. A pattern is already the group, with nowhere to go.
       key: 'g',
@@ -172,14 +166,7 @@ function WorkbenchBody() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="firestore-workbench">
       <h1 className="sr-only">Firestore</h1>
       <SchemaPanel />
-      <WorkbenchData
-        live={live}
-        onDelete={setDeleting}
-        explain={explain}
-        setExplain={setExplain}
-        indexes={indexes}
-        setIndexes={setIndexes}
-      />
+      <WorkbenchData live={live} onDelete={setDeleting} explain={explain} setExplain={setExplain} />
       <ExportDocuments open={exportOpen} onOpenChange={setExportOpen} />
       <CreateDialog />
       <DeleteDialog target={deleting} onOpenChange={(open) => !open && setDeleting(null)} />
@@ -226,15 +213,11 @@ function WorkbenchData({
   onDelete,
   explain,
   setExplain,
-  indexes,
-  setIndexes,
 }: {
   live: SubscriptionStatus
   onDelete: (target: DeleteTarget) => void
   explain: boolean
   setExplain: (explain: boolean) => void
-  indexes: boolean
-  setIndexes: (open: boolean) => void
 }) {
   const workbench = useWorkbench()
   const selecting = useSelection((state) => state.checked.size > 0 || state.everything)
@@ -258,8 +241,9 @@ function WorkbenchData({
           testId="live-state"
         />
         {/* Said only once a query has needed an index the file does not
-            declare: a report on the whole database, like the two beside it. */}
-        <MissingIndexesButton />
+            declare: a report on the whole database, like the two beside it,
+            and the way to the Indexes page that lists them. */}
+        <MissingIndexesLink />
         {/* Not a property of the query below: the identity applies to every
             read the workbench makes, the schema tree and inspector included.
             The security rules it reads through have a page of their own in
@@ -282,7 +266,6 @@ function WorkbenchData({
       {explain && workbench.collectionPath && !workbench.queryError && (
         <ExplainPanel onClose={() => setExplain(false)} />
       )}
-      {indexes && <MissingIndexesPanel onClose={() => setIndexes(false)} />}
       {/* Relative so a narrow inspector can float over the grid's right edge. */}
       <div className="relative flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">

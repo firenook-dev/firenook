@@ -172,10 +172,9 @@ impl RulesTarget for StorageTarget {
 pub(crate) struct IndexesTarget {
     pub(crate) database_id: String,
     pub(crate) path: PathBuf,
+    /// Which also knows the text in force, the console's own edits
+    /// included, so an edit landing on disk is not put in force twice.
     pub(crate) indexes: FirestoreIndexes,
-    /// The hash ([`source_hash`]) of the source in force, when the file was
-    /// put in force at all.
-    pub(crate) in_force: Mutex<Option<String>>,
 }
 
 impl RulesTarget for IndexesTarget {
@@ -192,15 +191,13 @@ impl RulesTarget for IndexesTarget {
     }
 
     fn in_force_hash(&self) -> Option<String> {
-        lock(&self.in_force).clone()
+        self.indexes.in_force_hash(&self.database_id)
     }
 
     fn install(&self, source: &str) -> Result<(), FileProblem> {
         self.indexes
             .install(&self.database_id, source)
-            .map_err(LoadError::unreadable)?;
-        *lock(&self.in_force) = Some(source_hash(source));
-        Ok(())
+            .map_err(LoadError::unreadable)
     }
 
     fn set_file_problems(&self, problems: Option<FileProblem>) {
@@ -269,7 +266,6 @@ pub(crate) fn rules_watch_targets(
                 database_id: entry.database_id.clone(),
                 path: path.clone(),
                 indexes: parts.indexes.clone(),
-                in_force: Mutex::new(parts.index_hashes.get(&entry.database_id).cloned()),
             }));
         }
     }
@@ -902,7 +898,7 @@ mod tests {
             Arc::default(),
             Arc::clone(&missing),
             true,
-            [("(default)".to_owned(), file.clone(), None)],
+            [("(default)".to_owned(), file.clone(), Ok(empty.to_owned()))],
         );
         let (policy, query) = strict_orders(&indexes, missing);
         policy
@@ -916,7 +912,6 @@ mod tests {
                 database_id: "(default)".to_owned(),
                 path: file.clone(),
                 indexes: indexes.clone(),
-                in_force: Mutex::new(Some(source_hash(empty))),
             })],
             Arc::new(move |target: &dyn RulesTarget, level, line| {
                 lock(&collected).push((target.service(), level, line));
@@ -962,6 +957,68 @@ mod tests {
         policy
             .validate("(default)", &query)
             .expect("the indexes in force are unchanged");
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    /// An index added from the console lands on disk already in force: the
+    /// watcher puts nothing in force again and says nothing, so the edit is
+    /// one change in the log, not two. A save from an editor after it is
+    /// still reloaded.
+    #[test]
+    fn an_edit_from_the_console_is_not_reloaded_again() {
+        let directory = std::env::temp_dir().join(format!(
+            "firenook-index-watch-console-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("directory");
+        let file = directory.join("firestore.indexes.json");
+        let empty = "{\n  \"indexes\": [],\n  \"fieldOverrides\": []\n}\n";
+        std::fs::write(&file, empty).expect("write");
+        let missing = Arc::new(firenook_query_engine::MissingIndexes::new(None));
+        let indexes = FirestoreIndexes::new(
+            Arc::default(),
+            Arc::clone(&missing),
+            true,
+            [("(default)".to_owned(), file.clone(), Ok(empty.to_owned()))],
+        );
+        let (policy, query) = strict_orders(&indexes, missing);
+        let lines: Lines = Arc::new(Mutex::new(Vec::new()));
+        let collected = Arc::clone(&lines);
+        let watcher = RulesWatcher::start(
+            vec![Arc::new(IndexesTarget {
+                database_id: "(default)".to_owned(),
+                path: file.clone(),
+                indexes: indexes.clone(),
+            })],
+            Arc::new(move |target: &dyn RulesTarget, level, line| {
+                lock(&collected).push((target.service(), level, line));
+            }),
+        )
+        .expect("watching starts");
+        let body =
+            serde_json::from_value::<firenook_console_front::IndexesEditBody>(serde_json::json!({
+                "revision": indexes.in_force_hash("(default)"),
+                "add": [{"section": "indexes", "entry": {
+                    "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [
+                        {"fieldPath": "status", "order": "ASCENDING"},
+                        {"fieldPath": "total", "order": "DESCENDING"}]}}],
+            }))
+            .expect("a body");
+        indexes.edit(&body).expect("edited");
+        policy
+            .validate("(default)", &query)
+            .expect("in force at once");
+        // Past the debounce and a slow notification.
+        std::thread::sleep(DEBOUNCE * 3);
+        assert!(lock(&lines).is_empty(), "{:?}", lock(&lines));
+
+        // The watcher is listening: an editor's save after it is reloaded.
+        write_index_until(&file, empty, &lines, || {
+            policy.validate("(default)", &query).is_err()
+        });
+        watcher.stop();
+        assert_eq!(lock(&lines).len(), 1, "{:?}", lock(&lines));
         let _ = std::fs::remove_dir_all(&directory);
     }
 

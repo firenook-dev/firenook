@@ -66,9 +66,10 @@ index passes there and fails in production. `emulators:start` and
 log, the terminal screen and the console's log (`firestore.index.missing`),
 with the entry to copy into that database's `firestore.indexes.json` (a field
 override that keeps the field's automatic indexes when a collection group
-query needs a single-field one). The console's Firestore page lists every
-missing index with the first query that needed it (its fields and operators,
-never its values) and how many did, and the MCP tool
+query needs a single-field one). The console's Firestore Indexes page lists
+every missing index with the first query that needed it (its fields and
+operators, never its values) and how many did, and adds it to the file (or
+takes a declared one out) in one click, and the MCP tool
 `firestore_missing_indexes` answers the same list. `--strict-indexes`
 refuses the query with `FAILED_PRECONDITION`, as production does. The index
 file is watched like the rules file: saved, it is in force for the next

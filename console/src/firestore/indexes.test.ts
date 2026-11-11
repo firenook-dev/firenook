@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import type { MissingIndexItem } from '@/api/generated/firestore/MissingIndexItem'
 import type { MissingIndexQuery } from '@/api/generated/firestore/MissingIndexQuery'
-import { describeQuery, describeTarget, formatEntry, missingFile, stillMissing } from './indexes'
+import {
+  type DeclaredIndexList,
+  databaseFile,
+  describeFields,
+  describeOverride,
+  describeQuery,
+  describeTarget,
+  entryKey,
+  entryOf,
+  formatEntry,
+  missingFile,
+  modeWord,
+  neededIn,
+  stillMissing,
+} from './indexes'
 
 const query = (patch: Partial<MissingIndexQuery> = {}): MissingIndexQuery => ({
   target: 'users/u1/orders',
@@ -90,8 +104,57 @@ describe('what the page copies', () => {
       indexes: [item().entry],
       fieldOverrides: [override.entry],
     })
-    expect(stillMissing({ strict: false, indexes: items, unlisted: 0, files: [] })).toHaveLength(
-      3,
-    )
+    expect(stillMissing({ strict: false, indexes: items, unlisted: 0, files: [] })).toHaveLength(3)
+  })
+})
+
+describe('the Indexes page', () => {
+  it('lists what one database needed, and its file', () => {
+    const list = {
+      strict: false,
+      indexes: [item(), item({ database: 'eu', declared: true })],
+      unlisted: 0,
+      files: [],
+    }
+    expect(neededIn(list, '(default)')).toHaveLength(1)
+    expect(neededIn(list, 'eu')[0]?.declared).toBe(true)
+    expect(neededIn(undefined, 'eu')).toEqual([])
+    const declared: DeclaredIndexList = {
+      strict: false,
+      databases: [
+        {
+          database: '(default)',
+          path: '/app/firestore.indexes.json',
+          problem: null,
+          revision: 'abc',
+          indexes: [],
+          fieldOverrides: [],
+        },
+      ],
+    }
+    expect(databaseFile(declared, '(default)')?.revision).toBe('abc')
+    expect(databaseFile(declared, 'eu')).toBeUndefined()
+  })
+
+  it('names an edit by the entry the file writes', () => {
+    const missing = item()
+    expect(entryOf(missing)).toEqual({ section: 'indexes', entry: missing.entry })
+    expect(entryKey(missing.entry)).toBe(JSON.stringify(missing.entry))
+  })
+
+  it('says fields and overrides in a line', () => {
+    expect(describeFields(item().fields)).toBe('status \u2191, total \u2193')
+    expect(modeWord({ mode: 'arrayContains', dimension: null })).toBe('array-contains')
+    expect(modeWord({ mode: 'vector', dimension: 768 })).toBe('vector 768')
+    expect(describeOverride({ indexes: [] })).toBe('Not indexed')
+    expect(
+      describeOverride({
+        indexes: [
+          { scope: 'collection', mode: 'ascending', dimension: null },
+          { scope: 'collection', mode: 'arrayContains', dimension: null },
+          { scope: 'collectionGroup', mode: 'descending', dimension: null },
+        ],
+      }),
+    ).toBe('\u2191 array-contains, collection group \u2193')
   })
 })

@@ -20,12 +20,16 @@ recent problems, snapshots and resets. It follows the engine live over one
 connection per browser, links a thing in one section to where it shows in
 another, and works without network access.
 
-On the Firestore page, a query the app ran that production would refuse for
-want of an index puts a count in the toolbar and on the Data page's badge.
-It opens (`i`, or `?indexes=true`) a list of those indexes, each with the
-query that needed it, how many queries did and the entry to copy, or all of
-them at once as an index file. Saving `firestore.indexes.json` turns each
-row to declared while you watch.
+Firestore has an Indexes page beside Data and Rules
+(`/console/firestore/indexes`). It shows what `firestore.indexes.json`
+declares, composite indexes and single-field overrides, and every index a
+query the app ran needed that the file does not declare, with the query (its
+fields and operators, never its values) and how many queries needed it.
+Add writes the entry into the file and Remove takes one out, leaving the rest
+of the file as it was; either is in force for the next query, and so is a
+save from your editor. An edit never overwrites a change to the file the page
+has not seen. A query that needs a missing index also puts a count in the
+Data page's toolbar and on the Indexes page's badge.
 
 Google's Emulator UI is not served since `0.2.0-next.3`. The port's root
 sends the browser to the console, and the official UI's addresses

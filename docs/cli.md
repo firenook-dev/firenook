@@ -100,7 +100,8 @@ Extensions](functions-and-extensions.md)), `--no-diagnostics`
 `--strict-indexes` (refuse a query whose index `firestore.indexes.json` does
 not declare, as production does, on `emulators:start` and `emulators:exec`
 alike; without it such a query is answered and the missing index is warned of
-once and listed in the console, see [Configuration](configuration.md)).
+once and listed on the console's Indexes page, see
+[Configuration](configuration.md)).
 
 `--build` (start and exec) runs each Functions codebase's own build: a start
 runs its `build:watch` script (its `build` when it has none) and waits for the

@@ -22,6 +22,7 @@ mod firestore_search;
 mod foreign;
 mod guard;
 mod http;
+mod index_file;
 mod indexes;
 mod instance;
 mod jobs;
@@ -78,8 +79,9 @@ pub use guard::{
     KEEP_TOKENS_HEADER, METADATA_HEADER, PREVIEW_HEADER,
 };
 pub use indexes::{
-    FirestoreIndexes, IndexFileStatus, IndexesChanged, MissingIndexItem, MissingIndexList,
-    MissingIndexQuery, QueryFilterShape,
+    DatabaseIndexes, DeclaredFieldOverride, DeclaredIndex, DeclaredIndexList, FirestoreIndexes,
+    IndexFileEntry, IndexFileStatus, IndexesChanged, IndexesEditBody, IndexesEdited, IndexesSaved,
+    MissingIndexItem, MissingIndexList, MissingIndexQuery, OverrideIndex, QueryFilterShape,
 };
 pub use jobs::{BulkTarget, Job, JobError, JobList, JobRegistry, JobState};
 pub use late::Late;
@@ -821,6 +823,9 @@ mod tests {
         Explanation::export_all(config).expect("TypeScript bindings written");
         MissingIndexList::export_all(config).expect("TypeScript bindings written");
         IndexesChanged::export_all(config).expect("TypeScript bindings written");
+        DeclaredIndexList::export_all(config).expect("TypeScript bindings written");
+        IndexesEditBody::export_all(config).expect("TypeScript bindings written");
+        IndexesEdited::export_all(config).expect("TypeScript bindings written");
         RulesDocument::export_all(config).expect("TypeScript bindings written");
         RulesInstalled::export_all(config).expect("TypeScript bindings written");
         RulesDiagnostic::export_all(config).expect("TypeScript bindings written");

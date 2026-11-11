@@ -44,7 +44,8 @@ How Firenook reads `firebase.json`, `.firebaserc` and the command line, and what
   indexes}` entries (one entry may omit `database` for `(default)`); the
   engine serves every listed database. A query whose index the database's
   index file does not declare is answered, as officially, warned of once with
-  the entry to add and listed on the console's Firestore page;
+  the entry to add and listed on the console's Firestore Indexes page, which
+  adds it to the file;
   `--strict-indexes` refuses it, as production does
   ([Compatibility](../COMPATIBILITY.md)). Each index file is watched like a
   rules file: a save is in force for the next query, with no restart. One

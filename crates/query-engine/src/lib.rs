@@ -18,8 +18,8 @@ mod missing;
 mod query;
 
 pub use indexes::{
-    IndexAdvice, IndexCatalog, IndexConfigError, IndexDirection, IndexMode, IndexRequirement,
-    IndexRequirementField, IndexScope,
+    FieldOverrideEntry, IndexAdvice, IndexCatalog, IndexConfigError, IndexDirection, IndexMode,
+    IndexRequirement, IndexRequirementField, IndexScope, SingleFieldIndex,
 };
 pub use missing::{
     IndexCatalogs, MISSING_INDEXES_LISTED, MissingIndexChange, MissingIndexListener,

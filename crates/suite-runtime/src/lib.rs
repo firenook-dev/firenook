@@ -545,8 +545,6 @@ struct ConsoleFirestoreParts {
     /// The indexes in force and those production would refuse queries for,
     /// which the file watcher replaces when an index file is saved.
     indexes: FirestoreIndexes,
-    /// The hash of each index file put in force at start, by database id.
-    index_hashes: BTreeMap<String, String>,
     rules: RulesEditor,
     rules_evaluator: RulesEvaluator,
     /// The runtime every Firestore front evaluates against, which the rules
@@ -1400,7 +1398,8 @@ fn prepare_firestore(
         Arc::clone(&missing),
         config.strict_indexes,
         start_indexes.files,
-    );
+    )
+    .with_saved_report(indexes_saved_report(logging));
     let query_policy = query_policy(config, catalogs, missing);
     let firestore_rules = firestore_rules(config)?;
     let request_history = firestore_rules.request_history();
@@ -1460,7 +1459,6 @@ fn prepare_firestore(
             Arc::clone(indexes.catalogs()),
         ),
         indexes,
-        index_hashes: start_indexes.hashes,
         rules: RulesEditor::new(
             &rules_for_console,
             &config.project_id,
@@ -1979,10 +1977,9 @@ impl OpeningWatch {
 struct StartIndexes {
     /// The catalog of each database whose file was read.
     catalogs: BTreeMap<String, Arc<IndexCatalog>>,
-    /// Each configured file, with why it was not read when it was not.
-    files: Vec<(String, PathBuf, Option<String>)>,
-    /// The hash of each file read, by database id.
-    hashes: BTreeMap<String, String>,
+    /// Each configured file, with the text it put in force or why it was
+    /// not read.
+    files: Vec<(String, PathBuf, Result<String, String>)>,
 }
 
 /// The index file of each database that configures one. One that cannot be
@@ -1994,7 +1991,6 @@ fn index_catalogs(config: &SuiteConfig) -> Result<StartIndexes, SuiteRuntimeErro
     let mut start = StartIndexes {
         catalogs: BTreeMap::new(),
         files: Vec::new(),
-        hashes: BTreeMap::new(),
     };
     for database in &config.firestore_databases {
         let Some(path) = &database.indexes else {
@@ -2004,16 +2000,15 @@ fn index_catalogs(config: &SuiteConfig) -> Result<StartIndexes, SuiteRuntimeErro
             .map_err(|error| error.to_string())
             .and_then(|source| {
                 IndexCatalog::from_json(&source)
-                    .map(|catalog| (catalog, firenook_rules_runtime::source_hash(&source)))
+                    .map(|catalog| (catalog, source))
                     .map_err(|error| error.to_string())
             });
-        let problem = match read {
-            Ok((catalog, hash)) => {
+        let read = match read {
+            Ok((catalog, source)) => {
                 start
                     .catalogs
                     .insert(database.database_id.clone(), Arc::new(catalog));
-                start.hashes.insert(database.database_id.clone(), hash);
-                None
+                Ok(source)
             }
             Err(error) if config.strict_indexes => {
                 return Err(failure(format!(
@@ -2033,12 +2028,12 @@ fn index_catalogs(config: &SuiteConfig) -> Result<StartIndexes, SuiteRuntimeErro
                     &message,
                     &format!("firenook: {message}"),
                 );
-                Some(error)
+                Err(error)
             }
         };
         start
             .files
-            .push((database.database_id.clone(), path.clone(), problem));
+            .push((database.database_id.clone(), path.clone(), read));
     }
     Ok(start)
 }
@@ -2058,6 +2053,24 @@ fn query_policy(
         config.strict_indexes,
         Some(missing),
     )
+}
+
+/// Says an edit the console saved to an index file, as the file watcher
+/// says a file saved in an editor: on the terminal, in the plain log and
+/// in the console's log as a `firestore.indexes.reloaded` marker.
+fn indexes_saved_report(logging: &LoggingRuntime) -> firenook_console_front::IndexesSaved {
+    let logging = logging.clone();
+    Arc::new(move |database: &str, message: String| {
+        terminal::print(
+            "INFO",
+            "firestore",
+            &message,
+            &format!("firenook firestore: {message}"),
+        );
+        logging.emit(console_wiring::observe::indexes_file_input(
+            database, false, message,
+        ));
+    })
 }
 
 /// Says a missing index once: in the plain log and on the terminal screen,

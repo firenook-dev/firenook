@@ -19,8 +19,8 @@ use axum::Json;
 use axum::extract::State;
 use firenook_core_store::{DatabaseName, Store};
 use firenook_query_engine::{
-    DatabaseEdition, IndexAdvice, IndexCatalogs, IndexDirection, IndexMode, IndexRequirement,
-    IndexScope, Limit, Query, QueryCandidates, QueryStrategy, execute, plan,
+    DatabaseEdition, IndexAdvice, IndexCatalog, IndexCatalogs, IndexDirection, IndexMode,
+    IndexRequirement, IndexScope, Limit, Query, QueryCandidates, QueryStrategy, execute, plan,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
@@ -225,12 +225,12 @@ impl QueryExplainer {
             limited: limit_reached(&query, documents.len()),
             documents_matched: documents.len(),
             elapsed_micros: u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
-            index: self
-                .indexes
-                .catalog(database_id)
-                .advise(&query)
-                .as_ref()
-                .map(index),
+            index: {
+                let catalog = self.indexes.catalog(database_id);
+                catalog
+                    .advise(&query)
+                    .map(|advice| index(&advice, &catalog))
+            },
         })
     }
 }
@@ -277,8 +277,8 @@ const fn strategy(strategy: QueryStrategy) -> ExplainStrategy {
     }
 }
 
-fn index(advice: &IndexAdvice) -> ExplainIndex {
-    let (section, entry) = advice.requirement.declaration();
+fn index(advice: &IndexAdvice, catalog: &IndexCatalog) -> ExplainIndex {
+    let (section, entry) = advice.requirement.declaration_in(catalog);
     ExplainIndex {
         declared: advice.declared,
         composite: advice.requirement.is_composite(),
