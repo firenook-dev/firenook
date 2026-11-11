@@ -81,8 +81,15 @@ function cleanPath(raw) {
 }
 
 /** Removes anything secret-looking. Applied to every request and answer string. */
+// The recordings keep the project, bucket and collection names they were
+// made with, some from before the rename; what a page shows names them as
+// `{project}` (or `{name}` for a word on its own), never the old name.
+const RECORDED_NAME = /[a-z0-9~_.-]*fireside[a-z0-9_.-]*/gi;
+const recordedName = (token) => (/^fireside$/i.test(token) ? '{name}' : '{project}');
+
 function scrub(text) {
   return String(text)
+    .replace(RECORDED_NAME, recordedName)
     .replace(/eyJ[A-Za-z0-9_-]{2,}(?:\.[A-Za-z0-9_-]*){0,2}/g, '')
     .replace(/\bBearer\s+\S+/gi, '')
     // A Basic credential is base64 (a digit, + / or = in it), never words like "Basic credential".

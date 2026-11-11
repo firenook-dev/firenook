@@ -81,6 +81,7 @@ const FORMER_NAME_LINES = [
   [/^crates\/extensions\/src\/source\.rs$/, /LEGACY_REGISTRY_SIDECAR: &str = "fireside-registry\.json"/, "reads Extension registry sidecars written before the rename"],
   [/^conformance\/test\/phase2-gate-plan\.test\.ts$/, /const sealedScriptName = \/\\btest:fireside\\b\/gu;/, "maps the sealed Phase 2 manifest's script names onto the renamed scripts"],
   [/^\.github\/workflows\/ci\.yml$/, /@fireside-dev\/linux-x64(?:@0\.1\.0-next\.3|\/bin\/fireside")/, "the previously published engine the native-upgrade check resumes from"],
+  [/^conformance\/src\/report\/cases\.mjs$/, /^const RECORDED_NAME = \/\[a-z0-9~_\.-\]\*fireside\[a-z0-9_\.-\]\*\/gi;$|^const recordedName = \(token\) => \(\/\^fireside\$\/i\.test/, "keeps the recordings' names from before the rename off the pages that show their answers"],
 ];
 
 function formerNameHit(file, line, inParagraph) {
