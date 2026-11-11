@@ -69,4 +69,6 @@ the container, or in a Linux CI job, before starting the emulators.
 npm, starts it as a test suite would (`packaging/container/smoke.sh`: a
 Firestore write and read, an Auth sign-up and the console through published
 ports, then a clean stop), and only then publishes both platforms, with
-provenance and an SBOM. The reviewed npm release runs it after its publish.
+provenance and an SBOM. The reviewed npm release runs it after its publish. A
+pull request that changes the image builds and tries it the same way, from
+the newest release on npm, and publishes nothing.

@@ -4,7 +4,13 @@ name: Container image
 # npm, tries it as a test suite would, and publishes it for linux/amd64 and
 # linux/arm64. The reviewed npm release calls it after its publish; the
 # release owner can also dispatch it on main for a version already published.
+# A pull request that changes the image only builds and tries it, from the
+# newest version on npm, so a broken image is found before a release.
 on:
+  pull_request:
+    paths:
+      - packaging/container/**
+      - .github/workflows/container.yml
   workflow_call:
     inputs:
       version:
@@ -31,13 +37,37 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: container-image
-  cancel-in-progress: false
-
 jobs:
+  try:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: The newest version on npm
+        id: version
+        run: |
+          version=$(npm view firenook dist-tags.latest)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a version: $version"; exit 1; }
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build for this runner
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: packaging/container
+          platforms: linux/amd64
+          build-args: FIRENOOK_VERSION=${{ steps.version.outputs.version }}
+          load: true
+          tags: firenook-smoke:local
+      - name: Start it as a test suite would
+        run: bash packaging/container/smoke.sh firenook-smoke:local
+
   image:
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    # One publish at a time; a pull request's try never waits behind one.
+    concurrency:
+      group: container-image
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     permissions:
