@@ -8,6 +8,7 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import {promisify} from 'node:util';
+import * as ledger from '../src/report/ledger.mjs';
 import test from 'node:test';
 
 const root=fileURLToPath(new URL('../../',import.meta.url));
@@ -68,10 +69,18 @@ test('native HTTP read options replay in memory and disk/WAL with explicit Java 
           const valid=['get-in-read-only','get-read-only-after-mutation','get-read-time'].includes(row.id);
           assert.equal(response.status,valid?200:row.id==='get-rolled-back'?409:400,row.id);
           if(valid)assert.equal(actual.fields.title.stringValue,'before 火🔥');
+          const hang='the official REST GET never answered this read (recorded as a timeout); ';
+          ledger.differs('rest-read-options-v1',row.id,ledger.COMPARED.status,row.status!==null
+            ?'the official REST GET refuses a valid readTime (400) that its batchGet reads at; Firenook reads at it'
+            :valid?hang+"Firenook answers from the transaction's snapshot, as the official gRPC GetDocument does"
+              :row.id==='get-rolled-back'?hang+'Firenook answers 409 ABORTED, as the official gRPC GetDocument answers code 10'
+                :hang+'Firenook refuses it with 400');
         }else{
           assert.equal(response.status,row.status,row.id);
           if(response.ok)assert.deepEqual(normalized(actual),normalized(row.response),row.id);
           else assert.equal(actual.error.status,row.response.error.status,row.id);
+          // A success as recorded (times and transaction ids aside); a refusal's status and code name.
+          ledger.checked('rest-read-options-v1',row.id,response.ok?ledger.COMPARED.answer:ledger.COMPARED.status);
         }
       }
       passed=true;

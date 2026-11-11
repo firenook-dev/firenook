@@ -762,6 +762,7 @@ version = "0.0.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
+ "firenook-conformance-ledger",
  "firenook-functions-bridge",
  "im",
  "indexmap",
@@ -788,6 +789,10 @@ dependencies = [
  "tokio",
  "url",
 ]
+
+[[package]]
+name = "firenook-conformance-ledger"
+version = "0.0.1"
 
 [[package]]
 name = "firenook-console-front"
@@ -869,6 +874,7 @@ version = "0.0.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
+ "firenook-conformance-ledger",
  "firenook-core-store",
  "firenook-grpc-front",
  "prost",
@@ -936,6 +942,7 @@ dependencies = [
  "apache-avro",
  "axum",
  "base64 0.23.1",
+ "firenook-conformance-ledger",
  "firenook-functions-bridge",
  "firenook-suite-front",
  "jiff",
@@ -973,6 +980,7 @@ version = "0.0.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
+ "firenook-conformance-ledger",
  "firenook-core-store",
  "firenook-export-format",
  "firenook-functions-bridge",
@@ -993,6 +1001,7 @@ name = "firenook-rules-engine"
 version = "0.0.1"
 dependencies = [
  "base64 0.23.1",
+ "firenook-conformance-ledger",
  "md-5",
  "regex",
  "serde_json",
@@ -1005,6 +1014,7 @@ name = "firenook-rules-runtime"
 version = "0.0.1"
 dependencies = [
  "base64 0.23.1",
+ "firenook-conformance-ledger",
  "firenook-core-store",
  "firenook-query-engine",
  "firenook-rules-engine",
@@ -1022,6 +1032,7 @@ dependencies = [
  "axum",
  "base64 0.23.1",
  "crc32c",
+ "firenook-conformance-ledger",
  "firenook-functions-bridge",
  "firenook-rules-engine",
  "firenook-rules-runtime",
@@ -1046,6 +1057,7 @@ name = "firenook-suite-front"
 version = "0.0.1"
 dependencies = [
  "axum",
+ "firenook-conformance-ledger",
  "firenook-core-store",
  "firenook-functions-bridge",
  "firenook-query-engine",
@@ -1106,6 +1118,7 @@ version = "0.0.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
+ "firenook-conformance-ledger",
  "firenook-functions-bridge",
  "firenook-suite-front",
  "flate2",
@@ -1131,6 +1144,7 @@ name = "firenook-webchannel-front"
 version = "0.0.1"
 dependencies = [
  "axum",
+ "firenook-conformance-ledger",
  "firenook-grpc-front",
  "futures-util",
  "http-body-util",

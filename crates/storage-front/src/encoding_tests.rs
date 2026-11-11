@@ -32,7 +32,8 @@ async fn storage_content_encoding_replays_official_sdk_fixture_and_export_import
     .await
     .expect("runtime");
     let mut upload_urls = BTreeMap::new();
-    for record in fixture["recordings"].as_array().expect("recordings") {
+    let recordings = fixture["recordings"].as_array().expect("recordings");
+    for (index, record) in recordings.iter().enumerate() {
         if record["label"]
             .as_str()
             .expect("label")
@@ -69,6 +70,7 @@ async fn storage_content_encoding_replays_official_sdk_fixture_and_export_import
             record["status"].as_u64().expect("status"),
             "{label}"
         );
+        ledger_recording(index + 1, firenook_conformance_ledger::Compared::Status);
         for name in ["location", "x-goog-upload-url"] {
             if let Some(location) = response.headers().get(name) {
                 let url = url::Url::parse(location.to_str().expect("URL")).expect("URL");
@@ -105,11 +107,42 @@ async fn storage_content_encoding_replays_official_sdk_fixture_and_export_import
     std::fs::remove_dir_all(root).expect("isolated test cleanup");
 }
 
+/// The case set `conformance/src/report/cases.mjs` lists this fixture in.
+const LEDGER_SET: &str = "firebase-suite-v1/storage";
+
+/// Notes the 1-based `recording` of the fixture in the conformance ledger.
+fn ledger_recording(recording: usize, compared: firenook_conformance_ledger::Compared) {
+    firenook_conformance_ledger::checked(
+        LEDGER_SET,
+        &format!("storage-content-encoding/{recording}"),
+        compared,
+    );
+}
+
+/// The 1-based recording an object's `index`-th probe was recorded as: the
+/// probes of one object are recorded in the order of its observations.
+fn probe_recording(fixture: &JsonValue, name: &str, index: usize, api: &str) -> Option<usize> {
+    let label = format!("probe:{}", name.strip_suffix(".json").unwrap_or(name));
+    let (position, recording) = fixture["recordings"]
+        .as_array()?
+        .iter()
+        .enumerate()
+        .filter(|(_, recording)| recording["label"] == label.as_str())
+        .nth(index)?;
+    let gcs = recording["path"].as_str()?.starts_with("/storage/v1/");
+    (gcs == (api == "gcs")).then_some(position + 1)
+}
+
 async fn check_objects(runtime: &StorageRuntime, fixture: &JsonValue) {
     let bucket = fixture["bucket"].as_str().expect("bucket");
     for object in fixture["objects"].as_array().expect("objects") {
         let name = object["name"].as_str().expect("name");
-        for expected in object["observations"].as_array().expect("observations") {
+        for (index, expected) in object["observations"]
+            .as_array()
+            .expect("observations")
+            .iter()
+            .enumerate()
+        {
             let prefix = if expected["api"] == "gcs" {
                 "storage/v1"
             } else {
@@ -179,6 +212,20 @@ async fn check_objects(runtime: &StorageRuntime, fixture: &JsonValue) {
                 assert_standard_metadata(&serde_json::from_slice(&body).expect("JSON"), fixture);
             } else {
                 assert_eq!(body.as_ref(), decode(&expected["body"]), "{name} {kind}");
+            }
+            if let Some(recording) =
+                probe_recording(fixture, name, index, expected["api"].as_str().unwrap_or(""))
+            {
+                // A download's status, headers and bytes; a metadata read's
+                // status and five of its fields.
+                ledger_recording(
+                    recording,
+                    if kind == "metadata" {
+                        firenook_conformance_ledger::Compared::Status
+                    } else {
+                        firenook_conformance_ledger::Compared::Answer
+                    },
+                );
             }
         }
     }

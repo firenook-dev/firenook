@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { captureRefreshContract, refreshProject, semanticRefresh, type RefreshObservation } from "../src/suite/auth-refresh-contract.ts";
 import { captureRefreshBrowser } from "../src/suite/auth-refresh-browser.ts";
+import * as ledger from "../src/report/ledger.mjs";
 
 export const refreshFixtureRoot = new URL("../fixtures/firebase-suite-v1/auth-refresh-reuse/", import.meta.url);
 export interface RefreshFixture {
@@ -70,9 +71,12 @@ test("Firenook matches password/custom refresh fixtures and real two-tab/reload 
     // Anonymous sign-up is not implemented in the accepted Phase 4 surface.
     // Preserve that oracle evidence, but do not claim to implement a new login
     // method as part of this repair to existing password/custom refresh grants.
-    assert.deepEqual(semanticRefresh(await captureRefreshContract(origin, ["password", "custom"])), semanticRefresh(fixture.observations.filter(({ id }) => !id.startsWith("anonymous-"))));
+    const replayed = fixture.observations.filter(({ id }) => !id.startsWith("anonymous-"));
+    assert.deepEqual(semanticRefresh(await captureRefreshContract(origin, ["password", "custom"])), semanticRefresh(replayed));
+    for (const { id, status } of replayed) ledger.checked("firebase-suite-v1/auth", `auth-refresh-reuse/${id}`, status === 200 ? ledger.COMPARED.answer : ledger.COMPARED.error);
     const browser = await captureRefreshBrowser(origin);
     assert.deepEqual(semanticRefresh(browser.observations), semanticRefresh(fixture.browser.observations));
+    for (const { id, status } of fixture.browser.observations) ledger.checked("firebase-suite-v1/auth", `auth-refresh-reuse/browser/${id}`, status === 200 ? ledger.COMPARED.answer : ledger.COMPARED.error);
     assert.deepEqual(browser.stages, fixture.browser.stages);
     assert.deepEqual(browser.pageErrors, []);
   } finally {

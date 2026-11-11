@@ -339,8 +339,11 @@ fn account_key(item: &JsonValue) -> Option<String> {
         .or_else(|| literal("phoneNumber"))
 }
 
+/// Replays `observations` of the suite fixture `fixture`, noting each
+/// compared one in the conformance ledger.
 async fn replay_observations(
     runtime: &AuthRuntime,
+    fixture: &str,
     observations: &[JsonValue],
 ) -> Vec<(String, JsonValue)> {
     let mut learned = Learned::default();
@@ -393,6 +396,11 @@ async fn replay_observations(
         let actual: JsonValue =
             serde_json::from_slice(&bytes).unwrap_or_else(|_| panic!("{id}: response is not JSON"));
         assert_shape(&observation["response"], &actual, id);
+        firenook_conformance_ledger::checked(
+            "firebase-suite-v1/auth",
+            &format!("{fixture}/{id}"),
+            firenook_conformance_ledger::Compared::Answer,
+        );
         learned.absorb(&actual);
         responses.push((id.to_owned(), actual));
     }
@@ -424,17 +432,27 @@ async fn phase4_suite_fixtures_replay_in_sequence() {
 
     let observations = identity["observations"].as_array().expect("observations");
     assert_eq!(observations.len(), 11);
-    replay_observations(&runtime, observations).await;
+    replay_observations(&runtime, "auth-identity-toolkit-and-admin", observations).await;
     let observations = browser["observations"].as_array().expect("observations");
     assert_eq!(observations.len(), 6);
-    replay_observations(&runtime, observations).await;
+    replay_observations(
+        &runtime,
+        "auth-browser-oauth-and-token-refresh",
+        observations,
+    )
+    .await;
     // Client sign-ups above multicast their own create events.
     tokio::task::yield_now().await;
     while dispatches.try_recv().is_ok() {}
 
     let mut seen = Vec::new();
     for observation in lifecycle["observations"].as_array().expect("observations") {
-        replay_observations(&runtime, std::slice::from_ref(observation)).await;
+        replay_observations(
+            &runtime,
+            "auth-import-export-and-trigger-dispatch",
+            std::slice::from_ref(observation),
+        )
+        .await;
         tokio::task::yield_now().await;
         while let Ok(dispatch) = dispatches.try_recv() {
             seen.push((
@@ -485,6 +503,11 @@ async fn refresh_reuse_fixture_replays_for_every_flow() {
         assert_eq!(u64::from(status), expected["status"], "{id}");
         if status != 200 {
             assert_eq!(body["error"]["message"], expected["error"], "{id}");
+            firenook_conformance_ledger::checked(
+                "firebase-suite-v1/auth",
+                &format!("auth-refresh-reuse/{id}"),
+                firenook_conformance_ledger::Compared::Error,
+            );
             return;
         }
         assert_eq!(
@@ -507,6 +530,11 @@ async fn refresh_reuse_fixture_replays_for_every_flow() {
         assert_eq!(
             claims["firebase"]["sign_in_provider"], expected["claims"]["provider"],
             "{id}"
+        );
+        firenook_conformance_ledger::checked(
+            "firebase-suite-v1/auth",
+            &format!("auth-refresh-reuse/{id}"),
+            firenook_conformance_ledger::Compared::Answer,
         );
     };
     let flows: [(&str, &str, JsonValue); 3] = [
@@ -657,11 +685,12 @@ async fn developer_tools_tenant_discovery_matches_the_official_ui_capture() {
         .expect("fixture file"),
     )
     .expect("fixture JSON");
-    let exchange = fixture["browser"]["exchanges"]
+    let (index, exchange) = fixture["browser"]["exchanges"]
         .as_array()
         .expect("exchanges")
         .iter()
-        .find(|exchange| {
+        .enumerate()
+        .find(|(_, exchange)| {
             exchange["service"] == "auth"
                 && exchange["path"]
                     .as_str()
@@ -678,6 +707,11 @@ async fn developer_tools_tenant_discovery_matches_the_official_ui_capture() {
     .await;
     assert_eq!(u64::from(status), exchange["status"]);
     assert_eq!(body, exchange["response"]);
+    firenook_conformance_ledger::checked(
+        "developer-tools-v1",
+        &format!("ui/{}", index + 1),
+        firenook_conformance_ledger::Compared::Answer,
+    );
 }
 
 #[tokio::test]

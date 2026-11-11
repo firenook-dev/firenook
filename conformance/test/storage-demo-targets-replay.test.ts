@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
+import * as ledger from "../src/report/ledger.mjs";
 
 type Case = { id: string; started: boolean; exitCode: number | null; notices: string[]; error: string | null; uploads: Record<string, number> | null };
 const execute = promisify(execFile);
@@ -31,11 +32,16 @@ test("Storage targets without buckets start, rule and print as on the official e
     assert.equal(got.exitCode === 0, want.exitCode === 0, `${want.id} exit code`);
     assert.deepEqual(got.notices, want.notices, `${want.id} notices`);
     assert.deepEqual(got.uploads, want.uploads, `${want.id} uploads`);
+    for (const bucket of Object.keys(want.uploads ?? {})) ledger.checked("storage-demo-targets-v1", `${want.id}/upload/${bucket}`, ledger.COMPARED.status);
     if (want.error !== null) {
       // The official requireTarget error, naming this CLI's command and its
       // --storage-bucket flag; the jar's CLI prints it after "Error: ".
       const target = /Deploy target (\S+) /.exec(want.error)![1];
       assert.equal(got.error, `${want.error.replace(/^Error: /, "").replace("firebase target:apply", "firenook target:apply")}\n\nor pass --storage-bucket ${target}=<bucket>.`, want.id);
+      ledger.differs("storage-demo-targets-v1", `${want.id}/start`, ledger.COMPARED.error, "the official requireTarget error, naming this CLI's command (firenook target:apply) and adding its --storage-bucket flag");
+    } else {
+      // Whether it started, its exit, and the notices it printed.
+      ledger.checked("storage-demo-targets-v1", `${want.id}/start`, ledger.COMPARED.answer);
     }
   }
 });

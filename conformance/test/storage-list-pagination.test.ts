@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import test from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import * as ledger from "../src/report/ledger.mjs";
 
 interface PageObservation {
   readonly id: string;
@@ -119,13 +120,25 @@ test("Firenook HTTP replays the oracle's inclusive continuation contract", { tim
       assert.equal(response.status, 200);
     }
 
+    // The first two pages of two are the recorded small pages: noted in the
+    // conformance ledger when their names and token are the recorded ones.
+    const recorded = (JSON.parse(await readFile(fixtureUrl, "utf8")) as { readonly observations: readonly PageObservation[] }).observations;
+    const ledgerPage = (id: string, page: { readonly itemNames: readonly string[]; readonly nextPageToken?: string }) => {
+      const expected = recorded.find((candidate) => candidate.id === id);
+      if (expected && expected.status === 200 && JSON.stringify(expected.itemNames) === JSON.stringify(page.itemNames) && expected.nextPageToken === page.nextPageToken) {
+        ledger.checked("firebase-suite-v1/storage", `storage-list-pagination/${id}`, ledger.COMPARED.answer);
+      }
+    };
     for (const route of ["storage/v1", "v0"]) {
+      const prefix = route === "v0" ? "firebase" : "gcs";
       const first = await listFirenook(origin, route, "");
       assert.deepEqual(first.itemNames, names.slice(0, 2));
       assert.equal(first.nextPageToken, names[2]);
+      ledgerPage(`${prefix}-small-first`, first);
       const second = await listFirenook(origin, route, first.nextPageToken ?? "");
       assert.deepEqual(second.itemNames, names.slice(2, 4));
       assert.equal(second.nextPageToken, names[4]);
+      ledgerPage(`${prefix}-small-second`, second);
       const third = await listFirenook(origin, route, second.nextPageToken ?? "");
       assert.deepEqual(third.itemNames, names.slice(4));
       assert.equal(third.nextPageToken, undefined);

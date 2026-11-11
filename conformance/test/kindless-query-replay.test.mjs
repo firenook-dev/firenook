@@ -13,6 +13,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { observe } from '../src/suite/kindless-query-observe.mjs';
+import * as ledger from '../src/report/ledger.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const fixture = JSON.parse(await readFile(new URL('../fixtures/kindless-query-v1/fixture.json', import.meta.url)));
@@ -22,6 +23,12 @@ const execute = promisify(execFile);
 // of every collection under the parent in the official emulator. No SDK sends
 // it, and the native engine keeps refusing it as an invalid scope.
 const REFUSED = new Set(['empty-id-direct-children']);
+const REFUSED_REASON = 'a selector with an empty id and no allDescendants lists direct children in the official emulator; no SDK sends it and Firenook refuses it as an invalid scope';
+
+// Conformance ledger ids, as conformance/src/report/cases.mjs gives them.
+const SET = 'kindless-query-v1';
+// A success's documents, fields and aggregate, or an error's message, with its code.
+const queryCompared = (expected) => (expected.code === 0 ? ledger.COMPARED.answer : ledger.COMPARED.error);
 
 function assertQuery(id, actual, expected) {
   assert.equal(actual.code, expected.code, `${id} code: ${actual.message ?? ''}`);
@@ -70,16 +77,21 @@ test('kindless queries and recursiveDelete match the official capture in memory 
         if (REFUSED.has(id)) {
           assert.equal(grpc.code, 3, `${mode} ${id}`);
           assert.equal(rest.status, 400, `${mode} ${id}`);
+          if (expected.grpc.code !== 3) ledger.differs(SET, `queries/${id}/grpc`, ledger.COMPARED.status, REFUSED_REASON);
+          if (expected.rest.status !== 400) ledger.differs(SET, `queries/${id}/rest`, ledger.COMPARED.status, REFUSED_REASON);
           continue;
         }
         assertQuery(`${mode} ${id} grpc`, grpc, expected.grpc);
+        ledger.checked(SET, `queries/${id}/grpc`, queryCompared(expected.grpc));
         assert.equal(rest.status, expected.rest.status, `${mode} ${id} rest: ${rest.message ?? ''}`);
         assert.deepEqual(rest.documents, expected.rest.documents, `${mode} ${id} rest`);
         assert.equal(rest.message, expected.rest.message, `${mode} ${id} rest message`);
         assert.equal(rest.errorStatus, expected.rest.errorStatus, `${mode} ${id} rest status`);
+        ledger.checked(SET, `queries/${id}/rest`, expected.rest.status === 200 ? ledger.COMPARED.answer : ledger.COMPARED.error);
       }
       for (const [id, expected] of Object.entries(fixture.aggregations)) {
         assertQuery(`${mode} ${id}`, actual.aggregations[id], expected);
+        ledger.checked(SET, `aggregations/${id}`, queryCompared(expected));
       }
       for (const [id, expected] of Object.entries(fixture.listens)) {
         const listened = actual.listens[id];
@@ -88,12 +100,29 @@ test('kindless queries and recursiveDelete match the official capture in memory 
         // The official emulator repeats a change on a plain collection, so
         // the control compares what was heard, not how often.
         assert.deepEqual([...new Set(listened.changes)], [...new Set(expected.changes)], `${mode} listen ${id} changes`);
+        ledger.checked(SET, `listens/${id}`, ledger.COMPARED.answer);
       }
       // Who may read, and what they read. Denial wording is the rules
       // engine's own and is compared elsewhere.
       assert.deepEqual(actual.rules, fixture.rules, `${mode} rules`);
+      for (const [profile, callers] of Object.entries(fixture.rules)) {
+        for (const [caller, result] of Object.entries(callers)) {
+          for (const query of ['root', 'underDocument', 'listen']) {
+            // A code and, when allowed, the first documents; no denial wording.
+            ledger.checked(SET, `rules/${profile}/${caller}/${query}`, result[query] === 0 ? ledger.COMPARED.answer : ledger.COMPARED.status);
+          }
+        }
+      }
       assert.deepEqual(actual.databases, fixture.databases, `${mode} databases`);
+      for (const [id, key] of [['named', 'named'], ['default', 'default']]) {
+        if (fixture.databases[key] !== undefined) ledger.checked(SET, `databases/${id}`, ledger.COMPARED.answer);
+      }
+      for (const key of ['named', 'default']) {
+        if (fixture.databases.afterRecursiveDelete?.[key] !== undefined) ledger.checked(SET, `databases/after-recursive-delete/${key}`, ledger.COMPARED.answer);
+      }
       assert.deepEqual(actual.sdk, fixture.sdk, `${mode} sdk`);
+      // What recursiveDelete did, and what it left.
+      for (const id of Object.keys(fixture.sdk)) ledger.checked(SET, `sdk/${id}`, ledger.COMPARED.behaviour);
     } finally {
       peer.stdin.end();
       if (peer.exitCode === null) peer.kill();

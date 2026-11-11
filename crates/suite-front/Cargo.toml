@@ -19,6 +19,7 @@ tokio = { workspace = true, features = ["fs"] }
 ts-rs.workspace = true
 
 [dev-dependencies]
+firenook-conformance-ledger = { path = "../conformance-ledger" }
 firenook-core-store = { path = "../core-store" }
 firenook-query-engine = { path = "../query-engine" }
 firenook-rest-front = { path = "../rest-front" }

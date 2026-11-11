@@ -584,6 +584,25 @@ mod tests {
                 }
                 other => panic!("unclassified frozen parse observation {other}"),
             }
+            let recorded_refused = observation["httpStatus"] != 200
+                || observation["response"]["issues"]
+                    .as_array()
+                    .is_some_and(|issues| issues.iter().any(|issue| issue["severity"] == "ERROR"));
+            let case = format!("parse-errors/{id}");
+            if recorded_refused == result.is_err() {
+                firenook_conformance_ledger::checked(
+                    "rules-v2/production-rules-api",
+                    &case,
+                    firenook_conformance_ledger::Compared::Verdict,
+                );
+            } else if matches!(id, "source-bytes-262143" | "source-bytes-262144") {
+                firenook_conformance_ledger::differs(
+                    "rules-v2/production-rules-api",
+                    &case,
+                    firenook_conformance_ledger::Compared::Verdict,
+                    "the Rules API's request envelope refuses this source below the documented 256 KiB deployed-rules maximum; Firenook accepts a source up to 262,144 bytes",
+                );
+            }
         }
     }
 

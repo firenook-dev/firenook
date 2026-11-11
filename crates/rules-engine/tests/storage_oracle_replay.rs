@@ -6,11 +6,15 @@
 
 use std::collections::BTreeMap;
 
+use firenook_conformance_ledger as ledger;
 use firenook_rules_engine::{
     Auth, DocumentAccess, DocumentAccessError, EmptyDocumentAccess, EvaluationRequest,
     RequestOperation, Resource, RulesService, StorageObject, Timestamp, Value, compile,
 };
 use serde_json::Value as JsonValue;
+
+/// The case set `conformance/src/report/cases.mjs` lists this corpus as.
+const LEDGER_SET: &str = "storage-rules-v1/production-rules-api";
 
 const EXPRESSION_CORPUS: &str = include_str!(
     "../../../conformance/fixtures/storage-rules-v1/production-expression-corpus.json"
@@ -61,6 +65,14 @@ fn replays_every_production_storage_expression_case() {
                     !actual.allowed && actual.error.is_some(),
                     "{id}: a fourteen-key object must deny with an error => {actual:?}"
                 );
+                if expected_allowed {
+                    ledger::differs(
+                        LEDGER_SET,
+                        id,
+                        ledger::Compared::Verdict,
+                        "the Storage runtime's object has fourteen keys and no cacheControl or contentLanguage, so Firenook denies with an error where production allowed a supplied resource that had them",
+                    );
+                }
                 replayed += 1;
                 continue;
             }
@@ -82,6 +94,7 @@ fn replays_every_production_storage_expression_case() {
                 rules.evaluate_with_trace(&request, &access).0,
                 "tracing must preserve the verdict for {id}"
             );
+            ledger::checked(LEDGER_SET, id, ledger::Compared::Verdict);
             replayed += 1;
         }
     }

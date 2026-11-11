@@ -10,9 +10,63 @@ import { promisify } from "node:util";
 import test from "node:test";
 import { queryRulesProject } from "../src/rules/query-rules-cases.ts";
 import { compareNativeCapture, verifyBrowserCapture, type BrowserCapture, type NativeCapture } from "../src/rules/query-rules-verification.ts";
+import * as ledger from "../src/report/ledger.mjs";
 
 const execute = promisify(execFile);
 const root = fileURLToPath(new URL("../../", import.meta.url));
+
+// The conformance ledger counts the 1.22.0 recording (cases.mjs); this replay
+// compares with the 1.21.0 one. A case is noted only where the two record the
+// same compared values. Ids are numbered as cases.mjs numbers them.
+const LEDGER_SET = "rules-v2/official-emulator";
+type Semantic = { code: number | string; documents?: string[]; count?: string };
+const sortedSet = (values: readonly string[] | undefined) => [...new Set(values ?? [])].sort();
+const sameSemantic = (left: Semantic, right: Semantic) =>
+  left.code === right.code && JSON.stringify(sortedSet(left.documents)) === JSON.stringify(sortedSet(right.documents)) && left.count === right.count;
+const recordedIds = () => {
+  const used = new Map<string, number>();
+  return (id: string) => {
+    const n = (used.get(id) ?? 0) + 1;
+    used.set(id, n);
+    return n === 1 ? id : `${id}#${n}`;
+  };
+};
+async function ledgerNative(corpus: string, oracle: NativeCapture): Promise<ReturnType<typeof recordedIds>> {
+  const unique = recordedIds();
+  const counted = JSON.parse(await readFile(new URL(`../fixtures/rules-v2/${corpus}/java-1.22.0/grpc.json`, import.meta.url), "utf8")) as NativeCapture;
+  for (const [index, observation] of counted.observations.entries()) {
+    const id = unique(`${corpus}/${observation.id}/grpc/${observation.operation}`);
+    const compared = oracle.observations[index];
+    if (!compared || compared.id !== observation.id || compared.operation !== observation.operation || !sameSemantic(observation, compared)) continue;
+    // Codes, documents and counts; a denial's wording is not compared.
+    ledger.checked(LEDGER_SET, id, observation.code === 0 ? ledger.COMPARED.answer : ledger.COMPARED.status);
+  }
+  return unique;
+}
+async function ledgerBrowser(corpus: string, variant: string, oracle: NativeCapture, unique: ReturnType<typeof recordedIds>): Promise<void> {
+  const counted = JSON.parse(await readFile(new URL(`../fixtures/rules-v2/${corpus}/java-1.22.0/${variant}-browser.json`, import.meta.url), "utf8")) as BrowserCapture;
+  for (const observation of counted.observations) {
+    const id = unique(`${corpus}/${observation.id}/${variant}/${observation.operation}`);
+    const result = observation.result;
+    if (observation.operation === "ListenChanges") {
+      // The snapshots and changes verifyBrowserCapture asserts.
+      const changes = result.snapshots?.flatMap((snapshot) => snapshot.changes.map(({ type, data }) => [type, data.updatedAt]));
+      if (result.code === 0 && JSON.stringify(result.snapshots?.map((snapshot) => snapshot.documents)) === JSON.stringify([[owned], [owned], []]) &&
+        JSON.stringify(changes) === JSON.stringify([["added", 2], ["modified", 3], ["removed", 3]])) {
+        ledger.checked(LEDGER_SET, id, ledger.COMPARED.answer);
+      }
+      continue;
+    }
+    const native = oracle.observations.find((value) => value.id === observation.id && value.operation === observation.operation);
+    if (!native) continue;
+    const code = native.code === 0 ? 0 : "permission-denied";
+    if (result.code !== code) continue;
+    if (code === 0 && observation.operation === "Listen" && JSON.stringify(sortedSet(result.documents)) !== JSON.stringify(sortedSet(native.documents))) continue;
+    if (code === 0 && observation.operation === "RunAggregationQuery" && result.count !== native.count) continue;
+    ledger.checked(LEDGER_SET, id, code === 0 ? ledger.COMPARED.answer : ledger.COMPARED.status);
+  }
+}
+const owned = `projects/${queryRulesProject}/databases/(default)/documents/records/owned`;
 
 test("query authorization matches native and real browser oracles in memory and disk/WAL", { timeout: 600_000 }, async (context) => {
   await execute("cargo", ["build", "--locked", "-p", "firenook"], { cwd: root });
@@ -48,8 +102,10 @@ test("query authorization matches native and real browser oracles in memory and 
       await execute(process.execPath, ["--import", "tsx", "src/rules/capture-query-rules.ts", "--case-set", caseSet, "--origin", origin, "--output", join(output, "capture")], { cwd: join(root, "conformance"), env: { ...process.env, FIRENOOK_CAPTURE_BINARY: binary }, timeout: 180_000, maxBuffer: 4 * 1024 * 1024 });
       const actual = JSON.parse(await readFile(join(output, "capture/grpc.json"), "utf8")) as NativeCapture;
       compareNativeCapture(actual, expected);
+      const unique = await ledgerNative(corpus, expected);
       for (const variant of ["long-poll", "streaming"]) {
         verifyBrowserCapture(JSON.parse(await readFile(join(output, `capture/${variant}-browser.json`), "utf8")) as BrowserCapture, expected);
+        await ledgerBrowser(corpus, variant, expected, unique);
       }
     } finally {
       if (server.exitCode === null && server.signalCode === null) {

@@ -1,10 +1,15 @@
 use std::collections::BTreeMap;
 
+use firenook_conformance_ledger as ledger;
 use firenook_rules_engine::{
     Auth, DocumentAccess, DocumentAccessError, EmptyDocumentAccess, EvaluationRequest, Query,
     RequestOperation, Resource, Timestamp, Value, compile,
 };
 use serde_json::Value as JsonValue;
+
+/// The case sets `conformance/src/report/cases.mjs` lists these fixtures as.
+const PRODUCTION_SET: &str = "rules-v2/production-rules-api";
+const OFFICIAL_SET: &str = "rules-v2/official-emulator";
 
 const EXPRESSION_CORPUS: &str =
     include_str!("../../../conformance/fixtures/rules-v2/production-expression-corpus.json");
@@ -14,6 +19,30 @@ const LIMIT_PROBES: &str =
     include_str!("../../../conformance/fixtures/rules-v2/production-limit-probes.json");
 const JAVA_ACCESS: &str =
     include_str!("../../../conformance/fixtures/rules-v2/java-access-accounting.json");
+// Recorded with the same rules source as `JAVA_ACCESS`; read only for the
+// verdicts the ledger compares the hand-built requests' results with.
+const JAVA_GET_AFTER: &str =
+    include_str!("../../../conformance/fixtures/rules-v2/java-get-after.json");
+const JAVA_RUNTIME_ERRORS: &str =
+    include_str!("../../../conformance/fixtures/rules-v2/java-runtime-errors.json");
+
+/// Notes a Java observation as checked when the verdict the test asserted is
+/// the one the official emulator answered (200 allows, 403 denies).
+fn ledger_java_verdict(fixture: &JsonValue, file: &str, id: &str, allowed: bool) {
+    let recorded = fixture["observations"]
+        .as_array()
+        .expect("observations")
+        .iter()
+        .find(|observation| observation["id"] == id)
+        .and_then(|observation| observation["status"].as_u64());
+    if recorded == Some(if allowed { 200 } else { 403 }) {
+        ledger::checked(
+            OFFICIAL_SET,
+            &format!("{file}/{id}"),
+            ledger::Compared::Verdict,
+        );
+    }
+}
 
 #[derive(Default)]
 struct CoverageVisits(usize);
@@ -65,6 +94,11 @@ fn replays_all_1024_production_expression_cases() {
                 case["id"].as_str().unwrap_or("unknown"),
                 case["expression"].as_str().unwrap_or("unknown")
             );
+            ledger::checked(
+                PRODUCTION_SET,
+                &format!("expression-corpus/{}", case["id"].as_str().expect("id")),
+                ledger::Compared::Verdict,
+            );
             replayed += 1;
         }
     }
@@ -88,6 +122,18 @@ fn replays_the_targeted_language_contract() {
             index,
             case["id"].as_str().unwrap_or("unknown")
         );
+        let id = case["id"].as_str().expect("id");
+        let case_id = format!("language-contract/{id}");
+        match fixture["response"]["testResults"][index]["state"].as_str() {
+            Some("SUCCESS") => ledger::checked(PRODUCTION_SET, &case_id, ledger::Compared::Verdict),
+            Some(_) if id == "debug-return" => ledger::differs(
+                PRODUCTION_SET,
+                &case_id,
+                ledger::Compared::Verdict,
+                "production's projects.test has no debug() (Function not found); Firenook evaluates debug() to its argument, as the emulator does",
+            ),
+            _ => {}
+        }
     }
 }
 
@@ -105,6 +151,18 @@ fn replays_the_frozen_call_depth_boundary() {
             id == "function-depth-21",
             "{id}: {result:?}"
         );
+        // Only the refusal is the whole recorded answer: production also
+        // evaluated the accepted depth, which is not replayed here.
+        let refused = observation["response"]["issues"]
+            .as_array()
+            .is_some_and(|issues| issues.iter().any(|issue| issue["severity"] == "ERROR"));
+        if result.is_err() && refused {
+            ledger::checked(
+                PRODUCTION_SET,
+                &format!("limit-probes/{id}"),
+                ledger::Compared::Verdict,
+            );
+        }
     }
 }
 
@@ -136,6 +194,14 @@ fn denies_at_the_frozen_evaluated_expression_limit() {
                     .as_ref()
                     .is_some_and(|error| error.message.contains("1000 expressions")),
                 "{actual:?}"
+            );
+        }
+        let recorded_allowed = observation["response"]["testResults"][0]["state"] == "SUCCESS";
+        if recorded_allowed == actual.allowed {
+            ledger::checked(
+                PRODUCTION_SET,
+                &format!("limit-probes/{id}"),
+                ledger::Compared::Verdict,
             );
         }
     }
@@ -181,6 +247,7 @@ fn enforces_access_limits_cache_and_atomic_accounting() {
         assert_eq!(result.allowed, expected_allowed, "{id}: {result:?}");
         assert_eq!(result.document_accesses, expected_accesses, "{id}");
         assert_eq!(result.document_cache_hits, expected_hits, "{id}");
+        ledger_java_verdict(&fixture, "java-access-accounting", id, result.allowed);
     }
 
     let batch_20 = batch_requests(20);
@@ -191,6 +258,12 @@ fn enforces_access_limits_cache_and_atomic_accounting() {
     );
     assert!(result.allowed, "{result:?}");
     assert_eq!(result.document_accesses, 20);
+    ledger_java_verdict(
+        &fixture,
+        "java-access-accounting",
+        "batch-20-distinct-access-calls",
+        result.allowed,
+    );
 
     let batch_21 = batch_requests(21);
     let result = rules.evaluate_atomic(&batch_21, &access);
@@ -201,6 +274,12 @@ fn enforces_access_limits_cache_and_atomic_accounting() {
     assert!(!result.allowed, "{result:?}");
     assert_eq!(result.document_accesses, 20);
     assert!(result.operations[20].error.is_some());
+    ledger_java_verdict(
+        &fixture,
+        "java-access-accounting",
+        "batch-21-distinct-access-calls",
+        result.allowed,
+    );
 }
 
 #[test]
@@ -238,6 +317,13 @@ fn get_after_uses_the_atomic_pending_snapshot() {
         rules.evaluate_atomic(&[counter_update.clone(), dependent_create.clone()], &access);
     assert!(result.allowed, "{result:?}");
     assert_eq!(result.document_accesses, 1);
+    let recorded: JsonValue = serde_json::from_str(JAVA_GET_AFTER).expect("valid fixture");
+    ledger_java_verdict(
+        &recorded,
+        "java-get-after",
+        "get-after-sees-pending-write",
+        result.allowed,
+    );
 
     dependent_create.request_resource = Some(Resource::new(
         "/databases/(default)/documents/atomic/item",
@@ -245,11 +331,18 @@ fn get_after_uses_the_atomic_pending_snapshot() {
     ));
     let result = rules.evaluate_atomic(&[counter_update, dependent_create], &access);
     assert!(!result.allowed, "{result:?}");
+    ledger_java_verdict(
+        &recorded,
+        "java-get-after",
+        "get-after-denies-stale-invariant",
+        result.allowed,
+    );
 }
 
 #[test]
 fn converts_the_frozen_runtime_errors_to_denials() {
     let fixture: JsonValue = serde_json::from_str(JAVA_ACCESS).expect("valid fixture");
+    let recorded: JsonValue = serde_json::from_str(JAVA_RUNTIME_ERRORS).expect("valid fixture");
     let rules = compile(fixture["rulesSource"].as_str().expect("rules source"))
         .expect("Java runtime rules should compile");
     for id in [
@@ -271,6 +364,7 @@ fn converts_the_frozen_runtime_errors_to_denials() {
         let result = rules.evaluate(&request, &EmptyDocumentAccess);
         assert!(!result.allowed, "{id}: {result:?}");
         assert!(result.error.is_some(), "{id}: {result:?}");
+        ledger_java_verdict(&recorded, "java-runtime-errors", id, result.allowed);
     }
 }
 

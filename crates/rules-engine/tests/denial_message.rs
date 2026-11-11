@@ -16,6 +16,20 @@ const FIXTURE: &str =
 
 const PRODUCTION: &str = "Missing or insufficient permissions.";
 
+/// What the ledger notes against each recorded denial this test asserts.
+const LEDGER_SET: &str = "request-identity-v1";
+const PREFIXED: &str = "Firenook's denial message starts with the text production answers (Missing or insufficient permissions.), then the official emulator's detail";
+
+/// Notes a recorded denial whose message this test asserts Firenook prefixes.
+fn ledger_prefixed(case: &str) {
+    firenook_conformance_ledger::differs(
+        LEDGER_SET,
+        case,
+        firenook_conformance_ledger::Compared::Error,
+        PREFIXED,
+    );
+}
+
 fn fixture() -> JsonValue {
     serde_json::from_str(FIXTURE).expect("fixture JSON")
 }
@@ -78,23 +92,27 @@ fn a_denial_names_the_allows_that_refused_it_as_the_official_emulator_does() {
     };
 
     // Conditions that evaluated to false: exactly the official detail.
-    for (request, expected) in [
+    for (request, expected, case) in [
         (
             request(RequestOperation::Get, "two/x", Some(alice())),
             official(&["denials", "twoAllows", "grpc"]),
+            "denials/twoAllows/grpc",
         ),
         (
             request(RequestOperation::Get, "deny/x", None),
             read("absent", "deny/x"),
+            "reads/(default)/absent/deny/x/grpc",
         ),
         (
             request(RequestOperation::Get, "anon/x", Some(alice())),
             read("user", "anon/x"),
+            "reads/(default)/user/anon/x/grpc",
         ),
     ] {
         let result = rules.evaluate(&request, &EmptyDocumentAccess);
         assert!(!result.allowed);
         assert_eq!(result.denial_message(), format!("{PRODUCTION}{expected}"));
+        ledger_prefixed(case);
     }
 
     // No allow applies.
@@ -111,6 +129,7 @@ fn a_denial_names_the_allows_that_refused_it_as_the_official_emulator_does() {
         format!("{PRODUCTION}\nNo matching allow statements")
     );
     assert_eq!(elsewhere.refused_by, []);
+    ledger_prefixed("denials/noMatchingAllow/grpc");
 
     // A condition that failed: Firenook's error text, at the official line.
     let failed = rules.evaluate(
@@ -140,6 +159,7 @@ fn a_denial_names_the_allows_that_refused_it_as_the_official_emulator_does() {
     );
     assert_eq!(created.refused_by[0].line, 14);
     assert_eq!(created.refused_by[0].operation, RequestOperation::Create);
+    ledger_prefixed("denials/create/rest");
 
     // An allowed request names nothing.
     let allowed = rules.evaluate(

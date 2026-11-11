@@ -13,6 +13,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { observe } from '../src/suite/listen-resume-observe.mjs';
+import * as ledger from '../src/report/ledger.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const fixture = JSON.parse(await readFile(new URL('../fixtures/listen-resume-v1/fixture.json', import.meta.url)));
@@ -75,10 +76,16 @@ test('a listener resumes as the official capture says, in memory and on disk', {
         assert.equal(actual.ending, expected.ending, `${label}: ${actual.message ?? ''}`);
         if (REPLAYS_CHANGES.has(id)) {
           assert.deepEqual(actual.frames, ['ADD', 'CURRENT', 'NO_CHANGE'], label);
+          if (JSON.stringify(expected.frames) !== JSON.stringify(actual.frames)) {
+            ledger.differs('listen-resume-v1', id, ledger.COMPARED.answer, 'a token this run issued replays only what changed since, where the official emulator resends everything; the client ends up with the same data');
+          }
           continue;
         }
         if (READ_TIME_AS_PRODUCTION.has(id)) {
           assert.deepEqual(actual.documents, expected.documents, label);
+          // The documents the listener ends with and how it ends; its frames
+          // follow production and are not compared.
+          ledger.checked('listen-resume-v1', id, ledger.COMPARED.behaviour);
           continue;
         }
         if (mode === 'disk-wal' && id.includes('after-a-restart')) {
@@ -90,6 +97,7 @@ test('a listener resumes as the official capture says, in memory and on disk', {
         }
         assert.deepEqual(actual.frames, expected.frames, label);
         assert.deepEqual(actual.documents, expected.documents, label);
+        ledger.checked('listen-resume-v1', id, ledger.COMPARED.answer);
       }
     } finally {
       await stop(running);

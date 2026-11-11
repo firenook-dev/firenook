@@ -67,6 +67,24 @@ fn publish_request(topic: &str, body: &JsonValue) -> Request<Body> {
         .expect("publish request")
 }
 
+/// Notes a recorded observation of the suite's Pub/Sub fixture as checked
+/// when `status` and `body` are what it recorded.
+fn ledger_observation(oracle: &JsonValue, id: &str, status: StatusCode, body: &JsonValue) {
+    let recorded = oracle["observations"]
+        .as_array()
+        .expect("observations")
+        .iter()
+        .find(|observation| observation["id"] == id)
+        .expect("recorded observation");
+    if recorded["status"] == status.as_u16() && recorded["response"] == *body {
+        firenook_conformance_ledger::checked(
+            "firebase-suite-v1/pubsub",
+            &format!("pubsub-schedule-and-function-dispatch/{id}"),
+            firenook_conformance_ledger::Compared::Answer,
+        );
+    }
+}
+
 #[tokio::test]
 async fn topic_inventory_and_publish_replay_the_frozen_contract() {
     let (runtime, mut deliveries, background) = runtime_and_deliveries();
@@ -83,10 +101,9 @@ async fn topic_inventory_and_publish_replay_the_frozen_contract() {
         .await
         .expect("list response");
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        json_response(response).await,
-        oracle["observations"][0]["response"]
-    );
+    let listed = json_response(response).await;
+    assert_eq!(listed, oracle["observations"][0]["response"]);
+    ledger_observation(&oracle, "list-function-topics", StatusCode::OK, &listed);
 
     let response = application
         .clone()
@@ -97,7 +114,9 @@ async fn topic_inventory_and_publish_replay_the_frozen_contract() {
         .await
         .expect("publish response");
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(json_response(response).await, json!({"messageIds": ["1"]}));
+    let published = json_response(response).await;
+    assert_eq!(published, json!({"messageIds": ["1"]}));
+    ledger_observation(&oracle, "publish-custom-topic", StatusCode::OK, &published);
     let dispatch = deliveries.recv().await.expect("topic dispatch");
     let event: JsonValue = serde_json::from_slice(&dispatch.body).expect("CloudEvent");
     assert_eq!(
@@ -127,7 +146,14 @@ async fn topic_inventory_and_publish_replay_the_frozen_contract() {
         .await
         .expect("schedule publish response");
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(json_response(response).await, json!({"messageIds": ["2"]}));
+    let published = json_response(response).await;
+    assert_eq!(published, json!({"messageIds": ["2"]}));
+    ledger_observation(
+        &oracle,
+        "publish-schedule-topic",
+        StatusCode::OK,
+        &published,
+    );
     let dispatch = deliveries.recv().await.expect("schedule dispatch");
     let event: JsonValue = serde_json::from_slice(&dispatch.body).expect("CloudEvent");
     assert_eq!(
@@ -145,8 +171,15 @@ async fn topic_inventory_and_publish_replay_the_frozen_contract() {
         .await
         .expect("disabled response");
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(json_response(response).await, json!({"messageIds": ["3"]}));
+    let published = json_response(response).await;
+    assert_eq!(published, json!({"messageIds": ["3"]}));
     assert!(deliveries.try_recv().is_err());
+    ledger_observation(
+        &oracle,
+        "publish-while-disabled",
+        StatusCode::OK,
+        &published,
+    );
 }
 
 #[tokio::test]

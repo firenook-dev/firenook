@@ -64,6 +64,17 @@ async fn missing_object_responses_match_the_official_route_contract() {
             decode_fixture_body(&probe["body"]),
             "{label} body"
         );
+        if probe["status"] == 404 {
+            firenook_conformance_ledger::checked(
+                "firebase-suite-v1/storage",
+                &format!(
+                    "storage-missing-object/{}-{}",
+                    probe["api"].as_str().expect("api"),
+                    probe["kind"].as_str().expect("kind")
+                ),
+                firenook_conformance_ledger::Compared::Answer,
+            );
+        }
     }
 
     runtime.shutdown().await.expect("shutdown");

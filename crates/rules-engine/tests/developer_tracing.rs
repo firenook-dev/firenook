@@ -58,7 +58,7 @@ fn recorded_allow_decisions_and_locations_match_the_phase_a_live_oracle() {
     assert_eq!(compiled.source(), source);
     let frames = fixture["websocket"]["firstConnection"].as_array().unwrap();
     let mut compared = 0;
-    for event in frames.iter().skip(1) {
+    for (index, event) in frames.iter().enumerate().skip(1) {
         let context = &event["rulesContext"];
         let operation = match context["method"].as_str().unwrap() {
             "get" => RequestOperation::Get,
@@ -114,6 +114,11 @@ fn recorded_allow_decisions_and_locations_match_the_phase_a_live_oracle() {
         // duplicates to imitate the oracle's mutable history implementation.
         let offset = trace.outcomes()[0].location.byte_offset;
         assert!(source[offset..].starts_with("allow "));
+        firenook_conformance_ledger::checked(
+            "developer-tools-v1",
+            &format!("websocket/first/{index}"),
+            firenook_conformance_ledger::Compared::Verdict,
+        );
         compared += 1;
     }
     assert_eq!(compared, 10);

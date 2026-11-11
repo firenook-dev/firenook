@@ -4,6 +4,7 @@ members = [
   "crates/capture-proxy",
   "crates/auth-front",
   "crates/cli",
+  "crates/conformance-ledger",
   "crates/console-front",
   "crates/core-store",
   "crates/export-format",

@@ -5,6 +5,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{Request, StatusCode, Version};
+use firenook_conformance_ledger::Compared;
 use firenook_webchannel_front::{Backend, BackendChannel, ChannelKind, OpenRequest, router};
 use futures_util::StreamExt as _;
 use http_body_util::BodyExt as _;
@@ -175,6 +176,7 @@ struct Metadata {
 
 #[derive(Deserialize)]
 struct Exchange {
+    sequence: Option<u64>,
     request: CapturedRequest,
     response: CapturedResponse,
 }
@@ -277,10 +279,22 @@ async fn replay_fixture(name: &str, fixture: &str) {
     let application = router(EchoBackend);
     let mut sessions = HashMap::<String, Session>::new();
     let mut replayed = 0_usize;
+    // The case set and recording `conformance/src/report/cases.mjs` list
+    // these exchanges under.
+    let (set, recording) = match name.split_once('/') {
+        Some(("java", recording)) => ("webchannel-v8/java-v1.22.0", recording),
+        Some(("cloud", recording)) => ("webchannel-v8/production-cloud-firestore", recording),
+        _ => panic!("{name}: unknown oracle"),
+    };
 
-    for exchange in &fixture.exchanges {
+    for (index, exchange) in fixture.exchanges.iter().enumerate() {
         let has_sid = query_value(&exchange.request.query, "SID").is_some();
-        if exchange.request.method == "POST" && !has_sid {
+        // What the replay compares: the handshake's status (and that it
+        // opens a session), a forward request's status (and that it is
+        // acknowledged), and an unknown session's status and, for
+        // production, its body. A backchannel carries the echo backend's
+        // frames, not the recorded ones, so it is not compared.
+        let compared = if exchange.request.method == "POST" && !has_sid {
             let session = replay_handshake(
                 &application,
                 &exchange.request,
@@ -289,10 +303,20 @@ async fn replay_fixture(name: &str, fixture: &str) {
             )
             .await;
             sessions.insert(exchange.request.path.clone(), session);
+            (exchange.response.status == 200).then_some(Compared::Status)
         } else if let Some(session) = sessions.get(&exchange.request.path) {
             replay_session_request(&application, &exchange.request, session, name).await;
+            (exchange.request.method == "POST" && exchange.response.status == 200)
+                .then_some(Compared::Status)
         } else {
             replay_unknown_sid(&application, exchange, name, &fixture.metadata.target).await;
+            (fixture.metadata.target == "production-cloud-firestore").then_some(Compared::Answer)
+        };
+        if let Some(compared) = compared {
+            let sequence = exchange
+                .sequence
+                .unwrap_or(u64::try_from(index).expect("index") + 1);
+            firenook_conformance_ledger::checked(set, &format!("{recording}/{sequence}"), compared);
         }
         replayed += 1;
     }
