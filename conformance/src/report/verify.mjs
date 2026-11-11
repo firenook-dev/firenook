@@ -100,7 +100,7 @@ function main() {
     if (!note) return { set: entry.set, id: entry.id, result: 'unreplayed' };
     const compared = COMPARED.find((value) => note.compared.has(value));
     if (note.results.has('differs')) {
-      return { set: entry.set, id: entry.id, result: 'differs', compared, reason: [...note.reasons].join('; ') };
+      return { set: entry.set, id: entry.id, result: 'differs', compared, reason: [...note.reasons][0] };
     }
     return { set: entry.set, id: entry.id, result: 'checked', compared };
   });

@@ -25,8 +25,8 @@ export const PRODUCTION_DENIAL = "Missing or insufficient permissions.";
  * credential it cannot read, INVALID_ARGUMENT naming the problem.
  */
 export const identityDivergences: Record<string, { grpc: number; rest: number; reason: string }> = {
-  basic: { grpc: 3, rest: 400, reason: "a non-Bearer credential is INVALID_ARGUMENT, not an empty UNKNOWN" },
-  "firebase-owner": { grpc: 3, rest: 400, reason: "a non-Bearer credential is INVALID_ARGUMENT, not an empty UNKNOWN" },
+  basic: { grpc: 3, rest: 400, reason: "a credential that is not a Bearer token is refused as INVALID_ARGUMENT, where the official emulator answers an empty UNKNOWN" },
+  "firebase-owner": { grpc: 3, rest: 400, reason: "a credential that is not a Bearer token is refused as INVALID_ARGUMENT, where the official emulator answers an empty UNKNOWN" },
 };
 
 /**
@@ -35,7 +35,7 @@ export const identityDivergences: Record<string, { grpc: number; rest: number; r
  * everyone else as the jar refuses the other reads no rule governs,
  * `ListCollectionIds`.
  */
-export const partitionDivergence = { owner: 0, other: 7, reason: "PartitionQuery is served to the owner only; the jar does not implement it" };
+export const partitionDivergence = { owner: 0, other: 7, reason: "the official emulator does not implement PartitionQuery; Firenook answers it for the owner, as the Admin SDKs' getPartitions() asks it" };
 
 /** The `@ L<n>` rule lines a denial names, in order, without repeats. */
 export function ruleLines(message: string): string[] {

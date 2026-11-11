@@ -85,7 +85,8 @@ function scrub(text) {
   return String(text)
     .replace(/eyJ[A-Za-z0-9_-]{2,}(?:\.[A-Za-z0-9_-]*){0,2}/g, '')
     .replace(/\bBearer\s+\S+/gi, '')
-    .replace(/\bBasic\s+[A-Za-z0-9+/=]{8,}/g, '')
+    // A Basic credential is base64 (a digit, + / or = in it), never words like "Basic credential".
+    .replace(/\bBasic\s+(?=\S*[0-9+/=])[A-Za-z0-9+/=]{8,}/g, '')
     .replace(/([?&\s]|^)key=[^&\s]*/gi, '$1')
     .replace(/(\bpassword\b["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,}]+)/gi, '$1')
     .replace(/\?&/g, '?')
@@ -134,6 +135,8 @@ function summarize(body) {
   if (body.error !== undefined && body.error !== null) {
     const error = body.error;
     if (typeof error === 'string') return error;
+    // A list of per-item failures in a successful answer (batchCreate's).
+    if (Array.isArray(error)) return `{error: [${error.length ? plural(error.length, 'item') : ''}]}`;
     const message = typeof error.message === 'string' ? error.message.trim() : '';
     const status = error.status ?? (typeof error.code === 'string' ? error.code : '');
     if (status && message && !message.includes(status)) return `${status}: ${message}`;

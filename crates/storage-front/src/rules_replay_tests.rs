@@ -37,37 +37,37 @@ const DIVERGENCES: &[(&str, &str, u16, &str)] = &[
         "request-resource-create-shape",
         "method-string",
         200,
-        "request-method-undefined: production defines request.method",
+        "production's rules define request.method, which the official emulator leaves undefined; Firenook follows production",
     ),
     (
         "request-resource-update-patch",
         "method-update",
         200,
-        "request-method-undefined: production defines request.method",
+        "production's rules define request.method, which the official emulator leaves undefined; Firenook follows production",
     ),
     (
         "request-resource-get-list-delete",
         "get-media-uses-get",
         200,
-        "request-method-undefined: production defines request.method",
+        "production's rules define request.method, which the official emulator leaves undefined; Firenook follows production",
     ),
     (
         "request-resource-get-list-delete",
         "list-method-string",
         200,
-        "request-method-undefined: production defines request.method",
+        "production's rules define request.method, which the official emulator leaves undefined; Firenook follows production",
     ),
     (
         "upload-over-existing",
         "overwrite-method-is-create",
         200,
-        "request-method-undefined: production defines request.method",
+        "production's rules define request.method, which the official emulator leaves undefined; Firenook follows production",
     ),
     (
         "bypass-json-api",
         "json-patch-anonymous",
         200,
-        "the JSON API PATCH route is implemented by Firenook (501 in the official emulator); rules are not consulted either way",
+        "Firenook answers the Cloud Storage API's JSON PATCH, which the official emulator does not implement (501); rules are not consulted either way",
     ),
 ];
 
