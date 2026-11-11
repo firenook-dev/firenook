@@ -1,0 +1,79 @@
+rules_version = '2';
+
+// Synthetic ruleset contributed for firenook-dev/firenook#156. Collections and
+// fields are invented; the language features are the ones a consumer's real
+// rulesets use.
+
+// A function outside the service block.
+function angemeldet() {
+  return request.auth != null;
+}
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // The conditional operator inside a function (#138).
+    function istLeitung() {
+      return (request.auth != null ? request.auth.token.rolle : 'gast') == 'leitung';
+    }
+
+    function istMitglied(raumId) {
+      return angemeldet()
+        && exists(/databases/$(database)/documents/raeume/$(raumId)/mitglieder/$(request.auth.uid));
+    }
+
+    match /raeume/{raumId} {
+      allow get: if istMitglied(raumId);
+      allow list: if angemeldet() && resource.data.sichtbarkeit == 'offen';
+
+      allow create: if istLeitung()
+        && request.resource.data.keys().hasOnly(['titel', 'sichtbarkeit', 'angelegt', 'notiz'])
+        && request.resource.data.keys().hasAll(['titel', 'sichtbarkeit', 'angelegt'])
+        && request.resource.data.titel is string
+        && request.resource.data.titel.size() <= 40
+        && request.resource.data.sichtbarkeit in ['offen', 'geschlossen']
+        && request.resource.data.angelegt == request.time;
+
+      // resource != null first: a create has no resource, and diff() on it is
+      // an evaluation error rather than a verdict.
+      allow update: if istLeitung()
+        && resource != null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['titel', 'notiz']);
+
+      allow delete: if false;
+
+      match /mitglieder/{uid} {
+        allow get: if angemeldet() && uid == request.auth.uid;
+        allow list: if istMitglied(raumId);
+        allow write: if istLeitung();
+      }
+
+      match /eintraege/{eintragId} {
+        allow get: if istMitglied(raumId);
+
+        // A field check in the proof of a list query (#154).
+        allow list: if istMitglied(raumId) && 'offen' in resource.data;
+
+        // get(key, default) on the payload.
+        allow create: if istMitglied(raumId)
+          && request.resource.data.get('menge', 0) is int
+          && request.resource.data.get('menge', 0) <= 100;
+
+        // A lookup of the parent document.
+        allow update: if istMitglied(raumId)
+          && get(/databases/$(database)/documents/raeume/$(raumId)).data.sichtbarkeit == 'offen';
+
+        allow delete: if istLeitung();
+      }
+    }
+
+    match /marken/{markeId} {
+      allow get: if angemeldet() && markeId.matches('^[a-z0-9-]+$');
+      allow list: if angemeldet();
+      allow create: if angemeldet()
+        && request.resource.data.bezeichnung is string
+        && request.resource.data.zaehler is int
+        && request.resource.data.keys().hasAny(['bezeichnung', 'zaehler']);
+    }
+  }
+}

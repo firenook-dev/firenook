@@ -1,0 +1,1308 @@
+{
+  "schemaVersion": 1,
+  "target": "official-java-emulator",
+  "firebaseToolsVersion": "15.35.0",
+  "javaJarSha256": "9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c",
+  "capturedAt": "2026-11-11T16:06:22.790Z",
+  "credentialsStored": false,
+  "rulesSourceSha256": "b69de63ab0de7378ecd4eab9ad655d08e9b72510077e5f401c531e6c9d88b190",
+  "projectId": "demo-firenook-contributed-rooms",
+  "allowCases": 10,
+  "denyCases": 19,
+  "seed": [
+    {
+      "path": "raeume/r1",
+      "fields": {
+        "titel": {
+          "stringValue": "Erster Raum"
+        },
+        "sichtbarkeit": {
+          "stringValue": "offen"
+        },
+        "notiz": {
+          "stringValue": ""
+        }
+      }
+    },
+    {
+      "path": "raeume/r2",
+      "fields": {
+        "titel": {
+          "stringValue": "Zweiter Raum"
+        },
+        "sichtbarkeit": {
+          "stringValue": "geschlossen"
+        },
+        "notiz": {
+          "stringValue": ""
+        }
+      }
+    },
+    {
+      "path": "raeume/r1/mitglieder/u-mitglied",
+      "fields": {
+        "seit": {
+          "integerValue": "1"
+        }
+      }
+    },
+    {
+      "path": "raeume/r1/mitglieder/u-leitung",
+      "fields": {
+        "seit": {
+          "integerValue": "1"
+        }
+      }
+    },
+    {
+      "path": "raeume/r2/mitglieder/u-fremder",
+      "fields": {
+        "seit": {
+          "integerValue": "1"
+        }
+      }
+    },
+    {
+      "path": "raeume/r1/eintraege/e1",
+      "fields": {
+        "menge": {
+          "integerValue": "5"
+        },
+        "offen": {
+          "booleanValue": true
+        }
+      }
+    },
+    {
+      "path": "raeume/r1/eintraege/e2",
+      "fields": {
+        "menge": {
+          "integerValue": "7"
+        },
+        "offen": {
+          "booleanValue": false
+        }
+      }
+    },
+    {
+      "path": "marken/gelb",
+      "fields": {
+        "bezeichnung": {
+          "stringValue": "Gelb"
+        },
+        "zaehler": {
+          "integerValue": "1"
+        }
+      }
+    }
+  ],
+  "cases": [
+    {
+      "id": "member-get-room",
+      "feature": "function-outside-service",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-mitglied",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "documents/raeume/r1"
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/raeume/r1",
+          "fields": {
+            "titel": {
+              "stringValue": "Erster Raum"
+            },
+            "sichtbarkeit": {
+              "stringValue": "offen"
+            },
+            "notiz": {
+              "stringValue": ""
+            }
+          },
+          "createTime": "2026-11-11T16:06:21.973172Z",
+          "updateTime": "2026-11-11T16:06:21.973172Z"
+        }
+      }
+    },
+    {
+      "id": "anonymous-get-room",
+      "feature": "function-outside-service",
+      "expected": "DENY",
+      "auth": null,
+      "request": {
+        "method": "GET",
+        "path": "documents/raeume/r1"
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'get' @ L26",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "lead-create-room",
+      "feature": "conditional-operator",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-leitung",
+        "claims": {
+          "rolle": "leitung"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/neu",
+                "fields": {
+                  "titel": {
+                    "stringValue": "Raum"
+                  },
+                  "sichtbarkeit": {
+                    "stringValue": "offen"
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "angelegt",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "writeResults": [
+            {
+              "updateTime": "2026-11-11T16:06:22.341477Z",
+              "transformResults": [
+                {
+                  "timestampValue": "2026-11-11T16:06:22.322Z"
+                }
+              ]
+            }
+          ],
+          "commitTime": "2026-11-11T16:06:22.341477Z"
+        }
+      }
+    },
+    {
+      "id": "member-create-room",
+      "feature": "conditional-operator",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-mitglied",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/neu2",
+                "fields": {
+                  "titel": {
+                    "stringValue": "Raum"
+                  },
+                  "sichtbarkeit": {
+                    "stringValue": "offen"
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "angelegt",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'create' @ L29, false for 'update' @ L39",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "anonymous-create-room",
+      "feature": "conditional-operator",
+      "expected": "DENY",
+      "auth": null,
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/neu3",
+                "fields": {
+                  "titel": {
+                    "stringValue": "Raum"
+                  },
+                  "sichtbarkeit": {
+                    "stringValue": "offen"
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "angelegt",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'create' @ L29, false for 'update' @ L39",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-room-unknown-field",
+      "feature": "keys-hasOnly-hasAll",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-leitung",
+        "claims": {
+          "rolle": "leitung"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/neu4",
+                "fields": {
+                  "titel": {
+                    "stringValue": "Raum"
+                  },
+                  "sichtbarkeit": {
+                    "stringValue": "offen"
+                  },
+                  "heimlich": {
+                    "booleanValue": true
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "angelegt",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L29:24 for 'create' @ L29, evaluation error at L39:24 for 'update' @ L39, false for 'create' @ L29",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-room-missing-field",
+      "feature": "keys-hasOnly-hasAll",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-leitung",
+        "claims": {
+          "rolle": "leitung"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/neu5",
+                "fields": {
+                  "titel": {
+                    "stringValue": "Raum"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'create' @ L29, evaluation error at L39:24 for 'update' @ L39, false for 'create' @ L29",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-room-title-not-string",
+      "feature": "type-and-value-checks",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-leitung",
+        "claims": {
+          "rolle": "leitung"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/neu6",
+                "fields": {
+                  "titel": {
+                    "integerValue": "42"
+                  },
+                  "sichtbarkeit": {
+                    "stringValue": "offen"
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "angelegt",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L29:24 for 'create' @ L29, evaluation error at L39:24 for 'update' @ L39, false for 'create' @ L29",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-room-title-too-long",
+      "feature": "type-and-value-checks",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-leitung",
+        "claims": {
+          "rolle": "leitung"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/neu7",
+                "fields": {
+                  "titel": {
+                    "stringValue": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  },
+                  "sichtbarkeit": {
+                    "stringValue": "offen"
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "angelegt",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L29:24 for 'create' @ L29, evaluation error at L39:24 for 'update' @ L39, false for 'create' @ L29",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-room-visibility-not-listed",
+      "feature": "type-and-value-checks",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-leitung",
+        "claims": {
+          "rolle": "leitung"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/neu8",
+                "fields": {
+                  "titel": {
+                    "stringValue": "Raum"
+                  },
+                  "sichtbarkeit": {
+                    "stringValue": "halboffen"
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "angelegt",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L29:24 for 'create' @ L29, evaluation error at L39:24 for 'update' @ L39, false for 'create' @ L29",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "update-room-allowed-field",
+      "feature": "diff-affectedKeys",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-leitung",
+        "claims": {
+          "rolle": "leitung"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/r1",
+                "fields": {
+                  "notiz": {
+                    "stringValue": "neu"
+                  }
+                }
+              },
+              "updateMask": {
+                "fieldPaths": [
+                  "notiz"
+                ]
+              },
+              "currentDocument": {
+                "exists": true
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "writeResults": [
+            {
+              "updateTime": "2026-11-11T16:06:22.470444Z"
+            }
+          ],
+          "commitTime": "2026-11-11T16:06:22.470444Z"
+        }
+      }
+    },
+    {
+      "id": "update-room-locked-field",
+      "feature": "diff-affectedKeys",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-leitung",
+        "claims": {
+          "rolle": "leitung"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/r1",
+                "fields": {
+                  "sichtbarkeit": {
+                    "stringValue": "geschlossen"
+                  }
+                }
+              },
+              "updateMask": {
+                "fieldPaths": [
+                  "sichtbarkeit"
+                ]
+              },
+              "currentDocument": {
+                "exists": true
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L39:24 for 'update' @ L39, false for 'update' @ L39",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "lead-delete-room",
+      "feature": "diff-affectedKeys",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-leitung",
+        "claims": {
+          "rolle": "leitung"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "delete": "{documents}/raeume/r1"
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'delete' @ L43",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "outsider-get-entry",
+      "feature": "exists-on-other-document",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-fremder",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "documents/raeume/r1/eintraege/e1"
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L52:23 for 'get' @ L52, false for 'get' @ L52",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "member-get-entry",
+      "feature": "exists-on-other-document",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-mitglied",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "documents/raeume/r1/eintraege/e1"
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/raeume/r1/eintraege/e1",
+          "fields": {
+            "menge": {
+              "integerValue": "5"
+            },
+            "offen": {
+              "booleanValue": true
+            }
+          },
+          "createTime": "2026-11-11T16:06:21.973172Z",
+          "updateTime": "2026-11-11T16:06:21.973172Z"
+        }
+      }
+    },
+    {
+      "id": "member-list-foreign-members",
+      "feature": "exists-on-other-document",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-mitglied",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents/raeume/r2:runQuery",
+        "body": {
+          "structuredQuery": {
+            "from": [
+              {
+                "collectionId": "mitglieder"
+              }
+            ]
+          }
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L47:24 for 'list' @ L47, false for 'list' @ L47",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "member-query-entries-with-field",
+      "feature": "field-check-in-list-proof",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-mitglied",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents/raeume/r1:runQuery",
+        "body": {
+          "structuredQuery": {
+            "from": [
+              {
+                "collectionId": "eintraege"
+              }
+            ],
+            "where": {
+              "fieldFilter": {
+                "field": {
+                  "fieldPath": "offen"
+                },
+                "op": "EQUAL",
+                "value": {
+                  "booleanValue": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "observed": {
+        "status": 200,
+        "body": [
+          {
+            "document": {
+              "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/raeume/r1/eintraege/e1",
+              "fields": {
+                "menge": {
+                  "integerValue": "5"
+                },
+                "offen": {
+                  "booleanValue": true
+                }
+              },
+              "createTime": "2026-11-11T16:06:21.973172Z",
+              "updateTime": "2026-11-11T16:06:21.973172Z"
+            },
+            "readTime": "2026-11-11T16:06:22.572512Z",
+            "done": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "outsider-query-entries-with-field",
+      "feature": "field-check-in-list-proof",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-fremder",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents/raeume/r1:runQuery",
+        "body": {
+          "structuredQuery": {
+            "from": [
+              {
+                "collectionId": "eintraege"
+              }
+            ],
+            "where": {
+              "fieldFilter": {
+                "field": {
+                  "fieldPath": "offen"
+                },
+                "op": "EQUAL",
+                "value": {
+                  "booleanValue": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L55:24 for 'list' @ L55, false for 'list' @ L55",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-entry-without-optional-field",
+      "feature": "get-with-default",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-mitglied",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/r1/eintraege/e3",
+                "fields": {
+                  "offen": {
+                    "booleanValue": true
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "writeResults": [
+            {
+              "updateTime": "2026-11-11T16:06:22.637158Z"
+            }
+          ],
+          "commitTime": "2026-11-11T16:06:22.637158Z"
+        }
+      }
+    },
+    {
+      "id": "create-entry-over-limit",
+      "feature": "get-with-default",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-mitglied",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/r1/eintraege/e4",
+                "fields": {
+                  "menge": {
+                    "integerValue": "101"
+                  },
+                  "offen": {
+                    "booleanValue": true
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'create' @ L58, evaluation error at L63:26 for 'update' @ L63, false for 'create' @ L58",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-entry-not-integer",
+      "feature": "get-with-default",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-mitglied",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/r1/eintraege/e5",
+                "fields": {
+                  "menge": {
+                    "doubleValue": 1.5
+                  },
+                  "offen": {
+                    "booleanValue": true
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'create' @ L58, evaluation error at L63:26 for 'update' @ L63, false for 'create' @ L58",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "update-entry-in-open-room",
+      "feature": "get-on-parent-document",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-mitglied",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/r1/eintraege/e1",
+                "fields": {
+                  "menge": {
+                    "integerValue": "6"
+                  }
+                }
+              },
+              "updateMask": {
+                "fieldPaths": [
+                  "menge"
+                ]
+              },
+              "currentDocument": {
+                "exists": true
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "writeResults": [
+            {
+              "updateTime": "2026-11-11T16:06:22.680448Z"
+            }
+          ],
+          "commitTime": "2026-11-11T16:06:22.680448Z"
+        }
+      }
+    },
+    {
+      "id": "create-room-with-null-field",
+      "feature": "null-values-on-write",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-leitung",
+        "claims": {
+          "rolle": "leitung"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/raeume/neu9",
+                "fields": {
+                  "titel": {
+                    "stringValue": "Raum"
+                  },
+                  "sichtbarkeit": {
+                    "stringValue": "offen"
+                  },
+                  "notiz": {
+                    "nullValue": null
+                  }
+                }
+              },
+              "updateTransforms": [
+                {
+                  "fieldPath": "angelegt",
+                  "setToServerValue": "REQUEST_TIME"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "writeResults": [
+            {
+              "updateTime": "2026-11-11T16:06:22.695975Z",
+              "transformResults": [
+                {
+                  "timestampValue": "2026-11-11T16:06:22.690Z"
+                }
+              ]
+            }
+          ],
+          "commitTime": "2026-11-11T16:06:22.695975Z"
+        }
+      }
+    },
+    {
+      "id": "anonymous-query-missing-document-id",
+      "feature": "query-pinned-to-document-id",
+      "expected": "DENY",
+      "auth": null,
+      "request": {
+        "method": "POST",
+        "path": "documents:runQuery",
+        "body": {
+          "structuredQuery": {
+            "from": [
+              {
+                "collectionId": "raeume"
+              }
+            ],
+            "where": {
+              "fieldFilter": {
+                "field": {
+                  "fieldPath": "__name__"
+                },
+                "op": "EQUAL",
+                "value": {
+                  "referenceValue": "{documents}/raeume/gibtesnicht"
+                }
+              }
+            }
+          }
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'list' @ L27",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "member-query-missing-document-id",
+      "feature": "query-pinned-to-document-id",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-mitglied",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:runQuery",
+        "body": {
+          "structuredQuery": {
+            "from": [
+              {
+                "collectionId": "raeume"
+              }
+            ],
+            "where": {
+              "fieldFilter": {
+                "field": {
+                  "fieldPath": "__name__"
+                },
+                "op": "EQUAL",
+                "value": {
+                  "referenceValue": "{documents}/raeume/gibtesnicht"
+                }
+              }
+            }
+          }
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nevaluation error at L27:22 for 'list' @ L27",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "get-matching-document-id",
+      "feature": "regex-on-document-id",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-mitglied",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "documents/marken/gelb"
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "name": "projects/demo-firenook-contributed-rooms/databases/(default)/documents/marken/gelb",
+          "fields": {
+            "bezeichnung": {
+              "stringValue": "Gelb"
+            },
+            "zaehler": {
+              "integerValue": "1"
+            }
+          },
+          "createTime": "2026-11-11T16:06:21.973172Z",
+          "updateTime": "2026-11-11T16:06:21.973172Z"
+        }
+      }
+    },
+    {
+      "id": "get-non-matching-document-id",
+      "feature": "regex-on-document-id",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-mitglied",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "documents/marken/GELB_1"
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'get' @ L71",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    },
+    {
+      "id": "create-mark-both-fields",
+      "feature": "keys-hasAny",
+      "expected": "ALLOW",
+      "auth": {
+        "uid": "u-mitglied",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/marken/blau",
+                "fields": {
+                  "bezeichnung": {
+                    "stringValue": "Blau"
+                  },
+                  "zaehler": {
+                    "integerValue": "2"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 200,
+        "body": {
+          "writeResults": [
+            {
+              "updateTime": "2026-11-11T16:06:22.772755Z"
+            }
+          ],
+          "commitTime": "2026-11-11T16:06:22.772755Z"
+        }
+      }
+    },
+    {
+      "id": "create-mark-wrong-type",
+      "feature": "keys-hasAny",
+      "expected": "DENY",
+      "auth": {
+        "uid": "u-mitglied",
+        "claims": {
+          "rolle": "mitglied"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "documents:commit",
+        "body": {
+          "writes": [
+            {
+              "update": {
+                "name": "{documents}/marken/rot",
+                "fields": {
+                  "bezeichnung": {
+                    "stringValue": "Rot"
+                  },
+                  "zaehler": {
+                    "stringValue": "zwei"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "observed": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": 403,
+            "message": "\nfalse for 'create' @ L73",
+            "status": "PERMISSION_DENIED"
+          }
+        }
+      }
+    }
+  ]
+}
