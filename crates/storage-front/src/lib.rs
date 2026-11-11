@@ -1055,11 +1055,54 @@ async fn v0_object(
     let Some(stored) = stored else {
         return Ok(firebase_object_not_found());
     };
+    let stored = if stored.download_tokens.is_empty() {
+        match first_download_token(&state, &bucket, &object, &headers).await? {
+            Some(object) => object,
+            None => return Ok(firebase_object_not_found()),
+        }
+    } else {
+        stored
+    };
     if query.get("alt").map(String::as_str) == Some("media") {
         file_response(&state, &stored, &headers).await
     } else {
         Ok(Json(firebase_metadata(&stored)).into_response())
     }
+}
+
+/// An object with no download token, such as one the Admin SDK or the Cloud
+/// Storage API saved, gets one the first time the Firebase API reads it, as
+/// the official emulator gives it one there (`addDownloadToken(true)` in its
+/// Firebase GET route): kept with the object, under a new metageneration,
+/// with a metadata event, so `getDownloadURL` works and the same token comes
+/// back every time after (#174). The object is read again under the guard;
+/// `None` when it was deleted meanwhile.
+async fn first_download_token(
+    state: &StorageState,
+    bucket: &str,
+    name: &str,
+    headers: &HeaderMap,
+) -> Result<Option<StoredObject>, StorageApiError> {
+    let guard = state.mutation.lock().await;
+    let Ok(object) = get_object(state, bucket, name) else {
+        return Ok(None);
+    };
+    if !object.download_tokens.is_empty() {
+        return Ok(Some(object));
+    }
+    let mut pending = write::Pending::default();
+    let object = write::token_locked(
+        state,
+        &guard,
+        &mut pending,
+        object,
+        &write::TokenOp::Create,
+        &ChangeContext::from_authorization(authorization_header(headers), via_console(headers)),
+    );
+    pending.commit(state).await?;
+    drop(guard);
+    pending.dispatch(state);
+    Ok(Some(object))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -2627,16 +2670,9 @@ fn gcs_metadata(origin: &str, object: &StoredObject) -> JsonValue {
         percent_encode(&object.bucket),
         object.generation
     ));
-    if !object.custom_metadata.is_empty() {
-        value["metadata"] = json!(object.custom_metadata);
-    }
-    value
-}
-
-fn event_metadata(state: &StorageState, object: &StoredObject) -> JsonValue {
-    // A function's event is not an answer to a request: its links name the
-    // configured origin, as before.
-    let mut value = gcs_metadata(&state.config.origin, object);
+    // The download tokens ride in `metadata`, as the official emulator's
+    // Cloud Storage answers carry them (CloudStorageObjectMetadata), so the
+    // Admin SDK's getMetadata reads the token getDownloadURL uses (#174).
     let mut metadata = object.custom_metadata.clone();
     if !object.download_tokens.is_empty() {
         metadata.insert(
@@ -2648,6 +2684,12 @@ fn event_metadata(state: &StorageState, object: &StoredObject) -> JsonValue {
         value["metadata"] = json!(metadata);
     }
     value
+}
+
+fn event_metadata(state: &StorageState, object: &StoredObject) -> JsonValue {
+    // A function's event is not an answer to a request: its links name the
+    // configured origin, as before.
+    gcs_metadata(&state.config.origin, object)
 }
 
 fn base_metadata(object: &StoredObject, gcs: bool) -> JsonValue {
@@ -3489,6 +3531,112 @@ mod tests {
         assert_eq!(metadata["cacheControl"], "public,max-age=60");
         assert_eq!(runtime.object_count(), 1);
         assert_eq!(runtime.object_bytes(), bytes.len() as u64);
+
+        runtime.shutdown().await.expect("shutdown");
+        std::fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    /// #174: an object the Admin SDK saves through the Cloud Storage API has
+    /// no download token; the first Firebase API read gives it one, kept and
+    /// the same on every read after, under a new metageneration, so the web
+    /// SDK's getDownloadURL works and the token downloads the file, as the
+    /// official emulator answers (firebase-tools 15.34.0). A download through
+    /// the Firebase API mints one too, once.
+    #[tokio::test]
+    async fn the_first_firebase_read_gives_an_object_without_a_token_one() {
+        let (runtime, _dispatches, root) = runtime("first-download-token", None).await;
+        let call = |method: Method, uri: String, body: &'static str| {
+            let application = runtime.application();
+            async move {
+                let response = application
+                    .oneshot(request(method, &uri, Body::from(body)))
+                    .await
+                    .expect("request");
+                (
+                    response.status(),
+                    to_bytes(response.into_body(), usize::MAX).await.unwrap(),
+                )
+            }
+        };
+        let parse = |bytes: &[u8]| serde_json::from_slice::<JsonValue>(bytes).expect("JSON");
+        for name in ["test%2Fpath", "test%2Fdownloaded"] {
+            let (status, saved) = call(
+                Method::POST,
+                format!("/upload/storage/v1/b/{DEFAULT_BUCKET}/o?uploadType=media&name={name}"),
+                "hello",
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            let saved = parse(&saved);
+            assert!(
+                saved["metadata"]["firebaseStorageDownloadTokens"].is_null(),
+                "{saved}"
+            );
+            assert_eq!(saved["metageneration"], "1");
+        }
+
+        // Read as getDownloadURL reads it: the metadata gets a token.
+        let metadata = format!("/v0/b/{DEFAULT_BUCKET}/o/test%2Fpath");
+        let (status, first) = call(Method::GET, metadata.clone(), "").await;
+        assert_eq!(status, StatusCode::OK);
+        let token = parse(&first)["downloadTokens"].as_str().unwrap().to_owned();
+        assert!(
+            !token.is_empty() && !token.contains(','),
+            "one token: {token:?}"
+        );
+        let (_, again) = call(Method::GET, metadata, "").await;
+        assert_eq!(parse(&again)["downloadTokens"], token.as_str());
+
+        // Kept with the object, under a new metageneration, and the Admin
+        // SDK reads it back in `metadata`, as from the official emulator.
+        let (_, admin) = call(
+            Method::GET,
+            format!("/storage/v1/b/{DEFAULT_BUCKET}/o/test%2Fpath"),
+            "",
+        )
+        .await;
+        let admin = parse(&admin);
+        assert_eq!(admin["metageneration"], "2");
+        assert_eq!(
+            admin["metadata"]["firebaseStorageDownloadTokens"],
+            token.as_str()
+        );
+
+        // The token downloads the file.
+        let (status, bytes) = call(
+            Method::GET,
+            format!("/v0/b/{DEFAULT_BUCKET}/o/test%2Fpath?alt=media&token={token}"),
+            "",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(&bytes[..], b"hello");
+
+        // A Firebase download of an object with no token mints one as well:
+        // its metadata read after carries it.
+        let (status, bytes) = call(
+            Method::GET,
+            format!("/v0/b/{DEFAULT_BUCKET}/o/test%2Fdownloaded?alt=media"),
+            "",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(&bytes[..], b"hello");
+        let (_, after) = call(
+            Method::GET,
+            format!("/v0/b/{DEFAULT_BUCKET}/o/test%2Fdownloaded"),
+            "",
+        )
+        .await;
+        let minted = parse(&after)["downloadTokens"].as_str().unwrap().to_owned();
+        assert_ne!(minted, "");
+        let (_, admin) = call(
+            Method::GET,
+            format!("/storage/v1/b/{DEFAULT_BUCKET}/o/test%2Fdownloaded"),
+            "",
+        )
+        .await;
+        assert_eq!(parse(&admin)["metageneration"], "2");
 
         runtime.shutdown().await.expect("shutdown");
         std::fs::remove_dir_all(root).expect("remove test storage");
