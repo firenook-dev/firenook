@@ -708,6 +708,10 @@ test('emulators:exec argument forms are decided before any binary is touched', (
   assert.match(run('emulators:exec','--project','demo-fixture').stderr,/requires a script/);
   assert.match(run('emulators:start','--project','demo-fixture','npm','test').stderr,/Unexpected argument npm/);
   assert.match(run('emulators:start','--recursive').stderr,/--recursive is not an option of firenook emulators:start/);
+  // --strict-indexes is a start and exec option: it passes the option check
+  // and meets the next one.
+  assert.match(run('emulators:start','--project','demo-fixture','--strict-indexes','npm','test').stderr,/Unexpected argument npm/);
+  assert.match(run('emulators:exec','--project','demo-fixture','--strict-indexes').stderr,/requires a script/);
   assert.match(run('doctor','--only','database').stderr,/not implemented by Firenook/);
   // doctor checks every Extension instance; --instance belongs to ext:vendor.
   assert.match(run('doctor','--instance','greeter').stderr,/--instance is not an option of firenook doctor/);

@@ -75,7 +75,7 @@ deploy/login command (never intercepted). Disk/WAL state by default; runs are ke
 `;
 
 const common = ['project', 'config', 'help', 'non-interactive', 'json', 'debug', 'log-verbosity'];
-const launch = [...common, 'import', 'export-on-exit', 'only', 'state-dir', 'resume-state', 'keep-data', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'inspect-functions', 'offline', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'no-diagnostics', 'ui', 'plain', 'build'];
+const launch = [...common, 'import', 'export-on-exit', 'only', 'state-dir', 'resume-state', 'keep-data', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'inspect-functions', 'offline', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'no-diagnostics', 'strict-indexes', 'ui', 'plain', 'build'];
 const accepted = {
   doctor:launch, 'emulators:start':launch, 'emulators:exec':launch, 'ext:vendor':[...common, 'instance', 'offline'],
   'emulators:export':[...common, 'force', 'only', 'hub-port'],
