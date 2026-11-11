@@ -96,6 +96,19 @@ jobs:
           RELEASE_LATEST: ${{ inputs.latest }}
         run: node packaging/publish-packages.mjs dist --publish
 
+  container:
+    needs: [authorize, publish]
+    # The image installs the version this run just published, so it follows
+    # the publish, behind the same approval; it can also be dispatched alone.
+    if: ${{ always() && needs.authorize.result == 'success' && needs.publish.result == 'success' }}
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/container.yml
+    with:
+      version: ${{ inputs.tag }}
+      latest: ${{ inputs.latest }}
+
   release-notes:
     needs: [authorize, publish]
     # A resume skips the build jobs, and a job skips whenever a job upstream

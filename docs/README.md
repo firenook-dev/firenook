@@ -23,6 +23,8 @@ Everything about running Firenook, from the first start to the details.
   agent.
 - [One service on its own](standalone-services.md): Firestore, Pub/Sub or Auth
   without the rest.
+- [In a container](container.md): the image for Docker, Compose and CI service
+  containers.
 - [CLI reference](cli.md): every command and option.
 
 ## Reference

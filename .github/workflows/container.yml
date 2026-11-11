@@ -1,0 +1,123 @@
+name: Container image
+
+# Builds ghcr.io/firenook-dev/firenook from a firenook version already on
+# npm, tries it as a test suite would, and publishes it for linux/amd64 and
+# linux/arm64. The reviewed npm release calls it after its publish; the
+# release owner can also dispatch it on main for a version already published.
+# A pull request that changes the image only builds and tries it, from the
+# newest version on npm, so a broken image is found before a release.
+on:
+  pull_request:
+    paths:
+      - packaging/container/**
+      - .github/workflows/container.yml
+  workflow_call:
+    inputs:
+      version:
+        description: 'The published version, or its npm-vVERSION tag'
+        required: true
+        type: string
+      latest:
+        description: 'Also tag latest (a release published to latest); next otherwise'
+        required: false
+        default: false
+        type: boolean
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'A firenook version already on npm, such as 0.2.3'
+        required: true
+        type: string
+      latest:
+        description: 'Also tag latest; next otherwise'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  try:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: The newest version on npm
+        id: version
+        run: |
+          version=$(npm view firenook dist-tags.latest)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a version: $version"; exit 1; }
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build for this runner
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: packaging/container
+          platforms: linux/amd64
+          build-args: FIRENOOK_VERSION=${{ steps.version.outputs.version }}
+          load: true
+          tags: firenook-smoke:local
+      - name: Start it as a test suite would
+        run: bash packaging/container/smoke.sh firenook-smoke:local
+
+  image:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    # One publish at a time; a pull request's try never waits behind one.
+    concurrency:
+      group: container-image
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read the version and check npm has it
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_LATEST: ${{ inputs.latest }}
+        run: |
+          version="${INPUT_VERSION#npm-v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "not a version: $INPUT_VERSION"; exit 1; }
+          npm view "firenook@$version" version | grep -qx "$version"
+          channel=next
+          if [ "$INPUT_LATEST" = true ]; then channel=latest; fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "tags=ghcr.io/firenook-dev/firenook:$version,ghcr.io/firenook-dev/firenook:$channel" >>"$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build for this runner, to try it first
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: packaging/container
+          platforms: linux/amd64
+          build-args: FIRENOOK_VERSION=${{ steps.version.outputs.version }}
+          load: true
+          tags: firenook-smoke:local
+      - name: Start it as a test suite would
+        run: bash packaging/container/smoke.sh firenook-smoke:local
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build both platforms and publish
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: packaging/container
+          platforms: linux/amd64,linux/arm64
+          build-args: FIRENOOK_VERSION=${{ steps.version.outputs.version }}
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ steps.version.outputs.tags }}
+      - name: Try the published arm64 image too
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker pull --platform linux/arm64 "ghcr.io/firenook-dev/firenook:$VERSION"
+          docker run --rm --platform linux/arm64 "ghcr.io/firenook-dev/firenook:$VERSION" --version | grep -q "$VERSION"
