@@ -1,3 +1,67 @@
+# 0.2.3 — the Indexes page, three reported bugs fixed, and a container image
+
+- Pin the engine to `2294132253f03395b0d9bafe391d35075e928112`, main after
+  every 0.2.3 pull request merged (the merge of
+  [PR #182](https://github.com/firenook-dev/firenook/pull/182)). CI
+  ([run 43084842804](https://github.com/firenook-dev/firenook/actions/runs/43084842804)),
+  the five-platform packed-install matrix
+  ([run 43084869443](https://github.com/firenook-dev/firenook/actions/runs/43084869443))
+  and the real SDK clients on Android, iOS and the web
+  ([run 43084875694](https://github.com/firenook-dev/firenook/actions/runs/43084875694))
+  passed on it.
+- **Thank you.** @ponkster found a lost update in Firestore transactions
+  (#169), @danielparks Admin SDK uploads with no download URL (#174),
+  @10eputzen blocking functions missing from Auth's project config (#175),
+  asked for a published conformance record (#156) and contributed a ruleset
+  with 29 cases recorded from the official emulator (#183), and @Chaz6 asked
+  for a container image (#145). Each bug was checked against the official
+  emulator before it was fixed.
+- **Firestore → Indexes.** A page of its own beside Data and Rules: every
+  index the app's queries needed that `firestore.indexes.json` does not
+  declare, with the query that needed it, **Add** and **Add all**; the
+  composite indexes and single-field overrides the file declares, with
+  **Remove**. An edit writes the entry into the file itself, leaving every
+  other byte as it was, and is in force for the next query; it never
+  overwrites a change made in an editor. The index file is watched like the
+  rules file, so a save is in force with no restart. `--strict-indexes` on
+  `emulators:start` and `emulators:exec` works through `npx firenook` (#173).
+  `firestore_missing_indexes` answers the same list over MCP.
+- **Firestore.** A transaction that reads a missing document with a
+  single-document get is checked for a conflict at commit, as `batchGet`'s
+  read already was, so two transactions that both read it can no longer
+  both write it: the second commit is aborted (#169).
+- **Storage.** An object saved through the Cloud Storage API, as the Admin
+  SDK saves it, gets a download token on its first Firebase API read, as on
+  the official emulator, so `getDownloadURL` works; the Cloud Storage API's
+  answers carry the tokens in `metadata.firebaseStorageDownloadTokens`, so
+  the Admin SDK reads them back (#174).
+- **Authentication.** The project config lists the blocking functions the
+  Functions emulator registered, and a `PATCH` of `blockingFunctions` turns
+  them off, puts them back or replaces them, as on the official emulator;
+  the next load of the functions registers them again (#175).
+- **A container image.** `ghcr.io/firenook-dev/firenook:0.2.3`, for
+  linux/amd64 and linux/arm64: Node 24 and this release's npm package. The
+  release builds it from the version it published and starts it as a test
+  suite would before pushing it; a pull request that changes the image
+  builds and tries it the same way (#145, `docs/container.md`).
+- **The conformance record.** Every answer recorded from the official
+  emulator or from production is listed with what the replays check:
+  compared exactly, compared and different on purpose, or not replayed yet.
+  CI keeps the record on every change, each release attaches it
+  (`conformance-cases.json` and `conformance-verify.json`), and
+  firenook.dev/compatibility shows it, service by service (#156). The
+  contributed ruleset's cases are replayed with the rest, and
+  `conformance/README.md` says how to add a recording.
+- Dependencies: `zip` 9.4.2 (four security fixes upstream; Firenook reads
+  Extension sources and writes Storage downloads as ZIP), firebase-tools
+  15.35.0 and Playwright in the conformance tools, `actions/setup-java`
+  6.2.0.
+- No port or data format changed: 0.2.3 opens what 0.2.2 saved as it is,
+  and 0.2.2 opens what 0.2.3 saves. On saved data the one answer that
+  changes is #174's: the Cloud Storage API now lists the download tokens an
+  object already holds.
+- Published straight to `latest`, as 0.2.2 was.
+
 # 0.2.2 — real SDK clients, Security Rules from the community, and missing-index warnings
 
 - Pin the engine to `070297f1c1fb75b328556c3481af26cf7b5dcacc`, main after
