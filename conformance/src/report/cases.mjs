@@ -657,6 +657,45 @@ function queryOracle(caseSet, items) {
   return observations;
 }
 
+/** rules-v2/contributed-rooms: a synthetic ruleset and its cases, contributed for #156. */
+const CONTRIBUTED_FEATURES = {
+  'function-outside-service': 'a function outside the service block',
+  'conditional-operator': 'the conditional operator inside a function',
+  'keys-hasOnly-hasAll': 'keys().hasOnly() and hasAll()',
+  'keys-hasAny': 'keys().hasAny()',
+  'type-and-value-checks': 'type, length and list-membership checks',
+  'diff-affectedKeys': 'diff().affectedKeys() on update, and a delete never allowed',
+  'exists-on-other-document': 'exists() on another document',
+  'field-check-in-list-proof': 'a field check in the proof of a list query',
+  'get-with-default': 'get() with a default on the payload, and is int',
+  'get-on-parent-document': 'get() on the parent document',
+  'null-values-on-write': 'a null value on write',
+  'query-pinned-to-document-id': 'a query pinned to a missing document id',
+  'regex-on-document-id': 'matches() on the document id',
+};
+
+function contributedRooms() {
+  const fixture = readJson('rules-v2/contributed-rooms/cases.json');
+  const items = fixture.cases.map((entry) => ({
+    id: `contributed-rooms/${entry.id}`,
+    scenario: `Contributed rooms ruleset: ${CONTRIBUTED_FEATURES[entry.feature] ?? entry.feature}`,
+    title: entry.id,
+    request: `${entry.request.method} ${entry.request.path} ${entry.auth ? `as ${entry.auth.uid}` : 'signed out'}`,
+    answer: http(entry.observed.status, entry.observed.body),
+  }));
+  declare('rules-v2/contributed-rooms', 'allowCases + denyCases', fixture.allowCases + fixture.denyCases, items.length);
+  addSet(
+    {
+      id: 'rules-v2/contributed-rooms',
+      service: 'firestore-rules',
+      area: 'Firestore Security Rules: a ruleset contributed by a user, with its allowed and denied requests',
+      reference: REF.java,
+      recordedAt: day(fixture.capturedAt),
+    },
+    items,
+  );
+}
+
 function rulesV2() {
   const items = [];
   const javaFiles = [
@@ -1922,6 +1961,7 @@ function build() {
   attempt(() => functionsPrograms('tasks-v1', 'tasks', 'Task queue functions: registration, dispatch, delete and the Admin SDK', REF.tasks));
   attempt(() => storageRules());
   attempt(() => rulesV2());
+  attempt(() => contributedRooms());
   attempt(() => wireSets('rest-v1', 'rest', 'Browser REST calls: aggregation, transactions, CORS'));
   attempt(() => wireSets('webchannel-v8', 'webchannel', 'Browser WebChannel: Listen and Write streams, framing, errors'));
   skip('webchannel-v8', 'firebase-js-sdk-*.json', 'CI evidence about the JS SDK integration tests, not a recording');

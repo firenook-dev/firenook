@@ -628,6 +628,8 @@ jobs:
         run: node --test conformance/test/listen-resume-replay.test.mjs
       - name: Replay rules paths and document names
         run: node --test conformance/test/rules-document-paths-replay.test.mjs
+      - name: Replay the contributed rooms rules cases
+        run: node --test conformance/test/contributed-rooms-replay.test.mjs
       - name: Check a racing write reaches the real SDK's listener
         run: node --test conformance/test/listener-write-race.test.mjs
       - name: Check that Auth and Storage send nothing with Functions off

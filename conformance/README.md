@@ -41,9 +41,11 @@ then is left out).
 A new directory under `fixtures/` with a README (what it covers, which
 firebase-tools or emulator version recorded it, how), the recorded requests
 and answers with synthetic names only, and a replay that compares Firenook
-with them and notes each case in the ledger. `rules-v2/complex-rules-cases.json`
-is the shape for a rules file and its cases. Recordings are never rewritten:
-a new version is a new directory.
+with them and notes each case in the ledger, plus a reader for the
+directory in `src/report/cases.mjs`, so the record counts it.
+`rules-v2/contributed-rooms/` is a rules file and its cases contributed this
+way, with `test/contributed-rooms-replay.test.mjs` its replay. Recordings are
+never rewritten: a new version is a new directory.
 
 ## The Storage captures
 
