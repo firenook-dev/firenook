@@ -268,6 +268,12 @@ impl AuthRuntime {
         self.runtime.blocking_changed();
     }
 
+    /// The Functions emulator loaded its functions again, and with them the
+    /// blocking functions it registers ([`Runtime::functions_registered`]).
+    pub fn functions_registered(&self) {
+        self.runtime.functions_registered();
+    }
+
     /// Receives log lines the official emulator prints (action links, codes)
     /// as text. The last sink set, of either kind, receives every line.
     pub fn set_log_sink(&self, sink: LogSink) {
@@ -537,6 +543,20 @@ impl Runtime {
         self.inner.blocking_changes.subscribe()
     }
 
+    /// The Functions emulator loaded its functions again: as the official
+    /// one writes the blocking functions it found into each project's
+    /// configuration after a load, they are what sign-up and sign-in call
+    /// again, until an `updateConfig` sets them (#175).
+    pub fn functions_registered(&self) {
+        {
+            let mut data = lock(&self.inner.data);
+            for agent in data.projects.values_mut() {
+                agent.blocking_set = false;
+            }
+        }
+        self.blocking_changed();
+    }
+
     /// Moves [`Runtime::blocking_changes`].
     pub fn blocking_changed(&self) {
         self.inner
@@ -777,19 +797,27 @@ impl Runtime {
         Result<BlockingOutcome, ApiError>,
         Option<blocking::BlockingReport>,
     ) {
-        let configured = {
+        let (configured, set) = {
             let mut data = lock(&self.inner.data);
+            let set = data
+                .projects
+                .get(&ctx.project_id)
+                .is_some_and(|agent| agent.blocking_set);
             let scope = Scope::new(&mut data, &ctx.project_id, ctx.tenant_id.as_deref());
-            scope.blocking_uri(event).map(|uri| BlockingTarget {
+            let configured = scope.blocking_uri(event).map(|uri| BlockingTarget {
                 uri,
                 forward_access_token: scope.forward_credential("accessToken"),
                 forward_id_token: scope.forward_credential("idToken"),
                 forward_refresh_token: scope.forward_credential("refreshToken"),
                 project_id: ctx.project_id.clone(),
                 tenant_id: ctx.tenant_id.clone(),
-            })
+            });
+            (configured, set)
         };
-        let target = if configured.is_some() {
+        // Once an updateConfig set the blocking functions, the configuration
+        // alone decides, as on the official emulator: no blocking function
+        // configured is none called (#175).
+        let target = if configured.is_some() || set {
             configured
         } else if let Some(resolver) = self
             .inner
@@ -871,18 +899,21 @@ impl Runtime {
                         agent.forward_credential("accessToken"),
                         agent.forward_credential("refreshToken"),
                     ],
+                    agent.blocking_set,
                 )
             })
         };
-        let (create, sign_in, forward) = configured.unwrap_or((None, None, [false; 3]));
+        let (create, sign_in, forward, set) = configured.unwrap_or((None, None, [false; 3], false));
         let resolver = self
             .inner
             .blocking
             .read()
             .ok()
             .and_then(|slot| slot.clone());
+        // Set with updateConfig, the configuration alone decides (#175).
         let registered = match (&create, &sign_in, resolver) {
             (Some(_), Some(_), _) | (_, _, None) => None,
+            _ if set => None,
             (_, _, Some(resolver)) => Some(resolver.resolve().await),
         };
         let hook = |configured: Option<String>, registered: Option<String>| {
@@ -1705,8 +1736,8 @@ async fn dispatch(runtime: &Runtime, operation_id: &str, ctx: &Ctx) -> Result<Js
         "identitytoolkit.projects.queryAccounts"
         | "identitytoolkit.projects.accounts.query"
         | "identitytoolkit.projects.tenants.accounts.query" => admin::query_accounts(runtime, ctx),
-        "identitytoolkit.projects.getConfig" => config::get_config(runtime, ctx),
-        "identitytoolkit.projects.updateConfig" => config::update_config(runtime, ctx),
+        "identitytoolkit.projects.getConfig" => config::get_config(runtime, ctx).await,
+        "identitytoolkit.projects.updateConfig" => config::update_config(runtime, ctx).await,
         "identitytoolkit.projects.accounts.batchCreate"
         | "identitytoolkit.projects.tenants.accounts.batchCreate" => {
             admin::batch_create(runtime, ctx)
