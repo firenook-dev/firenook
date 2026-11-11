@@ -1851,3 +1851,39 @@ behaviour was the question.
   The GitHub release is the repository's latest.
 - [x] The CLI's `next` moved to 0.2.1 by hand on 2026-11-05 (trusted publishing
   cannot move a tag), so `latest` and `next` are both 0.2.1.
+
+## 0.2.2, real SDK clients, Security Rules from the community, and missing-index warnings
+
+- [x] The same FlutterFire app runs against Firenook and firebase-tools on
+  Android, iOS and the web, also on a device cache kept from one to the other,
+  and 47 of 47 checks agree (PR #151). What it found is fixed: the empty resume
+  token Android sends, a write racing a listener's attach, native iOS and
+  browser resumable uploads, `listAll` under a one-segment rule and Android's
+  `10.0.2.2` address. The same pull request answers queries that name no
+  collection, so `recursiveDelete` works (#155).
+- [x] Security Rules from the community, merged as their authors wrote them
+  (PR #159: #146 to #150 by @harshmandan, #152 to #154 by @staticshock), and
+  what their review turned up (PR #160 and #168), including #143 and the
+  non-null proof in list rules. Every issue was reproduced against the official
+  emulator first.
+- [x] REST null values and null or NaN filters (#158, PR #162), and the Storage
+  empty delimiter (#157, PR #163).
+- [x] Missing-index warnings and `emulators:start --strict-indexes` (PR #166).
+- [x] Auth and Storage send no lifecycle events when Functions is not running,
+  and Firenook is listed in the MCP Registry.
+- [x] Rust and conformance dependency updates (PR #161 and #164).
+- [x] Published as `firenook@0.2.2` with `@firenook/cli-<platform>` ×5 (release
+  PR #170, tag `npm-v0.2.2` on 1658441, engine 070297f). Release run
+  42874310382, dispatched with `latest` and approved on 2026-11-11, passed
+  every gate and published all six packages in one go: the CLI on `latest`,
+  the native packages on `next`. Registry integrity equals the release assets
+  for all six, and registry signatures and provenance attestations verify on
+  a fresh install. From the registry, a bare `npm install firenook` got 0.2.2,
+  and its Firestore emulator answered every saved 0.2.2 probe as
+  firebase-tools 15.34.0 does: the 66 rules verdicts of the pull requests,
+  the follow-up probes their review added, 279 list-rule cases, and 362 REST
+  null, filter and spelling cases. The GitHub release is the repository's
+  latest.
+- [x] The CLI's `next` stayed on 0.2.1 through 0.2.2's life: 0.2.3 followed
+  within days, and `next` moves to it with its publication (trusted publishing
+  cannot move a tag, so that move is by hand).
