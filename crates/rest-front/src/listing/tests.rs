@@ -103,6 +103,7 @@ async fn rest_listing_replays_official_shapes_masks_pages_and_authentication() {
             assert_eq!(id, "list-invalid-size");
             assert_eq!(status, StatusCode::BAD_REQUEST);
             assert_eq!(actual["error"]["status"], "INVALID_ARGUMENT");
+            ledger_unanswered(id);
             continue; // Captured oracle timeout is not reproduced as a hang.
         }
         assert_eq!(
@@ -130,5 +131,28 @@ async fn rest_listing_replays_official_shapes_masks_pages_and_authentication() {
                     .is_some_and(|s| !s.is_empty())
             );
         }
+        ledger_exchange(id, status);
     }
+}
+
+/// Notes a matched exchange: a success body as recorded, or an error's status
+/// and code name.
+fn ledger_exchange(id: &str, status: StatusCode) {
+    use firenook_conformance_ledger::Compared;
+    let compared = if status.is_success() {
+        Compared::Answer
+    } else {
+        Compared::Status
+    };
+    firenook_conformance_ledger::checked("developer-tools-listing-v1", id, compared);
+}
+
+/// Notes the exchange the official emulator never answered.
+fn ledger_unanswered(id: &str) {
+    firenook_conformance_ledger::differs(
+        "developer-tools-listing-v1",
+        id,
+        firenook_conformance_ledger::Compared::Status,
+        "the official emulator never answered this request (recorded as a timeout); Firenook answers 400 INVALID_ARGUMENT instead of hanging",
+    );
 }

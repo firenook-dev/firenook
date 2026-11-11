@@ -87,9 +87,18 @@ jobs:
       - name: Deny Clippy warnings
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Run Rust tests
+        # Each replay notes the recorded cases it compared (crates/conformance-ledger).
+        env:
+          FIRENOOK_CONFORMANCE_LEDGER: ${{ runner.temp }}/conformance-ledger/rust
         run: cargo test --workspace --all-targets --all-features
       - name: Verify the committed Console API bindings match the Rust types
         run: git diff --exit-code -- console/src/api/generated
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: conformance-ledger-rust
+          path: ${{ runner.temp }}/conformance-ledger
+          retention-days: 7
+          if-no-files-found: error
 
   console:
     name: Console checks and the engine the journeys run against
@@ -385,6 +394,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Note the recorded cases each replay compares
+        # Read by conformance/src/report/ledger.mjs; the conformance-ledger job joins it.
+        run: echo "FIRENOOK_CONFORMANCE_LEDGER=$RUNNER_TEMP/conformance-ledger/harness" >> "$GITHUB_ENV"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.20.0
@@ -408,6 +420,8 @@ jobs:
       - name: Run harness unit tests
         run: npm test --prefix conformance
       - name: Verify real Auth popup and redirect against the official fixture
+        # The real SDK's popup loads its own script from apis.google.com; the
+        # answers it compares are the emulators', so its cases count.
         run: node --test conformance/test/auth-popup.test.mjs
       - name: Replay REST read options in memory and disk/WAL
         run: node --test conformance/test/rest-read-options-replay.test.mjs
@@ -573,6 +587,12 @@ jobs:
         run: npm run test:official-export-import --prefix conformance
       - name: Export through Firenook and import into Java
         run: npm run test:firenook-export-java-import --prefix conformance
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: conformance-ledger-harness
+          path: ${{ runner.temp }}/conformance-ledger
+          retention-days: 7
+          if-no-files-found: error
 
   # The 0.2.2 replays and real-SDK checks run beside the harness: in it they
   # added 12-14 minutes and took it past its 45.
@@ -584,6 +604,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Note the recorded cases each replay compares
+        run: echo "FIRENOOK_CONFORMANCE_LEDGER=$RUNNER_TEMP/conformance-ledger/client-replays" >> "$GITHUB_ENV"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.20.0
@@ -606,6 +628,8 @@ jobs:
         run: node --test conformance/test/listen-resume-replay.test.mjs
       - name: Replay rules paths and document names
         run: node --test conformance/test/rules-document-paths-replay.test.mjs
+      - name: Replay the contributed rooms rules cases
+        run: node --test conformance/test/contributed-rooms-replay.test.mjs
       - name: Check a racing write reaches the real SDK's listener
         run: node --test conformance/test/listener-write-race.test.mjs
       - name: Check that Auth and Storage send nothing with Functions off
@@ -615,6 +639,48 @@ jobs:
           node conformance/node_modules/playwright/cli.js install --with-deps chromium
           node --test conformance/test/storage-browser.test.mjs
           node --test conformance/test/listener-cache-browser.test.mjs
+      - name: Replay Storage gzip encoding, list pagination and Auth refresh grants over HTTP
+        working-directory: conformance
+        run: node --import tsx --test test/storage-content-encoding.test.ts test/storage-list-pagination.test.ts test/auth-refresh-reuse.test.ts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: conformance-ledger-client-replays
+          path: ${{ runner.temp }}/conformance-ledger
+          retention-days: 7
+          if-no-files-found: error
+
+  # Which recorded answers the replays above compared with Firenook's, and how
+  # much of each (conformance/src/report/verify.mjs). Fails when a replay
+  # names a case cases.mjs does not list.
+  conformance-ledger:
+    name: Conformance ledger
+    needs: [changes, rust, conformance, client-replays]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.20.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: conformance-ledger-*
+          path: ${{ runner.temp }}/conformance-ledger
+          merge-multiple: true
+      - name: Join every recorded answer with the ledger
+        run: |
+          set -o pipefail
+          node conformance/src/report/cases.mjs "$RUNNER_TEMP/conformance-report/cases.json"
+          node conformance/src/report/verify.mjs "$RUNNER_TEMP/conformance-report/cases.json" \
+            "$RUNNER_TEMP/conformance-ledger" "$RUNNER_TEMP/conformance-report/verify.json" \
+            | tee "$RUNNER_TEMP/conformance-report/verify.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: conformance-ledger-report
+          path: ${{ runner.temp }}/conformance-report
+          if-no-files-found: ignore
 
   firebase-js-sdk:
     name: Firebase JS SDK browser integration (${{ matrix.server_mode }}, client ${{ matrix.client_persistence }})

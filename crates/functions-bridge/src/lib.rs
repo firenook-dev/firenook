@@ -2102,6 +2102,11 @@ mod tests {
             expected["body"]["context"]["resource"]
         );
         assert_eq!(body["context"]["eventId"], dispatch.event_id);
+        firenook_conformance_ledger::checked(
+            "firebase-suite-v1/firestore-triggers",
+            "firestore-trigger-registration-and-v1-v2-dispatch/dispatch/1",
+            firenook_conformance_ledger::Compared::Behaviour,
+        );
     }
 
     #[test]
@@ -2177,6 +2182,11 @@ mod tests {
         assert_eq!(
             actual.update_mask,
             Some(firestore_proto::DocumentMask::default())
+        );
+        firenook_conformance_ledger::checked(
+            "firebase-suite-v1/firestore-triggers",
+            "firestore-trigger-registration-and-v1-v2-dispatch/dispatch/2",
+            firenook_conformance_ledger::Compared::Behaviour,
         );
     }
 

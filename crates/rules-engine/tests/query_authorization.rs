@@ -181,7 +181,8 @@ fn a_query_with_no_collection_needs_a_match_covering_the_whole_subtree() {
 #[test]
 fn replays_both_official_query_oracles_without_any_result_rows() {
     let rules = compile(RULES).expect("oracle source");
-    for source in ORACLES {
+    // `conformance/src/report/cases.mjs` counts the 1.22.0 recording only.
+    for (source, counted) in ORACLES.into_iter().zip([false, true]) {
         let oracle: Json = serde_json::from_str(source).expect("oracle JSON");
         for case in oracle["cases"].as_array().expect("cases") {
             let request = request(case);
@@ -212,6 +213,16 @@ fn replays_both_official_query_oracles_without_any_result_rows() {
             }
             if case["id"] == "permission-in-all-granted" {
                 assert_eq!(actual.document_accesses, 2);
+            }
+            if counted {
+                firenook_conformance_ledger::checked(
+                    "rules-v2/official-emulator",
+                    &format!(
+                        "query-authorization/{}/grpc/RunQuery",
+                        case["id"].as_str().expect("id")
+                    ),
+                    firenook_conformance_ledger::Compared::Verdict,
+                );
             }
         }
     }
@@ -318,10 +329,13 @@ fn replays_query_path_oracles_without_resolving_child_wildcards_to_rows() {
         "../../../conformance/fixtures/rules-v2/query-paths/java-1.21.0/firestore.rules"
     ))
     .expect("oracle source");
-    for source in [
+    for (source, counted) in [
         include_str!("../../../conformance/fixtures/rules-v2/query-paths/java-1.21.0/grpc.json"),
         include_str!("../../../conformance/fixtures/rules-v2/query-paths/java-1.22.0/grpc.json"),
-    ] {
+    ]
+    .into_iter()
+    .zip([false, true])
+    {
         let oracle: Json = serde_json::from_str(source).expect("oracle JSON");
         for case in oracle["cases"].as_array().expect("cases") {
             let actual = rules.evaluate(&request(case), &Parents);
@@ -356,6 +370,13 @@ fn replays_query_path_oracles_without_resolving_child_wildcards_to_rows() {
                 assert_eq!(
                     actual.document_accesses, 1,
                     "only the concrete parent is read"
+                );
+            }
+            if counted {
+                firenook_conformance_ledger::checked(
+                    "rules-v2/official-emulator",
+                    &format!("query-paths/{id}/grpc/RunQuery"),
+                    firenook_conformance_ledger::Compared::Verdict,
                 );
             }
         }

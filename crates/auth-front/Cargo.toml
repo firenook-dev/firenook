@@ -24,6 +24,7 @@ tokio.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+firenook-conformance-ledger = { path = "../conformance-ledger" }
 tower = { version = "0.5.3", features = ["util"] }
 
 [lints]

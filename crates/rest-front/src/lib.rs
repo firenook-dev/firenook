@@ -2665,6 +2665,8 @@ mod tests {
                 )
                 .expect("status fits u16")
             );
+            let mut echoes_the_recording = true;
+            let mut compared = firenook_conformance_ledger::Compared::Status;
             if registration["id"] == "v2-document-created" {
                 let body = axum::body::to_bytes(response.into_body(), usize::MAX)
                     .await
@@ -2672,6 +2674,20 @@ mod tests {
                 assert_eq!(
                     serde_json::from_slice::<JsonValue>(&body).expect("response JSON"),
                     registration["request"]
+                );
+                // The body is compared with the request; the recorded answer
+                // is the same document.
+                echoes_the_recording = registration["response"] == registration["request"];
+                compared = firenook_conformance_ledger::Compared::Answer;
+            }
+            if echoes_the_recording {
+                firenook_conformance_ledger::checked(
+                    "firebase-suite-v1/firestore-triggers",
+                    &format!(
+                        "firestore-trigger-registration-and-v1-v2-dispatch/{}",
+                        registration["id"].as_str().expect("registration id")
+                    ),
+                    compared,
                 );
             }
         }
@@ -3398,6 +3414,21 @@ mod tests {
                     "response header should match the Java fixture"
                 );
             }
+            ledger_rest_exchange(
+                "rest-v1/java-v1.22.0",
+                "cors-preflight",
+                &fixture,
+                exchange,
+                response.status(),
+                if exchange["response"]["body"]
+                    .as_str()
+                    .is_some_and(str::is_empty)
+                {
+                    firenook_conformance_ledger::Compared::Answer
+                } else {
+                    firenook_conformance_ledger::Compared::Status
+                },
+            );
         }
     }
 
@@ -3458,6 +3489,14 @@ mod tests {
         );
         assert!(response[0].get("readTime").is_some());
         assert!(response[0].get("done").is_none());
+        ledger_rest_exchange(
+            "rest-v1/production-cloud-firestore",
+            "aggregation-count",
+            &contract,
+            exchange,
+            StatusCode::OK,
+            firenook_conformance_ledger::Compared::Answer,
+        );
     }
 
     /// Google writes a UTC timestamp as `Z` from every endpoint. This
@@ -3823,6 +3862,7 @@ mod tests {
             .await
             .expect("REST router should respond");
         assert_eq!(response.status(), StatusCode::OK);
+        let status = response.status();
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("aggregation response should be readable");
@@ -3835,6 +3875,14 @@ mod tests {
         assert_eq!(
             response[0]["result"]["aggregateFields"]["aggregate_1"]["integerValue"],
             "1"
+        );
+        ledger_rest_exchange(
+            "rest-v1/java-v1.22.0",
+            "aggregation-composite-filter",
+            &contract,
+            fixture_post_exchange(&contract),
+            status,
+            firenook_conformance_ledger::Compared::Answer,
         );
     }
 
@@ -3856,6 +3904,23 @@ mod tests {
             response["error"]["message"],
             "The maximum number of aggregations allowed in an aggregation query is 5. Received: 6"
         );
+        let exchange = fixture_post_exchange(&contract);
+        let recorded: JsonValue = serde_json::from_str(
+            exchange["response"]["bodyText"]
+                .as_str()
+                .expect("fixture response body"),
+        )
+        .expect("fixture response body should be JSON");
+        if recorded["error"]["message"] == response["error"]["message"] {
+            ledger_rest_exchange(
+                "rest-v1/java-v1.22.0",
+                "aggregation-limit-error",
+                &contract,
+                exchange,
+                StatusCode::BAD_REQUEST,
+                firenook_conformance_ledger::Compared::Error,
+            );
+        }
     }
 
     #[tokio::test]
@@ -3878,6 +3943,14 @@ mod tests {
             exchange["response"]["bodyText"]
                 .as_str()
                 .expect("fixture response body")
+        );
+        ledger_rest_exchange(
+            "rest-v1/java-v1.22.0",
+            "transaction-commit",
+            &contract,
+            exchange,
+            StatusCode::BAD_REQUEST,
+            firenook_conformance_ledger::Compared::Answer,
         );
     }
 
@@ -3946,6 +4019,14 @@ mod tests {
                 .update_time(),
             observed_update_time,
             "a verify write must not mutate the document version"
+        );
+        ledger_rest_exchange(
+            "rest-v1/java-v1.22.0",
+            "transaction-commit",
+            &contract,
+            exchange,
+            StatusCode::OK,
+            firenook_conformance_ledger::Compared::Status,
         );
     }
 
@@ -4049,6 +4130,14 @@ mod tests {
                 Value::String("Sebastian".to_owned().into())
             )])))
         );
+        ledger_rest_exchange(
+            "rest-v1/java-v1.22.0",
+            "transaction-commit",
+            &contract,
+            exchange,
+            StatusCode::OK,
+            firenook_conformance_ledger::Compared::Behaviour,
+        );
     }
 
     #[tokio::test]
@@ -4105,6 +4194,40 @@ mod tests {
             store.snapshot().get(&key).unwrap().update_time(),
             observed_update_time
         );
+        ledger_rest_exchange(
+            "rest-v1/java-v1.22.0",
+            "transaction-noop-write",
+            &contract,
+            exchange,
+            StatusCode::OK,
+            firenook_conformance_ledger::Compared::Status,
+        );
+    }
+
+    /// Notes one exchange of a rest-v1 recording in the conformance ledger
+    /// when the status the test asserted is the recorded one. The case id is
+    /// the exchange's sequence, or its 1-based position when it has none, as
+    /// `conformance/src/report/cases.mjs` numbers it.
+    fn ledger_rest_exchange(
+        set: &str,
+        name: &str,
+        contract: &JsonValue,
+        exchange: &JsonValue,
+        status: StatusCode,
+        compared: firenook_conformance_ledger::Compared,
+    ) {
+        let position = contract["exchanges"]
+            .as_array()
+            .expect("fixture should contain exchanges")
+            .iter()
+            .position(|candidate| std::ptr::eq(candidate, exchange))
+            .expect("the exchange belongs to the contract");
+        let sequence = exchange["sequence"]
+            .as_u64()
+            .unwrap_or(u64::try_from(position).expect("position") + 1);
+        if exchange["response"]["status"] == status.as_u16() {
+            firenook_conformance_ledger::checked(set, &format!("{name}/{sequence}"), compared);
+        }
     }
 
     fn fixture_post_exchange(contract: &JsonValue) -> &JsonValue {
@@ -4304,6 +4427,14 @@ mod tests {
         let expected = &operation["response"]["fields"]["timestamp"];
         assert_eq!(expected["timestampValue"], "2020-01-02T03:04:05.123456Z");
         assert_eq!(&body["fields"]["timestamp"], expected);
+        if operation["status"] == 200 {
+            // The status and the rounded timestamp, not the whole document.
+            firenook_conformance_ledger::checked(
+                "developer-tools-request-values-v1",
+                &format!("operations/{}", operation["id"].as_str().expect("id")),
+                firenook_conformance_ledger::Compared::Status,
+            );
+        }
         // Rules saw the value the store keeps, as the oracle's did.
         let frame = history
             .subscribe()

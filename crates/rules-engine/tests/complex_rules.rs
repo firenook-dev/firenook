@@ -7,12 +7,49 @@ use firenook_rules_engine::{
 
 const COMPLEX_RULES: &str =
     include_str!("../../../conformance/fixtures/rules-v2/complex-firestore.rules");
+/// What the official emulator (and production's compile) answered for these
+/// rules; read only for the ledger, which notes a hand-built case as checked
+/// when its asserted verdict is the recorded one (200 allows, 403 denies).
+static RECORDED: std::sync::LazyLock<serde_json::Value> = std::sync::LazyLock::new(|| {
+    serde_json::from_str(include_str!(
+        "../../../conformance/fixtures/rules-v2/complex-rules-cases.json"
+    ))
+    .expect("valid fixture")
+});
+
+fn ledger_recorded_verdict(id: &str, allowed: bool) {
+    let recorded = RECORDED["observations"]
+        .as_array()
+        .expect("observations")
+        .iter()
+        .find(|observation| observation["id"] == id)
+        .and_then(|observation| observation["status"].as_u64());
+    if recorded == Some(if allowed { 200 } else { 403 }) {
+        firenook_conformance_ledger::checked(
+            "rules-v2/official-emulator",
+            &format!("complex-rules/{id}"),
+            firenook_conformance_ledger::Compared::Verdict,
+        );
+    }
+}
 const ROOT: &str = "/databases/(default)/documents";
 
 #[test]
 #[allow(clippy::too_many_lines)]
 fn replays_all_45_frozen_complex_rules_cases() {
     let rules = compile(COMPLEX_RULES).expect("frozen complex rules should compile");
+    let production = &RECORDED["productionCompile"];
+    if production["httpStatus"] == 200
+        && production["response"]["issues"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+    {
+        firenook_conformance_ledger::checked(
+            "rules-v2/production-rules-api",
+            "complex-rules/production-compile",
+            firenook_conformance_ledger::Compared::Verdict,
+        );
+    }
     let access = FixtureAccess::seeded();
     let alice = auth("alice", "editor", "tenant-a");
     let bob = auth("bob", "reader", "tenant-b");
@@ -386,6 +423,7 @@ fn assert_case(rules: &Ruleset, access: &FixtureAccess, case: Case, expected: bo
         case.id
     );
     assert_eq!(result.allowed, expected, "{}: {result:?}", case.id);
+    ledger_recorded_verdict(&case.id, result.allowed);
 }
 
 fn assert_atomic_case(
@@ -440,6 +478,14 @@ fn assert_atomic_case(
         rules.evaluate_atomic_with_trace(&requests, &access).0
     );
     assert_eq!(result.allowed, expected, "atomic: {result:?}");
+    ledger_recorded_verdict(
+        if expected {
+            "get-after-atomic-allow"
+        } else {
+            "get-after-atomic-deny"
+        },
+        result.allowed,
+    );
 }
 
 #[derive(Clone)]

@@ -6,6 +6,11 @@
 //
 //   node --import tsx src/auth/replay-firenook.ts --binary ../target/release/firenook \
 //     [--corpus=auth-v1] [--programs=a,b] [--report-only] [--output report.json]
+//
+// With FIRENOOK_CONFORMANCE_LEDGER set, every step that matched is noted in
+// the conformance ledger (../report/ledger.mjs): its status, headers, body,
+// log lines and function calls were compared, so `answer`; `differs` when a
+// named divergence of its response was observed.
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,6 +21,7 @@ import { CORPORA, type Corpus, corpusById } from "./corpora.ts";
 import { API_KEY, PROJECT_ID, type Json, type Program } from "./emulator-plan.ts";
 import { Registry, canonicalize } from "./normalize.ts";
 import { FunctionsStub, HOST, type LogLine, type RecordedStep, collectConstants, executeStep, reserveAvailablePort, waitForReady } from "./runner.ts";
+import * as ledger from "../report/ledger.mjs";
 
 const fixturesRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures");
 
@@ -141,7 +147,12 @@ try {
           mismatches.push({ program: program.id, step: expectedStep.id, path: "step", expected: "recorded", actual: "missing" });
           continue;
         }
+        const mismatchesBefore = mismatches.length;
+        const divergencesBefore = divergencesObserved.length;
         compareStep(program.id, expectedStep, actualStep);
+        if (mismatches.length === mismatchesBefore) {
+          ledgerStep(corpus.id, `${program.id}/${expectedStep.id}`, divergencesObserved.slice(divergencesBefore));
+        }
       }
       const bad = mismatches.filter((mismatch) => mismatch.program === program.id).length;
       console.log(`${bad === 0 ? "ok  " : "FAIL"} ${program.id}: ${recorded.steps.length} steps${bad ? `, ${String(bad)} mismatches` : ""}`);
@@ -238,6 +249,13 @@ async function replayProgram(program: Program, constants: ReadonlySet<string>): 
 }
 
 // ---------------------------------------------------------------- compare
+
+/** Notes a matched step; a named divergence of its response makes it `differs`. */
+function ledgerStep(set: string, id: string, observed: readonly { path: string; reason: string }[]): void {
+  const reasons = [...new Set(observed.filter((entry) => entry.path.startsWith("response.")).map((entry) => entry.reason))];
+  if (reasons.length > 0) ledger.differs(set, id, ledger.COMPARED.answer, reasons.join("; "));
+  else ledger.checked(set, id, ledger.COMPARED.answer);
+}
 
 function compareStep(program: string, expected: RecordedStep, actual: RecordedStep): void {
   const expectedView = view(expected);

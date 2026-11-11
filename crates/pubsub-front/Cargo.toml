@@ -37,6 +37,7 @@ protox.workspace = true
 tonic-prost-build.workspace = true
 
 [dev-dependencies]
+firenook-conformance-ledger = { path = "../conformance-ledger" }
 tower = { version = "0.5.3", features = ["util"] }
 
 [lints]

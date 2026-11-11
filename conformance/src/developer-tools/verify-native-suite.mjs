@@ -12,6 +12,7 @@ import {mkdir,readFile,writeFile,symlink} from 'node:fs/promises';
 import {createServer} from 'node:net';
 import {resolve,dirname,join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
+import * as ledger from '../report/ledger.mjs';
 
 const topicReload=process.argv[7]==='--topic-reload';
 assert(process.argv.length===7||(process.argv.length===8&&topicReload),'binary toolsRoot sdkRoot emulator-cache fresh-output [--topic-reload]');
@@ -20,6 +21,10 @@ const [binary,tools,sdk,cache,output]=process.argv.slice(2,7).map(path=>resolve(
 assert.equal(JSON.parse(await readFile(join(tools,'package.json'))).version,'15.22.0');
 assert.equal(JSON.parse(await readFile(join(sdk,'package.json'))).version,'7.2.5');
 const fixture=JSON.parse(await readFile(new URL('../../fixtures/developer-tools-v1/fixture.json',import.meta.url)));
+// The conformance ledger notes a step only where it matches what these
+// recordings hold; the assertions below are this check's own.
+const reloadFixture=JSON.parse(await readFile(new URL('../../fixtures/functions-topic-reload-v1/fixture.json',import.meta.url)));
+const lifecycleFixture=JSON.parse(await readFile(new URL('../../fixtures/developer-tools-functions-lifecycle-v1/fixture.json',import.meta.url)));
 const project='demo-fireside-developer-tools';
 const rules=fixture.rules;
 assert.equal(typeof rules,'string');
@@ -75,6 +80,8 @@ try{
       method:'PATCH',headers:{'content-type':'application/json',...(admin?{authorization:'Bearer owner'}:{})},
       body:JSON.stringify({fields:{visible:{booleanValue:visible},title:{stringValue:'Synthetic 中文 🚀'}}}),signal:AbortSignal.timeout(10000)});
     await response.arrayBuffer();assert.equal(response.status,id==='denied'?403:200);
+    const recorded=fixture.observations.find(observation=>observation.id===`write-${id}`);
+    if(recorded&&recorded.status===response.status&&!!recorded.admin===admin)ledger.checked('developer-tools-v1',`observations/write-${id}`,ledger.COMPARED.status);
   };
   await write('visible',true);await write('denied',false);await write('hidden',false,true);
   const deadline=Date.now()+5000;
@@ -96,6 +103,8 @@ try{
   record.console={root:root.status,location:root.headers.get('location'),page:page.status};
   const ping=await fetch(`${origin('functions')}/${project}/us-central1/ping`,{signal:AbortSignal.timeout(15000)});
   assert.equal(ping.status,200);assert.deepEqual(await ping.json(),{synthetic:true});
+  // The same function source the lifecycle recording invoked, and its answer.
+  if(lifecycleFixture.source===pingSource&&lifecycleFixture.exchange.status===200&&JSON.stringify(lifecycleFixture.exchange.body)===JSON.stringify({synthetic:true}))ledger.checked('developer-tools-functions-lifecycle-v1','invoke',ledger.COMPARED.answer);
   if(topicReload){
     const observations=[];
     const publish=async(stage,topic,handler,version)=>{
@@ -110,6 +119,9 @@ try{
         delivered=events.find(event=>event.data?.stage===stage);assert(Date.now()<deadline,`topic delivery ${stage}`);if(!delivered)await delay(100);
       }
       assert.deepEqual(delivered,{handler,version,data});observations.at(-1).delivered=delivered;
+      // Which handler, at which source version, the publish reached.
+      const recorded=reloadFixture.observations.find(observation=>observation.stage===stage);
+      if(recorded&&recorded.topic===topic&&recorded.delivered.handler===handler&&recorded.delivered.version===version)ledger.checked('functions-topic-reload-v1',stage,ledger.COMPARED.behaviour);
     };
     await publish('initial','alpha-topic','alpha',1);
     await delay(1200);await writeFile(join(output,'functions/index.js'),topicSource(2));

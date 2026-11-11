@@ -9,6 +9,7 @@ import { request } from "node:http";
 import { once } from "node:events";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import * as ledger from "../src/report/ledger.mjs";
 
 const root = new URL("../fixtures/firebase-suite-v1/storage-content-encoding/", import.meta.url);
 interface Bytes { readonly byteLength: number; readonly base64: string; readonly sha256: string }
@@ -106,12 +107,21 @@ test("Firenook HTTP replays the official upload bytes and browser-decodes synthe
     });
     const fixture = JSON.parse(await readFile(new URL("fixture.json", root), "utf8")) as EncodingFixture;
     const sessions = new Map<string, string>();
+    // Conformance ledger ids are 1-based recording positions (cases.mjs); the
+    // probes of one object are recorded in the order of its observations.
+    const recordingId = (recording: (typeof fixture.recordings)[number]) => `storage-content-encoding/${fixture.recordings.indexOf(recording) + 1}`;
+    const probe = (name: string, index: number, api: string) => {
+      const label = `probe:${name.replace(/\.json$/u, "")}`;
+      const recording = fixture.recordings.filter((candidate) => candidate.label === label)[index];
+      return recording && recording.path.startsWith("/storage/v1/") === (api === "gcs") ? recordingId(recording) : undefined;
+    };
     for (const recording of fixture.recordings.filter(({ label }) => !label.startsWith("probe:"))) {
       const path = recording.path.includes("upload_id=") ? sessions.get(recording.label)! : recording.path;
       const headers = Object.fromEntries(Object.entries(recording.requestHeaders).filter(([key]) =>
         !["host", "connection", "content-length", "transfer-encoding"].includes(key)));
       const response = await rawHttp(origin + path, recording.method, headers, decode(recording.requestBody));
       assert.equal(response.status, recording.status, recording.label);
+      ledger.checked("firebase-suite-v1/storage", recordingId(recording), ledger.COMPARED.status);
       const location = response.headers.location ?? response.headers["x-goog-upload-url"];
       if (typeof location === "string") {
         const parsed = new URL(location);
@@ -119,7 +129,8 @@ test("Firenook HTTP replays the official upload bytes and browser-decodes synthe
       }
     }
     for (const object of fixture.objects) {
-      for (const expected of object.observations) {
+      for (const [index, expected] of object.observations.entries()) {
+        const id = probe(object.name, index, expected.api);
         const prefix = expected.api === "gcs" ? "storage/v1" : "v0";
         const url = `${origin}/${prefix}/b/${fixture.bucket}/o/${object.name}${expected.kind === "metadata" ? "" : "?alt=media"}`;
         const headers: Record<string, string> = {};
@@ -132,6 +143,7 @@ test("Firenook HTTP replays the official upload bytes and browser-decodes synthe
           assert.equal(response.status, expected.status);
           assert.equal(response.headers.get("content-encoding"), "gzip");
           assert.deepEqual(await response.json(), JSON.parse(decode(fixture.json).toString()));
+          if (id) ledger.checked("firebase-suite-v1/storage", id, ledger.COMPARED.answer);
           continue;
         }
         const response = await rawHttp(url, "GET", headers);
@@ -147,6 +159,8 @@ test("Firenook HTTP replays the official upload bytes and browser-decodes synthe
             assert.equal(response.headers[field], expected.headers[field], `${object.name} ${expected.kind} ${field}`);
           }
         }
+        // A download's status, headers and bytes; a metadata read's status and five fields.
+        if (id) ledger.checked("firebase-suite-v1/storage", id, expected.kind === "metadata" ? ledger.COMPARED.status : ledger.COMPARED.answer);
       }
     }
   } finally {

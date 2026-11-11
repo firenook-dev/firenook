@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
-import { compareIdentityCapture, type IdentityCapture } from "../src/rules/request-identity-verification.ts";
+import { compareIdentityCapture, type IdentityCapture, type IdentityNote } from "../src/rules/request-identity-verification.ts";
+import * as ledger from "../src/report/ledger.mjs";
 
 const execute = promisify(execFile);
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -19,5 +20,10 @@ test("Firenook reads every Authorization header as the official emulator does", 
   await execute(process.execPath, ["--import", "tsx", "src/rules/capture-request-identity.ts", "--target", "firenook", "--binary", join(metadata.target_directory, "debug/firenook"), "--output", output], { cwd: join(root, "conformance"), timeout: 300_000, maxBuffer: 16 * 1024 * 1024 });
   const expected = JSON.parse(await readFile(new URL("../fixtures/request-identity-v1/fixture.json", import.meta.url), "utf8")) as IdentityCapture;
   const actual = JSON.parse(await readFile(join(output, "fixture.json"), "utf8")) as IdentityCapture;
-  assert.deepEqual(compareIdentityCapture(actual, expected), []);
+  const notes: IdentityNote[] = [];
+  assert.deepEqual(compareIdentityCapture(actual, expected, notes), []);
+  for (const { id, compared, reason } of notes) {
+    if (reason) ledger.differs("request-identity-v1", id, compared, reason);
+    else ledger.checked("request-identity-v1", id, compared);
+  }
 });

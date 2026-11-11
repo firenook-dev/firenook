@@ -83,6 +83,15 @@ fn non_resource_reports_match_all_captured_values_and_counts() {
             }
             assert_eq!(actual["report"], expected, "{} after", profile["id"]);
             assert_eq!(actual["firenookCoverage"]["truncated"], false);
+            // The recorded answer is the read's status and this report.
+            let allowed = rules.evaluate(&request(), &EmptyDocumentAccess).allowed;
+            if allowed == (profile["status"] == 200) {
+                firenook_conformance_ledger::checked(
+                    "developer-tools-coverage-v1",
+                    &format!("profiles/{}", profile["id"].as_str().unwrap()),
+                    firenook_conformance_ledger::Compared::Answer,
+                );
+            }
         }
     }
 }

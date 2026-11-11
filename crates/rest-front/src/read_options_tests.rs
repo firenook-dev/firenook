@@ -60,6 +60,13 @@ async fn seeded() -> (Router, JsonValue) {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    if fixture["exchanges"][0]["id"] == "seed" && fixture["exchanges"][0]["status"] == 200 {
+        firenook_conformance_ledger::checked(
+            "rest-read-options-v1",
+            "seed",
+            firenook_conformance_ledger::Compared::Status,
+        );
+    }
     (router, seed)
 }
 
@@ -296,6 +303,16 @@ async fn rest_get_masks_and_denials_match_captured_observations() {
         if status.is_success() {
             assert_eq!(result["fields"], row["response"]["fields"], "{}", row["id"]);
         }
+        // A read's fields as recorded; a refusal's status.
+        firenook_conformance_ledger::checked(
+            "rest-read-options-v1",
+            row["id"].as_str().unwrap(),
+            if status.is_success() {
+                firenook_conformance_ledger::Compared::Answer
+            } else {
+                firenook_conformance_ledger::Compared::Status
+            },
+        );
     }
 }
 

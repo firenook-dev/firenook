@@ -10,16 +10,22 @@
 // engine runs the Functions on (the corpus was recorded on Node 24; CI
 // replays it on every supported Node). Deliberate differences are listed in
 // DIVERGENCES and asserted, never skipped.
+//
+// With FIRENOOK_CONFORMANCE_LEDGER naming a directory, every recorded step
+// the replay compared is noted there through ../report/ledger.mjs
+// (`checked`, or `differs` with the step's DIVERGENCES reason), for
+// conformance/src/report/verify.mjs.
 import { execFileSync, spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { canonicalJson, finalizeFixture } from "./fixture.ts";
 import { PROJECT_ID } from "./plan.ts";
 import { HOST, PROFILES, reservePorts, writeProject, type Profile } from "./project.ts";
 import { normalizeLogLine, runProgram, stripAnsi, type RecordedProgram, type Target } from "./runner.ts";
+import * as ledger from "../report/ledger.mjs";
 
 interface Divergence {
   readonly profile: string;
@@ -150,6 +156,11 @@ const adminRoot = join(dirname(functionsRoot), "firebase-admin");
 const functionsPackage = JSON.parse(await readFile(join(functionsRoot, "package.json"), "utf8")) as { version: string };
 const adminPackage = JSON.parse(await readFile(join(adminRoot, "package.json"), "utf8")) as { version: string };
 const fixture = JSON.parse(await readFile(fixturePath, "utf8")) as { profiles: ReadonlyArray<{ id: string; programs: RecordedProgram[]; skipped?: string }> };
+/** The case set conformance/src/report/cases.mjs lists the fixture as: its directory. */
+const LEDGER_SET = basename(dirname(fixturePath));
+/** Harness-only actions no reference answers; cases.mjs leaves them out. */
+const HARNESS_ACTIONS: ReadonlySet<string> = new Set(["wait", "file"]);
+
 const runRoot = await mkdtemp(join(tmpdir(), "firenook-phase-h-replay-"));
 const shortTmp = await mkdtemp("/tmp/fsphr-");
 process.stderr.write(`replay root ${runRoot}\n`);
@@ -325,6 +336,7 @@ async function replayProfile(profile: Profile, recordedPrograms: readonly Record
         steps += 1;
         const result = compareStep(profile.id, program.id, expectedStep, actualStep);
         results.push(result);
+        ledgerStep(expectedStep, result);
         if (result.mismatches.length === 0) matched += 1;
         else mismatchedCount += 1;
       }
@@ -391,6 +403,27 @@ function compareStep(profile: string, program: string, expected: RecordedProgram
     }
   }
   return { profile, program, step: expected.id, mismatches, assertedDivergences: asserted };
+}
+
+/**
+ * Notes a recorded step in the conformance ledger when the replay compared it
+ * and it matched: `differs` when the step's own DIVERGENCES were asserted,
+ * `checked` otherwise. Out-of-scope steps, and steps whose answer itself is
+ * ignored, were not compared and are not noted. A log step's answer is the
+ * lines the run printed (an effect); every other step compares its status,
+ * body and the events its handlers saw.
+ */
+function ledgerStep(expected: RecordedProgram["steps"][number], result: StepResult): void {
+  if (!ledger.enabled || result.mismatches.length > 0) return;
+  const key = `${result.profile}/${result.program}/${result.step}`;
+  const kind = (expected.action as { kind?: string } | undefined)?.kind ?? "";
+  if (HARNESS_ACTIONS.has(kind) || OUT_OF_SCOPE_STEPS.has(key)) return;
+  const ignored = IGNORED_STEP_PATHS.get(key) ?? [];
+  if (ignored.some((pattern) => pattern.test("response.matched") || pattern.test("response.status"))) return;
+  const compared = kind === "logs" ? ledger.COMPARED.behaviour : ledger.COMPARED.answer;
+  const divergences = DIVERGENCES.filter((entry) => entry.profile === result.profile && entry.program === result.program && entry.step === result.step);
+  if (divergences.length > 0) ledger.differs(LEDGER_SET, key, compared, divergences.map((entry) => entry.reason).join("; "));
+  else ledger.checked(LEDGER_SET, key, compared);
 }
 
 /** Strips the parts of a response that belong to another emulator's contract. */

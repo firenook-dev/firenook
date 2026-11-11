@@ -12,6 +12,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { observe } from '../src/suite/rules-document-paths-observe.mjs';
+import * as ledger from '../src/report/ledger.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const fixture = JSON.parse(await readFile(new URL('../fixtures/rules-document-paths-v1/fixture.json', import.meta.url)));
@@ -45,6 +46,10 @@ test('rules paths and document names answer as the official capture says', { tim
     }
     const { answers } = await observe(`127.0.0.1:${port}`);
     assert.deepEqual(answers, fixture.answers);
+    // Each row recorded only a status, or that the rules were refused.
+    for (const [id, answer] of Object.entries(fixture.answers)) {
+      ledger.checked('rules-document-paths-v1', id, answer.rulesRefused !== undefined ? ledger.COMPARED.verdict : ledger.COMPARED.status);
+    }
   } finally {
     child.stdin.end();
     await Promise.race([exited, delay(15_000)]);

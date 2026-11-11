@@ -1,8 +1,56 @@
-# Synthetic conformance fixtures
+# Conformance: recorded answers, replayed against Firenook
 
-Source migration is in progress. This directory currently contains the three
-Storage oracle captures below, not the complete product conformance matrix.
-Do not interpret these checks as a full engine or release acceptance.
+`fixtures/` holds what the official emulator, and for some surfaces
+production Firebase, answered to synthetic requests: 41 recorded sets, about
+6,500 answers, from firebase-tools and the Firestore emulator, and from Cloud
+Firestore and the Firebase Rules API in projects that hold only made-up
+data. A set's README says what it covers, which version recorded it and
+how. The Rust tests and the Node replays here run Firenook against them on
+every pull request.
+
+## What is checked, case by case
+
+- `src/report/cases.mjs` lists every recorded answer: one entry per request
+  (or rules expression, or rules test case) a reference answered, with the
+  set, the reference and its version. Each recording is counted once.
+- Every replay notes each case it compared, and what it compared (`answer`,
+  `error`, `status`, `verdict` or `behaviour`), in a ledger when
+  `FIRENOOK_CONFORMANCE_LEDGER` names a directory: `crates/conformance-ledger`
+  for the Rust tests, `src/report/ledger.mjs` for the Node replays. A case
+  where Firenook answers differently on purpose is noted as `differs`, with
+  the reason its test asserts.
+- `src/report/verify.mjs` joins the two: per case `checked`, `differs` or
+  `unreplayed`, and per set the counts. CI's `conformance-ledger` job runs it
+  on every pull request, and the release attaches `conformance-cases.json`
+  and `conformance-verify.json` to its GitHub release, which
+  firenook.dev/compatibility is built from.
+
+From the repository root:
+
+```sh
+FIRENOOK_CONFORMANCE_LEDGER=/tmp/ledger cargo test --workspace
+node conformance/src/report/cases.mjs /tmp/cases.json
+node conformance/src/report/verify.mjs /tmp/cases.json /tmp/ledger /tmp/verify.json
+```
+
+`cases.mjs --history` counts a past release's fixtures (a set not recorded
+then is left out).
+
+## Adding a recording
+
+A new directory under `fixtures/` with a README (what it covers, which
+firebase-tools or emulator version recorded it, how), the recorded requests
+and answers with synthetic names only, and a replay that compares Firenook
+with them and notes each case in the ledger, plus a reader for the
+directory in `src/report/cases.mjs`, so the record counts it.
+`rules-v2/contributed-rooms/` is a rules file and its cases contributed this
+way, with `test/contributed-rooms-replay.test.mjs` its replay. Recordings are
+never rewritten: a new version is a new directory.
+
+## The Storage captures
+
+The three Storage oracle captures below are described in detail because
+they are recorded with their own scripts:
 
 | Capture | Observed scope |
 | --- | --- |

@@ -25,5 +25,14 @@ fn compiler_binding_positions_replay_all_forty_official_observations() {
                     .contains("is a package and cannot be used as variable name")
             }));
         }
+        firenook_conformance_ledger::checked(
+            "rule-bindings-v1",
+            &format!(
+                "{}/{}",
+                row["name"].as_str().unwrap(),
+                row["kind"].as_str().unwrap()
+            ),
+            firenook_conformance_ledger::Compared::Verdict,
+        );
     }
 }

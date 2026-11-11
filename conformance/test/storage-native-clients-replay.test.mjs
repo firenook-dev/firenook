@@ -13,6 +13,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { observe, project, startRules } from '../src/suite/storage-native-clients-observe.mjs';
+import * as ledger from '../src/report/ledger.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const fixture = JSON.parse(await readFile(new URL('../fixtures/storage-native-clients-v1/fixture.json', import.meta.url)));
@@ -58,14 +59,18 @@ test('what native SDKs and browsers send to Storage matches the official capture
       for (const [id, expected] of Object.entries(fixture[section])) {
         if (REFUSAL_BODY_DIFFERS.has(id)) {
           assert.equal(actual[section][id].status, expected.status, `${section} ${id}`);
+          ledger.checked('storage-native-clients-v1', `${section}/${id}`, ledger.COMPARED.status);
         } else {
           assert.deepEqual(actual[section][id], expected, `${section} ${id}`);
+          ledger.checked('storage-native-clients-v1', `${section}/${id}`, ledger.COMPARED.answer);
         }
       }
     }
     assert.deepEqual(actual.cors, fixture.cors, 'cors');
+    for (const id of ['preflight', 'privateNetwork', 'exposed']) ledger.checked('storage-native-clients-v1', `cors/${id}`, ledger.COMPARED.answer);
     for (const [id, expected] of Object.entries(fixture.lists)) {
       assert.deepEqual(actual.lists[id], expected, `lists ${id}`);
+      for (const prefix of Object.keys(expected)) ledger.checked('storage-native-clients-v1', `lists/${id}/${prefix}`, ledger.COMPARED.answer);
     }
   } finally {
     if (child.exitCode === null) child.kill('SIGINT');

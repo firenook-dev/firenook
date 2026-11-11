@@ -33,6 +33,13 @@ async fn configured_default_bucket_matches_official_ui_discovery() {
         bucket[field] = expected["items"][0][field].clone();
     }
     assert_eq!(&actual, expected);
+    if fixture["exchanges"][0]["status"] == 200 {
+        firenook_conformance_ledger::checked(
+            "developer-tools-buckets-v1",
+            "1",
+            firenook_conformance_ledger::Compared::Answer,
+        );
+    }
     runtime.shutdown().await.expect("shutdown");
     std::fs::remove_dir_all(root).expect("remove synthetic storage");
 }

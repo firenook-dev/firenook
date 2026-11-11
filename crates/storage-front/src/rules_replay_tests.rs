@@ -37,37 +37,37 @@ const DIVERGENCES: &[(&str, &str, u16, &str)] = &[
         "request-resource-create-shape",
         "method-string",
         200,
-        "request-method-undefined: production defines request.method",
+        "production's rules define request.method, which the official emulator leaves undefined; Firenook follows production",
     ),
     (
         "request-resource-update-patch",
         "method-update",
         200,
-        "request-method-undefined: production defines request.method",
+        "production's rules define request.method, which the official emulator leaves undefined; Firenook follows production",
     ),
     (
         "request-resource-get-list-delete",
         "get-media-uses-get",
         200,
-        "request-method-undefined: production defines request.method",
+        "production's rules define request.method, which the official emulator leaves undefined; Firenook follows production",
     ),
     (
         "request-resource-get-list-delete",
         "list-method-string",
         200,
-        "request-method-undefined: production defines request.method",
+        "production's rules define request.method, which the official emulator leaves undefined; Firenook follows production",
     ),
     (
         "upload-over-existing",
         "overwrite-method-is-create",
         200,
-        "request-method-undefined: production defines request.method",
+        "production's rules define request.method, which the official emulator leaves undefined; Firenook follows production",
     ),
     (
         "bypass-json-api",
         "json-patch-anonymous",
         200,
-        "the JSON API PATCH route is implemented by Firenook (501 in the official emulator); rules are not consulted either way",
+        "Firenook answers the Cloud Storage API's JSON PATCH, which the official emulator does not implement (501); rules are not consulted either way",
     ),
 ];
 
@@ -423,6 +423,12 @@ async fn replays_every_recorded_emulator_program() {
                     "{program_id}/{step_id}: a listed divergence must actually diverge"
                 );
                 assert_eq!(actual.status, *expected, "{program_id}/{step_id}: {reason}");
+                firenook_conformance_ledger::differs(
+                    "storage-rules-v1/official-emulator",
+                    &format!("{program_id}/{step_id}"),
+                    firenook_conformance_ledger::Compared::Status,
+                    reason,
+                );
                 diverged += 1;
             } else {
                 assert_eq!(
@@ -430,11 +436,14 @@ async fn replays_every_recorded_emulator_program() {
                     "{program_id}/{step_id}: {} {path} => {:?}",
                     request["method"], actual.body
                 );
+                // The status always; the error message too when both carry one.
+                let mut compared = firenook_conformance_ledger::Compared::Status;
                 if let (Some(expected), Some(actual_message)) = (
                     error_message(&step["response"]["body"]),
                     error_message(&actual.body),
                 ) {
                     assert_eq!(actual_message, expected, "{program_id}/{step_id}: message");
+                    compared = firenook_conformance_ledger::Compared::Error;
                 }
                 if let Some(expected) = step["response"]["headers"]["x-goog-upload-status"].as_str()
                 {
@@ -447,6 +456,11 @@ async fn replays_every_recorded_emulator_program() {
                         "{program_id}/{step_id}: upload status"
                     );
                 }
+                firenook_conformance_ledger::checked(
+                    "storage-rules-v1/official-emulator",
+                    &format!("{program_id}/{step_id}"),
+                    compared,
+                );
             }
             while let Ok(record) = decisions.try_recv() {
                 let detail = rules

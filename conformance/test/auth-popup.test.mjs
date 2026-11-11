@@ -9,6 +9,7 @@ import test from 'node:test';
 import { observePopup, popupProject } from '../src/suite/auth-popup-browser.mjs';
 import { observePopupAccountSafety } from '../src/suite/auth-popup-account-safety.mjs';
 import { observePickerAdditions } from '../src/suite/auth-picker-browser.mjs';
+import * as ledger from '../src/report/ledger.mjs';
 
 const fixtureRoot = new URL('../fixtures/firebase-suite-v1/auth-popup/',import.meta.url);
 const insecureRoot = new URL('../fixtures/firebase-suite-v1/auth-popup-insecure-origin/',import.meta.url);
@@ -48,6 +49,18 @@ test('official oracle completes the same popup and redirect outside a secure con
   assert.deepEqual(semantic(fixture.observation),semantic(loopback.observation));
 });
 
+/**
+ * Notes a matched popup observation in the conformance ledger under the ids
+ * cases.mjs gives it: the handler's validation answers and the sign-ins as
+ * recorded, and the events the popup page delivered.
+ */
+function ledgerPopup(name, observation) {
+  const set = 'firebase-suite-v1/auth';
+  observation.validation.forEach((_, index) => ledger.checked(set, `${name}/validation/${index + 1}`, ledger.COMPARED.answer));
+  observation.exchanges.forEach((_, index) => ledger.checked(set, `${name}/sign-in/${index + 1}`, ledger.COMPARED.answer));
+  observation.events.forEach((_, index) => ledger.checked(set, `${name}/event/${index + 1}`, ledger.COMPARED.behaviour));
+}
+
 // One fresh Auth peer per test: each run seeds the same synthetic accounts.
 async function withPeer(run) {
   const repository = fileURLToPath(new URL('../../',import.meta.url));
@@ -76,13 +89,16 @@ test('Firenook completes real SDK popup and redirect against the official fixtur
   const actual = await observePopup(origin);
   const expected = (await load()).observation;
   assert.deepEqual(semantic(actual),semantic(expected));
+  ledgerPopup('auth-popup',expected);
   assert.deepEqual(await observePopupAccountSafety(origin),JSON.parse(await readFile(new URL('account-safety.json',fixtureRoot))).observation);
+  for (const id of ['sign-in','disabled']) ledger.checked('firebase-suite-v1/auth',`auth-popup/account-safety/${id}`,ledger.COMPARED.answer);
 }));
 
 test('Firenook completes them outside a secure context, as the official emulator does', {timeout:600_000}, () => withPeer(async origin => {
   const fixture = JSON.parse(await readFile(new URL('fixture.json',insecureRoot)));
   const actual = await observePopup(origin,popupProject,{browserHost:fixture.browserHost});
   assert.deepEqual(semantic(actual),semantic(fixture.observation));
+  ledgerPopup('auth-popup-insecure-origin',fixture.observation);
 }));
 
 test('the picker makes a random user and fills its form, through the real SDK, outside a secure context', {timeout:600_000}, () => withPeer(async origin => {

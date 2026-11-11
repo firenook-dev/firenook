@@ -83,7 +83,15 @@ async fn real_websocket_replays_the_oracle_then_delivers_live_events_and_reconne
     let history = RequestHistory::default();
     let server = Server::start(Some(history.clone())).await;
     let mut client = server.client().await;
-    assert_eq!(json_frame(&mut client).await, json!([]));
+    let first = json_frame(&mut client).await;
+    assert_eq!(first, json!([]));
+    if first == fixture["websocket"]["firstConnection"][0] {
+        firenook_conformance_ledger::checked(
+            "developer-tools-v1",
+            "websocket/first/0",
+            firenook_conformance_ledger::Compared::Answer,
+        );
+    }
     for event in events {
         assert_eq!(history.record(event), RecordOutcome::Recorded);
         assert_eq!(json_frame(&mut client).await, *event);

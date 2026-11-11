@@ -25,8 +25,8 @@ export const PRODUCTION_DENIAL = "Missing or insufficient permissions.";
  * credential it cannot read, INVALID_ARGUMENT naming the problem.
  */
 export const identityDivergences: Record<string, { grpc: number; rest: number; reason: string }> = {
-  basic: { grpc: 3, rest: 400, reason: "a non-Bearer credential is INVALID_ARGUMENT, not an empty UNKNOWN" },
-  "firebase-owner": { grpc: 3, rest: 400, reason: "a non-Bearer credential is INVALID_ARGUMENT, not an empty UNKNOWN" },
+  basic: { grpc: 3, rest: 400, reason: "a credential that is not a Bearer token is refused as INVALID_ARGUMENT, where the official emulator answers an empty UNKNOWN" },
+  "firebase-owner": { grpc: 3, rest: 400, reason: "a credential that is not a Bearer token is refused as INVALID_ARGUMENT, where the official emulator answers an empty UNKNOWN" },
 };
 
 /**
@@ -35,15 +35,43 @@ export const identityDivergences: Record<string, { grpc: number; rest: number; r
  * everyone else as the jar refuses the other reads no rule governs,
  * `ListCollectionIds`.
  */
-export const partitionDivergence = { owner: 0, other: 7, reason: "PartitionQuery is served to the owner only; the jar does not implement it" };
+export const partitionDivergence = { owner: 0, other: 7, reason: "the official emulator does not implement PartitionQuery; Firenook answers it for the owner, as the Admin SDKs' getPartitions() asks it" };
 
 /** The `@ L<n>` rule lines a denial names, in order, without repeats. */
 export function ruleLines(message: string): string[] {
   return [...new Set([...message.matchAll(/@ L(\d+)/g)].map((match) => match[1]!))];
 }
 
-export function compareIdentityCapture(actual: IdentityCapture, expected: IdentityCapture): string[] {
+/**
+ * What a passing case of the corpus compared, for the conformance ledger:
+ * `compared` is "error" (code and the denial's text), "status" (the code
+ * alone) or "answer"; `reason` is set where Firenook deliberately answers
+ * otherwise. `id` is the case id conformance/src/report/cases.mjs gives it.
+ */
+export type IdentityNote = { id: string; compared: "answer" | "error" | "status"; reason?: string };
+
+const DENIAL_REASON = `Firenook's denial starts with production's text ("${PRODUCTION_DENIAL}"), then names the rule lines the official emulator names`;
+/** The prefix is a difference only where the recorded denial lacks it. */
+const denialReason = (recorded: string) => (recorded.startsWith(PRODUCTION_DENIAL) ? undefined : DENIAL_REASON);
+
+/**
+ * Compares the captures and returns every problem. `notes`, when given,
+ * receives one entry per case that showed no problem; it does not change what
+ * is compared.
+ */
+export function compareIdentityCapture(actual: IdentityCapture, expected: IdentityCapture, notes?: IdentityNote[]): string[] {
   const problems: string[] = [];
+  /** Runs one case's checks and notes it when they added no problem. */
+  const noteCase = (id: string, check: () => { compared: IdentityNote["compared"]; reason?: string | undefined }) => {
+    const before = problems.length;
+    const outcome = check();
+    if (notes && problems.length === before) notes.push({ id, compared: outcome.compared, ...(outcome.reason ? { reason: outcome.reason } : {}) });
+  };
+  /** The deliberate difference a code check applied, when the recorded code is not already the one Firenook answers. */
+  const codeReason = (identity: string, recorded: number, transport: "grpc" | "rest") => {
+    const divergence = identityDivergences[identity];
+    return divergence && divergence[transport] !== recorded ? divergence.reason : undefined;
+  };
   const expectCode = (label: string, identity: string, actualCode: number, expectedCode: number, transport: "grpc" | "rest") => {
     const divergence = identityDivergences[identity];
     const wanted = divergence ? divergence[transport] : expectedCode;
@@ -67,13 +95,29 @@ export function compareIdentityCapture(actual: IdentityCapture, expected: Identi
   };
   for (const [got, want] of pairs("reads", actual.reads, expected.reads, (read) => `${read.database} ${read.identity} ${read.path}`)) {
     const label = `read ${got.database} ${got.identity} ${got.path}`;
-    expectCode(label, got.identity, got.grpc.code, want.grpc.code, "grpc");
-    expectCode(label, got.identity, got.rest.status, want.rest.status, "rest");
-    if (want.grpc.code === 7 && got.grpc.code === 7) expectDenial(`${label} grpc`, got.grpc.message, want.grpc.message);
-    if (want.rest.status === 403 && got.rest.status === 403) expectDenial(`${label} rest`, got.rest.message, want.rest.message);
+    const base = `reads/${got.database}/${got.identity}/${got.path}`;
+    noteCase(`${base}/grpc`, () => {
+      expectCode(label, got.identity, got.grpc.code, want.grpc.code, "grpc");
+      if (want.grpc.code === 7 && got.grpc.code === 7) {
+        expectDenial(`${label} grpc`, got.grpc.message, want.grpc.message);
+        return { compared: "error", reason: denialReason(want.grpc.message) };
+      }
+      return { compared: "status", reason: codeReason(got.identity, want.grpc.code, "grpc") };
+    });
+    noteCase(`${base}/rest`, () => {
+      expectCode(label, got.identity, got.rest.status, want.rest.status, "rest");
+      if (want.rest.status === 403 && got.rest.status === 403) {
+        expectDenial(`${label} rest`, got.rest.message, want.rest.message);
+        return { compared: "error", reason: denialReason(want.rest.message) };
+      }
+      return { compared: "status", reason: codeReason(got.identity, want.rest.status, "rest") };
+    });
   }
   for (const [got, want] of pairs("claims", actual.claims, expected.claims, (claim) => `${claim.identity} ${claim.path}`)) {
-    expectCode(`claim ${got.identity} ${got.path}`, got.identity, got.rest.status, want.rest.status, "rest");
+    noteCase(`claims/${got.identity}/${got.path}`, () => {
+      expectCode(`claim ${got.identity} ${got.path}`, got.identity, got.rest.status, want.rest.status, "rest");
+      return { compared: "status", reason: codeReason(got.identity, want.rest.status, "rest") };
+    });
   }
   for (const [name, want] of Object.entries(expected.denials)) {
     const got = actual.denials[name];
@@ -83,28 +127,50 @@ export function compareIdentityCapture(actual: IdentityCapture, expected: Identi
       const observed = got[transport];
       if (!wanted) continue;
       if (!observed) { problems.push(`denial ${name}: no ${transport} observation`); continue; }
-      const code = "code" in observed && typeof observed.code === "number" ? observed.code : (observed as HttpOutcome).status;
-      const wantedCode = "code" in wanted && typeof wanted.code === "number" ? wanted.code : (wanted as HttpOutcome).status;
-      if (code !== wantedCode) problems.push(`denial ${name}: ${transport} ${code}, expected ${wantedCode}`);
-      expectDenial(`denial ${name} ${transport}`, observed.message, wanted.message);
+      noteCase(`denials/${name}/${transport}`, () => {
+        const code = "code" in observed && typeof observed.code === "number" ? observed.code : (observed as HttpOutcome).status;
+        const wantedCode = "code" in wanted && typeof wanted.code === "number" ? wanted.code : (wanted as HttpOutcome).status;
+        if (code !== wantedCode) problems.push(`denial ${name}: ${transport} ${code}, expected ${wantedCode}`);
+        expectDenial(`denial ${name} ${transport}`, observed.message, wanted.message);
+        return { compared: "error", reason: denialReason(wanted.message) };
+      });
     }
   }
   for (const [got, want] of pairs("metadata", actual.metadata, expected.metadata, (row) => `${row.mode} ${row.identity}`)) {
-    expectCode(`metadata ${got.mode} ${got.identity}`, got.identity, got.grpc.code, want.grpc.code, "grpc");
-    expectCode(`metadata ${got.mode} ${got.identity}`, got.identity, got.rest.status, want.rest.status, "rest");
-    if (want.grpc.code === 7 && got.grpc.message !== want.grpc.message) problems.push(`metadata ${got.mode} ${got.identity}: "${got.grpc.message}", expected "${want.grpc.message}"`);
-    const partition = got.identity === "owner" ? partitionDivergence.owner : partitionDivergence.other;
-    if (want.partition.code !== 12) problems.push(`metadata ${got.mode} ${got.identity}: the oracle now answers PartitionQuery ${want.partition.code}; recapture and drop the divergence`);
-    if (got.partition.code !== partition) problems.push(`partition ${got.mode} ${got.identity}: ${got.partition.code}, expected ${partition} (${partitionDivergence.reason})`);
+    const base = `metadata/${got.mode}/${got.identity}`;
+    noteCase(`${base}/grpc`, () => {
+      expectCode(`metadata ${got.mode} ${got.identity}`, got.identity, got.grpc.code, want.grpc.code, "grpc");
+      if (want.grpc.code === 7 && got.grpc.message !== want.grpc.message) problems.push(`metadata ${got.mode} ${got.identity}: "${got.grpc.message}", expected "${want.grpc.message}"`);
+      return { compared: want.grpc.code === 7 ? "error" : "status", reason: codeReason(got.identity, want.grpc.code, "grpc") };
+    });
+    noteCase(`${base}/rest`, () => {
+      expectCode(`metadata ${got.mode} ${got.identity}`, got.identity, got.rest.status, want.rest.status, "rest");
+      return { compared: "status", reason: codeReason(got.identity, want.rest.status, "rest") };
+    });
+    noteCase(`${base}/partition`, () => {
+      const partition = got.identity === "owner" ? partitionDivergence.owner : partitionDivergence.other;
+      if (want.partition.code !== 12) problems.push(`metadata ${got.mode} ${got.identity}: the oracle now answers PartitionQuery ${want.partition.code}; recapture and drop the divergence`);
+      if (got.partition.code !== partition) problems.push(`partition ${got.mode} ${got.identity}: ${got.partition.code}, expected ${partition} (${partitionDivergence.reason})`);
+      return { compared: "status", reason: partitionDivergence.reason };
+    });
   }
   for (const [got, want] of pairs("pipelines", actual.pipelines, expected.pipelines, (row) => row.identity)) {
     for (const kind of ["pipeline", "query"] as const) {
-      if (got[kind].code !== want[kind].code) problems.push(`${kind} as ${got.identity}: ${got[kind].code}, expected ${want[kind].code}`);
-      if (want[kind].code === 7 && got[kind].code === 7) expectDenial(`${kind} as ${got.identity}`, got[kind].message, want[kind].message);
+      noteCase(`pipelines/${got.identity}/${kind}`, () => {
+        if (got[kind].code !== want[kind].code) problems.push(`${kind} as ${got.identity}: ${got[kind].code}, expected ${want[kind].code}`);
+        if (want[kind].code === 7 && got[kind].code === 7) {
+          expectDenial(`${kind} as ${got.identity}`, got[kind].message, want[kind].message);
+          return { compared: "error", reason: denialReason(want[kind].message) };
+        }
+        return { compared: "status" };
+      });
     }
   }
   for (const [got, want] of pairs("reload", actual.reload, expected.reload, (row) => row.body)) {
-    if (got.status !== want.status || got.governs !== want.governs) problems.push(`reload ${got.body}: ${got.status}/${got.governs}, expected ${want.status}/${want.governs}`);
+    noteCase(`reload/${got.body}`, () => {
+      if (got.status !== want.status || got.governs !== want.governs) problems.push(`reload ${got.body}: ${got.status}/${got.governs}, expected ${want.status}/${want.governs}`);
+      return { compared: "answer" };
+    });
   }
   return problems;
 }

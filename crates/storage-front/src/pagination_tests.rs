@@ -93,10 +93,11 @@ async fn gcs_and_firebase_routes_emit_sdk_compatible_continuation_pages() {
     .await
     .expect("runtime");
     *lock(&runtime.state.inner) = corpus();
+    let fixture: JsonValue = serde_json::from_str(ORACLE).expect("oracle fixture");
 
-    for base in [
-        format!("/storage/v1/b/{BUCKET}/o"),
-        format!("/v0/b/{BUCKET}/o"),
+    for (base, route) in [
+        (format!("/storage/v1/b/{BUCKET}/o"), "gcs"),
+        (format!("/v0/b/{BUCKET}/o"), "firebase"),
     ] {
         let first = request_json(
             &runtime,
@@ -121,6 +122,14 @@ async fn gcs_and_firebase_routes_emit_sdk_compatible_continuation_pages() {
             ["objects/1000.json", "objects/1001.json"],
         );
         assert!(second.get("nextPageToken").is_none());
+        ledger_route_page(
+            &first,
+            fixture_observation(&fixture, &format!("{route}-default-first")),
+        );
+        ledger_route_page(
+            &second,
+            fixture_observation(&fixture, &format!("{route}-default-second")),
+        );
     }
 
     runtime.shutdown().await.expect("shutdown");
@@ -195,6 +204,34 @@ fn assert_page(page: &ObjectListPage<'_>, observation: &JsonValue) {
         page.next_page_token.as_deref(),
         observation.get("nextPageToken").and_then(JsonValue::as_str),
     );
+    ledger_page(observation);
+}
+
+/// Notes a recorded page in the conformance ledger.
+fn ledger_page(observation: &JsonValue) {
+    firenook_conformance_ledger::checked(
+        "firebase-suite-v1/storage",
+        &format!(
+            "storage-list-pagination/{}",
+            observation["id"].as_str().expect("id")
+        ),
+        firenook_conformance_ledger::Compared::Answer,
+    );
+}
+
+/// Notes `page` as checked when its names and token are the recorded ones.
+fn ledger_route_page(page: &JsonValue, observation: &JsonValue) {
+    let names: Vec<&str> = page["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|item| item["name"].as_str().expect("name"))
+        .collect();
+    if names == fixture_names(observation)
+        && page.get("nextPageToken") == observation.get("nextPageToken")
+    {
+        ledger_page(observation);
+    }
 }
 
 fn names<'a>(page: &'a ObjectListPage<'a>) -> Vec<&'a str> {

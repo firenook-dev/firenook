@@ -5,6 +5,12 @@
 //
 //   node --import tsx src/pubsub/replay-firenook.ts --binary ../target/release/firenook \
 //     [--programs=a,b] [--report-only] [--output report.json] [--debug]
+//
+// With FIRENOOK_CONFORMANCE_LEDGER set, every step that matched is noted in
+// the conformance ledger (../report/ledger.mjs): a call's response as
+// recorded (`answer`), or the pushes a push endpoint received (`behaviour`).
+// Timed waits and push-endpoint status settings answer nothing and are not
+// noted.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +19,7 @@ import { PushEndpoint, startFirenook, type Json } from "./client.ts";
 import { PROGRAMS, PROJECT_ID } from "./emulator-plan.ts";
 import { canonicalize } from "./normalize.ts";
 import { runProgram, type RecordedProgram, type RecordedStep } from "./runner.ts";
+import * as ledger from "../report/ledger.mjs";
 
 const fixtureRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures/pubsub-v1");
 
@@ -39,6 +46,9 @@ interface Divergence {
 }
 
 const DIVERGENCES: readonly Divergence[] = [];
+
+/** Harness-only steps no reference answers; conformance/src/report/cases.mjs leaves them out. */
+const HARNESS_TRANSPORTS: ReadonlySet<string> = new Set(["sleep", "pushStatus"]);
 
 function parseArguments(argv: readonly string[]): { binary: string; programs: readonly string[]; reportOnly: boolean; output?: string | undefined; debug: boolean } {
   let binary = "";
@@ -93,7 +103,9 @@ try {
         mismatches.push({ program: program.id, step: expectedStep.id, path: "step", expected: "recorded", actual: "missing" });
         continue;
       }
+      const mismatchesBefore = mismatches.length;
       diff(program.id, expectedStep.id, "", view(expectedStep), view(actualStep));
+      if (mismatches.length === mismatchesBefore) ledgerStep(program.id, expectedStep);
     }
     const bad = mismatches.filter((mismatch) => mismatch.program === program.id).length;
     console.log(`${bad === 0 ? "ok  " : "FAIL"} ${program.id}: ${String(recorded.steps.length)} steps${bad ? `, ${String(bad)} mismatches` : ""}`);
@@ -112,6 +124,12 @@ for (const mismatch of mismatches.slice(0, args.reportOnly ? 500 : 80)) {
   console.log(`  ${mismatch.program}/${mismatch.step} ${mismatch.path}: expected ${short(mismatch.expected)} got ${short(mismatch.actual)}`);
 }
 if (mismatches.length > 0 && !args.reportOnly) process.exit(1);
+
+function ledgerStep(program: string, step: RecordedStep): void {
+  const transport = (step.request as unknown as { transport?: string } | null)?.transport ?? "";
+  if (HARNESS_TRANSPORTS.has(transport)) return;
+  ledger.checked("pubsub-v1", `${program}/${step.id}`, transport === "pushes" ? ledger.COMPARED.behaviour : ledger.COMPARED.answer);
+}
 
 function view(step: RecordedStep): Json {
   return canonicalize({ response: step.response, ...(step.pushes === undefined ? {} : { pushes: step.pushes as Json }) });

@@ -200,6 +200,16 @@ fn expected_body(response: &OrderedJson) -> OrderedJson {
     response.get("body").cloned().expect("body")
 }
 
+/// Notes a recorded step that `assert_recorded` matched in the conformance
+/// ledger, under the id `conformance/src/report/cases.mjs` gives it.
+fn ledger_step(program: &str, id: &str) {
+    firenook_conformance_ledger::checked(
+        "tasks-v1",
+        &format!("tasks/{program}/{id}"),
+        firenook_conformance_ledger::Compared::Answer,
+    );
+}
+
 /// Asserts status, content type and the exact body of a recorded step.
 fn assert_recorded(reply: &Reply, response: &OrderedJson) {
     assert_eq!(
@@ -439,6 +449,7 @@ async fn discovery_registers_every_task_function_and_stats_match_the_corpus() {
     let app = runtime.application();
     let (reply, response) = play(&app, &corpus, REGISTRATION, "stats-initial", origin).await;
     assert_recorded(&reply, &response);
+    ledger_step(REGISTRATION, "stats-initial");
     assert_eq!(reply.header("vary"), Some("Origin"));
     assert_eq!(reply.header("access-control-allow-origin"), None);
 }
@@ -467,6 +478,7 @@ async fn registration_steps_match_the_corpus_byte_for_byte() {
     ] {
         let (reply, response) = play(&app, &corpus, REGISTRATION, id, origin).await;
         assert_recorded(&reply, &response);
+        ledger_step(REGISTRATION, id);
         if reply.status == StatusCode::NOT_FOUND {
             assert_eq!(
                 reply.header("content-security-policy"),
@@ -726,6 +738,7 @@ async fn enqueue_steps_echo_the_corpus_bodies() {
     ] {
         let (reply, response) = play(&app, &corpus, DISPATCH, id, &server.url).await;
         assert_recorded(&reply, &response);
+        ledger_step(DISPATCH, id);
     }
     assert_eq!(
         lines
@@ -756,6 +769,7 @@ async fn enqueue_steps_echo_the_corpus_bodies() {
     )
     .await;
     assert_recorded(&reply, &response);
+    ledger_step(DISPATCH, "enqueue-manual-queue-unreachable");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -806,6 +820,7 @@ async fn delete_steps_match_the_corpus() {
     for id in ["enqueue-pending-a", "enqueue-pending-b"] {
         let (reply, response) = play(&app, &corpus, DELETE, id, origin).await;
         assert_recorded(&reply, &response);
+        ledger_step(DELETE, id);
     }
     let reply = call(&app, Method::GET, "/queueStats", None).await;
     let manual = "queue:demo-fireside-functions-oracle-us-central1-manual-defaults";
@@ -814,6 +829,7 @@ async fn delete_steps_match_the_corpus() {
     for id in ["delete-unknown-queue", "delete-unknown-task"] {
         let (reply, response) = play(&app, &corpus, DELETE, id, origin).await;
         assert_recorded(&reply, &response);
+        ledger_step(DELETE, id);
     }
     // Deleting a pending task removes it.
     let reply = call(
@@ -886,6 +902,7 @@ async fn deleting_a_dispatched_task_succeeds_once_and_takes_the_count_negative()
     for id in ["delete-dispatched", "delete-again", "reuse-deleted-name"] {
         let (reply, response) = play(&app, &corpus, DELETE, id, &server.url).await;
         assert_recorded(&reply, &response);
+        ledger_step(DELETE, id);
     }
     let reply = call(&app, Method::GET, "/queueStats", None).await;
     assert_eq!(stats_of(&reply, default)["numberOfTasks"], json!(-1));
