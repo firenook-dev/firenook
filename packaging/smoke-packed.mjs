@@ -23,6 +23,12 @@ const installedVersion = packageManager(manager, manager === 'npm' ? ['exec','--
 assert.ok(installedVersion.includes(receipt.version),'Installed command shim must work');
 const cli = join(consumer,'node_modules/firenook/bin/firenook.mjs');
 const binary = execFileSync(process.execPath,[cli,'binary-path'],{cwd:consumer,encoding:'utf8'}).trim();
+// A binary's first launch from a new path can take tens of seconds before it
+// runs: Rosetta 2 translates the x86_64 engine on Apple silicon, where
+// darwin-x64 is built and checked (10 s on an idle M2 Pro, and the installed
+// copy is a new file each time). Launch it once, so the readiness wait below
+// times the engine's start, not that.
+execFileSync(binary,['--version'],{stdio:'ignore',timeout:300000});
 assert.match(execFileSync(process.execPath,[cli,'--version'],{encoding:'utf8'}),new RegExp(receipt.version.replaceAll('.','\\.')));
 const require = createRequire(join(consumer,'package.json'));
 const {Firestore} = require('@google-cloud/firestore');
