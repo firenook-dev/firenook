@@ -198,3 +198,467 @@ async fn html_and_script_are_static_same_origin_and_never_interpolate_rule_text(
     assert!(!SCRIPT.contains("innerHTML"));
     assert!(SCRIPT.contains("textContent"));
 }
+
+/// The official emulator's coverage recording
+/// (`conformance/fixtures/developer-tools-coverage-v1`), replayed through
+/// the REST router as it was captured: the owner's seed write, then for each
+/// policy a rules reload, the report, two reads and the report again, then a
+/// rejected reload, the report it kept and a rejected parameter name.
+mod oracle {
+    use super::*;
+    use firenook_conformance_ledger::{self as ledger, Compared};
+
+    const SET: &str = "developer-tools-coverage-v1";
+
+    /// Recorded answers Firenook gives otherwise with no documented reason.
+    /// The replay asserts each still differs as described; whoever fixes one
+    /// moves it out of this table and the replay notes it in the ledger.
+    const BUG_CANDIDATES: &[(&str, &str)] = &[
+        (
+            "profiles/missing-field",
+            "the error value's sourcePosition is the failing field access `resource.data.missing` (offsets 127-147); the official emulator's is `resource` (127-134)",
+        ),
+        (
+            "invalid-reload",
+            "a rejected reload's message is `rules compilation failed: 1:1: expected \"service\"`; the official emulator's is `Error compiling rules:\\nL1:1 mismatched input 'broken' expecting {'function', 'import', 'service', 'rules_version'}`",
+        ),
+        (
+            "compile-rejections/1",
+            "a rejected reload's message is `rules compilation failed: 4:19: <diagnostic>`; the official emulator frames the same diagnostic as `Error compiling rules:\\nL4:19 <diagnostic>`",
+        ),
+    ];
+
+    // The documented reasons a recorded report differs.
+    const LAZY_PLANNER: &str = "coverage counts Firenook's one evaluation of each read, with the document; the official emulator's lazy planner first evaluates without it (bare undefined values and doubled counts) and gives short-circuited expressions empty values (DESIGN.md, Live bounded coverage observations)";
+    const CAUSE_TEXT: &str = "an error value's cause text is Firenook's own message (DESIGN.md, Live bounded coverage observations)";
+
+    async fn send(
+        app: &Router,
+        method: &str,
+        path: &str,
+        body: Option<&JsonValue>,
+        owner: bool,
+    ) -> (StatusCode, JsonValue) {
+        let mut request = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(CONTENT_TYPE, "application/json");
+        if owner {
+            request = request.header(axum::http::header::AUTHORIZATION, "Bearer owner");
+        }
+        let body = body.map_or_else(Body::empty, |body| Body::from(body.to_string()));
+        let response = app
+            .clone()
+            .oneshot(request.body(body).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        (status, self::body(response).await)
+    }
+
+    fn reload(source: &JsonValue) -> JsonValue {
+        json!({"rules": {"files": [{"name": "firestore.rules", "content": source}]}})
+    }
+
+    /// A report as recorded: Firenook adds its documented `firenookCoverage`
+    /// accounting (DESIGN.md, Live bounded coverage observations), checked
+    /// complete and removed; request times, which differ on every run, are
+    /// normalised, merging the values they alone told apart.
+    fn report(mut actual: JsonValue) -> JsonValue {
+        let extension = actual
+            .as_object_mut()
+            .unwrap()
+            .remove("firenookCoverage")
+            .expect("Firenook's accounting");
+        assert_eq!(extension["truncated"], false);
+        assert_eq!(extension["omittedValues"], 0);
+        assert_eq!(extension["omittedOperations"], 0);
+        normalized(actual)
+    }
+
+    fn normalized(mut report: JsonValue) -> JsonValue {
+        if let Some(nodes) = report.get_mut("report").and_then(JsonValue::as_array_mut) {
+            nodes.iter_mut().for_each(normalize_node);
+        }
+        report
+    }
+
+    fn normalize_node(node: &mut JsonValue) {
+        if let Some(values) = node.get_mut("values").and_then(JsonValue::as_array_mut) {
+            let mut merged: Vec<JsonValue> = Vec::new();
+            for mut entry in values.drain(..) {
+                if let Some(fields) = entry.pointer_mut("/value/mapValue/fields")
+                    && fields.get("method").is_some()
+                    && fields.get("time").is_some()
+                {
+                    // The request map: its time is the read's own.
+                    assert!(fields["time"]["timestampValue"].is_string());
+                    fields["time"] = json!({"timestampValue": "<request-time>"});
+                }
+                match merged
+                    .iter_mut()
+                    .find(|seen| seen["value"] == entry["value"])
+                {
+                    Some(seen) => {
+                        seen["count"] = json!(
+                            seen["count"].as_u64().unwrap() + entry["count"].as_u64().unwrap()
+                        );
+                    }
+                    None => merged.push(entry),
+                }
+            }
+            *values = merged;
+        }
+        if let Some(children) = node.get_mut("children").and_then(JsonValue::as_array_mut) {
+            children.iter_mut().for_each(normalize_node);
+        }
+    }
+
+    /// The recorded report without the official planner's lazy first pass,
+    /// which DESIGN.md documents Firenook does not imitate. The official
+    /// emulator evaluates a read without its document first; when that pass
+    /// needs the document it is undefined, and a second pass evaluates with
+    /// the document. Firenook evaluates once, with the document. So the
+    /// first pass's bare `{"undefined":{}}` values go, an expression both
+    /// passes evaluated alike keeps one pass's count (half of the recorded
+    /// one), and a short-circuited expression's empty value objects go
+    /// (Firenook reports no values for an expression it did not evaluate).
+    /// Answers whether anything was taken out.
+    fn without_lazy_first_pass(report: &mut JsonValue) -> bool {
+        let mut changed = false;
+        let roots = report.get_mut("report").and_then(JsonValue::as_array_mut);
+        for root in roots.into_iter().flatten() {
+            let passes = root["values"]
+                .as_array()
+                .and_then(|values| {
+                    values
+                        .iter()
+                        .find(|entry| entry["value"] == json!({"undefined": {}}))
+                })
+                .map_or(0, |entry| entry["count"].as_u64().unwrap());
+            changed |= first_pass(root, passes);
+        }
+        changed
+    }
+
+    fn first_pass(node: &mut JsonValue, passes: u64) -> bool {
+        let mut changed = false;
+        if let Some(values) = node.get_mut("values").and_then(JsonValue::as_array_mut) {
+            let before = values.len();
+            values.retain(|entry| entry["value"] != json!({"undefined": {}}));
+            changed |= values.len() != before;
+            if values.len() == before
+                && passes > 0
+                && values.len() == 1
+                && values[0]["count"] == 2 * passes
+            {
+                values[0]["count"] = json!(passes);
+                changed = true;
+            }
+            if values.iter().all(|entry| entry["value"] == json!({})) {
+                node.as_object_mut().unwrap().remove("values");
+                changed = true;
+            }
+        }
+        for child in node
+            .get_mut("children")
+            .and_then(JsonValue::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            changed |= first_pass(child, passes);
+        }
+        changed
+    }
+
+    /// Takes Firenook's own error cause text into the recorded report
+    /// (documented); answers whether any was taken and whether an error's
+    /// source position differs, which is not documented.
+    fn own_cause_text(recorded: &mut JsonValue, actual: &JsonValue) -> (bool, bool) {
+        let (mut taken, mut moved) = (false, false);
+        let pairs = recorded
+            .get_mut("report")
+            .and_then(JsonValue::as_array_mut)
+            .into_iter()
+            .flatten()
+            .zip(
+                actual
+                    .get("report")
+                    .and_then(JsonValue::as_array)
+                    .into_iter()
+                    .flatten(),
+            );
+        for (recorded, actual) in pairs {
+            let (t, m) = cause_text(recorded, actual);
+            taken |= t;
+            moved |= m;
+        }
+        (taken, moved)
+    }
+
+    fn cause_text(recorded: &mut JsonValue, actual: &JsonValue) -> (bool, bool) {
+        let (mut taken, mut moved) = (false, false);
+        if let (Some(recorded), Some(actual)) = (
+            recorded.get_mut("values").and_then(JsonValue::as_array_mut),
+            actual.get("values").and_then(JsonValue::as_array),
+        ) {
+            for (recorded, actual) in recorded.iter_mut().zip(actual) {
+                let (Some(recorded), Some(actual)) = (
+                    recorded.pointer_mut("/value/undefined"),
+                    actual.pointer("/value/undefined"),
+                ) else {
+                    continue;
+                };
+                if recorded.get("causeMessage").is_some() && actual.get("causeMessage").is_some() {
+                    if recorded["causeMessage"] != actual["causeMessage"] {
+                        recorded["causeMessage"] = actual["causeMessage"].clone();
+                        taken = true;
+                    }
+                    if recorded["sourcePosition"] != actual["sourcePosition"] {
+                        recorded["sourcePosition"] = actual["sourcePosition"].clone();
+                        moved = true;
+                    }
+                }
+            }
+        }
+        let children = recorded
+            .get_mut("children")
+            .and_then(JsonValue::as_array_mut)
+            .into_iter()
+            .flatten()
+            .zip(
+                actual
+                    .get("children")
+                    .and_then(JsonValue::as_array)
+                    .into_iter()
+                    .flatten(),
+            );
+        for (recorded, actual) in children {
+            let (t, m) = cause_text(recorded, actual);
+            taken |= t;
+            moved |= m;
+        }
+        (taken, moved)
+    }
+
+    /// The jar emits a set in hash iteration order; DESIGN.md says serialized
+    /// set order is not a compatibility guarantee. Every member is compared.
+    fn canonical_sets(value: &mut JsonValue) {
+        match value {
+            JsonValue::Object(fields) => {
+                if let Some(values) = fields
+                    .get_mut("setValue")
+                    .and_then(|set| set.get_mut("values"))
+                    .and_then(JsonValue::as_array_mut)
+                {
+                    values.sort_by_cached_key(JsonValue::to_string);
+                }
+                fields.values_mut().for_each(canonical_sets);
+            }
+            JsonValue::Array(values) => values.iter_mut().for_each(canonical_sets),
+            _ => {}
+        }
+    }
+
+    /// A rejected reload's error: the recorded status and code, and the
+    /// two messages, which the bug table describes.
+    fn rejected(
+        status: StatusCode,
+        actual: &JsonValue,
+        recorded_status: &JsonValue,
+        recorded: &JsonValue,
+    ) -> (String, String) {
+        assert_eq!(
+            u64::from(status.as_u16()),
+            recorded_status.as_u64().unwrap()
+        );
+        assert_eq!(actual["error"]["code"], recorded["error"]["code"]);
+        assert_eq!(actual["error"]["status"], recorded["error"]["status"]);
+        (
+            actual["error"]["message"].as_str().unwrap().to_owned(),
+            recorded["error"]["message"].as_str().unwrap().to_owned(),
+        )
+    }
+
+    /// One recorded case's outcome: noted (checked, or differing for the
+    /// documented reasons given), or a listed bug candidate.
+    enum Outcome {
+        Noted(Compared, Vec<&'static str>),
+        Bug,
+    }
+
+    const CONTROL: &str = "/emulator/v1/projects/demo-fireside-coverage";
+
+    async fn coverage(app: &Router) -> JsonValue {
+        let (status, report) =
+            send(app, "GET", &format!("{CONTROL}:ruleCoverage"), None, false).await;
+        assert_eq!(status, StatusCode::OK);
+        report
+    }
+
+    /// The owner's seed write; its times differ on every run.
+    async fn seed(app: &Router, seed: &JsonValue) -> Outcome {
+        let (status, mut answer) = send(
+            app,
+            "PATCH",
+            seed["path"].as_str().unwrap(),
+            Some(&seed["body"]),
+            true,
+        )
+        .await;
+        assert_eq!(u64::from(status.as_u16()), seed["status"].as_u64().unwrap());
+        let mut recorded = seed["response"].clone();
+        for time in ["createTime", "updateTime"] {
+            assert!(answer[time].is_string());
+            answer[time] = json!("<time>");
+            recorded[time] = json!("<time>");
+        }
+        assert_eq!(answer, recorded, "seed");
+        Outcome::Noted(Compared::Answer, vec![])
+    }
+
+    /// One policy: reload, the report, two reads, the report again.
+    async fn profile(app: &Router, profile: &JsonValue, document: &str) -> Outcome {
+        let id = profile["id"].as_str().unwrap();
+        let (status, _) = send(
+            app,
+            "PUT",
+            &format!("{CONTROL}:securityRules"),
+            Some(&reload(&profile["source"])),
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{id} reload");
+        assert_eq!(
+            report(coverage(app).await),
+            normalized(profile["before"].clone()),
+            "{id} before"
+        );
+        for _ in 0..2 {
+            let (status, _) = send(app, "GET", document, None, false).await;
+            assert_eq!(
+                u64::from(status.as_u16()),
+                profile["status"].as_u64().unwrap(),
+                "{id} read"
+            );
+        }
+        let mut actual = report(coverage(app).await);
+        let mut recorded = normalized(profile["after"].clone());
+        canonical_sets(&mut actual);
+        canonical_sets(&mut recorded);
+        let mut reasons = Vec::new();
+        if without_lazy_first_pass(&mut recorded) {
+            reasons.push(LAZY_PLANNER);
+        }
+        let (taken, moved) = own_cause_text(&mut recorded, &actual);
+        if taken {
+            reasons.push(CAUSE_TEXT);
+        }
+        assert_eq!(actual, recorded, "{id} after");
+        let case = format!("profiles/{id}");
+        let listed = BUG_CANDIDATES.iter().any(|(listed, _)| *listed == case);
+        assert_eq!(
+            moved, listed,
+            "{case}: an error's position differs only where listed"
+        );
+        if listed {
+            Outcome::Bug
+        } else {
+            Outcome::Noted(Compared::Answer, reasons)
+        }
+    }
+
+    /// A rejected reload keeps the last valid rules and their coverage; a
+    /// namespace name as a parameter is rejected too.
+    async fn rejections(app: &Router, fixture: &JsonValue) -> Vec<(String, Outcome)> {
+        let mut outcomes = Vec::new();
+        let invalid = &fixture["invalidReload"];
+        let (status, answer) = send(
+            app,
+            "PUT",
+            invalid["path"].as_str().unwrap(),
+            Some(&invalid["body"]),
+            false,
+        )
+        .await;
+        let (actual, recorded) =
+            rejected(status, &answer, &invalid["status"], &invalid["response"]);
+        assert_eq!(
+            actual,
+            "rules compilation failed: 1:1: expected \"service\""
+        );
+        assert_ne!(actual, recorded);
+        outcomes.push(("invalid-reload".to_owned(), Outcome::Bug));
+        assert_eq!(
+            report(coverage(app).await),
+            normalized(fixture["afterInvalidReload"].clone()),
+            "after the rejected reload"
+        );
+        outcomes.push((
+            "after-invalid-reload".to_owned(),
+            Outcome::Noted(Compared::Answer, vec![]),
+        ));
+        for (index, rejection) in fixture["compileRejections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .enumerate()
+        {
+            let (status, answer) = send(
+                app,
+                "PUT",
+                &format!("{CONTROL}:securityRules"),
+                Some(&reload(&rejection["source"])),
+                false,
+            )
+            .await;
+            let (actual, recorded) =
+                rejected(status, &answer, &rejection["status"], &rejection["data"]);
+            // The same diagnostic at the same place, framed differently.
+            let diagnostic = recorded
+                .strip_prefix("Error compiling rules:\nL")
+                .unwrap()
+                .replacen(' ', ": ", 1);
+            assert_eq!(actual, format!("rules compilation failed: {diagnostic}"));
+            outcomes.push((format!("compile-rejections/{}", index + 1), Outcome::Bug));
+        }
+        outcomes
+    }
+
+    #[tokio::test]
+    async fn the_official_coverage_recording_replays_through_the_rest_router() {
+        let fixture: JsonValue = serde_json::from_str(include_str!(
+            "../../../../conformance/fixtures/developer-tools-coverage-v1/fixture.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture["project"], PROJECT);
+        let app = application(RulesRuntime::with_request_history(RequestHistory::default()));
+        let mut outcomes = vec![("seed".to_owned(), seed(&app, &fixture["seed"]).await)];
+        let document = fixture["seed"]["path"].as_str().unwrap();
+        for recorded in fixture["profiles"].as_array().unwrap() {
+            outcomes.push((
+                format!("profiles/{}", recorded["id"].as_str().unwrap()),
+                profile(&app, recorded, document).await,
+            ));
+        }
+        outcomes.extend(rejections(&app, &fixture).await);
+
+        let mut bugs = Vec::new();
+        for (case, outcome) in outcomes {
+            match outcome {
+                Outcome::Noted(compared, reasons) if reasons.is_empty() => {
+                    ledger::checked(SET, &case, compared);
+                }
+                Outcome::Noted(compared, reasons) => {
+                    ledger::differs(SET, &case, compared, &reasons.join("; "));
+                }
+                Outcome::Bug => bugs.push(case),
+            }
+        }
+        let listed = BUG_CANDIDATES
+            .iter()
+            .map(|(case, _)| (*case).to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(bugs, listed, "every listed bug candidate still differs");
+    }
+}
