@@ -328,6 +328,10 @@ async fn an_operation_answers_once_its_change_is_on_disk() {
     );
 
     // The state's directory becomes a file: every write fails from here on.
+    // The flush first waits out a write the writer thread may have started
+    // and leaves nothing for it to write: a temporary file it created while
+    // the directory was being removed failed this with "Directory not empty".
+    runtime.flush().expect("flush");
     std::fs::remove_dir_all(&state).expect("remove the state directory");
     std::fs::write(&state, "not a directory").expect("block the state path");
     let (status, body) = sign_up(&runtime, "grace@example.test").await;

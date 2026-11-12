@@ -101,7 +101,7 @@ jobs:
           if-no-files-found: error
 
   console:
-    name: Console checks and the engine the journeys run against
+    name: Console checks
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -125,15 +125,25 @@ jobs:
           npm run test --prefix console
           npm run build --prefix console
           npm run budget --prefix console
+
+  journey-engine:
+    # Built once and handed to every journey job, beside the console checks
+    # rather than after them: the journeys need the engine, not the checks
+    # (2.5-4.5 minutes). The debug binary reads console/dist from this
+    # checkout's path at run time, which every journey job's checkout
+    # shares; each builds the console itself.
+    name: The engine the journeys run against
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install latest stable Rust
         run: |
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
-      # Built once here and handed to every journey shard: a cold debug
-      # build is most of this job, and seven shards building it would be
-      # seven times that. The debug binary reads console/dist from this
-      # checkout's path at run time, which every shard's checkout shares.
       - name: Build the engine the browser journeys run against
         run: cargo build --locked --bin firenook
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -145,16 +155,22 @@ jobs:
 
   console-journeys:
     # The whole suite is about 17 minutes on a 12-core machine; on a 4-vCPU
-    # runner it would not fit one job's budget, so each Playwright project
-    # (one engine profile) is its own job with its own limit.
-    name: Console journeys (${{ matrix.project }})
-    needs: console
+    # runner it would not fit one job's budget. Each Playwright project (one
+    # engine profile) ran as a job of its own; the six short ones (3-6
+    # minutes) now run in pairs, so the run asks for three fewer runners and
+    # waits less for them, and shell (about 10) stays alone.
+    name: Console journeys (${{ matrix.name }})
+    needs: journey-engine
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        project: [data, auth, storage, compute, messaging, observe, shell]
+        include:
+          - {name: data and storage, key: data-storage, projects: --project data --project storage}
+          - {name: auth and messaging, key: auth-messaging, projects: --project auth --project messaging}
+          - {name: compute and observe, key: compute-observe, projects: --project compute --project observe}
+          - {name: shell, key: shell, projects: --project shell}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -179,13 +195,13 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Install the pinned Functions SDK the journeys' Functions fixture links in
         run: npm run e2e:sdk --prefix console
-      - name: Run the ${{ matrix.project }} journeys against the real engine
+      - name: Run the ${{ matrix.name }} journeys against the real engine
         working-directory: console
-        run: npx playwright test --project ${{ matrix.project }}
+        run: npx playwright test ${{ matrix.projects }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: failure()
         with:
-          name: console-playwright-report-${{ matrix.project }}
+          name: console-playwright-report-${{ matrix.key }}
           path: |
             console/playwright-report
             console/test-results
@@ -194,23 +210,27 @@ jobs:
     # Functions run on the Node that runs Firenook, and every other job runs
     # Node 24. The Functions journeys again, with the engine running the
     # Functions on each other supported Node; Playwright and the console
-    # build stay on the pinned 24.20.0.
-    name: Console Functions journeys (Node ${{ matrix.node }})
-    needs: console
+    # build stay on the pinned 24.20.0. One job runs both (about 3 minutes
+    # each), so the setup is paid once.
+    name: Console Functions journeys (Node 22 and 26)
+    needs: journey-engine
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        node: [22, 26]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: ${{ matrix.node }}
-      - name: Keep the Node the engine runs the Functions on
+          node-version: 22
+      - name: Keep Node 22 for the Functions
         run: |
-          echo "FIRENOOK_NODE=$(command -v node)" >> "$GITHUB_ENV"
+          echo "NODE22=$(command -v node)" >> "$GITHUB_ENV"
+          node --version
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - name: Keep Node 26 for the Functions
+        run: |
+          echo "NODE26=$(command -v node)" >> "$GITHUB_ENV"
           node --version
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -234,15 +254,28 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Install the pinned Functions SDK the journeys' Functions fixture links in
         run: npm run e2e:sdk --prefix console
-      - name: Run the compute journeys with the Functions on Node ${{ matrix.node }}
+      - name: Run the compute journeys with the Functions on Node 22
         working-directory: console
-        run: npx playwright test --project compute
+        env:
+          FIRENOOK_NODE: ${{ env.NODE22 }}
+        run: npx playwright test --project compute --output test-results/node22
+      - name: Keep the Node 22 report
+        if: ${{ !cancelled() }}
+        working-directory: console
+        run: if [ -d playwright-report ]; then mv playwright-report playwright-report-node22; fi
+      - name: Run the compute journeys with the Functions on Node 26
+        if: ${{ !cancelled() }}
+        working-directory: console
+        env:
+          FIRENOOK_NODE: ${{ env.NODE26 }}
+        run: npx playwright test --project compute --output test-results/node26
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: failure()
         with:
-          name: console-playwright-report-compute-node${{ matrix.node }}
+          name: console-playwright-report-compute-node22-26
           path: |
             console/playwright-report
+            console/playwright-report-node22
             console/test-results
 
   functions-node:
@@ -390,7 +423,10 @@ jobs:
     runs-on: ubuntu-latest
     # The 0.2.0 replays (who a request is from, Storage targets without
     # buckets, rules-unit-testing on both emulators) brought this job to
-    # 24-30 minutes; 30 was cancelling it on slow runners.
+    # 24-30 minutes; 30 was cancelling it on slow runners. Most of that was
+    # the engine rebuilt in every step (fixed in console-front's build
+    # script), and the oracle corpus replays run in a job of their own:
+    # about 10 minutes now.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -477,40 +513,6 @@ jobs:
             target/debug/firenook "$RUNNER_TEMP/firenook-devtools" \
             "$HOME/.cache/firebase/emulators" "$RUNNER_TEMP/firenook-native-upgrade-evidence" \
             "$RUNNER_TEMP/firenook-previous-engine/node_modules/@fireside-dev/linux-x64/bin/fireside"
-      - name: Replay the Functions runtime and Extensions oracle corpus
-        env:
-          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
-          FIRENOOK_OFFLINE: "1"
-        run: |
-          NODE24="$(command -v node)" npm run replay:functions:runtime --prefix conformance -- \
-            --binary ../target/debug/firenook \
-            --profiles main,v1-blocking,inspect,ext-missing-param \
-            --output "$RUNNER_TEMP/firenook-functions-runtime-replay.json"
-      - name: Replay the Cloud Tasks oracle corpus against the suite
-        env:
-          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
-          FIRENOOK_OFFLINE: "1"
-        run: |
-          NODE24="$(command -v node)" npm run replay:functions:runtime --prefix conformance -- \
-            --binary ../target/debug/firenook \
-            --profiles tasks \
-            --fixture fixtures/tasks-v1/emulator-programs.json \
-            --output "$RUNNER_TEMP/firenook-tasks-replay.json"
-      - name: Replay the Auth oracle corpus against the standalone Auth service
-        run: |
-          npm run replay:auth --prefix conformance -- \
-            --binary ../target/debug/firenook \
-            --output "$RUNNER_TEMP/firenook-auth-replay.json"
-      - name: Replay the Pub/Sub oracle corpus over gRPC and HTTP/JSON
-        run: |
-          npm run replay:pubsub --prefix conformance -- \
-            --binary ../target/debug/firenook \
-            --output "$RUNNER_TEMP/firenook-pubsub-replay.json"
-      - name: Verify the pinned Pub/Sub client library against Firenook
-        run: |
-          npm run verify:pubsub:client --prefix conformance -- \
-            --binary ../target/debug/firenook \
-            --output "$RUNNER_TEMP/firenook-pubsub-client.json"
       - name: Verify suite start without Java on PATH
         run: >-
           node conformance/src/suite/verify-no-java.mjs
@@ -537,10 +539,6 @@ jobs:
             ${{ runner.temp }}/firenook-developer-ui-evidence/failure.json
             ${{ runner.temp }}/firenook-developer-ui-evidence/browser-failure.json
             ${{ runner.temp }}/firenook-developer-ui-evidence/*.png
-            ${{ runner.temp }}/firenook-functions-runtime-replay.json
-            ${{ runner.temp }}/firenook-auth-replay.json
-            ${{ runner.temp }}/firenook-pubsub-replay.json
-            ${{ runner.temp }}/firenook-pubsub-client.json
             ${{ runner.temp }}/firenook-no-java-evidence/result.json
             ${{ runner.temp }}/firenook-no-java-evidence/suite.log
           if-no-files-found: ignore
@@ -590,6 +588,89 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: conformance-ledger-harness
+          path: ${{ runner.temp }}/conformance-ledger
+          retention-days: 7
+          if-no-files-found: error
+
+  # The Functions, Cloud Tasks, Auth and Pub/Sub oracle corpus replays
+  # (about 9 minutes) beside the harness rather than in it, where they were
+  # its longest steps: they compare recorded answers and start no Java.
+  oracle-replays:
+    name: Oracle corpus replays
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Note the recorded cases each replay compares
+        run: echo "FIRENOOK_CONFORMANCE_LEDGER=$RUNNER_TEMP/conformance-ledger/oracle-replays" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.20.0
+          cache: npm
+          cache-dependency-path: conformance/package-lock.json
+      - name: Install current npm
+        run: npm install --global npm@12.0.2
+      - name: Install latest stable Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc --version
+      - name: Build the engine the replays run against
+        run: cargo build --locked --bin firenook
+      - name: Install pinned harness dependencies and the Functions peers
+        run: |
+          npm ci --prefix conformance
+          npm install --prefix "$RUNNER_TEMP/firenook-devtools" --ignore-scripts --no-audit --no-fund firebase-functions@7.2.5 firebase-admin@13.10.0
+      - name: Replay the Functions runtime and Extensions oracle corpus
+        env:
+          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
+          FIRENOOK_OFFLINE: "1"
+        run: |
+          NODE24="$(command -v node)" npm run replay:functions:runtime --prefix conformance -- \
+            --binary ../target/debug/firenook \
+            --profiles main,v1-blocking,inspect,ext-missing-param \
+            --output "$RUNNER_TEMP/firenook-functions-runtime-replay.json"
+      - name: Replay the Cloud Tasks oracle corpus against the suite
+        env:
+          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
+          FIRENOOK_OFFLINE: "1"
+        run: |
+          NODE24="$(command -v node)" npm run replay:functions:runtime --prefix conformance -- \
+            --binary ../target/debug/firenook \
+            --profiles tasks \
+            --fixture fixtures/tasks-v1/emulator-programs.json \
+            --output "$RUNNER_TEMP/firenook-tasks-replay.json"
+      - name: Replay the Auth oracle corpus against the standalone Auth service
+        run: |
+          npm run replay:auth --prefix conformance -- \
+            --binary ../target/debug/firenook \
+            --output "$RUNNER_TEMP/firenook-auth-replay.json"
+      - name: Replay the Pub/Sub oracle corpus over gRPC and HTTP/JSON
+        run: |
+          npm run replay:pubsub --prefix conformance -- \
+            --binary ../target/debug/firenook \
+            --output "$RUNNER_TEMP/firenook-pubsub-replay.json"
+      - name: Verify the pinned Pub/Sub client library against Firenook
+        run: |
+          npm run verify:pubsub:client --prefix conformance -- \
+            --binary ../target/debug/firenook \
+            --output "$RUNNER_TEMP/firenook-pubsub-client.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: oracle-replays
+          path: |
+            ${{ runner.temp }}/firenook-functions-runtime-replay.json
+            ${{ runner.temp }}/firenook-tasks-replay.json
+            ${{ runner.temp }}/firenook-auth-replay.json
+            ${{ runner.temp }}/firenook-pubsub-replay.json
+            ${{ runner.temp }}/firenook-pubsub-client.json
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: conformance-ledger-oracle-replays
           path: ${{ runner.temp }}/conformance-ledger
           retention-days: 7
           if-no-files-found: error
@@ -654,7 +735,7 @@ jobs:
   # names a case cases.mjs does not list.
   conformance-ledger:
     name: Conformance ledger
-    needs: [changes, rust, conformance, client-replays]
+    needs: [changes, rust, conformance, oracle-replays, client-replays]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10

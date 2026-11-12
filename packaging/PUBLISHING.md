@@ -121,7 +121,9 @@ macOS notarization and more platforms remain separate supported-platform work.
    automatic `latest` on a prerelease stops for owner review; a CLI published
    to `latest` on request holds it on purpose.
 6. After successful npm publication, a **draft** GitHub release gets the exact
-   tarballs/manifests/test receipts. Review and publish those notes. Without
+   tarballs/manifests/test receipts, with this version's section of
+   `packaging/CHANGELOG.md` as its notes (`packaging/release-notes.mjs`).
+   Review and publish those notes. Without
    `latest`, the workflow publishes to `next` only. Until the first stable
    release, `latest` follows the newest verified prerelease so that
    `npx firenook` resolves to a real engine rather than the `0.0.0`

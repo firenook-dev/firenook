@@ -140,8 +140,10 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
           SOURCE_RUN: ${{ needs.authorize.outputs.source_run || github.run_id }}
         run: |
-          gh release create "$RELEASE_TAG" --verify-tag --draft --title "Firenook ${RELEASE_TAG#npm-v}" --notes-file packaging/CHANGELOG.md
           VERSION="${RELEASE_TAG#npm-v}"
+          # This version's section of the changelog, not the whole file.
+          node packaging/release-notes.mjs "$VERSION" > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$RELEASE_TAG" --verify-tag --draft --title "Firenook $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
           mkdir release-receipts
           for PLATFORM in linux-x64 linux-arm64 darwin-arm64 darwin-x64 win32-x64; do
             for RECEIPT in npm-smoke bun-smoke suite-smoke; do
