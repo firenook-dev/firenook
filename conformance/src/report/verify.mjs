@@ -22,8 +22,15 @@
 //
 // The output is `{schemaVersion: 1, sets: [{id, answers, checked, differs,
 // unreplayed, compared: {answer, error, status, verdict, behaviour}}], cases:
-// [{set, id, result, compared?, reason?}]}`, in the case list's order. Node 24,
-// no dependencies.
+// [{set, id, result, compared?, reason?}]}`, in the case list's order.
+//
+// With `--expect-unreplayed <file>` every recorded case must be noted by a
+// replay unless the file lists it, with the issue that tracks it: a known bug
+// whose replay waits for the fix. A case no replay noted that the file does
+// not list, or a listed case that a replay now notes, fails the run after the
+// output is written, so a new recording lands with its replay and a fix takes
+// its case off the list. The file is `{schemaVersion: 1, cases: [{set, case,
+// issue, why}]}`. Node 24, no dependencies.
 
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -32,10 +39,43 @@ const RESULTS = new Set(['checked', 'differs']);
 /** Most complete first. */
 const COMPARED = ['answer', 'error', 'behaviour', 'status', 'verdict'];
 
+const USAGE = 'usage: node conformance/src/report/verify.mjs <cases.json> <ledger-dir> <output.json> [--expect-unreplayed <file>]';
+
+/** The listed cases, by key; a malformed, duplicate or unknown entry is an error. */
+function readExpected(path, known, key, errors) {
+  const listed = new Map();
+  let file;
+  try {
+    file = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    errors.push(`${path}: ${error.message}`);
+    return listed;
+  }
+  if (file?.schemaVersion !== 1 || !Array.isArray(file.cases)) {
+    errors.push(`${path}: expected {schemaVersion: 1, cases: [...]}`);
+    return listed;
+  }
+  file.cases.forEach((entry, index) => {
+    const { set, case: id, issue, why } = entry ?? {};
+    const where = `${path} cases[${index}]`;
+    if (typeof set !== 'string' || typeof id !== 'string' || !Number.isInteger(issue) || issue < 1 || typeof why !== 'string' || !why.trim()) {
+      errors.push(`${where}: needs set, case, issue (a number) and why`);
+      return;
+    }
+    if (!known.has(key(set, id))) errors.push(`${where}: ${set} has no case ${id}`);
+    else if (listed.has(key(set, id))) errors.push(`${where}: ${set} ${id} is listed twice`);
+    else listed.set(key(set, id), { issue, why });
+  });
+  return listed;
+}
+
 function main() {
-  const [casesPath, ledgerDir, outputPath] = process.argv.slice(2);
-  if (!casesPath || !ledgerDir || !outputPath) {
-    console.error('usage: node conformance/src/report/verify.mjs <cases.json> <ledger-dir> <output.json>');
+  const argv = process.argv.slice(2);
+  const flag = argv.indexOf('--expect-unreplayed');
+  const expectedPath = flag === -1 ? undefined : argv[flag + 1];
+  const [casesPath, ledgerDir, outputPath, ...extra] = argv.filter((_, index) => flag === -1 || (index !== flag && index !== flag + 1));
+  if (!casesPath || !ledgerDir || !outputPath || extra.length || (flag !== -1 && !expectedPath)) {
+    console.error(USAGE);
     process.exit(2);
   }
   const list = JSON.parse(readFileSync(casesPath, 'utf8'));
@@ -123,6 +163,7 @@ function main() {
   console.log(row('total', totals));
   console.log(`Ledger: ${files.length} files, ${lines} lines, ${notes.size} distinct cases`);
 
+  const expected = expectedPath ? readExpected(expectedPath, known, key, errors) : undefined;
   if (errors.length) {
     console.error(`Errors (${errors.length}):`);
     for (const error of errors) console.error(`  ${error}`);
@@ -132,6 +173,28 @@ function main() {
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, `${JSON.stringify({ schemaVersion: 1, sets, cases }, null, 2)}\n`);
   console.log(`Wrote ${target}`);
+
+  if (!expected) return;
+  const unlisted = [];
+  const stale = [];
+  for (const entry of cases) {
+    const listed = expected.get(key(entry.set, entry.id));
+    if (entry.result === 'unreplayed' && !listed) unlisted.push(`${entry.set} ${entry.id}`);
+    if (entry.result !== 'unreplayed' && listed) stale.push(`${entry.set} ${entry.id} (#${listed.issue}): now ${entry.result}`);
+  }
+  if (!unlisted.length && !stale.length) {
+    console.log(`Every recorded case is replayed but the ${expected.size} that ${expectedPath} lists, each with its issue.`);
+    return;
+  }
+  if (unlisted.length) {
+    console.error(`Recorded, but no replay compares them (${unlisted.length}): add a replay, or list a known bug with its issue in ${expectedPath}.`);
+    for (const line of unlisted) console.error(`  ${line}`);
+  }
+  if (stale.length) {
+    console.error(`Listed in ${expectedPath}, but a replay now notes them (${stale.length}): take them off the list.`);
+    for (const line of stale) console.error(`  ${line}`);
+  }
+  process.exit(1);
 }
 
 main();
