@@ -319,3 +319,67 @@ async fn a_save_that_does_not_load_is_said_in_the_log() {
     broken.stop().await;
     harness.stop().await;
 }
+
+/// A codebase that asks for the running Node's major is told so on every
+/// load, in the official words; one that asks for another, or for a range,
+/// is not.
+#[tokio::test]
+async fn a_codebase_on_the_node_it_asks_for_is_told_so_on_every_load() {
+    let Ok((node, _)) = support::requirements() else {
+        eprintln!("skipped: no Node or Functions SDK");
+        return;
+    };
+    let version = firenook_functions_runtime::node::probe(&node)
+        .await
+        .expect("the test Node prints its version");
+    let said = |harness: &Harness| {
+        harness
+            .events()
+            .into_iter()
+            .filter(|event| event.kind == Some(firenook_functions_runtime::log::CODEBASE_NODE))
+            .map(|event| {
+                (
+                    event.level,
+                    event.label,
+                    event.message,
+                    event.codebase.unwrap_or_default(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let package = |node: &str| {
+        format!(r#"{{"name":"dispatch","main":"index.js","engines":{{"node":"{node}"}}}}"#)
+    };
+    let running = package(&version.major.to_string());
+    let harness = Harness::start_with_runtime(INDEX, MANIFEST, &[("package.json", &running)], None)
+        .await
+        .expect("the runtime starts");
+    let line = (
+        "INFO".to_owned(),
+        "functions".to_owned(),
+        format!("Using node@{} from host.", version.major),
+        "default".to_owned(),
+    );
+    assert_eq!(said(&harness), std::slice::from_ref(&line));
+    let mut updates = harness.runtime.updates();
+    std::fs::write(
+        harness.directory.path().join("functions/index.js"),
+        format!("{INDEX}// saved again\n"),
+    )
+    .expect("written");
+    tokio::time::timeout(Duration::from_secs(15), updates.changed())
+        .await
+        .expect("a reload")
+        .expect("the runtime runs");
+    assert_eq!(said(&harness), [line.clone(), line]);
+    harness.stop().await;
+    let other = if version.major == 22 { "24" } else { "22" };
+    for asks in [package(other), package(">=22")] {
+        let harness =
+            Harness::start_with_runtime(INDEX, MANIFEST, &[("package.json", &asks)], None)
+                .await
+                .expect("the runtime starts");
+        assert!(said(&harness).is_empty(), "{asks}: {:?}", said(&harness));
+        harness.stop().await;
+    }
+}

@@ -416,6 +416,31 @@ fn function_output_carries_the_keys_the_official_ui_reads() {
 }
 
 #[test]
+fn a_bare_line_reaches_the_feed_as_printed_with_no_emulator_metadata() {
+    let logging = LoggingRuntime::new();
+    let console = Arc::new(ConsoleLines::default());
+    logging.set_console_sink(console.clone());
+    // The official CLI's own labelled line (`firebase-suite-v1`
+    // logging-websocket/3): `data` is empty, whatever the line's service.
+    logging.emit(LogInput {
+        level: LogLevel::Info,
+        service: "functions".to_owned(),
+        message: "Using node@24 from host.".to_owned(),
+        legacy_text: Some("✔  functions: Using node@24 from host.".to_owned()),
+        legacy_emulator: Some("functions"),
+        legacy_bare: true,
+        ..LogInput::default()
+    });
+    assert_eq!(
+        official_records(&logging),
+        [
+            r#"{"level":"info","data":{},"timestamp":"<time>","message":"✔  functions: Using node@24 from host."}"#
+        ]
+    );
+    assert_eq!(console.take()[0].message, "Using node@24 from host.");
+}
+
+#[test]
 fn a_multi_line_functions_line_matches_todays_records_byte_for_byte() {
     let log = DebugLog::new("multiline");
     let logging = LoggingRuntime::new();

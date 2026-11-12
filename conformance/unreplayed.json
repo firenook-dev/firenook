@@ -21,18 +21,6 @@
     },
     {
       "set": "firebase-suite-v1/suite",
-      "case": "ui-config-logging-and-websocket/logging-websocket/1",
-      "issue": 211,
-      "why": "the logging feed's Functions lines differ from firebase-tools'"
-    },
-    {
-      "set": "firebase-suite-v1/suite",
-      "case": "ui-config-logging-and-websocket/logging-websocket/3",
-      "issue": 211,
-      "why": "the logging feed's Functions lines differ from firebase-tools'"
-    },
-    {
-      "set": "firebase-suite-v1/suite",
       "case": "ui-config-logging-and-websocket/ui-api-config",
       "issue": 210,
       "why": "the hub's /emulators and the UI's /api/config list the emulators with other fields than firebase-tools"

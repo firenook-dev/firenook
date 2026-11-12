@@ -478,9 +478,20 @@ pub(crate) fn functions_input(event: &LogEvent) -> LogInput {
     } else {
         event.message.lines().collect()
     };
+    // Each printed line under its label, as the feed has always carried
+    // them, but for the two lines the official feed is recorded carrying
+    // otherwise (`firebase-suite-v1` logging-websocket): the watched folder,
+    // which its emulator logger files without the label, and the Node in
+    // use, which the CLI prints with its own (`✔  functions: …`) and no
+    // emulator metadata.
+    let bare = event.kind == Some(firenook_functions_runtime::log::CODEBASE_NODE);
     let legacy_text = printed
         .iter()
-        .map(|line| format!("{label}: {line}"))
+        .map(|line| match event.kind {
+            Some(firenook_functions_runtime::log::CODEBASE_WATCHING) => (*line).to_owned(),
+            Some(firenook_functions_runtime::log::CODEBASE_NODE) => format!("✔  {label}: {line}"),
+            _ => format!("{label}: {line}"),
+        })
         .collect::<Vec<_>>()
         .join("\n");
     LogInput {
@@ -507,6 +518,7 @@ pub(crate) fn functions_input(event: &LogEvent) -> LogInput {
         }),
         legacy_level: Some(legacy_level(event.terminal_level())),
         legacy_emulator: Some("functions"),
+        legacy_bare: bare,
     }
 }
 

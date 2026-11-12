@@ -351,14 +351,6 @@ const SUITE_BUGS = {
     description: '/api/config lists the functions emulator with a `listen` array, as the hub does',
     expected: [/^body\.functions\.listen: \[\{"address":"127\.0\.0\.1","family":"IPv4","port":"<functions-port>"\}\] where undefined$/u],
   },
-  'ui-config-logging-and-websocket/logging-websocket/1': {
-    description: 'the logging feed words the line "functions: Watching ... for Cloud Functions..."; the official feed has no "functions: " prefix (the emulator is in its metadata)',
-    expected: [/^worded "functions: Watching \\"<suite-root>\/functions\\" for Cloud Functions\.\.\." where "Watching \\"<suite-root>\/functions\\" for Cloud Functions\.\.\."$/u],
-  },
-  'ui-config-logging-and-websocket/logging-websocket/3': {
-    description: 'no "✔  functions: Using node@24 from host." line in the logging feed',
-    expected: [/^not in the feed's \d+ messages: info ✔  functions: Using node@24 from host\.$/u],
-  },
 };
 
 const FUNCTIONS_SET = 'firebase-suite-v1/functions';

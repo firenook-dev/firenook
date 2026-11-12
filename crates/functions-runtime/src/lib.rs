@@ -621,10 +621,17 @@ impl FunctionsRuntime {
                     }
                 ));
             }
-            state.log.info(format!(
-                "Watching \"{}\" for Cloud Functions...",
-                backend.directory().display()
-            ));
+            state.log.record(
+                LogEvent::new(
+                    "INFO",
+                    "functions",
+                    format!(
+                        "Watching \"{}\" for Cloud Functions...",
+                        backend.directory().display()
+                    ),
+                )
+                .with_kind(log::CODEBASE_WATCHING),
+            );
             let _ = state.load_backend(backend, true).await;
         }
         // Start every worker now so the first invocation does not pay the
@@ -1242,7 +1249,10 @@ impl RuntimeState {
     /// Warns, as the official emulator does, when the functions of a user
     /// codebase run on a Node it does not ask for (firebase.json's
     /// `runtime`, else package.json's `engines.node`). Said on the load that
-    /// finds the difference, and again only when the warning changes.
+    /// finds the difference, and again only when the warning changes. A
+    /// codebase that asks for the running Node's major gets the official
+    /// `Using node@<major> from host.` on every load instead, as the
+    /// official runtime says it each time it discovers the functions.
     async fn check_node(&self, backend: &Backend) {
         let directory = backend.directory();
         let runtime = self
@@ -1251,13 +1261,29 @@ impl RuntimeState {
             .iter()
             .find(|codebase| codebase.id == backend.id)
             .and_then(|codebase| codebase.runtime.as_deref());
-        let warning = match node::NodeRequest::of(runtime, &directory) {
-            Some(request) => self
-                .node_version()
-                .await
-                .and_then(|version| request.mismatch(version, &self.relative(&directory))),
+        let request = node::NodeRequest::of(runtime, &directory);
+        let version = match &request {
+            Some(_) => self.node_version().await,
             None => None,
         };
+        let warning = request
+            .as_ref()
+            .zip(version)
+            .and_then(|(request, version)| request.mismatch(version, &self.relative(&directory)));
+        if let Some(version) = version
+            && request
+                .is_some_and(|request| request.range.parse::<u64>().ok() == Some(version.major))
+        {
+            self.log.record(
+                LogEvent::new(
+                    "INFO",
+                    &backend.label(),
+                    format!("Using node@{} from host.", version.major),
+                )
+                .with_codebase(backend.id.clone())
+                .with_kind(log::CODEBASE_NODE),
+            );
+        }
         let mut said = backend
             .node_warning
             .lock()

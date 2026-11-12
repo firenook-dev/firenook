@@ -130,7 +130,8 @@ impl LoggingRuntime {
     pub fn emit(&self, input: LogInput) {
         if input.audience == Audience::Everyone {
             let level = input.legacy_level.unwrap_or_else(|| input.level.legacy());
-            let emulator = input.legacy_emulator.unwrap_or(input.service.as_str());
+            let emulator =
+                (!input.legacy_bare).then(|| input.legacy_emulator.unwrap_or(&input.service));
             let extras = RecordExtras {
                 function: input.function.as_deref(),
                 extension: input.extension.as_deref(),
@@ -139,10 +140,10 @@ impl LoggingRuntime {
             match &input.legacy_text {
                 Some(text) => {
                     for line in printed_lines(text) {
-                        self.official(level, Some(emulator), line, &extras);
+                        self.official(level, emulator, line, &extras);
                     }
                 }
-                None => self.official(level, Some(emulator), &input.message, &extras),
+                None => self.official(level, emulator, &input.message, &extras),
             }
         }
         if let Some(sink) = self.console_sink() {

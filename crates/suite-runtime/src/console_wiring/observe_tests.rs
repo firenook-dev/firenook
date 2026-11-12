@@ -427,6 +427,46 @@ fn a_functions_event_keeps_its_official_text_and_level_and_gains_structure() {
 }
 
 #[test]
+fn the_watched_folder_and_the_node_in_use_are_recorded_as_the_official_feed_carries_them() {
+    use firenook_functions_runtime::log::{CODEBASE_NODE, CODEBASE_WATCHING};
+    // `firebase-suite-v1` logging-websocket/1: the emulator logger's line,
+    // without the label, under the functions emulator.
+    let watching = functions_input(
+        &LogEvent::new(
+            "INFO",
+            "functions",
+            "Watching \"/project/functions\" for Cloud Functions...".to_owned(),
+        )
+        .with_kind(CODEBASE_WATCHING),
+    );
+    assert_eq!(
+        watching.legacy_text.as_deref(),
+        Some("Watching \"/project/functions\" for Cloud Functions...")
+    );
+    assert_eq!(watching.legacy_emulator, Some("functions"));
+    assert!(!watching.legacy_bare);
+    // logging-websocket/3: the CLI's own labelled line, with no metadata.
+    let node = functions_input(
+        &LogEvent::new("INFO", "functions", "Using node@24 from host.".to_owned())
+            .with_kind(CODEBASE_NODE)
+            .with_codebase("default"),
+    );
+    assert_eq!(
+        node.legacy_text.as_deref(),
+        Some("✔  functions: Using node@24 from host.")
+    );
+    assert!(node.legacy_bare);
+    assert_eq!(node.legacy_level, Some("INFO"));
+    // The console keeps them as plain lines of their codebase.
+    for input in [&watching, &node] {
+        assert_eq!(input.kind, None);
+        assert_eq!(input.level, LogLevel::Info);
+    }
+    assert_eq!(node.message, "Using node@24 from host.");
+    assert_eq!(node.codebase.as_deref(), Some("default"));
+}
+
+#[test]
 fn the_official_record_of_a_functions_event_is_todays() {
     let logging = LoggingRuntime::new();
     logging.emit(functions_input(&LogEvent::new(
