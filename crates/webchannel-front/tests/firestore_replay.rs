@@ -189,6 +189,13 @@ const DIFFERS: &[Differs] = &[
     },
     Differs {
         set: JAVA_WEBCHANNEL,
+        case: "multiple-inequality-query/12",
+        compared: Compared::Answer,
+        reason: "a query ordered by more fields after `__name__` is refused with production's message, `Order by clause cannot contain more fields after the key key` (webchannel-v8/production-cloud-firestore multiple-inequality-query/8); Java 1.22.0 says `order by clause cannot contain more fields after the key`",
+        instead: Instead::Production("multiple-inequality-query/8"),
+    },
+    Differs {
+        set: JAVA_WEBCHANNEL,
         case: "reserved-resource-id-error/2",
         compared: Compared::Answer,
         reason: "a query target whose parent is under a reserved resource id is added, then removed with INVALID_ARGUMENT, as production (webchannel-v8/production-cloud-firestore reserved-resource-id-error/2 adds target 1002 before removing it); Java 1.22.0 removes it without adding it",
@@ -227,11 +234,6 @@ const DIFFERS: &[Differs] = &[
 ];
 
 const BUG_CANDIDATES: &[Bug] = &[
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "multiple-inequality-query/8",
-        description: "the refusal of an order by more fields after `__name__` says Java's `order by clause cannot contain more fields after the key`, where production says `Order by clause cannot contain more fields after the key key`",
-    },
     Bug {
         set: JAVA_WEBCHANNEL,
         case: "write-missing-update-error/4",

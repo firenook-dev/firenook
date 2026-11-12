@@ -201,12 +201,6 @@
     },
     {
       "set": "webchannel-v8/production-cloud-firestore",
-      "case": "multiple-inequality-query/8",
-      "issue": 200,
-      "why": "the refusal of an order by after __name__ is the Java emulator's text, not production's"
-    },
-    {
-      "set": "webchannel-v8/production-cloud-firestore",
       "case": "write-missing-update-error/4",
       "issue": 201,
       "why": "a Write stream update of a missing document fails with Firenook's message and envelope, not production's"
