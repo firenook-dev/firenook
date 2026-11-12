@@ -1887,3 +1887,38 @@ behaviour was the question.
 - [x] The CLI's `next` stayed on 0.2.1 through 0.2.2's life: 0.2.3 followed
   within days, and `next` moves to it with its publication (trusted publishing
   cannot move a tag, so that move is by hand).
+
+## 0.2.3, the Indexes page, three reported bugs fixed, and a container image
+
+- [x] Firestore → Indexes: the indexes the app's queries needed that
+  `firestore.indexes.json` does not declare, added or removed from the console
+  and written into the file itself (PR #176), and `--strict-indexes` through
+  `npx firenook` (PR #173).
+- [x] Three reported bugs, each reproduced against the official emulator
+  first: a lost update in transactions that read a missing document (#169,
+  PR #177), Admin SDK uploads with no download URL (#174, PR #178) and
+  blocking functions missing from Auth's project config (#175, PR #179).
+- [x] A container image, `ghcr.io/firenook-dev/firenook`, for linux/amd64 and
+  linux/arm64, built by the release from the version it published and tried
+  on every pull request that changes it (#145, PR #180).
+- [x] The conformance record: every answer recorded from the official
+  emulator or from production, with what the replays check, kept by CI and
+  attached to each release (#156, PR #182), with a ruleset and 29 cases
+  contributed by @10eputzen (PR #183).
+- [x] Rust, conformance and GitHub Actions dependency updates (PR #165, #167
+  and #171).
+- [x] Published as `firenook@0.2.3` with `@firenook/cli-<platform>` ×5 (release
+  PR #184, tag `npm-v0.2.3` on 04a7b98, engine 2294132). Release run
+  43155723448, dispatched with `latest` and approved on 2026-11-12, passed
+  every gate after one re-run of the darwin-x64 build, whose sign-in latency
+  test failed on its runner, and published all six packages in one go: the
+  CLI on `latest`, the native packages on `next`. Registry integrity equals
+  the release assets for all six, and registry signatures and provenance
+  attestations verify on a fresh install. From the registry, `firenook@0.2.3`
+  answered the three reported bugs' probes as the fixes intend: #174's and
+  #175's as firebase-tools 15.34.0 does, and #169's two transactions with
+  one commit and one abort. The image is public as `0.2.3` and `latest`, the
+  MCP Registry lists 0.2.3, and the GitHub release is the repository's
+  latest.
+- [x] The CLI's `next` moved to 0.2.3 by hand on 2026-11-12 (trusted publishing
+  cannot move a tag), so `latest` and `next` are both 0.2.3.
