@@ -713,6 +713,12 @@ jobs:
             --profiles tasks \
             --fixture fixtures/tasks-v1/emulator-programs.json \
             --output "$RUNNER_TEMP/firenook-tasks-replay.json"
+      - name: Replay the suite's hub, UI, start-up, restart and Functions start-up recordings
+        if: matrix.key == 'functions'
+        env:
+          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
+          FIRENOOK_BINARY: ${{ github.workspace }}/target/debug/firenook
+        run: node --test conformance/test/suite-replay.test.mjs
       - name: Replay the Auth oracle corpus against the standalone Auth service
         if: matrix.key == 'auth-pubsub'
         run: |
