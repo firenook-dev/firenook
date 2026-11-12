@@ -1054,8 +1054,7 @@ pub(crate) fn format_time(time: OffsetDateTime) -> String {
 /// [`format_time`] of a time in milliseconds since the Unix epoch.
 pub(crate) fn format_millis(millis: i64) -> String {
     OffsetDateTime::from_unix_timestamp_nanos(i128::from(millis) * 1_000_000)
-        .map(format_time)
-        .unwrap_or_default()
+        .map_or_default(format_time)
 }
 
 /// Milliseconds since the Unix epoch, now.

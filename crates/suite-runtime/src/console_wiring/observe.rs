@@ -799,8 +799,7 @@ pub(crate) fn denial_input(denial: &Denial, file: Option<&str>) -> LogInput {
     let reason = denial
         .error
         .as_deref()
-        .map(|error| format!(": {error}"))
-        .unwrap_or_default();
+        .map_or_default(|error| format!(": {error}"));
     let (kind, level, message) = match denial.origin {
         DenialOrigin::App => (
             kinds::RULES_DENIED,

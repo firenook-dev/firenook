@@ -67,13 +67,12 @@ pub fn set_account_info_impl(
     let delete_attributes: Vec<String> = body
         .get("deleteAttribute")
         .and_then(JsonValue::as_array)
-        .map(|list| {
+        .map_or_default(|list| {
             list.iter()
                 .filter_map(JsonValue::as_str)
                 .map(str::to_owned)
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     for attribute in &delete_attributes {
         if attribute == "PROVIDER" || attribute == "RAW_USER_INFO" {
             return Err(ApiError::not_implemented(format!(
@@ -270,13 +269,12 @@ pub fn set_account_info_impl(
         let delete_provider: Vec<String> = body
             .get("deleteProvider")
             .and_then(JsonValue::as_array)
-            .map(|list| {
+            .map_or_default(|list| {
                 list.iter()
                     .filter_map(JsonValue::as_str)
                     .map(str::to_owned)
                     .collect()
-            })
-            .unwrap_or_default();
+            });
         if delete_provider
             .iter()
             .any(|provider| provider == PROVIDER_PASSWORD)
@@ -328,15 +326,14 @@ pub fn set_account_info_impl(
     let delete_providers: Vec<String> = body
         .get("deleteProvider")
         .and_then(JsonValue::as_array)
-        .map(|list| {
+        .map_or_default(|list| {
             list.iter()
                 .filter_map(JsonValue::as_str)
                 .map(str::to_owned)
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     let local_id = str_field(&user, "localId").unwrap_or_default().to_owned();
-    let upserts: Vec<ProviderInfo> = link.map(|info| vec![info.clone()]).unwrap_or_default();
+    let upserts: Vec<ProviderInfo> = link.map_or_default(|info| vec![info.clone()]);
     user = scope.project().update_user_by_local_id(
         &local_id,
         &updates,

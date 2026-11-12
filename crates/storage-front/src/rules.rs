@@ -627,17 +627,13 @@ impl NativeRules {
 
     /// The rulesets that governed `scope`, newest first, at most fifty.
     pub(crate) fn history(&self, scope: &RulesScope) -> Vec<InstalledVersion> {
-        self.read()
-            .versions
-            .get(scope)
-            .map(|history| {
-                history
-                    .iter()
-                    .rev()
-                    .map(|version| (**version).clone())
-                    .collect()
-            })
-            .unwrap_or_default()
+        self.read().versions.get(scope).map_or_default(|history| {
+            history
+                .iter()
+                .rev()
+                .map(|version| (**version).clone())
+                .collect()
+        })
     }
 
     /// The file `firebase.json` names for `scope`.
@@ -685,8 +681,7 @@ impl NativeRules {
         self.read()
             .file_problems
             .get(scope)
-            .map(|problems| problems.diagnostics.clone())
-            .unwrap_or_default()
+            .map_or_default(|problems| problems.diagnostics.clone())
     }
 
     pub(crate) fn subscribe(&self) -> broadcast::Receiver<StorageRulesEvent> {

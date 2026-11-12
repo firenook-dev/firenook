@@ -279,12 +279,8 @@ impl DecisionLog {
             allows: decided
                 .result
                 .zip(decided.rules)
-                .map(|((_, trace), rules)| allows(rules, trace))
-                .unwrap_or_default(),
-            rules_hash: decided
-                .rules
-                .map(|rules| rules.hash.clone())
-                .unwrap_or_default(),
+                .map_or_default(|((_, trace), rules)| allows(rules, trace)),
+            rules_hash: decided.rules.map_or_default(|rules| rules.hash.clone()),
             no_ruleset: decided.rules.is_none(),
             proposed_size: proposed.map(|object| u64::try_from(object.size).unwrap_or(0)),
             proposed_content_type: proposed.and_then(|object| object.content_type.clone()),

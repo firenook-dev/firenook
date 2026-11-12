@@ -957,7 +957,7 @@ fn finished_detail(
         attempts: finished.attempts.records().cloned().collect(),
         omitted_attempts: finished.attempts.omitted,
         retry_plan: Vec::new(),
-        stops: queue.map(|queue| stops(&queue.config)).unwrap_or_default(),
+        stops: queue.map_or_default(|queue| stops(&queue.config)),
         finished: Some(FinishedView {
             outcome: finished.outcome,
             at: finished.at,

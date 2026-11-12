@@ -976,8 +976,7 @@ async fn export_users(
         "auth-users-{project}{}-{:04}{:02}{:02}-{:02}{:02}.{}",
         tenant
             .as_ref()
-            .map(|tenant| format!("-{tenant}"))
-            .unwrap_or_default(),
+            .map_or_default(|tenant| format!("-{tenant}")),
         stamp.year(),
         u8::from(stamp.month()),
         stamp.day(),

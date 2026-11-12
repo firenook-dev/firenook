@@ -366,8 +366,7 @@ pub(crate) fn absent_reasons(
 /// context.
 pub(crate) fn unsupported(launch: Option<&LaunchContext>) -> Vec<UnsupportedService> {
     launch
-        .map(|launch| launch.skipped.as_slice())
-        .unwrap_or_default()
+        .map_or_default(|launch| launch.skipped.as_slice())
         .iter()
         .map(|name| {
             let label = match name.as_str() {

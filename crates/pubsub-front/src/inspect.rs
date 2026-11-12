@@ -764,9 +764,7 @@ impl Broker {
                     encoding: encoding_name(bound.map_or(Encoding::Json, |bound| bound.encoding)),
                     first_revision_id: non_empty(&settings.first_revision_id),
                     last_revision_id: non_empty(&settings.last_revision_id),
-                    bound_revision_id: bound
-                        .map(|bound| bound.revision_id.clone())
-                        .unwrap_or_default(),
+                    bound_revision_id: bound.map_or_default(|bound| bound.revision_id.clone()),
                 }
             });
             let view = TopicView {
@@ -1714,7 +1712,7 @@ fn live_members<'a>(
     state
         .generations
         .get(&entry.generation)
-        .map(|generation| {
+        .map_or_default(|generation| {
             generation
                 .members
                 .iter()
@@ -1724,7 +1722,6 @@ fn live_members<'a>(
                 })
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 fn backlog_of(entry: &SubscriptionEntry) -> u64 {
@@ -1825,8 +1822,7 @@ fn subscription_view(
         summary: subscription_summary(consumers, name, entry),
         push_endpoint: push.and_then(|config| non_empty(&config.push_endpoint)),
         push_attributes: push
-            .map(|config| config.attributes.clone().into_iter().collect())
-            .unwrap_or_default(),
+            .map_or_default(|config| config.attributes.clone().into_iter().collect()),
         ack_deadline_seconds: subscription.ack_deadline_seconds,
         retain_acked: subscription.retain_acked_messages,
         retention_seconds: duration_seconds(subscription.message_retention_duration.as_ref())
@@ -1882,8 +1878,7 @@ fn schema_uses(state: &State, schema: &str) -> Vec<SchemaUse> {
                 bound_revision_id: entry
                     .schema
                     .as_ref()
-                    .map(|bound| bound.revision_id.clone())
-                    .unwrap_or_default(),
+                    .map_or_default(|bound| bound.revision_id.clone()),
             })
         })
         .collect()

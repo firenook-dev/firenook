@@ -247,15 +247,13 @@ fn parameter_files(directory: &Path, extensions: &ExtensionsControl) -> Vec<Path
         .iter()
         .map(|(id, _)| id.clone())
         .collect();
-    std::fs::read_dir(directory)
-        .map(|entries| {
-            entries
-                .filter_map(Result::ok)
-                .map(|entry| entry.path())
-                .filter(|path| is_parameter_file(path, &instances))
-                .collect()
-        })
-        .unwrap_or_default()
+    std::fs::read_dir(directory).map_or_default(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| is_parameter_file(path, &instances))
+            .collect()
+    })
 }
 
 #[cfg(test)]

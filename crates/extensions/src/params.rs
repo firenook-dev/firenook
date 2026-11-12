@@ -169,13 +169,12 @@ pub fn validate(param: &Value, value: Option<&str>) -> Option<String> {
     let options: Vec<&str> = param
         .get("options")
         .and_then(Value::as_array)
-        .map(|options| {
+        .map_or_default(|options| {
             options
                 .iter()
                 .filter_map(|option| option.get("value").and_then(Value::as_str))
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     match kind.as_str() {
         "select" if !options.is_empty() && !options.contains(&value) => {
             return Some(format!("Choose one of: {}.", options.join(", ")));

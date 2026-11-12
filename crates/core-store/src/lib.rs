@@ -3101,9 +3101,7 @@ fn apply_write(
         } => {
             let previous = documents.get(key);
             validate_precondition(key, previous, *precondition)?;
-            let mut next_fields = previous
-                .map(|document| document.fields.clone())
-                .unwrap_or_default();
+            let mut next_fields = previous.map_or_default(|document| document.fields.clone());
 
             for path in update_mask {
                 if let Some(value) = nested_value(fields, path.segments()) {

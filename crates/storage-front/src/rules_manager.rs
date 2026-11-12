@@ -375,20 +375,14 @@ impl StorageRulesHandle {
             rules: retained
                 .rules
                 .as_ref()
-                .map(|rules| rules.source().to_owned())
-                .unwrap_or_default(),
+                .map_or_default(|rules| rules.source().to_owned()),
             rules_hash: record.rules_hash.clone(),
-            claims: retained
-                .request
-                .auth
-                .as_ref()
-                .map(|auth| {
-                    auth.token
-                        .iter()
-                        .map(|(key, value)| (key.clone(), dry_run::value_json(value)))
-                        .collect()
-                })
-                .unwrap_or_default(),
+            claims: retained.request.auth.as_ref().map_or_default(|auth| {
+                auth.token
+                    .iter()
+                    .map(|(key, value)| (key.clone(), dry_run::value_json(value)))
+                    .collect()
+            }),
             request,
         })
     }

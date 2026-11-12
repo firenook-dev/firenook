@@ -1366,8 +1366,7 @@ impl Broker {
                     .topics
                     .get(topic)
                     .and_then(|entry| entry.topic.schema_settings.as_ref())
-                    .map(|settings| settings.schema.clone())
-                    .unwrap_or_default();
+                    .map_or_default(|settings| settings.schema.clone());
                 message.attributes.insert(
                     "googclient_schemaencoding".to_owned(),
                     match bound.encoding {
@@ -1801,8 +1800,7 @@ impl Broker {
                         .subscription
                         .push_config
                         .as_ref()
-                        .map(|config| config.push_endpoint.clone())
-                        .unwrap_or_default();
+                        .map_or_default(|config| config.push_endpoint.clone());
                     let pushes: Vec<u64> = ctx
                         .entry
                         .index
@@ -2477,8 +2475,7 @@ impl State {
         }
         let members: Vec<String> = generations
             .get(&entry.generation)
-            .map(|generation| generation.members.iter().cloned().collect())
-            .unwrap_or_default();
+            .map_or_default(|generation| generation.members.iter().cloned().collect());
         let now = Instant::now();
         for name in &members {
             self.with_subscription(name, |ctx| {
@@ -2516,17 +2513,11 @@ impl State {
             );
             copy.attributes.insert(
                 "CloudPubSubDeadLetterSourceSubscription".to_owned(),
-                parsed
-                    .as_ref()
-                    .map(|name| name.id.clone())
-                    .unwrap_or_default(),
+                parsed.as_ref().map_or_default(|name| name.id.clone()),
             );
             copy.attributes.insert(
                 "CloudPubSubDeadLetterSourceSubscriptionProject".to_owned(),
-                parsed
-                    .as_ref()
-                    .map(|name| name.project.clone())
-                    .unwrap_or_default(),
+                parsed.as_ref().map_or_default(|name| name.project.clone()),
             );
             copy.attributes.insert(
                 "CloudPubSubDeadLetterSourceTopicPublishTime".to_owned(),
@@ -3152,14 +3143,13 @@ pub fn push_envelope(subscription: &str, message: &StoredMessage) -> String {
         .message
         .publish_time
         .as_ref()
-        .map(|stamp| {
+        .map_or_default(|stamp| {
             rfc3339_millis(
                 UNIX_EPOCH
                     + Duration::from_secs(u64::try_from(stamp.seconds).unwrap_or(0))
                     + Duration::from_nanos(u64::try_from(stamp.nanos).unwrap_or(0)),
             )
-        })
-        .unwrap_or_default();
+        });
     let data = base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
         &message.message.data,
@@ -4031,25 +4021,21 @@ impl Broker {
     /// Message ids a subscription tracks, by state name, for tests.
     pub(crate) fn tracked_ids(&self, name: &str) -> BTreeMap<u64, &'static str> {
         let state = lock(&self.inner.state);
-        state
-            .subscriptions
-            .get(name)
-            .map(|entry| {
-                entry
-                    .messages
-                    .iter()
-                    .map(|(id, tracked)| {
-                        let state = match tracked.state {
-                            MessageState::Available => "available",
-                            MessageState::Leased { .. } => "leased",
-                            MessageState::Pushing { .. } => "pushing",
-                            MessageState::Acked => "acked",
-                        };
-                        (*id, state)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+        state.subscriptions.get(name).map_or_default(|entry| {
+            entry
+                .messages
+                .iter()
+                .map(|(id, tracked)| {
+                    let state = match tracked.state {
+                        MessageState::Available => "available",
+                        MessageState::Leased { .. } => "leased",
+                        MessageState::Pushing { .. } => "pushing",
+                        MessageState::Acked => "acked",
+                    };
+                    (*id, state)
+                })
+                .collect()
+        })
     }
 }
 

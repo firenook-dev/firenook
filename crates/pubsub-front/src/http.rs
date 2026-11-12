@@ -99,16 +99,13 @@ fn mask_paths(
     if let Some(mask) = mask {
         return mask.paths;
     }
-    query
-        .get("updateMask")
-        .map(|value| {
-            value
-                .split(',')
-                .filter(|path| !path.is_empty())
-                .map(snake_case)
-                .collect()
-        })
-        .unwrap_or_default()
+    query.get("updateMask").map_or_default(|value| {
+        value
+            .split(',')
+            .filter(|path| !path.is_empty())
+            .map(snake_case)
+            .collect()
+    })
 }
 
 const BOOL_FIELDS: &[&str] = &[
@@ -183,13 +180,11 @@ fn percent_decode(path: &str) -> String {
 }
 
 fn query_map(query: Option<&str>) -> BTreeMap<String, String> {
-    query
-        .map(|text| {
-            url::form_urlencoded::parse(text.as_bytes())
-                .map(|(key, value)| (key.into_owned(), value.into_owned()))
-                .collect()
-        })
-        .unwrap_or_default()
+    query.map_or_default(|text| {
+        url::form_urlencoded::parse(text.as_bytes())
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect()
+    })
 }
 
 fn page_size(query: &BTreeMap<String, String>) -> i32 {

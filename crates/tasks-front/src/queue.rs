@@ -1454,6 +1454,5 @@ pub fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_millis())
-        .map(|millis| u64::try_from(millis).unwrap_or(u64::MAX))
-        .unwrap_or_default()
+        .map_or_default(|millis| u64::try_from(millis).unwrap_or(u64::MAX))
 }

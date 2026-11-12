@@ -103,14 +103,13 @@ fn info(id: &str, tenant: &TenantState) -> TenantInfo {
         mfa_providers: mfa
             .and_then(|mfa| mfa.get("enabledProviders"))
             .and_then(JsonValue::as_array)
-            .map(|providers| {
+            .map_or_default(|providers| {
                 providers
                     .iter()
                     .filter_map(JsonValue::as_str)
                     .map(str::to_owned)
                     .collect()
-            })
-            .unwrap_or_default(),
+            }),
     }
 }
 

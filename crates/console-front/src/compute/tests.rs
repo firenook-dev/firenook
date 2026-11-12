@@ -388,16 +388,13 @@ impl Suite {
                 ignore: Vec::new(),
                 config_dir: None,
             }],
-            extensions: loaded
-                .as_ref()
-                .map(|(_, outcome)| {
-                    outcome
-                        .loaded
-                        .iter()
-                        .map(|extension| extension.backend.clone())
-                        .collect()
-                })
-                .unwrap_or_default(),
+            extensions: loaded.as_ref().map_or_default(|(_, outcome)| {
+                outcome
+                    .loaded
+                    .iter()
+                    .map(|extension| extension.backend.clone())
+                    .collect()
+            }),
             inspect: None,
         };
         let runtime = FunctionsRuntime::start_with(

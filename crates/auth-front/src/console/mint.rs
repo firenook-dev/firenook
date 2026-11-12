@@ -435,8 +435,7 @@ impl Runtime {
                     session_claims: outcome
                         .extra_claims
                         .as_ref()
-                        .map(|claims| claims.keys().cloned().collect())
-                        .unwrap_or_default(),
+                        .map_or_default(|claims| claims.keys().cloned().collect()),
                     call: call.id(),
                 };
                 call.finish(self, None);

@@ -21,13 +21,12 @@ pub const SESSION_COOKIE_MAX_VALID_DURATION: i64 = 14 * 24 * 60 * 60;
 fn string_list(body: &JsonMap<String, JsonValue>, field: &str) -> Vec<String> {
     body.get(field)
         .and_then(JsonValue::as_array)
-        .map(|list| {
+        .map_or_default(|list| {
             list.iter()
                 .filter_map(JsonValue::as_str)
                 .map(str::to_owned)
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 pub fn lookup(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiError> {

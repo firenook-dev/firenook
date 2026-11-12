@@ -161,7 +161,7 @@ fn stat(root: &Path, entry: &fs::DirEntry, junk: bool) -> Result<Found, String> 
         .to_str()
         .ok_or_else(|| "seed paths must be UTF-8".to_owned())?
         .to_owned();
-    let modified = metadata.modified().map(nanos).unwrap_or_default();
+    let modified = metadata.modified().map_or_default(nanos);
     Ok(Found {
         path: relative,
         size: metadata.len(),

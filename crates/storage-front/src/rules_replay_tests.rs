@@ -125,21 +125,15 @@ fn firestore_value(value: &JsonValue) -> Value {
         Value::List(
             value["values"]
                 .as_array()
-                .map(|values| values.iter().map(firestore_value).collect())
-                .unwrap_or_default(),
+                .map_or_default(|values| values.iter().map(firestore_value).collect()),
         )
     } else if let Some(value) = field.get("mapValue") {
-        Value::Map(
-            value["fields"]
-                .as_object()
-                .map(|fields| {
-                    fields
-                        .iter()
-                        .map(|(key, value)| (key.clone(), firestore_value(value)))
-                        .collect()
-                })
-                .unwrap_or_default(),
-        )
+        Value::Map(value["fields"].as_object().map_or_default(|fields| {
+            fields
+                .iter()
+                .map(|(key, value)| (key.clone(), firestore_value(value)))
+                .collect()
+        }))
     } else {
         Value::Null
     }

@@ -212,8 +212,7 @@ impl CallError {
             .and_then(|error| error.get("message"))
             .or_else(|| parsed.as_ref().and_then(|value| value.get("message")))
             .and_then(JsonValue::as_str)
-            .map(str::to_owned)
-            .unwrap_or_default();
+            .map_or_default(str::to_owned);
         let declared = error
             .and_then(|error| error.get("status"))
             .and_then(JsonValue::as_str);

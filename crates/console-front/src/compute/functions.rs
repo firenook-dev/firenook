@@ -742,8 +742,7 @@ async fn detail(
     let environment = runtime
         .environment(&view.codebase)
         .await
-        .map(environment_of)
-        .unwrap_or_default();
+        .map_or_default(environment_of);
     let suite = state.parts.suite();
     let mut summary = summary_of(&view, counters.clone(), suite, &state.project);
     let queues = extension_task_queues(state.control().ok().as_ref()).await;
@@ -1615,21 +1614,18 @@ fn string_at(value: &Value, key: &str) -> Option<String> {
 }
 
 fn string_map(value: Option<&Value>) -> BTreeMap<String, String> {
-    value
-        .and_then(Value::as_object)
-        .map(|map| {
-            map.iter()
-                .filter_map(|(key, value)| {
-                    let value = match value {
-                        Value::String(text) => text.clone(),
-                        Value::Null => return None,
-                        other => other.to_string(),
-                    };
-                    Some((key.clone(), value))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    value.and_then(Value::as_object).map_or_default(|map| {
+        map.iter()
+            .filter_map(|(key, value)| {
+                let value = match value {
+                    Value::String(text) => text.clone(),
+                    Value::Null => return None,
+                    other => other.to_string(),
+                };
+                Some((key.clone(), value))
+            })
+            .collect()
+    })
 }
 
 /// A definition's trigger, flattened for reading.
@@ -1716,14 +1712,13 @@ pub(crate) fn trigger_of(definition: &Value, project: &str) -> FunctionTrigger {
         trigger.invoker = https
             .get("invoker")
             .and_then(Value::as_array)
-            .map(|invokers| {
+            .map_or_default(|invokers| {
                 invokers
                     .iter()
                     .filter_map(Value::as_str)
                     .map(str::to_owned)
                     .collect()
-            })
-            .unwrap_or_default();
+            });
     }
     trigger
 }

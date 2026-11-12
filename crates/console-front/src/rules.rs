@@ -459,12 +459,10 @@ impl RulesEditor {
         };
         let hash = current
             .as_ref()
-            .map(|version| version.hash.clone())
-            .unwrap_or_default();
+            .map_or_default(|version| version.hash.clone());
         let source = current
             .as_ref()
-            .map(|version| version.source.to_string())
-            .unwrap_or_default();
+            .map_or_default(|version| version.source.to_string());
         Ok(RulesDocument {
             database: database_id.to_owned(),
             enforced: current.is_some(),
@@ -475,8 +473,7 @@ impl RulesEditor {
             file_problems: self
                 .rules
                 .file_problems(&database)
-                .map(|problems| diagnostics(&problems))
-                .unwrap_or_default(),
+                .map_or_default(|problems| diagnostics(&problems)),
             governed_by: self.rules.stand_in_for(&database).map(|governor| {
                 let database = governor.database_id().to_owned();
                 RulesGovernor {
@@ -869,8 +866,7 @@ impl RulesNews {
             problems: self
                 .rules
                 .file_problems(&self.database)
-                .map(|problems| diagnostics(&problems))
-                .unwrap_or_default(),
+                .map_or_default(|problems| diagnostics(&problems)),
         }
     }
 

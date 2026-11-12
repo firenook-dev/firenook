@@ -265,8 +265,7 @@ pub fn mfa_pending(
     let enrollments: Vec<JsonValue> = user
         .get("mfaInfo")
         .and_then(JsonValue::as_array)
-        .map(|list| list.iter().map(redact_mfa_info).collect())
-        .unwrap_or_default();
+        .map_or_default(|list| list.iter().map(redact_mfa_info).collect());
     response.insert("mfaInfo".to_owned(), JsonValue::Array(enrollments));
     response
 }

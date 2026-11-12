@@ -805,8 +805,7 @@ impl FirestoreService {
         let next_page_token = if has_more {
             documents
                 .last()
-                .map(|document| document.key.to_string())
-                .unwrap_or_default()
+                .map_or_default(|document| document.key.to_string())
         } else {
             String::new()
         };
@@ -2574,10 +2573,7 @@ fn paginate_keys(
     let has_more = sorted.len() > page_size;
     sorted.truncate(page_size);
     let next_page_token = if has_more {
-        sorted
-            .last()
-            .map(|(key, _)| key.to_string())
-            .unwrap_or_default()
+        sorted.last().map_or_default(|(key, _)| key.to_string())
     } else {
         String::new()
     };

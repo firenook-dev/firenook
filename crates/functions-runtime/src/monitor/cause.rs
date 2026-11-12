@@ -583,14 +583,13 @@ fn pubsub(
     }
     let topic = topic
         .or_else(|| definition_resource(input.definition))
-        .map(|topic| {
+        .map_or_default(|topic| {
             if topic.starts_with("projects/") {
                 topic
             } else {
                 format!("projects/{}/topics/{topic}", input.project)
             }
-        })
-        .unwrap_or_default();
+        });
     let summary = match &message_id {
         Some(id) => format!("message {id} on {}", short_topic(&topic)),
         None => format!("message on {}", short_topic(&topic)),

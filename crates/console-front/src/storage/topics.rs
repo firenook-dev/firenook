@@ -345,16 +345,14 @@ impl RulesNews {
     fn hash(&self) -> String {
         self.rules
             .current(&self.scope)
-            .map(|installed| installed.hash.clone())
-            .unwrap_or_default()
+            .map_or_default(|installed| installed.hash.clone())
     }
 
     fn changed(&mut self) -> Option<TopicEvent> {
         let current = self.rules.current(&self.scope);
         let hash = current
             .as_ref()
-            .map(|installed| installed.hash.clone())
-            .unwrap_or_default();
+            .map_or_default(|installed| installed.hash.clone());
         if hash == self.seen {
             return None;
         }
@@ -438,7 +436,7 @@ impl LiveTopic for RulesTopic {
         let mut news = RulesNews {
             rules: self.rules.clone(),
             scope,
-            seen: after.map(str::to_owned).unwrap_or_default(),
+            seen: after.map_or_default(str::to_owned),
         };
         let mut first = Vec::new();
         if after.is_some() {

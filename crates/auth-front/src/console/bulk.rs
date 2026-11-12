@@ -455,16 +455,13 @@ impl Runtime {
     ) -> Result<u64, ConsoleError> {
         let scopes: Vec<(Option<String>, IndexSnapshot)> = {
             let data = lock(&self.inner.data);
-            data.projects
-                .get(project)
-                .map(|agent| {
-                    std::iter::once((None, agent.project.user_index().snapshot()))
-                        .chain(agent.tenants.iter().map(|(id, tenant)| {
-                            (Some(id.clone()), tenant.project.user_index().snapshot())
-                        }))
-                        .collect()
-                })
-                .unwrap_or_default()
+            data.projects.get(project).map_or_default(|agent| {
+                std::iter::once((None, agent.project.user_index().snapshot()))
+                    .chain(agent.tenants.iter().map(|(id, tenant)| {
+                        (Some(id.clone()), tenant.project.user_index().snapshot())
+                    }))
+                    .collect()
+            })
         };
         let total: u64 = scopes.iter().map(|(_, index)| index.len()).sum();
         progress.total(total);

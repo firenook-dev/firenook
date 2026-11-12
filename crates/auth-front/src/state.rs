@@ -1050,13 +1050,12 @@ fn continue_url_of(link: &str) -> Option<String> {
 pub fn provider_infos(user: &UserRecord) -> Vec<ProviderInfo> {
     user.get("providerUserInfo")
         .and_then(JsonValue::as_array)
-        .map(|infos| {
+        .map_or_default(|infos| {
             infos
                 .iter()
                 .filter_map(|info| info.as_object().cloned())
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 fn provider_infos_of(props: &UserRecord) -> Vec<ProviderInfo> {
@@ -1067,12 +1066,11 @@ fn provider_infos_of(props: &UserRecord) -> Vec<ProviderInfo> {
 pub fn passkeys(user: &UserRecord) -> Vec<JsonMap<String, JsonValue>> {
     user.get("passkeyInfo")
         .and_then(JsonValue::as_array)
-        .map(|keys| {
+        .map_or_default(|keys| {
             keys.iter()
                 .filter_map(|key| key.as_object().cloned())
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 fn provider_emails(user: &UserRecord) -> BTreeSet<String> {
@@ -1643,14 +1641,13 @@ impl<'a> Scope<'a> {
                 let providers = mfa
                     .get("enabledProviders")
                     .and_then(JsonValue::as_array)
-                    .map(|values| {
+                    .map_or_default(|values| {
                         values
                             .iter()
                             .filter_map(JsonValue::as_str)
                             .map(str::to_owned)
                             .collect()
-                    })
-                    .unwrap_or_default();
+                    });
                 (state, providers)
             }
         }

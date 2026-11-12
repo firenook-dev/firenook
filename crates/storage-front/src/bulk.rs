@@ -703,8 +703,7 @@ impl StorageConsoleApi {
         let patch = request
             .metadata
             .as_ref()
-            .map(MetadataPatch::to_json)
-            .unwrap_or_default();
+            .map_or_default(MetadataPatch::to_json);
         let guard = state.mutation.lock().await;
         lock(&state.inner).begin_batch();
         let mut pending = Pending::default();

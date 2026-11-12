@@ -120,10 +120,7 @@ impl Publisher for PubsubRuntime {
         request: Request<UpdateTopicRequest>,
     ) -> Result<Response<Topic>, Status> {
         let request = request.into_inner();
-        let paths = request
-            .update_mask
-            .map(|mask| mask.paths)
-            .unwrap_or_default();
+        let paths = request.update_mask.map_or_default(|mask| mask.paths);
         Ok(Response::new(
             self.broker().update_topic(request.topic, &paths)?,
         ))
@@ -248,10 +245,7 @@ impl Subscriber for PubsubRuntime {
         request: Request<UpdateSubscriptionRequest>,
     ) -> Result<Response<Subscription>, Status> {
         let request = request.into_inner();
-        let paths = request
-            .update_mask
-            .map(|mask| mask.paths)
-            .unwrap_or_default();
+        let paths = request.update_mask.map_or_default(|mask| mask.paths);
         Ok(Response::new(
             self.broker()
                 .update_subscription(request.subscription, &paths)?,
@@ -368,11 +362,10 @@ impl Subscriber for PubsubRuntime {
             // nothing is sent while there is nothing to deliver.
             let properties = broker
                 .get_subscription(&subscription)
-                .map(|found| SubscriptionProperties {
+                .map_or_default(|found| SubscriptionProperties {
                     exactly_once_delivery_enabled: found.enable_exactly_once_delivery,
                     message_ordering_enabled: found.enable_message_ordering,
-                })
-                .unwrap_or_default();
+                });
             let mut changes = broker.watch();
             loop {
                 match broker.pull(&subscription, 1000) {

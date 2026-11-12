@@ -173,7 +173,7 @@ impl Definition {
         self.json
             .get("secretEnvironmentVariables")
             .and_then(Value::as_array)
-            .map(|entries| {
+            .map_or_default(|entries| {
                 entries
                     .iter()
                     .filter_map(|entry| {
@@ -183,7 +183,6 @@ impl Definition {
                     })
                     .collect()
             })
-            .unwrap_or_default()
     }
 
     /// `getSignatureType`.
@@ -486,31 +485,27 @@ pub(crate) fn declared_params(manifest: &serde_norway::Value) -> Vec<DeclaredPar
     else {
         return Vec::new();
     };
-    params
-        .as_array()
-        .map(|entries| {
-            entries
-                .iter()
-                .filter_map(|entry| {
-                    let name = entry.get("name")?.as_str()?.to_owned();
-                    let text =
-                        |key: &str| entry.get(key).and_then(Value::as_str).map(str::to_owned);
-                    Some(DeclaredParam {
-                        name,
-                        param_type: text("type").unwrap_or_else(|| "string".to_owned()),
-                        default: entry
-                            .get("default")
-                            .filter(|value| !value.is_null())
-                            .cloned(),
-                        label: text("label"),
-                        description: text("description"),
-                        input: entry.get("input").filter(|value| !value.is_null()).cloned(),
-                        delimiter: text("delimiter"),
-                    })
+    params.as_array().map_or_default(|entries| {
+        entries
+            .iter()
+            .filter_map(|entry| {
+                let name = entry.get("name")?.as_str()?.to_owned();
+                let text = |key: &str| entry.get(key).and_then(Value::as_str).map(str::to_owned);
+                Some(DeclaredParam {
+                    name,
+                    param_type: text("type").unwrap_or_else(|| "string".to_owned()),
+                    default: entry
+                        .get("default")
+                        .filter(|value| !value.is_null())
+                        .cloned(),
+                    label: text("label"),
+                    description: text("description"),
+                    input: entry.get("input").filter(|value| !value.is_null()).cloned(),
+                    delimiter: text("delimiter"),
                 })
-                .collect()
-        })
-        .unwrap_or_default()
+            })
+            .collect()
+    })
 }
 
 /// [`definitions_from_manifest`] with what the console shows beside the
