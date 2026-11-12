@@ -114,7 +114,6 @@ const FRAMING_REPLAYED: &[&str] = &[
 
 /// rest-v1 cases `crates/rest-front` already notes.
 const REST_NOTED_ELSEWHERE: &[(&str, &str)] = &[
-    ("rest-v1/java-v1.22.0", "aggregation-composite-filter/2"),
     ("rest-v1/java-v1.22.0", "aggregation-limit-error/2"),
     ("rest-v1/java-v1.22.0", "transaction-commit/4"),
     ("rest-v1/java-v1.22.0", "transaction-commit/6"),
@@ -195,8 +194,8 @@ const DIFFERS: &[Differs] = &[
         reason: "an aggregation answer ends without `\"done\": true`, as production (rest-v1/production-cloud-firestore aggregation-count/2); Java 1.22.0 adds it",
         instead: Instead::Production("aggregation-count/2"),
     },
-    // `crates/rest-front` notes this case (its aggregate values); here the
-    // whole body is compared, and the difference is asserted, not noted.
+    // `crates/rest-front` compares only this case's aggregate values; the
+    // whole body is compared here, and the difference noted.
     Differs {
         set: JAVA_REST,
         case: "aggregation-composite-filter/2",
