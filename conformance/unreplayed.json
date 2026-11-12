@@ -9,18 +9,6 @@
     },
     {
       "set": "developer-tools-v1",
-      "case": "ui/7",
-      "issue": 209,
-      "why": "a user saved with mfaInfo: [] is returned without the field"
-    },
-    {
-      "set": "developer-tools-v1",
-      "case": "ui/8",
-      "issue": 209,
-      "why": "a user saved with mfaInfo: [] is returned without the field"
-    },
-    {
-      "set": "developer-tools-v1",
       "case": "ui/config",
       "issue": 210,
       "why": "the hub's /emulators and the UI's /api/config list the emulators with other fields than firebase-tools"
