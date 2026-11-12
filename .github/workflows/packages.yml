@@ -68,8 +68,20 @@ jobs:
       # No Java and no firebase-tools on the packed-install hosts: the suite
       # evaluates Storage rules natively and runs Functions on its own runtime.
       - name: Pinned package managers and unit contracts
+        env:
+          NODE_ARCHITECTURE: ${{ matrix.node-architecture }}
         run: |
-          npm install --global npm@12.0.2 bun@1.3.14
+          if [[ "$RUNNER_OS" == macOS && "$NODE_ARCHITECTURE" == x64 ]]; then
+            # Bun's installer picks its Apple silicon build under Rosetta,
+            # and Rosetta offers no AVX: the x64 baseline build is installed
+            # directly, so Bun installs the darwin-x64 package as on an
+            # Intel Mac. It warns that the CPU lacks AVX; baseline uses none.
+            npm install --global npm@12.0.2 @oven/bun-darwin-x64-baseline@1.3.14
+            ln -s "$(npm root --global)/@oven/bun-darwin-x64-baseline/bin/bun" "$(npm prefix --global)/bin/bun"
+            test "$(bun -e 'console.log(process.arch)')" = x64
+          else
+            npm install --global npm@12.0.2 bun@1.3.14
+          fi
           node --test packaging/*.test.mjs
           node packaging/check-release.mjs
       - name: Resolve pinned engine source
