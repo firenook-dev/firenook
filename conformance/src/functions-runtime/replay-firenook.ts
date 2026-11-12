@@ -86,10 +86,24 @@ const GLOBAL_DIVERGENCES: ReadonlyArray<{ readonly pattern: RegExp; readonly rec
   },
 ];
 
-/** Steps outside this phase's contract (their own fixtures pin them). */
-const OUT_OF_SCOPE_STEPS: ReadonlySet<string> = new Set([
-  // The hub's /emulators listing is the suite's contract (firebase-suite-v1/hub-*), not the Functions runtime's.
-  "main/discovery-backends-inventory/hub-emulators",
+/** Steps outside this phase's contract (their own fixtures pin them); none at present. */
+const OUT_OF_SCOPE_STEPS: ReadonlySet<string> = new Set([]);
+
+/**
+ * Bug candidates: steps Firenook answers otherwise with no documented
+ * reason. Their differences at `paths` are asserted (the replay fails once
+ * one no longer differs, so whoever fixes it moves the step out of here) and
+ * the step is never noted in the ledger.
+ */
+const BUG_CANDIDATES: ReadonlyMap<string, { readonly description: string; readonly paths: RegExp }> = new Map([
+  [
+    "main/discovery-backends-inventory/hub-emulators",
+    {
+      description:
+        "the hub's /emulators omits logging (the UI is disabled; the official listing keeps it) and the extensions entry, lists eventarc and tasks without `listen` (the capture selected them with --only, which Firenook's --only cannot name), and gives Firestore no pid/webSocketHost/webSocketPort/reservedPorts but a `firestore.websocket` entry of its own",
+      paths: /^response\.body\.(logging|extensions|firestore\.(pid|reservedPorts|webSocketHost|webSocketPort)|eventarc\.listen|tasks\.listen|firestore\.websocket)$/u,
+    },
+  ],
 ]);
 
 /** Step-scoped paths whose value is a race the program does not control. */
@@ -102,9 +116,6 @@ const IGNORED_STEP_PATHS: ReadonlyMap<string, readonly RegExp[]> = new Map([
   // over-deadline request, so its per-process attempt counter restarts and
   // the retry never overlaps the first invocation; Firenook keeps its worker.
   ["tasks/tasks-deadline-and-limits/slow-deadline", [/^observations\[\d+\]\.(attempt|concurrent)$/u]],
-  // The official log lines of the Tasks emulator and its worker have no
-  // counterpart wording in Firenook's log.
-  ["tasks/tasks-admin-sdk/tasks-logs", [/^response\.matched$/u]],
 ]);
 
 /** Recorded fields that vary between runs or engines without a contract. */
@@ -366,6 +377,17 @@ function compareStep(profile: string, program: string, expected: RecordedProgram
   const actualView = { response: comparableResponse(kind, actual.response), observations: sortedObservations(actual.observations), observationsTimedOut: actual.observationsTimedOut ?? false };
   const raw = diff(expectedView, actualView, "");
   const stepIgnored = IGNORED_STEP_PATHS.get(`${profile}/${program}/${expected.id}`) ?? [];
+  const bug = BUG_CANDIDATES.get(`${profile}/${program}/${expected.id}`);
+  if (bug) {
+    if (!raw.some((entry) => bug.paths.test(entry.path))) {
+      mismatches.push({ path: "(bug candidate no longer differs: note the step and leave BUG_CANDIDATES)", expected: bug.description, actual: "the recorded answer" });
+    }
+    for (const entry of raw) {
+      if (bug.paths.test(entry.path)) asserted.push(`${entry.path} (bug candidate)`);
+      else if (!IGNORED_PATHS.some((pattern) => pattern.test(entry.path))) mismatches.push(entry);
+    }
+    return { profile, program, step: expected.id, mismatches, assertedDivergences: asserted };
+  }
   for (const entry of raw) {
     if (IGNORED_PATHS.some((pattern) => pattern.test(entry.path))) continue;
     if (stepIgnored.some((pattern) => pattern.test(entry.path))) continue;
@@ -417,7 +439,7 @@ function ledgerStep(expected: RecordedProgram["steps"][number], result: StepResu
   if (!ledger.enabled || result.mismatches.length > 0) return;
   const key = `${result.profile}/${result.program}/${result.step}`;
   const kind = (expected.action as { kind?: string } | undefined)?.kind ?? "";
-  if (HARNESS_ACTIONS.has(kind) || OUT_OF_SCOPE_STEPS.has(key)) return;
+  if (HARNESS_ACTIONS.has(kind) || OUT_OF_SCOPE_STEPS.has(key) || BUG_CANDIDATES.has(key)) return;
   const ignored = IGNORED_STEP_PATHS.get(key) ?? [];
   if (ignored.some((pattern) => pattern.test("response.matched") || pattern.test("response.status"))) return;
   const compared = kind === "logs" ? ledger.COMPARED.behaviour : ledger.COMPARED.answer;

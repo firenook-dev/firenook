@@ -147,6 +147,8 @@ mod rules_replay_tests;
 mod rules_tests;
 #[cfg(test)]
 mod staging_tests;
+#[cfg(test)]
+mod suite_replay_tests;
 
 /// Makes every resent event's ids unique within the process.
 static RESEND_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

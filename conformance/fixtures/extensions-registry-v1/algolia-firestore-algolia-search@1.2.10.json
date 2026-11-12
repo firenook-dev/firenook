@@ -1,0 +1,473 @@
+{
+  "extension": {
+    "createTime": "2021-04-02T21:17:03.133196Z",
+    "iconUri": "https://storage.googleapis.com/firebase-extensions-icons/extension_icons/algolia/algolia_search_120@2x.png",
+    "latestApprovedVersion": "1.3.0",
+    "latestVersion": "1.3.0",
+    "latestVersionCreateTime": "2026-06-25T12:14:01.318248Z",
+    "metrics": {
+      "activeInstallCount": "38900"
+    },
+    "name": "publishers/algolia/extensions/firestore-algolia-search",
+    "publisher": {
+      "displayName": "Algolia",
+      "iconUri": "https://storage.googleapis.com/firebase-extensions-icons/publisher_icons/algolia/algolia.svg"
+    },
+    "ref": "algolia/firestore-algolia-search",
+    "repoUri": "https://github.com/algolia/firestore-algolia-search",
+    "state": "PUBLISHED",
+    "tags": [
+      "ai",
+      "search",
+      "semantic-search",
+      "vector-search",
+      "text-search"
+    ]
+  },
+  "extensionVersion": {
+    "buildSourceUri": "https://github.com/algolia/firestore-algolia-search/tree/88d3701e3158e8e28d62797bcec70eb3ecc2ce3d",
+    "createTime": "2025-05-16T17:02:12.063897Z",
+    "extensionRoot": "/",
+    "hash": "bf3bebef836a4d00847d8766756acb75d2dff6b3b089488bd6c90ac03c38ff57",
+    "id": "1.2.10",
+    "listing": {
+      "state": "APPROVED"
+    },
+    "metrics": {
+      "activeInstallCount": "8400"
+    },
+    "name": "publishers/algolia/extensions/firestore-algolia-search/versions/1.2.10",
+    "ref": "algolia/firestore-algolia-search@1.2.10",
+    "releaseNotes": "### Bug Fixes\n\n* downgrade to nodejs20 to resolve algolia firestore extension installation ([4b24726](https://github.com/algolia/firestore-algolia-search/commit/4b24726d93eb4d5242c332f4d7a4a641563c8c99))\n",
+    "sourceDownloadUri": "https://storage.googleapis.com/firebase-mod-sources-prod/bf3bebef836a4d00847d8766756acb75d2dff6b3b089488bd6c90ac03c38ff57",
+    "spec": {
+      "author": {
+        "authorName": "Algolia",
+        "url": "https://algolia.com"
+      },
+      "billingRequired": true,
+      "contributors": [
+        {
+          "authorName": "Sajid Momin",
+          "email": "sajid.momin@algolia.com",
+          "url": "https://github.com/smomin"
+        }
+      ],
+      "description": "Enables full text search of your Cloud Firestore data with Algolia.",
+      "displayName": "Search Firestore with Algolia",
+      "externalServices": [
+        {
+          "name": "Algolia",
+          "pricingUri": "https://algolia.com/pricing"
+        }
+      ],
+      "license": "Apache-2.0",
+      "lifecycleEvents": [
+        {
+          "processingMessage": "Indexing existing documents in ${COLLECTION_PATH}",
+          "stage": "ON_INSTALL",
+          "taskQueueTriggerFunction": "executeFullIndexOperation"
+        },
+        {
+          "processingMessage": "Indexing existing documents in ${COLLECTION_PATH}",
+          "stage": "ON_UPDATE",
+          "taskQueueTriggerFunction": "executeFullIndexOperation"
+        },
+        {
+          "processingMessage": "Indexing existing documents in ${COLLECTION_PATH}",
+          "stage": "ON_CONFIGURE",
+          "taskQueueTriggerFunction": "executeFullIndexOperation"
+        }
+      ],
+      "name": "firestore-algolia-search",
+      "params": [
+        {
+          "default": "(default)",
+          "description": "Enter database that contains the collections that you want to monitor?\n",
+          "example": "test",
+          "immutable": true,
+          "label": "Database ID",
+          "param": "DATABASE_ID",
+          "required": true,
+          "type": "STRING"
+        },
+        {
+          "description": "What is the path to the Cloud Firestore collection where the extension should monitor for changes?\n",
+          "example": "store",
+          "immutable": true,
+          "label": "Collection Path",
+          "param": "COLLECTION_PATH",
+          "required": true,
+          "type": "STRING",
+          "validationErrorMessage": "Firestore collection paths must be an odd number of segments separated by slashes, e.g. \"movies/{id}/actors\".",
+          "validationRegex": "^[^/]+(/[^/]+/[^/]+)*$"
+        },
+        {
+          "description": "This can be a comma separated list or left blank to index all fields. For performance reasons, [record size is limited](https://www.algolia.com/doc/guides/sending-and-managing-data/prepare-your-data/in-depth/index-and-records-size-and-usage-limitations/#record-size-limits). If you're receiving errors that your records are too large, refer to the [reducing record size documentation](https://www.algolia.com/doc/guides/sending-and-managing-data/prepare-your-data/how-to/reducing-object-size/).\n",
+          "example": "name,category,price,sales",
+          "label": "Indexable Fields",
+          "param": "FIELDS",
+          "type": "STRING"
+        },
+        {
+          "default": "no",
+          "description": "The extension uses approaches to mitigate race conditions but it might not be a 100% fool proof.  This setting will make sure the function is using the latest data from Firestore by making another read call before processing and sending to Algolia.  note: This will be a add to your usage of Firestore.",
+          "label": "Force Data Sync",
+          "options": [
+            {
+              "label": "No",
+              "value": "no"
+            },
+            {
+              "label": "Yes",
+              "value": "yes"
+            }
+          ],
+          "param": "FORCE_DATA_SYNC",
+          "type": "SELECT"
+        },
+        {
+          "description": "This is the name of the [Algolia index](https://www.algolia.com/doc/faq/basics/what-is-an-index/) where the records will be persisted. Refer to [naming your index](https://www.algolia.com/doc/guides/sending-and-managing-data/send-and-update-your-data/#naming-your-index) for more information.",
+          "label": "Algolia Index Name",
+          "param": "ALGOLIA_INDEX_NAME",
+          "required": true,
+          "type": "STRING"
+        },
+        {
+          "description": "This is the Algolia application you want to index your data to. You can find your credentials including application ID on your Algolia dashboard, under the [API keys tab](https://www.algolia.com/api-keys).",
+          "label": "Algolia Application Id",
+          "param": "ALGOLIA_APP_ID",
+          "required": true,
+          "type": "STRING"
+        },
+        {
+          "description": "We recommend [creating a new API key](https://www.algolia.com/doc/guides/security/api-keys/#creating-and-managing-api-keys) with \"addObject\", \"deleteObject\", \"listIndexes\", \"deleteIndex\", \"editSettings\", and \"settings\" permissions. **Do not use the Admin API key**.",
+          "label": "Algolia API Key",
+          "param": "ALGOLIA_API_KEY",
+          "required": true,
+          "type": "SECRET"
+        },
+        {
+          "description": "Specify an alternative Firestore document property to use for the Algolia record Id.  Use `(path)` if the document path is desired as the Algolia ObjectID.  The default is the Firestore document Id. **If you set this property, make sure to clear out the Algolia Index since the ObjectID will be different resulting in duplicate records.**",
+          "label": "Alternative Object Id",
+          "param": "ALT_OBJECT_ID",
+          "type": "STRING"
+        },
+        {
+          "description": "Specify a Firebase Cloud Function for any data transformation before saving into Algolia. Refer to [Call functions for your app](https://firebase.google.com/docs/functions/callable).",
+          "label": "Transform Function Name (Experimental)",
+          "param": "TRANSFORM_FUNCTION",
+          "type": "STRING"
+        },
+        {
+          "description": "Should existing documents in the Firestore collection be indexed as well?\n",
+          "label": "Full Index existing documents?",
+          "options": [
+            {
+              "label": "Yes",
+              "value": "true"
+            },
+            {
+              "label": "No",
+              "value": "false"
+            }
+          ],
+          "param": "DO_FULL_INDEXING",
+          "required": true,
+          "type": "SELECT"
+        },
+        {
+          "description": "Where do you want to deploy the functions created for this extension? You usually want a location close to your database. For help selecting a location, refer to the [location selection guide](https://firebase.google.com/docs/functions/locations).",
+          "immutable": true,
+          "label": "Cloud Functions location",
+          "options": [
+            {
+              "label": "Iowa (us-central1)",
+              "value": "us-central1"
+            },
+            {
+              "label": "South Carolina (us-east1)",
+              "value": "us-east1"
+            },
+            {
+              "label": "Northern Virginia (us-east4)",
+              "value": "us-east4"
+            },
+            {
+              "label": "Los Angeles (us-west2)",
+              "value": "us-west2"
+            },
+            {
+              "label": "Salt Lake City (us-west3)",
+              "value": "us-west3"
+            },
+            {
+              "label": "Las Vegas (us-west4)",
+              "value": "us-west4"
+            },
+            {
+              "label": "Warsaw (europe-central2)",
+              "value": "europe-central2"
+            },
+            {
+              "label": "Belgium (europe-west1)",
+              "value": "europe-west1"
+            },
+            {
+              "label": "London (europe-west2)",
+              "value": "europe-west2"
+            },
+            {
+              "label": "Frankfurt (europe-west3)",
+              "value": "europe-west3"
+            },
+            {
+              "label": "Zurich (europe-west6)",
+              "value": "europe-west6"
+            },
+            {
+              "label": "Hong Kong (asia-east2)",
+              "value": "asia-east2"
+            },
+            {
+              "label": "Tokyo (asia-northeast1)",
+              "value": "asia-northeast1"
+            },
+            {
+              "label": "Osaka (asia-northeast2)",
+              "value": "asia-northeast2"
+            },
+            {
+              "label": "Seoul (asia-northeast3)",
+              "value": "asia-northeast3"
+            },
+            {
+              "label": "Mumbai (asia-south1)",
+              "value": "asia-south1"
+            },
+            {
+              "label": "Jakarta (asia-southeast2)",
+              "value": "asia-southeast2"
+            },
+            {
+              "label": "Montreal (northamerica-northeast1)",
+              "value": "northamerica-northeast1"
+            },
+            {
+              "label": "Sao Paulo (southamerica-east1)",
+              "value": "southamerica-east1"
+            },
+            {
+              "label": "Sydney (australia-southeast1)",
+              "value": "australia-southeast1"
+            }
+          ],
+          "param": "LOCATION",
+          "required": true,
+          "type": "SELECT"
+        }
+      ],
+      "postinstallContent": "### See it in action\n\nYou can test out this extension right away:\n\n1.  Go to the [Cloud Firestore tab](https://console.firebase.google.com/project/${param:PROJECT_ID}/database/firestore/data).\n\n1.  If it doesn't exist already, create a collection called `${param:COLLECTION_PATH}`.\n\n1.  Create, update, or delete a document in the `${param:COLLECTION_PATH}` collection.  Go to Algolia's dashboard and verify in Algolia that a record is created, updated, or deleted in the `${param:ALGOLIA_INDEX_NAME}` index for application id `${param:ALGOLIA_APP_ID}`.\n\n### Collection import\n\nIf the collection named `${param:COLLECTION_PATH}` exists, the extension has begun importing documents into the `${param:ALGOLIA_INDEX_NAME}` Algolia Index. Additionally, a full reindex will occur each time the extension's configuration changes.\n\nA `lastmodified` attribute is added to Algolia records to eliminate race condition issues related from the Cloud Function cold start.\n\n### Using the extension\n\nThis extension listens to the Cloud Firestore collection `${param:COLLECTION_PATH}`. If you create, update, or delete a document within that collection, this extension will:\n\n- Indexes the document and send all the fields or configured fields defined in the extension.\n- or, removes the record from Algolia index if the document is deleted.\n\n### Monitoring\n\nAs a best practice, you can [monitor the activity](https://firebase.google.com/docs/extensions/manage-installed-extensions#monitor) of your installed extension, including checks on its health, usage, and logs.\n",
+      "preinstallContent": "Use this extension to index your Cloud Firestore data to Algolia and keep it synced.  The extension is applied and configured on a Firestore [collection](https://firebase.google.com/docs/firestore/data-model#collections).\n\nThis extension listens for changes on the specified collection. If you add a [document](https://firebase.google.com/docs/firestore/data-model#documents), the extension indexes it as a [record in Algolia](https://www.algolia.com/doc/faq/basics/what-is-a-record/). The extension only indexes the fields defined in the extension configuration and uses the [document Id](https://firebase.google.com/docs/firestore/manage-data/add-data#add_a_document) as the Algolia [object Id](https://www.algolia.com/doc/guides/sending-and-managing-data/send-and-update-your-data/#using-unique-object-identifiers).\n\nAnytime you update a document, the extension propagates the update to the corresponding Algolia record. If you delete a document, the extension removes the corresponding Algolia record.\n\n#### Important\n\nUpon installation or when the extension's configuration is changed, the documents in the specified collection will be synced to Algolia.\n\n#### Additional setup\n\nBefore installing this extension, make sure that you've\n[set up a Cloud Firestore database](https://firebase.google.com/docs/firestore/quickstart)\nin your Firebase project.\n\nYou must also have an Algolia account set up before installing this\nextension. You can do so on the [Algolia](https://www.algolia.com/) site.\n\n#### Billing\n\nThis extension uses the following Firebase services which may have associated charges:\n\n- Cloud Firestore\n- Cloud Functions\n\nThis extension also uses the following third-party services:\n\n- Algolia ([pricing information](https://www.algolia.com/pricing))\n\nYou are responsible for any costs associated with your use of these services.\n\n#### Note from Firebase\n\nTo install this extension, your Firebase project must be on the Blaze (pay-as-you-go) plan. You will only be charged for the resources you use. Most Firebase services offer a free tier for low-volume use. [Learn more about Firebase billing.](https://firebase.google.com/pricing)\n\nYou will be billed a small amount (typically less than $0.10) when you install or reconfigure this extension. See Cloud Functions under [Firebase Pricing](https://firebase.google.com/pricing) for a detailed explanation.\n",
+      "readmeContent": "# Search Firestore with Algolia\n\n**Author**: Algolia (**[https://www.algolia.com](https://www.algolia.com)**)\n\n**Description**: Enable full text search of your Cloud Firestore data with Algolia.\n\n**Details**: Use this extension to index your Cloud Firestore data to [Algolia](https://www.algolia.com/doc/) and keep it synced.\n\nYou can then [configure your relevance](/doc/guides/getting-started/how-algolia-works/in-depth/implementation-process/#configuring-relevance) using the [Algolia dashboard](https://www.algolia.com/dashboard) or [API clients](/doc/api-client/getting-started/install/javascript/). From there, you can use Algolia's [front-end libraries](/doc/guides/building-search-ui/what-is-instantsearch/js/) to incorporate search components into your Firebase app's UI.\n\n---\n\nWe welcome [bug reports and feature requests](https://github.com/algolia/firestore-algolia-search/issues/new) as well as pull requests in this GitHub repository.\n\n### Firebase CLI\n\n```bash\nfirebase ext:install algolia/firestore-algolia-search --project=<your-project-id>\n```\n\n> Learn more about installing extensions in the Firebase Extensions documentation: [console](https://firebase.google.com/docs/extensions/install-extensions?platform=console), [CLI](https://firebase.google.com/docs/extensions/install-extensions?platform=cli)\n\n---\n\n#### Details\n\nUse this extension to index your Cloud Firestore data to Algolia and keep it synced.  The extension is applied and configured on a Firestore [collection](https://firebase.google.com/docs/firestore/data-model#collections) or [subcollection](https://firebase.google.com/docs/firestore/data-model#subcollections).\n\nThis extension listens for changes on the specified collection. If you add a [document](https://firebase.google.com/docs/firestore/data-model#documents), the extension indexes it as a [record in Algolia](https://www.algolia.com/doc/faq/basics/what-is-a-record/). The extension only indexes the fields defined in the extension configuration and uses the [document Id](https://firebase.google.com/docs/firestore/manage-data/add-data#add_a_document) as the Algolia [object Id](https://www.algolia.com/doc/guides/sending-and-managing-data/send-and-update-your-data/#using-unique-object-identifiers).\n\nAnytime you update a document, the extension propagates the update to the corresponding Algolia record. If you delete a document, the extension removes the corresponding Algolia record.\n\n#### Additional setup\n\nBefore installing this extension, make sure that you've set up:\n- [Cloud Firestore database](https://firebase.google.com/docs/firestore/quickstart) in your Firebase project.\n- [Algolia](https://www.algolia.com/) account.\n\n\n#### Billing\n\nThis extension uses the following Firebase services which may have associated charges:\n\n- Cloud Firestore\n- Cloud Functions\n\nThis extension also uses the following third-party services:\n\n- Algolia ([pricing information](https://www.algolia.com/pricing))\n\nYou are responsible for any costs associated with your use of these services.\n\n#### Note from Firebase\n\nTo install this extension, your Firebase project must be on the Blaze (pay-as-you-go) plan. You will only be charged for the resources you use. Most Firebase services offer a free tier for low-volume use. [Learn more about Firebase billing.](https://firebase.google.com/pricing)\n\nYou will be billed a small amount (typically less than $0.10) when you install or reconfigure this extension. See Cloud Functions under [Firebase Pricing](https://firebase.google.com/pricing) for a detailed explanation.\n\n#### Configuration Parameters\n\nCloud Functions Location: Where do you want to deploy the functions created for this extension?\n  You usually want a location close to your database.\n  For help selecting a location, refer to the\n  [location selection guide](https://firebase.google.com/docs/functions/locations).\n- Database Id: Enter the database id that contains the collection(s) that you want to monitor?\n  Firebase supports [multiple databases](https://cloud.google.com/blog/products/databases/manage-multiple-firestore-databases-in-a-project) in a project.  In order to use a non default database, enter the database Id.\n\n- Collection Path: What is the path to the Cloud Firestore collection where the extension should monitor for changes?\n  For subcollection, the syntax is `parent_collection/{parentId}/target_collection`. (please note, there is not depublication process on subcollections).\n\n- Fields: What document fields should be indexed to provide the best search experience? For more information on which fields to index to Algolia, see the [Algolia documentation on records](https://www.algolia.com/doc/guides/sending-and-managing-data/prepare-your-data/#algolia-records).\n  This can be a comma separated list or left blank to index all fields.\n  For performance reasons, [record size is limited](https://www.algolia.com/doc/guides/sending-and-managing-data/prepare-your-data/in-depth/index-and-records-size-and-usage-limitations/#record-size-limits).\n  If you're receiving errors that your records are too large, refer to the [reducing record size documentation](https://www.algolia.com/doc/guides/sending-and-managing-data/prepare-your-data/how-to/reducing-object-size/).\n\n- Force Data Sync: Are you facing data inconsistent issues possibly due to race conditions?\n  This setting will make sure the function is using the latest data from Firestore by making another read call before processing and sending to Algolia.\n\n- Algolia Application ID: What is the Algolia Application Id?\n  This is the Algolia application you want to index your data to.\n  You can find your credentials including application ID on your Algolia dashboard,\n  under the [API keys tab](https://www.algolia.com/api-keys).\n\n- Algolia API Key: What is your Algolia API key?\n  We recommend [creating a new API key](https://www.algolia.com/doc/guides/security/api-keys/#creating-and-managing-api-keys)\n  with \"addObject\", \"deleteObject\", \"listIndexes\", \"deleteIndex\", \"editSettings\", and \"settings\" permissions.\n  **Do not use the Admin API key**.\n\n- Algolia Index Name: What is the Algolia index name?\n  This is the name of the [Algolia index](https://www.algolia.com/doc/faq/basics/what-is-an-index/)\n  where the records will be persisted.\n  Refer to [naming your index](https://www.algolia.com/doc/guides/sending-and-managing-data/send-and-update-your-data/#naming-your-index) for more information.\n\n- Alternative Object Id: Are you looking to use another Firestore document property or document path as the Algolia ObjectID?\n  Specify an alternative Firestore document property to use for the Algolia record Id.  Use `(path)` if the document path is desired as the Algolia ObjectID.  The default is the Firestore document Id.\n  **If you set this property, make sure to clear out the Algolia Index since the ObjectID will be different resulting in duplicate records.**\n\n- Transform Function Name (experimental): What is the Firebase Cloud Function Name?\n  This is the name of the Firestore Cloud Function for transforming the data before transmitting to Algolia for indexing.\n  This function should be deployed to the same Firebase Project and Location as the Firestore/Algolia extension.\n  Refer to [Call functions for your app](https://firebase.google.com/docs/functions/callable).\n  Below is an example of a Transform function used for my testing:\n  ```javascript\n    import * as functions from \"firebase-functions\";\n\n    const doStuffToData = (payload: any) => {\n      return {\n      ...payload,\n      \"hello\": \"world\",\n      };\n    };\n\n    export const helloWorld = functions.https.onCall((payload) => {\n      const transformedData = doStuffToData(payload);\n      return transformedData;\n    });\n  ```\n  **Note**: The Transform Firebase Function should be set up to unauthenticated users at this time.\n\n#### Cloud Functions\n\n- **executeIndexOperation:** Firestore document-triggered function that creates, updates, or deletes data in Algolia.\n",
+      "resources": [
+        {
+          "deletionPolicy": "DELETE",
+          "description": "Firestore document-triggered function that creates, updates, or deletes data in Algolia.",
+          "name": "executeIndexOperation",
+          "properties": {
+            "eventTrigger": {
+              "eventType": "providers/cloud.firestore/eventTypes/document.write",
+              "resource": "projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents/${COLLECTION_PATH}/{documentID}"
+            },
+            "location": "${LOCATION}",
+            "runtime": "nodejs20"
+          },
+          "propertiesYaml": "eventTrigger:\n  eventType: providers/cloud.firestore/eventTypes/document.write\n  resource: projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents/${COLLECTION_PATH}/{documentID}\nlocation: ${LOCATION}\nruntime: nodejs20\n",
+          "type": "firebaseextensions.v1beta.function"
+        },
+        {
+          "deletionPolicy": "DELETE",
+          "description": "Loads all the data from your FireStore database into Algolia",
+          "name": "executeFullIndexOperation",
+          "properties": {
+            "availableMemoryMb": 1024,
+            "location": "${param:LOCATION}",
+            "runtime": "nodejs20",
+            "taskQueueTrigger": {},
+            "timeout": "540s"
+          },
+          "propertiesYaml": "availableMemoryMb: 1024\nlocation: ${param:LOCATION}\nruntime: nodejs20\ntaskQueueTrigger: {}\ntimeout: 540s\n",
+          "type": "firebaseextensions.v1beta.function"
+        }
+      ],
+      "roles": [
+        {
+          "reason": "Allows this extension to access Cloud Firestore to read.",
+          "role": "datastore.user"
+        }
+      ],
+      "sourceUrl": "https://github.com/algolia/firestore-algolia-search/tree/main",
+      "specVersion": "v1beta",
+      "systemParams": [
+        {
+          "advanced": true,
+          "description": "How long should functions run before timing out, in seconds (0-540)?",
+          "label": "Function timeout seconds",
+          "param": "firebaseextensions.v1beta.function/timeoutSeconds",
+          "type": "STRING",
+          "validationErrorMessage": "Function timeout should be an integer number of seconds, between 0 and 540",
+          "validationRegex": "^[1-9][0-9]{0,2}$"
+        },
+        {
+          "advanced": true,
+          "description": "The VPC Network Connector that this cloud function can connect to. It can be either the fully-qualified URI, or the short name of the network connector resource. The format of this field is projects/*/locations/*/connectors/*.",
+          "label": "VPC Connector",
+          "param": "firebaseextensions.v1beta.function/vpcConnector",
+          "type": "STRING",
+          "validationRegex": "^projects/([^/]+)/locations/([^/]+)/connectors/([^/]+)$"
+        },
+        {
+          "advanced": true,
+          "default": "VPC_CONNECTOR_EGRESS_SETTINGS_UNSPECIFIED",
+          "description": "Controls outgoing traffic when a VPC connector is configured",
+          "label": "VPC Connector Egress settings",
+          "options": [
+            {
+              "label": "Unspecified",
+              "value": "VPC_CONNECTOR_EGRESS_SETTINGS_UNSPECIFIED"
+            },
+            {
+              "label": "Private ranges only",
+              "value": "PRIVATE_RANGES_ONLY"
+            },
+            {
+              "label": "All traffic",
+              "value": "ALL_TRAFFIC"
+            }
+          ],
+          "param": "firebaseextensions.v1beta.function/vpcConnectorEgressSettings",
+          "type": "SELECT"
+        },
+        {
+          "advanced": true,
+          "default": "0",
+          "description": "The minimum number of instances of each function to run at once (0-1000)",
+          "label": "Minimum function instances",
+          "param": "firebaseextensions.v1beta.function/minInstances",
+          "type": "STRING",
+          "validationErrorMessage": "Min instances must be a non-negative integer.",
+          "validationRegex": "^[0-9]*$"
+        },
+        {
+          "advanced": true,
+          "description": "The maximum number of instances of each function to run at once",
+          "label": "Maximum function instances",
+          "param": "firebaseextensions.v1beta.function/maxInstances",
+          "type": "STRING",
+          "validationErrorMessage": "Max instances must be a non-negative integer.",
+          "validationRegex": "^[0-9]*$"
+        },
+        {
+          "advanced": true,
+          "description": "Where should functions allow incoming traffic from?",
+          "label": "Function ingress settings",
+          "options": [
+            {
+              "label": "Allow all",
+              "value": "ALLOW_ALL"
+            },
+            {
+              "label": "Allow internal only",
+              "value": "ALLOW_INTERNAL_ONLY"
+            },
+            {
+              "label": "Allow internal and GCLB",
+              "value": "ALLOW_INTERNAL_AND_GCLB"
+            }
+          ],
+          "param": "firebaseextensions.v1beta.function/ingressSettings",
+          "type": "SELECT"
+        },
+        {
+          "advanced": true,
+          "description": "Do you wish to set any labels on this instance's Cloud Functions? If so, provide up to 55 labels in the format 'key1:value, key2:value'",
+          "label": "Function labels",
+          "param": "firebaseextensions.v1beta.function/labels",
+          "type": "STRING",
+          "validationRegex": "^([a-zžà-ÿ][A-Za-zŽžÀ-ÿ0-9_-]{0,62}:[A-Za-zŽžÀ-ÿ0-9_-]{0,63},\\s*)*([a-zžà-ÿ][A-Za-zŽžÀ-ÿ0-9_-]{0,62}:[A-Za-zŽžÀ-ÿ0-9_-]{0,63})$"
+        },
+        {
+          "advanced": true,
+          "description": "Do you want to use a Customer Managed Encryption Key (CMEK) to encrypt this extension's functions? If you set this, you must also set a Docker repository encrypted by that key. See https://cloud.google.com/functions/docs/securing/cmek for more details.",
+          "label": "KMS key name",
+          "param": "firebaseextensions.v1beta.function/kmsKeyName",
+          "type": "STRING",
+          "validationRegex": "^projects/([^/]+)/locations/([^/]+)/keyRings/([^/]+)/cryptoKeys/([^/]+)$"
+        },
+        {
+          "advanced": true,
+          "description": "What Docker repository should be used to store function images? Default repository will be used if not set.",
+          "label": "Docker repository",
+          "param": "firebaseextensions.v1beta.function/dockerRepository",
+          "type": "STRING",
+          "validationRegex": "^projects/([^/]+)/locations/([^/]+)/repositories/([^/]+)$"
+        },
+        {
+          "advanced": true,
+          "default": "256",
+          "description": "How much memory should be allocated to each v1 function?",
+          "label": "Function memory",
+          "options": [
+            {
+              "label": "128MB",
+              "value": "128"
+            },
+            {
+              "label": "256MB",
+              "value": "256"
+            },
+            {
+              "label": "512MB",
+              "value": "512"
+            },
+            {
+              "label": "1GB",
+              "value": "1024"
+            },
+            {
+              "label": "2GB",
+              "value": "2048"
+            },
+            {
+              "label": "4GB",
+              "value": "4096"
+            },
+            {
+              "label": "8GB",
+              "value": "8192"
+            }
+          ],
+          "param": "firebaseextensions.v1beta.function/memory",
+          "type": "SELECT"
+        }
+      ],
+      "tags": [
+        "ai",
+        "search",
+        "semantic-search",
+        "vector-search",
+        "text-search"
+      ],
+      "version": "1.2.10"
+    },
+    "state": "PUBLISHED",
+    "tags": [
+      "ai",
+      "search",
+      "semantic-search",
+      "vector-search",
+      "text-search"
+    ]
+  }
+}

@@ -94,6 +94,8 @@ mod diagnostics_tests;
 mod no_delay_tests;
 #[cfg(test)]
 mod transport_tests;
+#[cfg(test)]
+mod ui_config_tests;
 
 /// Fixed suite listener ports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

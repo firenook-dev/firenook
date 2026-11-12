@@ -132,8 +132,86 @@ async fn gcs_and_firebase_routes_emit_sdk_compatible_continuation_pages() {
         );
     }
 
+    replay_delimiter_and_autopagination(&runtime, &fixture).await;
+
     runtime.shutdown().await.expect("shutdown");
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// `gcs-delimiter` and `sdk-autopagination`, over the same corpus.
+async fn replay_delimiter_and_autopagination(runtime: &StorageRuntime, fixture: &JsonValue) {
+    // `gcs-delimiter`: the small page with `delimiter=/`. Under `objects/`
+    // nothing nests, so the official answer was byte-identical to the same
+    // page without a delimiter (one `responseSha256`); Firenook's must be too.
+    let delimiter = fixture_observation(fixture, "gcs-delimiter");
+    assert_eq!(
+        delimiter["responseSha256"],
+        fixture_observation(fixture, "gcs-small-first")["responseSha256"]
+    );
+    let base = format!("/storage/v1/b/{BUCKET}/o?prefix=objects%2F");
+    let with = request_json(runtime, &format!("{base}&delimiter=%2F&maxResults=2")).await;
+    let without = request_json(runtime, &format!("{base}&maxResults=2")).await;
+    assert_eq!(
+        with, without,
+        "a delimiter with nothing nested changes nothing"
+    );
+    assert_eq!(
+        with.get("prefixes")
+            .cloned()
+            .unwrap_or_else(|| JsonValue::Array(Vec::new())),
+        delimiter["prefixes"]
+    );
+    ledger_route_page(&with, delimiter);
+
+    // `sdk-autopagination`: what @google-cloud/storage 7.22.0's
+    // `bucket.getFiles({ prefix: "objects/" })` sends. `Bucket#getFiles` asks
+    // `GET /o` with the query, then the same query with `pageToken` set to
+    // each `nextPageToken` until there is none (build/cjs/src/bucket.js); the
+    // client loop is reproduced here, the pages are Firenook's own answers.
+    let recorded = &fixture["sdkAutopagination"];
+    assert_eq!(recorded["packageVersion"], "7.22.0");
+    let mut names = Vec::new();
+    let mut token: Option<String> = None;
+    let mut calls = 0;
+    loop {
+        let page = request_json(
+            runtime,
+            &match &token {
+                None => base.clone(),
+                Some(token) => format!("{base}&pageToken={}", token.replace('/', "%2F")),
+            },
+        )
+        .await;
+        calls += 1;
+        names.extend(
+            page["items"]
+                .as_array()
+                .expect("items")
+                .iter()
+                .map(|item| item["name"].as_str().expect("name").to_owned()),
+        );
+        match page.get("nextPageToken").and_then(JsonValue::as_str) {
+            Some(next) => token = Some(next.to_owned()),
+            None => break,
+        }
+        assert!(calls < 10, "pagination must end");
+    }
+    let expected: Vec<String> = (0..1_002)
+        .map(|index| format!("objects/{index:04}.json"))
+        .collect();
+    assert_eq!(names, expected, "every object once, in order");
+    if u64::try_from(names.len()).ok() == recorded["count"].as_u64()
+        && names.first().map(String::as_str) == recorded["first"].as_str()
+        && names.get(999).map(String::as_str) == recorded["boundaryBefore"].as_str()
+        && names.get(1_000).map(String::as_str) == recorded["boundaryAfter"].as_str()
+        && names.last().map(String::as_str) == recorded["last"].as_str()
+    {
+        firenook_conformance_ledger::checked(
+            "firebase-suite-v1/storage",
+            "storage-list-pagination/sdk-autopagination",
+            firenook_conformance_ledger::Compared::Behaviour,
+        );
+    }
 }
 
 async fn request_json(runtime: &StorageRuntime, uri: &str) -> JsonValue {

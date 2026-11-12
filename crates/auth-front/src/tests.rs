@@ -389,7 +389,7 @@ async fn replay_observations(
             "{id}: content type"
         );
         if content_type.starts_with("text/html") {
-            // Firenook serves its own helper pages (named divergence).
+            replay_helper_page(fixture, observation, &bytes);
             responses.push((id.to_owned(), JsonValue::Null));
             continue;
         }
@@ -405,6 +405,49 @@ async fn replay_observations(
         responses.push((id.to_owned(), actual));
     }
     responses
+}
+
+/// The markers the capture looked for in a helper page
+/// (`conformance/src/suite/capture-auth.ts`, `observeHtml`).
+const HELPER_PAGE_MARKERS: [&str; 3] = ["Firebase Auth Emulator", "sendAuthEvent", "gapi.iframes"];
+
+/// Firenook serves its own popup helper pages: the Auth replay's divergence
+/// table (`conformance/src/auth/replay-firenook.ts`, `$html.sha256|bytes`)
+/// and DESIGN.md (Auth browser helpers) name it. The status and content type
+/// are compared before this; here the markers the browser SDK's flow needs,
+/// found exactly as the capture found them, and the bytes, which differ.
+fn replay_helper_page(fixture: &str, observation: &JsonValue, bytes: &[u8]) {
+    let id = observation["id"].as_str().unwrap_or_default();
+    let text = std::str::from_utf8(bytes).expect("an HTML page");
+    let recorded = &observation["response"];
+    let contains: Vec<&str> = HELPER_PAGE_MARKERS
+        .into_iter()
+        .filter(|marker| text.contains(marker))
+        .collect();
+    assert_eq!(json!(contains), recorded["contains"], "{id}: markers");
+    let digest = <sha2::Sha256 as sha2::Digest>::digest(bytes).iter().fold(
+        String::new(),
+        |mut hex, byte| {
+            use std::fmt::Write as _;
+            write!(hex, "{byte:02x}").expect("hex");
+            hex
+        },
+    );
+    let case = format!("{fixture}/{id}");
+    if digest == recorded["sha256"] && bytes.len() as u64 == recorded["byteLength"] {
+        firenook_conformance_ledger::checked(
+            "firebase-suite-v1/auth",
+            &case,
+            firenook_conformance_ledger::Compared::Answer,
+        );
+    } else {
+        firenook_conformance_ledger::differs(
+            "firebase-suite-v1/auth",
+            &case,
+            firenook_conformance_ledger::Compared::Answer,
+            "Firenook serves its own popup helper page (the Auth replay's divergence table, DESIGN.md Auth browser helpers): status, content type and the sendAuthEvent/gapi.iframes markers match, the bytes are its own",
+        );
+    }
 }
 
 fn load_suite_fixture(name: &str) -> JsonValue {
@@ -675,8 +718,49 @@ async fn refresh_grant_survives_a_durable_restart() {
     std::fs::remove_file(file).expect("remove test state");
 }
 
+/// The capture's sanitiser (`observe-ui.mjs`): token, password and salt
+/// fields are left out of the recorded requests and answers.
+fn ui_sanitize(value: &JsonValue) -> JsonValue {
+    match value {
+        JsonValue::Object(fields) => JsonValue::Object(
+            fields
+                .iter()
+                .filter(|(key, _)| {
+                    let key = key.to_ascii_lowercase();
+                    !["token", "password", "salt"]
+                        .iter()
+                        .any(|word| key.contains(word))
+                })
+                .map(|(key, child)| (key.clone(), ui_sanitize(child)))
+                .collect(),
+        ),
+        JsonValue::Array(items) => JsonValue::Array(items.iter().map(ui_sanitize).collect()),
+        other => other.clone(),
+    }
+}
+
+/// Bug candidates of the UI's Auth session: answered otherwise with no
+/// documented reason, kept out of the ledger. The test fails once one
+/// matches, so whoever fixes it moves the case into the ledger.
+const UI_AUTH_BUG_CANDIDATES: &[(&str, &str)] = &[
+    (
+        "ui/7",
+        "the user the UI added with `mfaInfo: []` is looked up without `mfaInfo`; the official signUp keeps the empty list (`if (reqBody.mfaInfo)`), Firenook's skips an empty one (ops/signup.rs)",
+    ),
+    (
+        "ui/8",
+        "the same user is listed by accounts:query without its empty `mfaInfo`",
+    ),
+];
+
+/// Every Auth request the official Emulator UI made in `developer-tools-v1`
+/// (`browser.exchanges`, service `auth`), in order: list, tenants, config,
+/// add a user, look it up, list again, clear. The recorded requests lack the
+/// fields the capture sanitised; the one the UI typed (the password, from
+/// `observe-ui.mjs`) is sent. The user's id and its times are generated per
+/// run and are compared by shape, then by value through the later answers.
 #[tokio::test]
-async fn developer_tools_tenant_discovery_matches_the_official_ui_capture() {
+async fn developer_tools_auth_requests_replay_the_official_ui_session() {
     let fixture: JsonValue = serde_json::from_str(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -685,33 +769,108 @@ async fn developer_tools_tenant_discovery_matches_the_official_ui_capture() {
         .expect("fixture file"),
     )
     .expect("fixture JSON");
-    let (index, exchange) = fixture["browser"]["exchanges"]
+    let project = fixture["project"].as_str().expect("project");
+    let (runtime, _dispatches) = fixture_runtime(project);
+    let exchanges: Vec<(usize, &JsonValue)> = fixture["browser"]["exchanges"]
         .as_array()
         .expect("exchanges")
         .iter()
         .enumerate()
-        .find(|(_, exchange)| {
-            exchange["service"] == "auth"
-                && exchange["path"]
-                    .as_str()
-                    .is_some_and(|path| path.ends_with("/tenants"))
-        })
-        .expect("official tenant discovery");
-    let (runtime, _dispatches) = fixture_runtime("demo-fireside-developer-tools");
-    let (status, body) = call(
-        &runtime,
-        Method::GET,
-        exchange["path"].as_str().expect("path"),
-        &JsonValue::Null,
-    )
-    .await;
-    assert_eq!(u64::from(status), exchange["status"]);
-    assert_eq!(body, exchange["response"]);
-    firenook_conformance_ledger::checked(
-        "developer-tools-v1",
-        &format!("ui/{}", index + 1),
-        firenook_conformance_ledger::Compared::Answer,
-    );
+        .filter(|(_, exchange)| exchange["service"] == "auth")
+        .collect();
+    assert_eq!(exchanges.len(), 7);
+    let mut recorded_id = String::new();
+    let mut live_id = String::new();
+    let mut times: BTreeMap<String, JsonValue> = BTreeMap::new();
+    for (index, exchange) in exchanges {
+        let case = format!("ui/{}", index + 1);
+        let method = Method::from_bytes(exchange["method"].as_str().expect("method").as_bytes())
+            .expect("method");
+        let mut body = exchange["request"].clone();
+        if exchange["path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("/accounts"))
+            && method == Method::POST
+        {
+            body["password"] = json!("Synthetic-only-123!");
+        }
+        if let Some(ids) = body.get_mut("localId") {
+            *ids = json!([live_id]);
+        }
+        let (status, answer) = call(
+            &runtime,
+            method,
+            exchange["path"].as_str().expect("path"),
+            &body,
+        )
+        .await;
+        assert_eq!(u64::from(status), exchange["status"], "{case}: {answer}");
+        let mut answer = ui_sanitize(&answer);
+        let recorded = &exchange["response"];
+        if recorded["kind"] == "identitytoolkit#SignupNewUserResponse" {
+            recorded_id = recorded["localId"].as_str().expect("id").to_owned();
+            live_id = answer["localId"]
+                .as_str()
+                .expect("a generated id")
+                .to_owned();
+            assert_eq!(live_id.len(), recorded_id.len(), "{case}: id shape");
+        }
+        // The same user, by the id this run generated, at the times it set.
+        let key = if answer.get("users").is_some() {
+            "users"
+        } else {
+            "userInfo"
+        };
+        let expected_users = recorded
+            .get(key)
+            .and_then(JsonValue::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if let Some(users) = answer.get_mut(key).and_then(JsonValue::as_array_mut) {
+            assert_eq!(users.len(), expected_users.len(), "{case}: users");
+            for (user, expected) in users.iter_mut().zip(&expected_users) {
+                if user["localId"] == live_id.as_str() {
+                    user["localId"] = json!(recorded_id);
+                }
+                for field in ["lastLoginAt", "createdAt", "validSince"] {
+                    let value = user[field].as_str().expect("a time").to_owned();
+                    assert!(
+                        value.bytes().all(|byte| byte.is_ascii_digit()),
+                        "{case}: {field}"
+                    );
+                    let first = times
+                        .entry(field.to_owned())
+                        .or_insert_with(|| json!(value));
+                    assert_eq!(*first, json!(value), "{case}: {field} is the user's own");
+                    user[field] = expected[field].clone();
+                }
+            }
+        }
+        if answer.get("localId").is_some() {
+            answer["localId"] = json!(recorded_id);
+        }
+        if UI_AUTH_BUG_CANDIDATES.iter().any(|(id, _)| *id == case) {
+            assert_ne!(
+                &answer, recorded,
+                "{case} matches now: note it and leave the table"
+            );
+            // The only difference is the empty list.
+            for user in answer[key].as_array_mut().into_iter().flatten() {
+                user["mfaInfo"] = json!([]);
+            }
+            assert_eq!(
+                &answer, recorded,
+                "{case}: body apart from the bug candidate"
+            );
+            continue;
+        }
+        assert_eq!(&answer, recorded, "{case}: body");
+        firenook_conformance_ledger::checked(
+            "developer-tools-v1",
+            &case,
+            firenook_conformance_ledger::Compared::Answer,
+        );
+    }
 }
 
 #[tokio::test]

@@ -59,6 +59,8 @@ const JSON_CONTENT_TYPE: HeaderValue = HeaderValue::from_static("application/jso
 mod preview;
 use preview::Preview;
 mod coverage;
+#[cfg(test)]
+mod developer_tools_tests;
 mod listing;
 mod methods;
 #[cfg(test)]
@@ -2627,6 +2629,47 @@ mod tests {
         let _router = router(Store::default());
     }
 
+    /// The trigger fixture's document write, after its registrations.
+    async fn replay_trigger_write(application: &Router, oracle: &JsonValue) {
+        // The document write the recording made next, as the Admin SDK sends
+        // it (`capture-firestore-triggers.ts`). The fixture keeps the answer's
+        // document (`summarizeDocumentResponse`) with its times replaced.
+        let write = &oracle["write"];
+        let response = application
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(write["method"].as_str().expect("write method"))
+                    .uri(write["path"].as_str().expect("write path"))
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(AUTHORIZATION, "Bearer owner")
+                    .body(Body::from(
+                        json!({ "fields": write["responseShape"]["fields"] }).to_string(),
+                    ))
+                    .expect("write request"),
+            )
+            .await
+            .expect("write response");
+        assert_eq!(u64::from(response.status().as_u16()), write["status"]);
+        let mut document: JsonValue = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("write body"),
+        )
+        .expect("write JSON");
+        for field in ["createTime", "updateTime"] {
+            let time = document[field].as_str().expect("a document time");
+            assert!(OffsetDateTime::parse(time, &Rfc3339).is_ok(), "{time}");
+            document[field] = json!("<timestamp>");
+        }
+        assert_eq!(document, write["responseShape"], "the written document");
+        firenook_conformance_ledger::checked(
+            "firebase-suite-v1/firestore-triggers",
+            "firestore-trigger-registration-and-v1-v2-dispatch/write",
+            firenook_conformance_ledger::Compared::Answer,
+        );
+    }
+
     #[tokio::test]
     async fn trigger_control_routes_replay_the_frozen_official_contract() {
         let oracle: JsonValue =
@@ -2694,6 +2737,8 @@ mod tests {
             }
         }
         assert_eq!(triggers.all().len(), 2);
+
+        replay_trigger_write(&application, &oracle).await;
 
         let response = application
             .oneshot(

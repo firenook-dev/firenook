@@ -713,6 +713,27 @@ jobs:
             --profiles tasks \
             --fixture fixtures/tasks-v1/emulator-programs.json \
             --output "$RUNNER_TEMP/firenook-tasks-replay.json"
+      # The two public registry Extensions the corpus resolved with a Firebase
+      # CLI login: their published source archives, checked by SHA-256, as the
+      # engine's default Extensions source cache (the replay passes the engine
+      # HOME, not FIREBASE_EXTENSIONS_CACHE_PATH).
+      - name: Replay the registry Extensions recordings from their published sources
+        if: matrix.key == 'functions'
+        env:
+          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
+          FIRENOOK_OFFLINE: "1"
+        run: |
+          node conformance/src/functions-runtime/fetch-registry-sources.mjs "$HOME/.cache/firebase/extensions"
+          NODE24="$(command -v node)" npm run replay:functions:runtime --prefix conformance -- \
+            --binary ../target/debug/firenook \
+            --profiles consumer-refs \
+            --output "$RUNNER_TEMP/firenook-registry-extensions-replay.json"
+      - name: Replay the suite's hub, UI, start-up, restart and Functions start-up recordings
+        if: matrix.key == 'functions'
+        env:
+          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
+          FIRENOOK_BINARY: ${{ github.workspace }}/target/debug/firenook
+        run: node --test conformance/test/suite-replay.test.mjs
       - name: Replay the Auth oracle corpus against the standalone Auth service
         if: matrix.key == 'auth-pubsub'
         run: |
@@ -738,6 +759,7 @@ jobs:
           path: |
             ${{ runner.temp }}/firenook-functions-runtime-replay.json
             ${{ runner.temp }}/firenook-tasks-replay.json
+            ${{ runner.temp }}/firenook-registry-extensions-replay.json
             ${{ runner.temp }}/firenook-auth-replay.json
             ${{ runner.temp }}/firenook-pubsub-replay.json
             ${{ runner.temp }}/firenook-pubsub-client.json
