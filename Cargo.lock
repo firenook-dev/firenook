@@ -1145,7 +1145,12 @@ version = "0.0.1"
 dependencies = [
  "axum",
  "firenook-conformance-ledger",
+ "firenook-core-store",
+ "firenook-functions-bridge",
  "firenook-grpc-front",
+ "firenook-query-engine",
+ "firenook-rest-front",
+ "firenook-rules-runtime",
  "futures-util",
  "http-body-util",
  "pbjson-types",
