@@ -8,30 +8,6 @@
       "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
     },
     {
-      "set": "developer-tools-v1",
-      "case": "ui/config",
-      "issue": 210,
-      "why": "the hub's /emulators and the UI's /api/config list the emulators with other fields than firebase-tools"
-    },
-    {
-      "set": "firebase-suite-v1/suite",
-      "case": "hub-locator-export-and-background-controls/hub-emulator-map",
-      "issue": 210,
-      "why": "the hub's /emulators and the UI's /api/config list the emulators with other fields than firebase-tools"
-    },
-    {
-      "set": "firebase-suite-v1/suite",
-      "case": "ui-config-logging-and-websocket/ui-api-config",
-      "issue": 210,
-      "why": "the hub's /emulators and the UI's /api/config list the emulators with other fields than firebase-tools"
-    },
-    {
-      "set": "functions-runtime-v1",
-      "case": "main/discovery-backends-inventory/hub-emulators",
-      "issue": 210,
-      "why": "the hub's /emulators and the UI's /api/config list the emulators with other fields than firebase-tools"
-    },
-    {
       "set": "rules-v2/production-rules-api",
       "case": "limit-probes/linear-expression-terms-60",
       "issue": 204,

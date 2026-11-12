@@ -261,9 +261,13 @@ export function inspectProject(options, cwd = process.cwd()) {
   if (typeof host === 'string' && !isLoopback(host)) warnings.push(`Firenook: binding ${host}; the emulators have no authentication, so every service, the data and arbitrary Functions execution are reachable from any device that can reach this host.`);
 
   const ports = {};
+  // The listeners whose port neither a flag nor firebase.json chose.
+  const defaulted = [];
   for (const name of [...LISTENERS, 'firestore-websocket']) {
     const override = options[`${name}-port`];
-    const value = override ?? (name === 'firestore-websocket' ? entry('firestore')?.websocketPort : entry(name)?.port) ?? DEFAULT_PORTS[name];
+    const chosen = override ?? (name === 'firestore-websocket' ? entry('firestore')?.websocketPort : entry(name)?.port);
+    if (chosen === undefined) defaulted.push(name);
+    const value = chosen ?? DEFAULT_PORTS[name];
     if (value !== undefined) {
       if (!/^\d+$/.test(String(value)) || Number(value) < 1 || Number(value) > 65535) fail('port', `Invalid port for ${name}`);
       ports[name] = Number(value);
@@ -311,7 +315,7 @@ export function inspectProject(options, cwd = process.cwd()) {
   // The engine needs a positive minimum only when a Functions codebase exists.
   const functionsConfigured = has('functions') || has('extensions');
   const minimumFunctions = options['minimum-functions'] !== undefined ? String(options['minimum-functions']) : (services.includes('functions') && functionsConfigured ? '1' : '0');
-  return {config, directory, rc, data, project, alias, projectFrom, demo, configured, services, skipped, ui, uiExplicit, singleProjectMode, host, ports, imported, exported, state, resume, minimumFunctions, errors, warnings, skips};
+  return {config, directory, rc, data, project, alias, projectFrom, demo, configured, services, skipped, ui, uiExplicit, singleProjectMode, host, ports, defaulted, imported, exported, state, resume, minimumFunctions, errors, warnings, skips};
 }
 
 // What the engine is told about this launch (--launch-context), so the

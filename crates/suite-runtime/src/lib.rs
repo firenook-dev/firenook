@@ -113,9 +113,9 @@ pub struct SuitePorts {
     pub tasks: u16,
 }
 
-/// Which data services the suite starts (`--only`); the hub always runs,
-/// Eventarc and Tasks follow Functions, the Firestore requests WebSocket
-/// follows Firestore, the UI and logging listeners follow `ui_enabled`.
+/// Which data services the suite starts (`--only`); the hub and the logging
+/// listener always run, Eventarc and Tasks follow Functions, the Firestore
+/// requests WebSocket follows Firestore, the UI follows `ui_enabled`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 // One switch per service, each mapped from one `--only` name.
 #[allow(clippy::struct_excessive_bools)]
@@ -304,8 +304,8 @@ pub struct SuiteConfig {
     pub project_alias: Option<String>,
     /// `--only` selection; `ServiceSelection::ALL` by default.
     pub services: ServiceSelection,
-    /// `emulators.ui.enabled` / `--no-ui`: without the UI the logging
-    /// listener is not started either, as officially.
+    /// `emulators.ui.enabled` / `--no-ui`. The logging listener runs either
+    /// way, as officially.
     pub ui_enabled: bool,
     /// `emulators.singleProjectMode` (default true): warn about requests that
     /// name another project.
@@ -1727,10 +1727,7 @@ fn without_absent_functions(mut config: SuiteConfig) -> Result<SuiteConfig, Suit
     )
     .map_err(|error| failure(format!("invalid firebase.json: {error}")))?;
     let codebases = codebases_from_config(&firebase_json, &config.project_dir);
-    let extensions = firebase_json
-        .get("extensions")
-        .and_then(serde_json::Value::as_object)
-        .is_some_and(|instances| !instances.is_empty());
+    let extensions = configures_extensions(&firebase_json);
     if codebases.is_empty() && !extensions {
         let message = "firebase.json configures no Functions codebase and no Extensions; the Functions emulator (with Eventarc and Tasks) is not started";
         terminal::print("INFO", "firenook", message, &format!("firenook: {message}"));
@@ -1854,7 +1851,7 @@ fn startup_banner(config: &SuiteConfig) -> Vec<(&'static str, String)> {
     if !config.ui_enabled {
         lines.push((
             "INFO",
-            "Emulator UI disabled (emulators.ui.enabled is false); the logging emulator is not started either.".to_owned(),
+            "Emulator UI disabled (emulators.ui.enabled is false).".to_owned(),
         ));
     }
     lines
@@ -2350,14 +2347,17 @@ fn lifecycle_queue(config: &SuiteConfig, delivery: &DeliveryRuntime) -> Dispatch
     }
 }
 
-/// Every listener the selection needs, in the official listing order.
+/// Every listener the selection needs, in the official listing order. The
+/// logging emulator runs with the hub, UI or not, as the official CLI starts
+/// it (its `START_LOGGING_EMULATOR` defaults to the string "false", which is
+/// true; `functions-runtime-v1` lists it with the UI disabled).
 fn listener_plan(config: &SuiteConfig) -> Vec<(&'static str, u16)> {
     let services = config.services;
     let mut plan = vec![("hub", config.ports.hub)];
     if config.ui_enabled {
         plan.push(("ui", config.ports.ui));
-        plan.push(("logging", config.ports.logging));
     }
+    plan.push(("logging", config.ports.logging));
     if services.firestore {
         plan.push(("firestore", config.ports.firestore));
         plan.push(("firestore.websocket", config.ports.firestore_websocket));
@@ -2382,14 +2382,17 @@ fn listener_plan(config: &SuiteConfig) -> Vec<(&'static str, u16)> {
 fn suite_directory(config: &SuiteConfig) -> Result<SuiteDirectory, SuiteRuntimeError> {
     let host = config.connect_host();
     let services = listener_plan(config).into_iter().map(|(name, port)| {
-        // The recorded official listing carries no `listen` array for the
-        // Eventarc and Tasks entries.
+        // Eventarc and Tasks are dependencies to the console; the listing
+        // gives them and Functions their `listen` as the official hub does
+        // (`SuiteDirectory::with_extensions`).
         let mut service = if matches!(name, "eventarc" | "tasks") {
             ServiceInfo::dependency(name, &host, port)
         } else {
             ServiceInfo::listening(name, &host, port)
         };
-        if name == "pubsub" {
+        // The official listing names the process of the Java Firestore and
+        // Pub/Sub emulators; both run in this one.
+        if matches!(name, "pubsub" | "firestore") {
             service.pid = Some(std::process::id());
         }
         if config.also_ipv6(name) {
@@ -2400,8 +2403,31 @@ fn suite_directory(config: &SuiteConfig) -> Result<SuiteDirectory, SuiteRuntimeE
         }
         service
     });
-    SuiteDirectory::new(&config.project_id, services)
-        .map_err(|error| failure(format!("invalid suite directory: {error}")))
+    let directory = SuiteDirectory::new(&config.project_id, services)
+        .map_err(|error| failure(format!("invalid suite directory: {error}")))?;
+    Ok(if emulates_extensions(config) {
+        directory.with_extensions()
+    } else {
+        directory
+    })
+}
+
+/// Whether the Extensions emulator runs: Functions does, and `firebase.json`
+/// names an extension instance.
+fn emulates_extensions(config: &SuiteConfig) -> bool {
+    config.services.functions
+        && std::fs::read(&config.firebase_json)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .is_some_and(|firebase_json| configures_extensions(&firebase_json))
+}
+
+/// `firebase.json` names at least one extension instance.
+fn configures_extensions(firebase_json: &serde_json::Value) -> bool {
+    firebase_json
+        .get("extensions")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|instances| !instances.is_empty())
 }
 
 /// The host the Functions runtime names its own port by (its origin, and
@@ -2649,14 +2675,14 @@ fn spawn_static_servers(
                 failed.clone(),
             ));
         }
-        servers.push(spawn_axum(
-            "logging",
-            listeners.take("logging")?,
-            applications.logging,
-            shutdown.subscribe(),
-            failed.clone(),
-        ));
     }
+    servers.push(spawn_axum(
+        "logging",
+        listeners.take("logging")?,
+        applications.logging,
+        shutdown.subscribe(),
+        failed.clone(),
+    ));
     Ok(servers)
 }
 

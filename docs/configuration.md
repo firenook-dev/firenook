@@ -57,7 +57,8 @@ How Firenook reads `firebase.json`, `.firebaserc` and the command line, and what
   the engine drops Functions (with Eventarc and Tasks) with a notice when
   `firebase.json` has no `functions` codebase and no `extensions`.
 - **UI.** `emulators.ui.enabled: false` turns off the UI port, and with it
-  the console and the logging listener, as in the official suite; `--ui`
+  the console, as in the official suite (the logging listener, the feed the
+  UI's Logs page read, runs either way, as the official CLI starts it); `--ui`
   turns it on all the same, as the official `--ui` comes before that
   setting. `emulators:exec` keeps it off unless `--ui` is given or
   `ui.enabled` is explicitly `true`; `emulators:start` keeps it on unless
@@ -81,7 +82,9 @@ How Firenook reads `firebase.json`, `.firebaserc` and the command line, and what
   (Firestore 8080, Auth 9099, Storage 9199, Functions 5001, Pub/Sub 8085, hub
   4400, UI 4000, logging 4500, Eventarc 9299, Tasks 9499, Firestore WebSocket
   9150); every port is passed to the engine explicitly and they must be
-  distinct.
+  distinct. The logging port alone moves, as officially: when neither
+  `--logging-port` nor `emulators.logging.port` chose it and 4500 is taken,
+  it starts on the next free port, with a warning.
 
 ## Rules coverage and request tracing
 

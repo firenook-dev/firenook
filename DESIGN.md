@@ -1135,9 +1135,14 @@ after such a delete is the one path not reproduced.
 
 The suite starts the data services `SuiteConfig.services` names (`--only`;
 the wrapper derives the default set from `firebase.json` as the official
-`filterEmulatorTargets` does). The hub always runs; Eventarc and Tasks follow
-Functions, the requests WebSocket follows Firestore, the UI and logging
-listeners follow `emulators.ui.enabled`. Every runtime, listener, hub entry,
+`filterEmulatorTargets` does). The hub and the logging listener always run
+(the official CLI starts logging whatever the UI); Eventarc and Tasks follow
+Functions, the requests WebSocket follows Firestore, the UI follows
+`emulators.ui.enabled`. The hub's `/emulators` and the UI's `/api/config`
+list them as firebase-tools 15.22.0 does: Functions, Eventarc and Tasks carry
+`listen` only when the Extensions emulator runs (then listed too, on the
+Functions port), and the requests WebSocket is the Firestore entry's
+`webSocketPort`. Every runtime, listener, hub entry,
 import and export step is conditional on that selection; a selection naming
 Functions while `firebase.json` configures no codebase and no extension drops
 Functions with one notice; `--resume-state` keeps requiring Firestore, Auth

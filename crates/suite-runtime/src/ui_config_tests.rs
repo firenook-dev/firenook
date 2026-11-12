@@ -26,6 +26,23 @@ fn name_ports(value: &mut Value, ports: &BTreeMap<u16, &'static str>) {
     }
 }
 
+/// The capture named every process id it found (`normalize-capture.mjs`).
+fn name_pids(value: &mut Value) {
+    match value {
+        Value::Array(items) => items.iter_mut().for_each(name_pids),
+        Value::Object(fields) => {
+            for (key, item) in fields.iter_mut() {
+                if key == "pid" && item.is_number() {
+                    *item = json!("<oracle-pid>");
+                } else {
+                    name_pids(item);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 #[tokio::test]
 async fn developer_tools_ui_config_lists_the_recorded_services() {
     let fixture: Value = serde_json::from_str(include_str!(
@@ -83,34 +100,11 @@ async fn developer_tools_ui_config_lists_the_recorded_services() {
     )
     .expect("JSON");
     name_ports(&mut actual, &ports);
-    // The two differences BUG_CANDIDATES holds: the official Firestore
-    // entry names the Java emulator's process id (`<oracle-pid>`), and the
-    // official listing has no entry of its own for the requests WebSocket
-    // (it is the Firestore entry's `webSocketPort`).
-    assert_ne!(
-        actual, *recorded,
-        "ui/config matches now: note it and leave BUG_CANDIDATES"
+    name_pids(&mut actual);
+    assert_eq!(&actual, recorded, "/api/config");
+    firenook_conformance_ledger::checked(
+        "developer-tools-v1",
+        "ui/config",
+        firenook_conformance_ledger::Compared::Answer,
     );
-    assert_eq!(recorded["firestore"]["pid"], "<oracle-pid>");
-    assert!(recorded.get("firestore.websocket").is_none());
-    let mut expected = recorded.clone();
-    expected["firestore"]
-        .as_object_mut()
-        .expect("firestore")
-        .remove("pid");
-    let listed = actual
-        .as_object_mut()
-        .expect("config")
-        .remove("firestore.websocket")
-        .expect("Firenook's own WebSocket entry");
-    assert_eq!(listed["port"], "websocket");
-    assert_eq!(actual, expected, "/api/config apart from the two");
-    assert!(BUG_CANDIDATES.iter().any(|(case, _)| *case == "ui/config"));
 }
-
-/// Bug candidates: answered otherwise with no documented reason, kept out of
-/// the ledger; the test above fails once one matches.
-const BUG_CANDIDATES: &[(&str, &str)] = &[(
-    "ui/config",
-    "/api/config lists a `firestore.websocket` entry the official listing does not have (it names the port only as the Firestore entry's webSocketPort), and its Firestore entry has no `pid` where the official one names its emulator's process (suite-runtime suite_directory, suite-front wire_services)",
-)];

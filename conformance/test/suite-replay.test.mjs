@@ -83,6 +83,9 @@ async function startSuite({ binary, projectDir, project, only, ports, tmp, ui = 
   const args = ['suite', '--host', HOST, '--project-id', project, '--project-dir', projectDir, '--state-dir', join(projectDir, 'state'), '--node', process.execPath, '--only', only];
   if (!ui) args.push('--no-ui');
   for (const [name, port] of Object.entries(ports)) if (PORT_FLAGS[name]) args.push(PORT_FLAGS[name], String(port));
+  // The logging emulator runs with or without the UI, as officially: a
+  // free port of its own, never the default another suite may hold.
+  if (!ports.logging) args.push(PORT_FLAGS.logging, String(await reservePort()));
   const started = performance.now();
   const child = spawn(binary, args, { cwd: projectDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
   const exited = new Promise((done) => child.once('exit', (code, signal) => done({ code, signal })));
@@ -342,16 +345,7 @@ const SUITE_DIFFERS = {
  * Bug candidates: answered otherwise with no documented reason. Never noted;
  * `settle` fails once one matches, so whoever fixes it moves it out of here.
  */
-const SUITE_BUGS = {
-  'hub-locator-export-and-background-controls/hub-emulator-map': {
-    description: 'the hub lists the functions emulator with a `listen` array; the official entry has only name, host and port (suite-runtime suite_directory lists only eventarc and tasks as dependencies)',
-    expected: [/^body\.functions\.listen: \[\{"address":"127\.0\.0\.1","family":"IPv4","port":"<functions-port>"\}\] where undefined$/u],
-  },
-  'ui-config-logging-and-websocket/ui-api-config': {
-    description: '/api/config lists the functions emulator with a `listen` array, as the hub does',
-    expected: [/^body\.functions\.listen: \[\{"address":"127\.0\.0\.1","family":"IPv4","port":"<functions-port>"\}\] where undefined$/u],
-  },
-};
+const SUITE_BUGS = {};
 
 const FUNCTIONS_SET = 'firebase-suite-v1/functions';
 const FUNCTIONS_DIFFERS = {};

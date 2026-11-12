@@ -95,16 +95,7 @@ const OUT_OF_SCOPE_STEPS: ReadonlySet<string> = new Set([]);
  * one no longer differs, so whoever fixes it moves the step out of here) and
  * the step is never noted in the ledger.
  */
-const BUG_CANDIDATES: ReadonlyMap<string, { readonly description: string; readonly paths: RegExp }> = new Map([
-  [
-    "main/discovery-backends-inventory/hub-emulators",
-    {
-      description:
-        "the hub's /emulators omits logging (the UI is disabled; the official listing keeps it) and the extensions entry, lists eventarc and tasks without `listen` (the capture selected them with --only, which Firenook's --only cannot name), and gives Firestore no pid/webSocketHost/webSocketPort/reservedPorts but a `firestore.websocket` entry of its own",
-      paths: /^response\.body\.(logging|extensions|firestore\.(pid|reservedPorts|webSocketHost|webSocketPort)|eventarc\.listen|tasks\.listen|firestore\.websocket)$/u,
-    },
-  ],
-]);
+const BUG_CANDIDATES: ReadonlyMap<string, { readonly description: string; readonly paths: RegExp }> = new Map([]);
 
 /** Step-scoped paths whose value is a race the program does not control. */
 const IGNORED_STEP_PATHS: ReadonlyMap<string, readonly RegExp[]> = new Map([
@@ -345,7 +336,7 @@ async function replayProfile(profile: Profile, recordedPrograms: readonly Record
       for (const expectedStep of expected.steps) {
         const actualStep = finalized.steps.find((candidate) => candidate.id === expectedStep.id);
         steps += 1;
-        const result = compareStep(profile.id, program.id, expectedStep, actualStep);
+        const result = compareStep(profile.id, program.id, expectedStep, recordedWebSocketPort(expectedStep, actualStep, ports.firestoreWebsocket));
         results.push(result);
         ledgerStep(expectedStep, result);
         if (result.mismatches.length === 0) matched += 1;
@@ -446,6 +437,26 @@ function ledgerStep(expected: RecordedProgram["steps"][number], result: StepResu
   const divergences = DIVERGENCES.filter((entry) => entry.profile === result.profile && entry.program === result.program && entry.step === result.step);
   if (divergences.length > 0) ledger.differs(LEDGER_SET, key, compared, divergences.map((entry) => entry.reason).join("; "));
   else ledger.checked(LEDGER_SET, key, compared);
+}
+
+/**
+ * The hub lists the Firestore requests WebSocket's port as the Firestore
+ * entry's `webSocketPort` and `reservedPorts`, which the capture's
+ * normalisation (by key: `port`, `pid`) left as the official run's number.
+ * The port this run gave the WebSocket stands for that number, as
+ * `{{number}}` stands for each `port`; any other value is left as it is,
+ * and differs.
+ */
+function recordedWebSocketPort(expected: RecordedProgram["steps"][number], actual: RecordedProgram["steps"][number] | undefined, port: number): RecordedProgram["steps"][number] | undefined {
+  const recorded = (expected.response as { body?: { firestore?: { webSocketPort?: unknown } } } | undefined)?.body?.firestore?.webSocketPort;
+  const response = actual?.response as { body?: { firestore?: Record<string, unknown> } } | undefined;
+  const firestore = response?.body?.firestore;
+  if (!actual || typeof recorded !== "number" || !firestore || typeof firestore !== "object") return actual;
+  const named = (value: unknown): unknown => (value === port ? recorded : value);
+  const renamed: Record<string, unknown> = { ...firestore };
+  if ("webSocketPort" in firestore) renamed.webSocketPort = named(firestore.webSocketPort);
+  if (Array.isArray(firestore.reservedPorts)) renamed.reservedPorts = firestore.reservedPorts.map(named);
+  return { ...actual, response: { ...response, body: { ...response.body, firestore: renamed } } };
 }
 
 /** Strips the parts of a response that belong to another emulator's contract. */

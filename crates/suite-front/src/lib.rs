@@ -65,7 +65,10 @@ pub struct ServiceInfo {
     pub host: String,
     /// Bound port.
     pub port: u16,
-    /// Whether the official shape includes a `listen` array.
+    /// Whether the official shape includes a `listen` array (the console
+    /// reads it as whether the service listens on a port of its own).
+    /// Functions, Eventarc and Tasks take theirs from
+    /// [`SuiteDirectory::with_extensions`] in the listing.
     #[serde(skip)]
     pub include_listen: bool,
     /// Addresses it listens on besides `host` (the hub and the console on
@@ -126,13 +129,15 @@ impl ServiceInfo {
         }
     }
 
-    fn wire_value(&self) -> JsonValue {
+    /// The entry the official listing has for it; `listen`: with the
+    /// addresses it listens on.
+    fn wire_value(&self, listen: bool) -> JsonValue {
         let mut value = json!({
             "name": self.name,
             "host": self.host,
             "port": self.port,
         });
-        if self.include_listen {
+        if listen {
             value["listen"] = std::iter::once(&self.host)
                 .chain(&self.also)
                 .map(|address| {
@@ -156,6 +161,8 @@ impl ServiceInfo {
 pub struct SuiteDirectory {
     project: String,
     services: BTreeMap<String, ServiceInfo>,
+    /// The Extensions emulator runs, on the Functions port.
+    extensions: bool,
 }
 
 impl SuiteDirectory {
@@ -182,15 +189,26 @@ impl SuiteDirectory {
             }
         }
         // Every other service is optional: a suite started with a subset
-        // (`--only`), without the UI (which also drops the logging emulator,
-        // as officially) or without Functions advertises only what runs.
+        // (`--only`), without the UI or without Functions advertises only
+        // what runs.
         if !indexed.contains_key("hub") {
             return Err(SuiteError("missing required hub service".to_owned()));
         }
         Ok(Self {
             project,
             services: indexed,
+            extensions: false,
         })
+    }
+
+    /// The Extensions emulator runs beside Functions, on its port: the
+    /// listing names it, and gives Functions, Eventarc and Tasks the
+    /// `listen` arrays the official hub gives them when it starts with
+    /// extension backends.
+    #[must_use]
+    pub fn with_extensions(mut self) -> Self {
+        self.extensions = true;
+        self
     }
 
     /// Configured Firebase project ID.
@@ -204,15 +222,43 @@ impl SuiteDirectory {
         self.services.values()
     }
 
-    /// Emulator map using the captured firebase-tools representation.
+    /// The emulators as the official hub's `/emulators` and the UI's
+    /// `/api/config` list them (firebase-tools 15.22.0
+    /// `getRunningEmulatorsMapping`), as `firebase-suite-v1`,
+    /// `developer-tools-v1` and `functions-runtime-v1` recorded them. The
+    /// `listen` arrays are the addresses the hub was started with: Functions,
+    /// Eventarc and Tasks have them only when the Extensions emulator runs
+    /// (the CLI assigns their ports before the hub only for extension
+    /// backends, and later for codebases). The Firestore requests WebSocket
+    /// is no entry of its own: the Firestore entry names it
+    /// (`webSocketHost`, `webSocketPort`, `reservedPorts`). The Extensions
+    /// emulator is listed on the Functions port, without `listen`.
     #[must_use]
     pub fn wire_services(&self) -> JsonValue {
-        JsonValue::Object(
-            self.services
-                .iter()
-                .map(|(name, service)| (name.clone(), service.wire_value()))
-                .collect(),
-        )
+        let mut listing = serde_json::Map::new();
+        for (name, service) in &self.services {
+            let listen = match name.as_str() {
+                "firestore.websocket" => continue,
+                "functions" | "eventarc" | "tasks" => self.extensions,
+                _ => service.include_listen,
+            };
+            listing.insert(name.clone(), service.wire_value(listen));
+        }
+        if let (Some(firestore), Some(websocket)) = (
+            listing.get_mut("firestore"),
+            self.services.get("firestore.websocket"),
+        ) {
+            firestore["webSocketHost"] = json!(websocket.host);
+            firestore["webSocketPort"] = json!(websocket.port);
+            firestore["reservedPorts"] = json!([websocket.port]);
+        }
+        if let Some(functions) = self.services.get("functions").filter(|_| self.extensions) {
+            listing.insert(
+                "extensions".to_owned(),
+                json!({ "name": "extensions", "host": functions.host, "port": functions.port }),
+            );
+        }
+        JsonValue::Object(listing)
     }
 
     fn required(&self, name: &str) -> &ServiceInfo {
@@ -452,14 +498,6 @@ struct UiState {
 
 async fn ui_config(State(state): State<UiState>) -> Json<JsonValue> {
     let mut value = state.directory.wire_services();
-    if let (Some(_), Some(websocket)) = (
-        state.directory.services.get("firestore"),
-        state.directory.services.get("firestore.websocket"),
-    ) {
-        value["firestore"]["webSocketHost"] = json!(websocket.host);
-        value["firestore"]["webSocketPort"] = json!(websocket.port);
-        value["firestore"]["reservedPorts"] = json!([websocket.port]);
-    }
     value["projectId"] = json!(state.directory.project());
     value["experiments"] = json!([
         "functionsv2deployoptimizations",
@@ -629,6 +667,49 @@ mod tests {
         assert_eq!(oracle["webSocketPort"], "websocket");
         assert_eq!(actual["firestore"]["webSocketPort"], 31001);
         assert_eq!(actual["firestore"]["reservedPorts"], json!([31001]));
+    }
+
+    /// Functions, Eventarc and Tasks have the `listen` the official hub
+    /// starts with, which it assigns early only for extension backends; the
+    /// requests WebSocket is the Firestore entry's port, not an entry.
+    #[test]
+    fn the_listing_gives_listen_to_functions_only_with_extensions() {
+        let mut directory = directory();
+        directory.services.insert(
+            "firestore".into(),
+            ServiceInfo::listening("firestore", "127.0.0.1", 31000),
+        );
+        directory.services.insert(
+            "firestore.websocket".into(),
+            ServiceInfo::listening("firestore.websocket", "127.0.0.1", 31001),
+        );
+        // The console still sees every listener.
+        assert!(
+            directory
+                .services()
+                .any(|service| service.name == "firestore.websocket")
+        );
+        let plain = directory.wire_services();
+        for name in ["functions", "eventarc", "tasks"] {
+            assert!(plain[name].get("listen").is_none(), "{name}");
+        }
+        assert!(plain.get("extensions").is_none());
+        assert!(plain.get("firestore.websocket").is_none());
+        assert_eq!(plain["firestore"]["webSocketPort"], 31001);
+        assert_eq!(plain["firestore"]["reservedPorts"], json!([31001]));
+        assert_eq!(plain["auth"]["listen"][0]["port"], 21001);
+        let extended = directory.with_extensions().wire_services();
+        for (name, port) in [("functions", 21003), ("eventarc", 21007), ("tasks", 21008)] {
+            assert_eq!(
+                extended[name]["listen"],
+                json!([{ "address": "127.0.0.1", "family": "IPv4", "port": port }]),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            extended["extensions"],
+            json!({ "name": "extensions", "host": "127.0.0.1", "port": 21003 })
+        );
     }
 
     #[tokio::test]
