@@ -423,7 +423,10 @@ jobs:
     runs-on: ubuntu-latest
     # The 0.2.0 replays (who a request is from, Storage targets without
     # buckets, rules-unit-testing on both emulators) brought this job to
-    # 24-30 minutes; 30 was cancelling it on slow runners.
+    # 24-30 minutes; 30 was cancelling it on slow runners. Most of that was
+    # the engine rebuilt in every step (fixed in console-front's build
+    # script), and the oracle corpus replays run in a job of their own:
+    # about 10 minutes now.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -510,40 +513,6 @@ jobs:
             target/debug/firenook "$RUNNER_TEMP/firenook-devtools" \
             "$HOME/.cache/firebase/emulators" "$RUNNER_TEMP/firenook-native-upgrade-evidence" \
             "$RUNNER_TEMP/firenook-previous-engine/node_modules/@fireside-dev/linux-x64/bin/fireside"
-      - name: Replay the Functions runtime and Extensions oracle corpus
-        env:
-          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
-          FIRENOOK_OFFLINE: "1"
-        run: |
-          NODE24="$(command -v node)" npm run replay:functions:runtime --prefix conformance -- \
-            --binary ../target/debug/firenook \
-            --profiles main,v1-blocking,inspect,ext-missing-param \
-            --output "$RUNNER_TEMP/firenook-functions-runtime-replay.json"
-      - name: Replay the Cloud Tasks oracle corpus against the suite
-        env:
-          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
-          FIRENOOK_OFFLINE: "1"
-        run: |
-          NODE24="$(command -v node)" npm run replay:functions:runtime --prefix conformance -- \
-            --binary ../target/debug/firenook \
-            --profiles tasks \
-            --fixture fixtures/tasks-v1/emulator-programs.json \
-            --output "$RUNNER_TEMP/firenook-tasks-replay.json"
-      - name: Replay the Auth oracle corpus against the standalone Auth service
-        run: |
-          npm run replay:auth --prefix conformance -- \
-            --binary ../target/debug/firenook \
-            --output "$RUNNER_TEMP/firenook-auth-replay.json"
-      - name: Replay the Pub/Sub oracle corpus over gRPC and HTTP/JSON
-        run: |
-          npm run replay:pubsub --prefix conformance -- \
-            --binary ../target/debug/firenook \
-            --output "$RUNNER_TEMP/firenook-pubsub-replay.json"
-      - name: Verify the pinned Pub/Sub client library against Firenook
-        run: |
-          npm run verify:pubsub:client --prefix conformance -- \
-            --binary ../target/debug/firenook \
-            --output "$RUNNER_TEMP/firenook-pubsub-client.json"
       - name: Verify suite start without Java on PATH
         run: >-
           node conformance/src/suite/verify-no-java.mjs
@@ -570,10 +539,6 @@ jobs:
             ${{ runner.temp }}/firenook-developer-ui-evidence/failure.json
             ${{ runner.temp }}/firenook-developer-ui-evidence/browser-failure.json
             ${{ runner.temp }}/firenook-developer-ui-evidence/*.png
-            ${{ runner.temp }}/firenook-functions-runtime-replay.json
-            ${{ runner.temp }}/firenook-auth-replay.json
-            ${{ runner.temp }}/firenook-pubsub-replay.json
-            ${{ runner.temp }}/firenook-pubsub-client.json
             ${{ runner.temp }}/firenook-no-java-evidence/result.json
             ${{ runner.temp }}/firenook-no-java-evidence/suite.log
           if-no-files-found: ignore
@@ -623,6 +588,89 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: conformance-ledger-harness
+          path: ${{ runner.temp }}/conformance-ledger
+          retention-days: 7
+          if-no-files-found: error
+
+  # The Functions, Cloud Tasks, Auth and Pub/Sub oracle corpus replays
+  # (about 9 minutes) beside the harness rather than in it, where they were
+  # its longest steps: they compare recorded answers and start no Java.
+  oracle-replays:
+    name: Oracle corpus replays
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Note the recorded cases each replay compares
+        run: echo "FIRENOOK_CONFORMANCE_LEDGER=$RUNNER_TEMP/conformance-ledger/oracle-replays" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.20.0
+          cache: npm
+          cache-dependency-path: conformance/package-lock.json
+      - name: Install current npm
+        run: npm install --global npm@12.0.2
+      - name: Install latest stable Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc --version
+      - name: Build the engine the replays run against
+        run: cargo build --locked --bin firenook
+      - name: Install pinned harness dependencies and the Functions peers
+        run: |
+          npm ci --prefix conformance
+          npm install --prefix "$RUNNER_TEMP/firenook-devtools" --ignore-scripts --no-audit --no-fund firebase-functions@7.2.5 firebase-admin@13.10.0
+      - name: Replay the Functions runtime and Extensions oracle corpus
+        env:
+          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
+          FIRENOOK_OFFLINE: "1"
+        run: |
+          NODE24="$(command -v node)" npm run replay:functions:runtime --prefix conformance -- \
+            --binary ../target/debug/firenook \
+            --profiles main,v1-blocking,inspect,ext-missing-param \
+            --output "$RUNNER_TEMP/firenook-functions-runtime-replay.json"
+      - name: Replay the Cloud Tasks oracle corpus against the suite
+        env:
+          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
+          FIRENOOK_OFFLINE: "1"
+        run: |
+          NODE24="$(command -v node)" npm run replay:functions:runtime --prefix conformance -- \
+            --binary ../target/debug/firenook \
+            --profiles tasks \
+            --fixture fixtures/tasks-v1/emulator-programs.json \
+            --output "$RUNNER_TEMP/firenook-tasks-replay.json"
+      - name: Replay the Auth oracle corpus against the standalone Auth service
+        run: |
+          npm run replay:auth --prefix conformance -- \
+            --binary ../target/debug/firenook \
+            --output "$RUNNER_TEMP/firenook-auth-replay.json"
+      - name: Replay the Pub/Sub oracle corpus over gRPC and HTTP/JSON
+        run: |
+          npm run replay:pubsub --prefix conformance -- \
+            --binary ../target/debug/firenook \
+            --output "$RUNNER_TEMP/firenook-pubsub-replay.json"
+      - name: Verify the pinned Pub/Sub client library against Firenook
+        run: |
+          npm run verify:pubsub:client --prefix conformance -- \
+            --binary ../target/debug/firenook \
+            --output "$RUNNER_TEMP/firenook-pubsub-client.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: oracle-replays
+          path: |
+            ${{ runner.temp }}/firenook-functions-runtime-replay.json
+            ${{ runner.temp }}/firenook-tasks-replay.json
+            ${{ runner.temp }}/firenook-auth-replay.json
+            ${{ runner.temp }}/firenook-pubsub-replay.json
+            ${{ runner.temp }}/firenook-pubsub-client.json
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: conformance-ledger-oracle-replays
           path: ${{ runner.temp }}/conformance-ledger
           retention-days: 7
           if-no-files-found: error
@@ -687,7 +735,7 @@ jobs:
   # names a case cases.mjs does not list.
   conformance-ledger:
     name: Conformance ledger
-    needs: [changes, rust, conformance, client-replays]
+    needs: [changes, rust, conformance, oracle-replays, client-replays]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
