@@ -61,6 +61,9 @@ jobs:
 
   rust:
     name: Rust quality gate
+    env:
+      # Incremental data is large and useless to the next checkout.
+      CARGO_INCREMENTAL: 0
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -82,11 +85,18 @@ jobs:
           rustup default stable
           rustup component add rustfmt clippy
           rustc --version
-      # Dependencies only (the cache drops this workspace's crates): the
-      # compile of the tree itself still runs in full.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+          echo "RUSTC_VERSION=$(rustc --version | cut -d' ' -f2)" >> "$GITHUB_ENV"
+      # What the last run with this Cargo.lock and Rust compiled. Cargo
+      # rebuilds this tree's own crates (a fresh checkout is newer than
+      # them) and takes the dependencies as they are.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          shared-key: rust-gate
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: rust-gate-${{ runner.os }}-rust${{ env.RUSTC_VERSION }}-${{ hashFiles('Cargo.lock') }}
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Deny Clippy warnings
@@ -138,6 +148,9 @@ jobs:
     # checkout's path at run time, which every journey job's checkout
     # shares; each builds the console itself.
     name: The engine the journeys run against
+    env:
+      # Incremental data is large and useless to the next checkout.
+      CARGO_INCREMENTAL: 0
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -149,11 +162,18 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
-      # The dependencies of the debug engine, shared by every job that builds
-      # it; this job is the one that saves them when Cargo.lock or Rust moves.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+          echo "RUSTC_VERSION=$(rustc --version | cut -d' ' -f2)" >> "$GITHUB_ENV"
+      # The debug engine's compiled dependencies, restored by every job that
+      # builds it; this job is the one that saves them, when Cargo.lock or
+      # Rust moves. Cargo rebuilds this tree's own crates each time.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          shared-key: engine-debug
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: engine-debug-${{ runner.os }}-rust${{ env.RUSTC_VERSION }}-${{ hashFiles('Cargo.lock') }}
       - name: Build the engine the browser journeys run against
         run: cargo build --locked --bin firenook
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -326,10 +346,15 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+          echo "RUSTC_VERSION=$(rustc --version | cut -d' ' -f2)" >> "$GITHUB_ENV"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          shared-key: engine-debug
-          save-if: false
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: engine-debug-${{ runner.os }}-rust${{ env.RUSTC_VERSION }}-${{ hashFiles('Cargo.lock') }}
       - name: Run the npm package's tests on Node ${{ matrix.node }}
         run: '"$FUNCTIONS_NODE" --test packaging/*.test.mjs'
       - name: Run the Functions runtime's tests with the workers on Node ${{ matrix.node }}
@@ -465,10 +490,15 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+          echo "RUSTC_VERSION=$(rustc --version | cut -d' ' -f2)" >> "$GITHUB_ENV"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          shared-key: engine-debug
-          save-if: false
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: engine-debug-${{ runner.os }}-rust${{ env.RUSTC_VERSION }}-${{ hashFiles('Cargo.lock') }}
       - name: Install pinned harness dependencies
         run: npm ci --prefix conformance
       - name: Type-check harness
@@ -645,10 +675,15 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+          echo "RUSTC_VERSION=$(rustc --version | cut -d' ' -f2)" >> "$GITHUB_ENV"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          shared-key: engine-debug
-          save-if: false
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: engine-debug-${{ runner.os }}-rust${{ env.RUSTC_VERSION }}-${{ hashFiles('Cargo.lock') }}
       - name: Build the engine the replays run against
         run: cargo build --locked --bin firenook
       - name: Install pinned harness dependencies and the Functions peers
@@ -738,10 +773,15 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+          echo "RUSTC_VERSION=$(rustc --version | cut -d' ' -f2)" >> "$GITHUB_ENV"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          shared-key: engine-debug
-          save-if: false
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: engine-debug-${{ runner.os }}-rust${{ env.RUSTC_VERSION }}-${{ hashFiles('Cargo.lock') }}
       - name: Install pinned harness dependencies
         run: npm ci --prefix conformance
       - name: Replay kindless queries and recursiveDelete in memory and disk/WAL
@@ -836,10 +876,15 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+          echo "RUSTC_VERSION=$(rustc --version | cut -d' ' -f2)" >> "$GITHUB_ENV"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          shared-key: engine-debug
-          save-if: false
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: engine-debug-${{ runner.os }}-rust${{ env.RUSTC_VERSION }}-${{ hashFiles('Cargo.lock') }}
       - name: Install Firenook conformance dependencies
         run: npm ci --prefix conformance
       - name: Install pinned Firebase JS SDK dependencies
