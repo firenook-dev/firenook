@@ -714,16 +714,16 @@ jobs:
             --fixture fixtures/tasks-v1/emulator-programs.json \
             --output "$RUNNER_TEMP/firenook-tasks-replay.json"
       # The two public registry Extensions the corpus resolved with a Firebase
-      # CLI login: their published source archives, checked by SHA-256, as an
-      # offline source cache.
+      # CLI login: their published source archives, checked by SHA-256, as the
+      # engine's default Extensions source cache (the replay passes the engine
+      # HOME, not FIREBASE_EXTENSIONS_CACHE_PATH).
       - name: Replay the registry Extensions recordings from their published sources
         if: matrix.key == 'functions'
         env:
           FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
-          FIREBASE_EXTENSIONS_CACHE_PATH: ${{ runner.temp }}/extensions-cache
           FIRENOOK_OFFLINE: "1"
         run: |
-          node conformance/src/functions-runtime/fetch-registry-sources.mjs "$FIREBASE_EXTENSIONS_CACHE_PATH"
+          node conformance/src/functions-runtime/fetch-registry-sources.mjs "$HOME/.cache/firebase/extensions"
           NODE24="$(command -v node)" npm run replay:functions:runtime --prefix conformance -- \
             --binary ../target/debug/firenook \
             --profiles consumer-refs \
