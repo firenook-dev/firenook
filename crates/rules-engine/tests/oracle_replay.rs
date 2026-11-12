@@ -207,6 +207,224 @@ fn denies_at_the_frozen_evaluated_expression_limit() {
     }
 }
 
+/// Limit probes Firenook answers otherwise than production, with no
+/// documented reason. The replay below asserts each still differs as
+/// described; whoever fixes one moves it out of this table and the replay
+/// notes it in the ledger.
+const LIMIT_BUG_CANDIDATES: &[(&str, &str)] = &[
+    (
+        "function-depth-21",
+        "production evaluates the 21-function chain f0..f20 and allows; Firenook compiles it but denies at run time: `maximum allowed call depth of 20 is reached` at `f20()` (22:27)",
+    ),
+    (
+        "function-depth-23",
+        "both refuse to compile; production answers one issue, `Maximum allowed call depth of 20 is reached for [f0->f1->...->f20] call stack.` at 24:12 (the declaration of f21); Firenook answers `maximum allowed function call depth of 20 is exceeded` at 1:1 for each of f0 and f1",
+    ),
+    (
+        "linear-expression-terms-60",
+        "production answers 500 INTERNAL `Internal error encountered.` (backendError); Firenook compiles and allows",
+    ),
+    (
+        "linear-expression-terms-70",
+        "production answers 500 INTERNAL `Internal error encountered.` (backendError); Firenook compiles and allows",
+    ),
+    (
+        "linear-expression-terms-80",
+        "production answers 500 INTERNAL `Internal error encountered.` (backendError); Firenook compiles and allows",
+    ),
+    (
+        "linear-expression-terms-90",
+        "production answers 500 INTERNAL `Internal error encountered.` (backendError); Firenook compiles and allows",
+    ),
+    (
+        "linear-expression-terms-100",
+        "production refuses to compile, `Expression is too complex to evaluate safely.` (4 issues, the first at 5:21); Firenook has no such limit, compiles and allows (not implemented)",
+    ),
+    (
+        "balanced-expression-terms-150",
+        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:116 (inside leaf12), Firenook at 24:33 (the call `leaf12()`): the budget is spent at another expression",
+    ),
+    (
+        "balanced-expression-terms-175",
+        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 33:33 (the call `branch0_6()`): the budget is spent at another expression",
+    ),
+    (
+        "balanced-expression-terms-200",
+        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 36:33 (the call `branch0_6()`): the budget is spent at another expression",
+    ),
+    (
+        "balanced-expression-terms-225",
+        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 40:33 (the call `branch0_6()`): the budget is spent at another expression",
+    ),
+    (
+        "balanced-expression-terms-250",
+        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 43:33 (the call `branch0_6()`): the budget is spent at another expression",
+    ),
+    (
+        "balanced-expression-terms-300",
+        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 51:33 (the call `branch0_6()`): the budget is spent at another expression",
+    ),
+];
+
+/// What `projects.test` answered for one probe, or what Firenook does with
+/// it, in the terms both can be compared in.
+#[derive(Debug, PartialEq)]
+enum ProbeAnswer {
+    /// Compiled and the request was allowed.
+    Allowed,
+    /// Compiled, and evaluation failed with this message at this line and
+    /// column.
+    Failed(String, usize, usize),
+    /// Refused to compile with these issues (line, column, message).
+    Refused(Vec<(usize, usize, String)>),
+    /// No verdict: the API itself failed with this HTTP status and message.
+    Unanswered(u64, String),
+}
+
+/// Production's answer, from the recording.
+fn recorded_probe(observation: &JsonValue) -> ProbeAnswer {
+    let response = &observation["response"];
+    if observation["httpStatus"] != 200 {
+        return ProbeAnswer::Unanswered(
+            observation["httpStatus"].as_u64().expect("status"),
+            response["error"]["message"]
+                .as_str()
+                .expect("message")
+                .to_owned(),
+        );
+    }
+    if let Some(issues) = response["issues"].as_array() {
+        return ProbeAnswer::Refused(
+            issues
+                .iter()
+                .map(|issue| {
+                    let at = &issue["sourcePosition"];
+                    (
+                        usize::try_from(at["line"].as_u64().expect("line")).expect("line"),
+                        usize::try_from(at["column"].as_u64().expect("column")).expect("column"),
+                        issue["description"]
+                            .as_str()
+                            .expect("description")
+                            .to_owned(),
+                    )
+                })
+                .collect(),
+        );
+    }
+    let result = &response["testResults"][0];
+    if result["state"] == "SUCCESS" {
+        return ProbeAnswer::Allowed;
+    }
+    // `Error: firestore.rules line [L], column [C]. Unable to evaluate the
+    // expression as the <message>.` names the error position recorded
+    // beside it.
+    let [debug] = result["debugMessages"]
+        .as_array()
+        .expect("debug")
+        .as_slice()
+    else {
+        panic!("one debug message: {result}");
+    };
+    let at = &result["errorPosition"];
+    let (line, column) = (
+        usize::try_from(at["line"].as_u64().expect("line")).expect("line"),
+        usize::try_from(at["column"].as_u64().expect("column")).expect("column"),
+    );
+    let message = debug
+        .as_str()
+        .expect("debug")
+        .strip_prefix(&format!(
+            "Error: firestore.rules line [{line}], column [{column}]. Unable to evaluate the expression as the "
+        ))
+        .and_then(|message| message.strip_suffix('.'))
+        .expect("production's debug message shape");
+    ProbeAnswer::Failed(message.to_owned(), line, column)
+}
+
+/// Firenook's answer: the source compiled, then evaluated with the test
+/// case the capture sent with every limit probe
+/// (`conformance/src/rules/capture-phase3-boundaries.ts`).
+fn firenook_probe(source: &str) -> ProbeAnswer {
+    let rules = match compile(source) {
+        Ok(rules) => rules,
+        Err(diagnostics) => {
+            return ProbeAnswer::Refused(
+                diagnostics
+                    .into_iter()
+                    .map(|diagnostic| (diagnostic.line, diagnostic.column, diagnostic.message))
+                    .collect(),
+            );
+        }
+    };
+    let request = evaluation_request(
+        &serde_json::json!({
+            "auth": {"uid": "limit-probe", "token": {"n": 10_000}},
+            "method": "get",
+            "path": "/databases/(default)/documents/phase3/limit-probe",
+            "time": "2026-01-01T00:00:00Z",
+        }),
+        None,
+    );
+    let result = rules.evaluate(&request, &EmptyDocumentAccess);
+    if result.allowed {
+        return ProbeAnswer::Allowed;
+    }
+    let error = result.error.expect("a probe fails with an error");
+    let start = error
+        .expression_key()
+        .expect("the failing expression")
+        .start;
+    let before = &source[..start];
+    ProbeAnswer::Failed(
+        error.message,
+        before.matches('\n').count() + 1,
+        before.rsplit('\n').next().unwrap_or(before).chars().count() + 1,
+    )
+}
+
+/// Every limit probe the two tests above do not note: compile and verdict
+/// for an accepted source (production's expression reports are not a
+/// Firenook surface, so an allowed probe is compared as a verdict), and the
+/// message with its line and column for a refusal or an evaluation error.
+#[test]
+fn replays_the_remaining_frozen_limit_probes() {
+    let fixture: JsonValue = serde_json::from_str(LIMIT_PROBES).expect("valid fixture");
+    let mut differing = Vec::new();
+    for observation in fixture["observations"].as_array().expect("observations") {
+        let id = observation["id"].as_str().expect("id");
+        // Noted by the two tests above.
+        if matches!(
+            id,
+            "function-depth-22" | "balanced-expression-terms-100" | "balanced-expression-terms-125"
+        ) {
+            continue;
+        }
+        let recorded = recorded_probe(observation);
+        let actual = firenook_probe(observation["source"].as_str().expect("source"));
+        let case = format!("limit-probes/{id}");
+        match (&recorded, &actual) {
+            (ProbeAnswer::Allowed, ProbeAnswer::Allowed) => {
+                ledger::checked(PRODUCTION_SET, &case, ledger::Compared::Verdict);
+            }
+            _ if recorded == actual => {
+                ledger::checked(PRODUCTION_SET, &case, ledger::Compared::Error);
+            }
+            _ => {
+                eprintln!("{id}: production {recorded:?}, Firenook {actual:?}");
+                differing.push(id);
+            }
+        }
+    }
+    assert_eq!(
+        differing,
+        LIMIT_BUG_CANDIDATES
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
+        "every listed bug candidate still differs, and nothing else does"
+    );
+}
+
 #[test]
 fn enforces_access_limits_cache_and_atomic_accounting() {
     let fixture: JsonValue = serde_json::from_str(JAVA_ACCESS).expect("valid fixture");
