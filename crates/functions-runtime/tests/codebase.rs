@@ -5,8 +5,8 @@ mod support;
 
 use std::time::{Duration, SystemTime};
 
-use firenook_functions_runtime::LogDelivery;
 use firenook_functions_runtime::monitor::{FunctionLoadState, FunctionStale};
+use firenook_functions_runtime::{LogDelivery, LogEvent};
 use support::Harness;
 
 const INDEX: &str = "exports.api = (req, res) => res.send('ok');\n";
@@ -260,5 +260,62 @@ async fn functions_on_a_node_their_codebase_does_not_ask_for_are_warned_about_on
             "firebase.json asks for nodejs{other} for functions (its runtime), but these functions run on Node {version}, the Node running the emulators; start the emulators with Node {other} to run them on the Node they ask for (with nvm: nvm use {other})"
         )]
     );
+    harness.stop().await;
+}
+
+/// A save that does not load is said in the log, as the first load's
+/// failure is: the plain output, which pipes and CI read, prints it, and the
+/// functions loaded before keep answering.
+#[tokio::test]
+async fn a_save_that_does_not_load_is_said_in_the_log() {
+    let harness = Harness::start_without_worker(MANIFEST, &[]).await;
+    let loaded = |harness: &Harness| harness.monitor.codebase("default").expect("registered");
+    assert_eq!(loaded(&harness).state, FunctionLoadState::Ready);
+    let before = harness.events().len();
+    std::fs::write(
+        harness.directory.path().join("functions/functions.yaml"),
+        "endpoints: [\n",
+    )
+    .expect("written");
+    let reloaded = harness.runtime.console().reload("default").await;
+    assert!(reloaded.is_ok(), "{reloaded:?}");
+    let codebase = loaded(&harness);
+    assert_eq!(codebase.loads, 2);
+    assert!(
+        codebase.serving_previous,
+        "the functions loaded before still answer"
+    );
+    assert_eq!(codebase.function_count, 1);
+    let failed: Vec<LogEvent> = harness.events()[before..]
+        .iter()
+        .filter(|event| event.level == "ERROR")
+        .cloned()
+        .collect();
+    assert_eq!(failed.len(), 1, "{failed:#?}");
+    let line = &failed[0];
+    assert_eq!(line.label, "functions");
+    assert!(
+        line.message.starts_with(
+            "Failed to load function definition from source: FirebaseError: Failed to parse build specification: "
+        ),
+        "{}",
+        line.message
+    );
+    assert_eq!(line.codebase.as_deref(), Some("default"));
+    assert_eq!(
+        line.kind,
+        Some(firenook_functions_runtime::log::CODEBASE_FAILED)
+    );
+    // The first load's failure is the same line.
+    let broken = Harness::start_without_worker("endpoints: [\n", &[]).await;
+    let first: Vec<LogEvent> = broken
+        .events()
+        .into_iter()
+        .filter(|event| event.level == "ERROR")
+        .collect();
+    assert_eq!(first.len(), 1, "{first:#?}");
+    assert_eq!(first[0].kind, line.kind);
+    assert_eq!(first[0].message, line.message);
+    broken.stop().await;
     harness.stop().await;
 }

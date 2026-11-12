@@ -23,6 +23,11 @@ impl LogStream {
     }
 }
 
+/// The kind of a codebase load that failed, the first load's or a save's
+/// (`Failed to load function definition from source: …`). The codebase's
+/// monitor event says the same, so the terminal screen draws that instead.
+pub const CODEBASE_FAILED: &str = "codebase.failed";
+
 /// One log line with the official emulator's level vocabulary, and what the
 /// runtime knows about who printed it.
 #[derive(Debug, Clone, PartialEq, Eq)]
