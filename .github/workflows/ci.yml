@@ -837,7 +837,9 @@ jobs:
 
   # Which recorded answers the replays above compared with Firenook's, and how
   # much of each (conformance/src/report/verify.mjs). Fails when a replay
-  # names a case cases.mjs does not list.
+  # names a case cases.mjs does not list, and when a recorded answer is
+  # compared by no replay unless conformance/unreplayed.json lists it with the
+  # issue of the bug its replay waits for.
   conformance-ledger:
     name: Conformance ledger
     needs: [changes, rust, conformance, oracle-replays, client-replays]
@@ -854,12 +856,15 @@ jobs:
           pattern: conformance-ledger-*
           path: ${{ runner.temp }}/conformance-ledger
           merge-multiple: true
+      - name: Test the join
+        run: node --test conformance/test/verify-unreplayed.test.mjs
       - name: Join every recorded answer with the ledger
         run: |
           set -o pipefail
           node conformance/src/report/cases.mjs "$RUNNER_TEMP/conformance-report/cases.json"
           node conformance/src/report/verify.mjs "$RUNNER_TEMP/conformance-report/cases.json" \
             "$RUNNER_TEMP/conformance-ledger" "$RUNNER_TEMP/conformance-report/verify.json" \
+            --expect-unreplayed conformance/unreplayed.json \
             | tee "$RUNNER_TEMP/conformance-report/verify.txt"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
