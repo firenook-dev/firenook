@@ -458,8 +458,12 @@ write masks/transforms, and both read-only and read/write transaction reads.
 The opt-in serializer renders the actual collection domain with its wildcard,
 not the evaluator's synthetic candidate document. Group `request.path` is
 undefined, while the outer domain uses `/**/collection/*`. Root parent/ancestor
-is null; nested parents use a typed path. Empty order/group maps remain empty
-objects, absent limit is null, and absent offset is integer zero. The ordinary
+is null; nested parents use a typed path. A query's outer `resource` is the
+recorded symbolic document: empty `data`, plus an empty `__name__` constraint
+when a collection group is queried below a document. How a filter shows there
+is not recorded, so a filtered query's `resource` stays undefined. Empty
+order/group maps remain empty objects, absent limit is null, and absent offset
+is integer zero. The ordinary
 query profile has false distinct/select-only-keys flags; this is not coverage
 of projections, grouping or additional planner modes.
 

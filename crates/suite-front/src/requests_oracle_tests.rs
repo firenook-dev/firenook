@@ -38,16 +38,9 @@ const NOTED_ELSEWHERE: &[(&str, &str)] = &[(VALUES_SET, "operations/create-typed
 /// Recorded messages Firenook answers otherwise with no documented reason.
 /// The replay asserts each still differs as described; whoever fixes one
 /// moves it out of this table and the replay notes it in the ledger.
-const BUG_CANDIDATES: &[(&str, &str, &str)] = &[
-    (METADATA_SET, "messages/5", LIST_RESOURCE),
-    (METADATA_SET, "messages/6", LIST_RESOURCE),
-    (METADATA_SET, "messages/7", LIST_RESOURCE),
-    (METADATA_SET, "messages/8", LIST_RESOURCE),
-    (METADATA_SET, "messages/9", LIST_RESOURCE_NAME),
-    (VALUES_SET, "messages/5", LIST_RESOURCE),
-];
-const LIST_RESOURCE: &str = "a query's evaluation reports `resource` as {\"undefined\":{}}; the official emulator reports the query's resource, {\"mapValue\":{\"fields\":{\"data\":{\"mapValue\":{}}}}}";
-const LIST_RESOURCE_NAME: &str = "a query's evaluation reports `resource` as {\"undefined\":{}}; the official emulator reports the query's resource with its name constraint, {\"mapValue\":{\"fields\":{\"data\":{\"mapValue\":{}},\"__name__\":{\"constraintValue\":{}}}}}";
+const BUG_CANDIDATES: &[(&str, &str, &str)] = &[];
+const LIST_RESOURCE: &str =
+    "a query's evaluation reports `resource` otherwise than the official emulator";
 
 // The documented reasons a recorded answer differs.
 const LAZY_RESOURCE: &str = "Firenook reports the document the evaluation had (`resource`, `request.resource`) where the official emulator's lazy context reports {\"undefined\":{}} for a document it did not load (DESIGN.md, Opt-in evaluation producer and typed context)";
@@ -535,15 +528,7 @@ fn compare_event(
     let resource = &actual["rulesContext"]["resource"];
     if recorded["rulesContext"]["resource"] != *resource {
         if method == "list" {
-            let fields = &recorded["rulesContext"]["resource"]["mapValue"]["fields"];
-            assert_eq!(*resource, undefined, "{id}");
-            assert_eq!(fields["data"], json!({"mapValue": {}}), "{id}");
-            bug = Some(if fields.get("__name__").is_some() {
-                assert_eq!(fields["__name__"], json!({"constraintValue": {}}), "{id}");
-                LIST_RESOURCE_NAME
-            } else {
-                LIST_RESOURCE
-            });
+            bug = Some(LIST_RESOURCE);
         } else {
             assert_eq!(recorded["rulesContext"]["resource"], undefined, "{id}");
             let current = if method == "get" { after } else { before };

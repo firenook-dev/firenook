@@ -305,6 +305,7 @@ async fn query_domains_and_options_match_the_captured_root_nested_and_group_cont
         let actual = &events[index]["rulesContext"];
         let expected = &fixture["messages"][index + 5]["rulesContext"];
         assert_eq!(actual["path"], expected["path"]);
+        assert_eq!(actual["resource"], expected["resource"], "case {index}");
         for field in ["query", "path", "fields", "inTransaction"] {
             assert_eq!(
                 actual["request"]["mapValue"]["fields"][field],
