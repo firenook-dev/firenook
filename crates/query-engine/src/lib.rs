@@ -136,15 +136,39 @@ impl QueryPolicy {
     /// lists them, and refused if it is strict. A permissive policy does no
     /// work.
     pub fn validate(&self, database: &str, query: &Query) -> Result<(), IndexConfigError> {
+        self.check(database, query, false)
+    }
+
+    /// [`Self::validate`] for an aggregation over `query`, which production
+    /// answers from one index: merged single-field indexes never serve it.
+    pub fn validate_aggregation(
+        &self,
+        database: &str,
+        query: &Query,
+    ) -> Result<(), IndexConfigError> {
+        self.check(database, query, true)
+    }
+
+    fn check(
+        &self,
+        database: &str,
+        query: &Query,
+        aggregation: bool,
+    ) -> Result<(), IndexConfigError> {
         let Some(indexes) = self.indexes.as_deref() else {
             return Ok(());
         };
         let catalog = indexes.catalogs.catalog(database);
-        let Some(advice) = catalog.advise(query).filter(|advice| !advice.declared) else {
+        let advice = if aggregation {
+            catalog.advise_aggregation(query)
+        } else {
+            catalog.advise(query)
+        };
+        let Some(advice) = advice.filter(|advice| !advice.declared) else {
             return Ok(());
         };
         if let Some(missing) = &indexes.missing {
-            missing.record(database, &advice.requirement, query);
+            missing.record(database, &advice.requirement, query, aggregation);
         }
         if indexes.strict {
             return Err(IndexConfigError::Missing(advice.requirement));

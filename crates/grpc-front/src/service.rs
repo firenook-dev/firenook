@@ -1725,7 +1725,7 @@ impl Firestore for FirestoreService {
         let rules_candidate = firenook_rules_runtime::query_candidate(&database, &query)
             .map_err(Status::invalid_argument)?;
         self.query_policy
-            .validate(database.database_id(), &query)
+            .validate_aggregation(database.database_id(), &query)
             .map_err(|error| index_status(&error))?;
         let (token, new_transaction, historical) = match request.consistency_selector {
             None => (Vec::new(), false, None),

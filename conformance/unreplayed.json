@@ -104,12 +104,6 @@
       "why": "the hub's /emulators and the UI's /api/config list the emulators with other fields than firebase-tools"
     },
     {
-      "set": "rest-v1/production-cloud-firestore",
-      "case": "aggregation-composite-filter/2",
-      "issue": 202,
-      "why": "with --strict-indexes a count and sum over two equality filters is answered, where production asks for an index"
-    },
-    {
       "set": "rules-v2/production-rules-api",
       "case": "limit-probes/balanced-expression-terms-150",
       "issue": 205,

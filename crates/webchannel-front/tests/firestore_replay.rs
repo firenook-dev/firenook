@@ -227,6 +227,13 @@ const DIFFERS: &[Differs] = &[
         instead: Instead::Replay(refuses_target_1004_for_its_index),
     },
     Differs {
+        set: CLOUD_REST,
+        case: "aggregation-composite-filter/2",
+        compared: Compared::Status,
+        reason: "with --strict-indexes an aggregation whose composite index is not declared is refused with FAILED_PRECONDITION as production does, here for a count and sum over two equality filters, which merged single-field indexes do not serve; the message is Firenook's own, naming the entry to add to firestore.indexes.json (COMPATIBILITY.md)",
+        instead: Instead::Replay(refuses_the_aggregation_for_its_index),
+    },
+    Differs {
         set: JAVA_REST,
         case: "aggregation-count/2",
         compared: Compared::Answer,
@@ -244,11 +251,7 @@ const DIFFERS: &[Differs] = &[
     },
 ];
 
-const BUG_CANDIDATES: &[Bug] = &[Bug {
-    set: CLOUD_REST,
-    case: "aggregation-composite-filter/2",
-    description: "with --strict-indexes, a count and sum over two equality filters is answered, where production refuses it with FAILED_PRECONDITION for want of a composite index (sequence, synthetic)",
-}];
+const BUG_CANDIDATES: &[Bug] = &[];
 
 fn never_adds_target_1006(outcome: &Outcome) -> bool {
     !outcome.replayed.iter().any(|message| {
@@ -266,6 +269,18 @@ fn refuses_target_1004_for_its_index(outcome: &Outcome) -> bool {
         message["targetChange"]["targetChangeType"] == "REMOVE"
             && message["targetChange"]["targetIds"] == json!([1004])
             && message["targetChange"]["cause"]["code"] == 9
+    })
+}
+
+fn refuses_the_aggregation_for_its_index(outcome: &Outcome) -> bool {
+    outcome.replayed.first().is_some_and(|body| {
+        let error = &body[0]["error"];
+        error["code"] == 400
+            && error["status"] == "FAILED_PRECONDITION"
+            && error["message"].as_str().is_some_and(|message| {
+                message.contains("\"fieldPath\": \"sequence\"")
+                    && message.contains("\"fieldPath\": \"synthetic\"")
+            })
     })
 }
 
