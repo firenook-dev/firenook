@@ -839,4 +839,46 @@ mod tests {
             "maximum allowed call depth of 20 is reached"
         );
     }
+
+    /// The expression budget's accounting, at its edge. Every expression is
+    /// charged once it has its value; `&&` once more when it goes on to its
+    /// right operand, failing at the operator; a literal operand before the
+    /// other operand; and a field access fails where its member chain starts.
+    #[test]
+    fn the_expression_budget_runs_out_where_its_1001st_charge_falls() {
+        // `true` (1), `&&` going on (2), the list's `n` literals and the list
+        // (n + 3), `0` and the index (n + 5), the first `&&` (n + 6); then
+        // the second `&&` going on (n + 7), `'get'` (n + 8), `request`
+        // (n + 9), `.method` (n + 10), `==` (n + 11), the second `&&`
+        // (n + 12).
+        let failing_at = |n: usize| {
+            let list = vec!["true"; n].join(", ");
+            let source = format!(
+                "rules_version = '2'; service cloud.firestore {{ match /databases/{{d}}/documents/c/{{id}} {{ allow get: if true && [{list}][0] && request.method == 'get'; }} }}"
+            );
+            let request = EvaluationRequest::new(
+                RequestOperation::Get,
+                "/databases/(default)/documents/c/one",
+                Timestamp::new(1, 0),
+            );
+            let result = compile(&source)
+                .unwrap()
+                .evaluate(&request, &EmptyDocumentAccess);
+            let Some(error) = result.error else {
+                return "allowed".to_owned();
+            };
+            assert_eq!(
+                error.message,
+                "maximum of 1000 expressions to evaluate has been reached"
+            );
+            let key = error.expression_key().expect("a position");
+            source[key.start..key.end].to_owned()
+        };
+        assert_eq!(failing_at(988), "allowed");
+        assert_eq!(failing_at(990), "request.method == 'get'");
+        assert_eq!(failing_at(991), "request");
+        assert_eq!(failing_at(992), "request");
+        assert_eq!(failing_at(993), "'get'");
+        assert_eq!(failing_at(994), "&&");
+    }
 }

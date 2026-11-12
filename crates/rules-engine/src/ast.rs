@@ -248,6 +248,9 @@ pub(crate) enum ExprKind {
     },
     Binary {
         operator: BinaryOperator,
+        /// Byte offset of the operator token, where a step of the operator
+        /// itself fails.
+        operator_at: usize,
         left: Box<Expr>,
         right: Box<Expr>,
     },

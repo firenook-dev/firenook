@@ -384,11 +384,13 @@ impl Parser {
             if left_binding_power < minimum_binding_power {
                 break;
             }
+            let operator_at = self.current().offset;
             self.advance();
             let right = self.expression(right_binding_power)?;
             left = Expr::new(
                 ExprKind::Binary {
                     operator,
+                    operator_at,
                     left: Box::new(left),
                     right: Box::new(right),
                 },

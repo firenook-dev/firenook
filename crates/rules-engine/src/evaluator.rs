@@ -25,6 +25,18 @@ use crate::{
 #[path = "query_constraints.rs"]
 mod query_constraints;
 
+/// The expressions one request may evaluate. Each costs one when it has its
+/// value, a user function call one when it is entered (not again for its
+/// value), and `&&` or `||` one more when it goes on to its right operand,
+/// at the operator; a literal right operand is charged before the left
+/// operand. The 1,001st charge fails, at the expression that made it.
+///
+/// Production's balanced limit probes (100 to 300 terms of
+/// `request.auth.token.n >= k` in a tree of functions) all stop where this
+/// accounting stops, with values for exactly the expressions production's
+/// reports give values. The probes fix where evaluation stops, not every
+/// step's cost: charging one per step is the simplest accounting that fits
+/// them, not the only one.
 const MAXIMUM_EVALUATED_EXPRESSIONS: usize = 1_000;
 /// The deepest user function frame, the first being depth 0: production
 /// evaluates the 21 frames `f0` … `f20` (`function-depth-21` of the
@@ -350,6 +362,53 @@ struct PinnedDocument {
     resource: Option<Resource>,
 }
 
+/// Where the expression budget fails at an expression: a field access fails
+/// where its member chain starts, as its other errors do (production's
+/// `balanced-expression-terms-125` runs out at `request` in
+/// `request.auth.token.n`).
+fn budget_key(expression: &Expr) -> ExpressionKey {
+    let at = match &expression.kind {
+        ExprKind::Field { base, .. } => member_root(base),
+        _ => expression,
+    };
+    ExpressionKey {
+        start: at.span.start,
+        end: at.span.end,
+    }
+}
+
+/// The two characters of a `&&` or `||` operator at `start`.
+const fn operator_key(start: usize) -> ExpressionKey {
+    ExpressionKey {
+        start,
+        end: start + 2,
+    }
+}
+
+/// A literal: evaluating it cannot fail and reads nothing.
+const fn is_literal(expression: &Expr) -> bool {
+    matches!(
+        expression.kind,
+        ExprKind::Null
+            | ExprKind::Bool(_)
+            | ExprKind::Integer(_)
+            | ExprKind::Float(_)
+            | ExprKind::String(_)
+    )
+}
+
+/// The value of a literal expression, which evaluating cannot fail.
+fn literal_value(expression: &Expr) -> Option<EvalValue> {
+    Some(EvalValue::Data(match &expression.kind {
+        ExprKind::Null => Value::Null,
+        ExprKind::Bool(value) => Value::Bool(*value),
+        ExprKind::Integer(value) => Value::Integer(*value),
+        ExprKind::Float(value) => Value::Float(*value),
+        ExprKind::String(value) => Value::String(value.clone()),
+        _ => return None,
+    }))
+}
+
 /// The expression a chain of field accesses starts from: `resource` for
 /// `resource.data.missing`.
 fn member_root(mut expression: &Expr) -> &Expr {
@@ -596,6 +655,19 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         }
     }
 
+    /// Charges one step to the expression budget. Past the budget the step
+    /// fails, at `key` when given (else at the expression that made it).
+    fn charge(&mut self, key: Option<ExpressionKey>) -> Result<(), RuntimeError> {
+        self.evaluated_expressions += 1;
+        if self.evaluated_expressions > MAXIMUM_EVALUATED_EXPRESSIONS {
+            let mut error =
+                RuntimeError::new("maximum of 1000 expressions to evaluate has been reached");
+            error.expression_key = key;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     fn eval_expr<'program>(
         &mut self,
         expression: &'program Expr,
@@ -603,6 +675,15 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         functions: &BTreeMap<String, &'program Function>,
     ) -> Result<EvalValue, RuntimeError> {
         let mut result = self.eval_expr_inner(expression, environment, functions);
+        // A call charges itself (`eval_call`); every other expression is
+        // charged once it has its value.
+        if result.is_ok()
+            && !matches!(expression.kind, ExprKind::Call { .. })
+            && let Err(mut error) = self.charge(None)
+        {
+            error.expression_key = Some(budget_key(expression));
+            result = Err(error);
+        }
         if let Err(error) = &mut result {
             error.expression_key.get_or_insert(ExpressionKey {
                 start: expression.span.start,
@@ -689,12 +770,6 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         environment: &mut BTreeMap<String, EvalValue>,
         functions: &BTreeMap<String, &'program Function>,
     ) -> Result<EvalValue, RuntimeError> {
-        self.evaluated_expressions += 1;
-        if self.evaluated_expressions > MAXIMUM_EVALUATED_EXPRESSIONS {
-            return Err(RuntimeError::new(
-                "maximum of 1000 expressions to evaluate has been reached",
-            ));
-        }
         match &expression.kind {
             ExprKind::Null => Ok(EvalValue::Data(Value::Null)),
             ExprKind::Bool(value) => Ok(EvalValue::Data(Value::Bool(*value))),
@@ -759,10 +834,12 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             }
             ExprKind::Binary {
                 operator,
+                operator_at,
                 left,
                 right,
             } => self.eval_binary(
                 *operator,
+                *operator_at,
                 left,
                 right,
                 ExpressionKey {
@@ -985,19 +1062,13 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 .map(|argument| self.eval_expr(argument, environment, functions))
                 .collect::<Result<Vec<_>, _>>()?;
             if let Some(function) = functions.get(name) {
-                // The production evaluator charges call-frame setup, argument
-                // binding, entry, return, and result propagation in addition
-                // to the call expression itself. This accounting is what
-                // separates the frozen 100-term and 125-term balanced probes.
-                self.evaluated_expressions += 5;
-                if self.evaluated_expressions > MAXIMUM_EVALUATED_EXPRESSIONS {
-                    return Err(RuntimeError::new(
-                        "maximum of 1000 expressions to evaluate has been reached",
-                    ));
-                }
+                // Charged once, as it is entered, not again for its value.
+                self.charge(None)?;
                 return self.call_user_function(function, values, environment, functions);
             }
-            return self.call_builtin(name, values);
+            let value = self.call_builtin(name, values)?;
+            self.charge(None)?;
+            return Ok(value);
         }
         if let ExprKind::Field { base, name } = &callee.kind {
             let receiver = self.eval_expr(base, environment, functions)?;
@@ -1005,14 +1076,17 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 .iter()
                 .map(|argument| self.eval_expr(argument, environment, functions))
                 .collect::<Result<Vec<_>, _>>()?;
-            if matches!(receiver, EvalValue::Namespace(Namespace::Firestore)) {
-                return self.firestore_namespace(name, values);
-            }
-            if name == "get" && matches!(receiver, EvalValue::QueryData | EvalValue::Constraint(_))
+            let value = if matches!(receiver, EvalValue::Namespace(Namespace::Firestore)) {
+                self.firestore_namespace(name, values)
+            } else if name == "get"
+                && matches!(receiver, EvalValue::QueryData | EvalValue::Constraint(_))
             {
-                return self.query_get(receiver, values);
-            }
-            return call_method(receiver, name, values);
+                self.query_get(receiver, values)
+            } else {
+                call_method(receiver, name, values)
+            }?;
+            self.charge(None)?;
+            return Ok(value);
         }
         Err(RuntimeError::new("rules call target is not callable"))
     }
@@ -1244,9 +1318,11 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         self.eval_expr(taken, environment, functions)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn eval_binary<'program>(
         &mut self,
         operator: BinaryOperator,
+        operator_at: usize,
         left: &'program Expr,
         right: &'program Expr,
         key: ExpressionKey,
@@ -1267,9 +1343,12 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             // branch to dominate unknowns and runtime errors. Keep the failed
             // branch's error unless the other operand actually proves that
             // terminal value. Access caches and all budgets remain shared.
-            let right = self
-                .eval_expr(right, environment, functions)
-                .and_then(query_boolean);
+            let right = match self.charge(Some(operator_key(operator_at))) {
+                Ok(()) => self
+                    .eval_expr(right, environment, functions)
+                    .and_then(query_boolean),
+                Err(error) => Err(error),
+            };
             if matches!(&right, Ok(EvalValue::Data(Value::Bool(value))) if *value == terminal)
                 || matches!(&left, Ok(EvalValue::Data(Value::Bool(_))))
             {
@@ -1292,18 +1371,36 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             if left == Ok(terminal) {
                 return Ok(EvalValue::Data(Value::Bool(terminal)));
             }
-            let right = self
-                .eval_expr(right, environment, functions)
-                .and_then(data_bool);
+            // Going on to the right operand is a step of its own, failing at
+            // the operator (production's `balanced-expression-terms-175`).
+            let right = match self.charge(Some(operator_key(operator_at))) {
+                Ok(()) => self
+                    .eval_expr(right, environment, functions)
+                    .and_then(data_bool),
+                Err(error) => Err(error),
+            };
             return match (left, right) {
                 (_, Ok(value)) if value == terminal => Ok(EvalValue::Data(Value::Bool(terminal))),
                 (Ok(_), Ok(value)) => Ok(EvalValue::Data(Value::Bool(value))),
                 (Err(error), _) | (Ok(_), Err(error)) => Err(error),
             };
         }
+        // A literal operand is charged before the other operand is evaluated
+        // (`request.auth.token.n >= 122` runs out at `122` with `request`
+        // not yet evaluated, production's `balanced-expression-terms-150`).
+        let literal_first = is_literal(right);
+        if literal_first {
+            self.charge(Some(ExpressionKey {
+                start: right.span.start,
+                end: right.span.end,
+            }))?;
+        }
         let left = self.eval_expr(left, environment, functions)?;
         let left_field = self.provenance.last.take();
-        let right = self.eval_expr(right, environment, functions)?;
+        let right = match literal_value(right) {
+            Some(value) => value,
+            None => self.eval_expr(right, environment, functions)?,
+        };
         let right_field = self.provenance.last.take();
         // A query's document data, and each map inside it, holds the fields
         // its filters name, as the official emulator answers, so

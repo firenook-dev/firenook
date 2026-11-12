@@ -232,30 +232,6 @@ const LIMIT_BUG_CANDIDATES: &[(&str, &str)] = &[
         "linear-expression-terms-100",
         "production refuses to compile, `Expression is too complex to evaluate safely.` (4 issues, the first at 5:21); Firenook has no such limit, compiles and allows (not implemented)",
     ),
-    (
-        "balanced-expression-terms-150",
-        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:116 (inside leaf12), Firenook at 24:33 (the call `leaf12()`): the budget is spent at another expression",
-    ),
-    (
-        "balanced-expression-terms-175",
-        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 33:33 (the call `branch0_6()`): the budget is spent at another expression",
-    ),
-    (
-        "balanced-expression-terms-200",
-        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 36:33 (the call `branch0_6()`): the budget is spent at another expression",
-    ),
-    (
-        "balanced-expression-terms-225",
-        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 40:33 (the call `branch0_6()`): the budget is spent at another expression",
-    ),
-    (
-        "balanced-expression-terms-250",
-        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 43:33 (the call `branch0_6()`): the budget is spent at another expression",
-    ),
-    (
-        "balanced-expression-terms-300",
-        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 51:33 (the call `branch0_6()`): the budget is spent at another expression",
-    ),
 ];
 
 /// What `projects.test` answered for one probe, or what Firenook does with

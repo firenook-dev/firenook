@@ -57,42 +57,6 @@
     },
     {
       "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/balanced-expression-terms-150",
-      "issue": 205,
-      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/balanced-expression-terms-175",
-      "issue": 205,
-      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/balanced-expression-terms-200",
-      "issue": 205,
-      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/balanced-expression-terms-225",
-      "issue": 205,
-      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/balanced-expression-terms-250",
-      "issue": 205,
-      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/balanced-expression-terms-300",
-      "issue": 205,
-      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
       "case": "limit-probes/linear-expression-terms-60",
       "issue": 204,
       "why": "no expression size limit: production refuses 100 terms and fails on 60-90"
