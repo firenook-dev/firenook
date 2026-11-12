@@ -723,14 +723,29 @@ async fn project_operation(
             state
                 .rules
                 .install_project(project, source)
-                .map_err(|error| {
-                    RestError::invalid(format!("rules compilation failed: {error}"))
-                })?;
+                .map_err(|error| RestError::invalid(compile_error_message(&error)))?;
             Ok(Json(json!({})))
         }
         (Method::POST, "export") => export_database(&state, project, json()?).await,
         _ => Err(RestError::not_found("unknown emulator project operation")),
     }
+}
+
+/// A reload that does not compile, as the official emulator frames it:
+/// `Error compiling rules:` and a line `L<line>:<column> <message>` for each
+/// diagnostic (developer-tools-coverage-v1 compile-rejections,
+/// rule-bindings-v1). The messages are Firenook's own compiler's.
+fn compile_error_message(error: &firenook_rules_runtime::LoadError) -> String {
+    use std::fmt::Write as _;
+    let mut message = String::from("Error compiling rules:");
+    for diagnostic in &error.diagnostics {
+        let _ = write!(
+            message,
+            "\nL{}:{} {}",
+            diagnostic.line, diagnostic.column, diagnostic.message
+        );
+    }
+    message
 }
 
 fn rules_source(body: &JsonValue) -> Result<&str, RestError> {
@@ -4547,6 +4562,22 @@ mod tests {
         assert_eq!(
             document.fields()["union"],
             Value::Array(vec![at(1_577_934_245, 0)])
+        );
+    }
+
+    /// A reload that does not compile answers each diagnostic on its own
+    /// `L<line>:<column>` line under `Error compiling rules:`, as the
+    /// official emulator answers two (rule-bindings-v1).
+    #[test]
+    fn a_rejected_reload_frames_each_diagnostic_on_its_own_line() {
+        let source = "rules_version = '2';\nservice cloud.firestore {\n  function a() { return a(); }\n  function b() { return b(); }\n  match /databases/{d}/documents/c/{id} { allow get: if a() && b(); }\n}\n";
+        let error = RulesRuntime::default()
+            .install_project("demo-reload", source)
+            .expect_err("recursion is refused");
+        assert_eq!(error.diagnostics.len(), 2, "{error:?}");
+        assert_eq!(
+            compile_error_message(&error),
+            "Error compiling rules:\nL1:1 recursive function call is not allowed: a\nL1:1 recursive function call is not allowed: b"
         );
     }
 }

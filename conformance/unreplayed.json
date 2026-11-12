@@ -3,15 +3,9 @@
   "cases": [
     {
       "set": "developer-tools-coverage-v1",
-      "case": "compile-rejections/1",
-      "issue": 207,
-      "why": "a rules reload's compile error is framed and worded otherwise than the official emulator's"
-    },
-    {
-      "set": "developer-tools-coverage-v1",
       "case": "invalid-reload",
       "issue": 207,
-      "why": "a rules reload's compile error is framed and worded otherwise than the official emulator's"
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
     },
     {
       "set": "developer-tools-v1",
