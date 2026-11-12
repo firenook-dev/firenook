@@ -24,14 +24,21 @@ every pull request.
   on every pull request, and the release attaches `conformance-cases.json`
   and `conformance-verify.json` to its GitHub release, which
   firenook.dev/compatibility is built from.
+- Every recorded case is replayed. CI fails on a case no replay notes, unless
+  `unreplayed.json` lists it with the issue of the bug its replay waits for,
+  and on a listed case a replay notes again: the fix takes it off the list.
 
 From the repository root:
 
 ```sh
 FIRENOOK_CONFORMANCE_LEDGER=/tmp/ledger cargo test --workspace
 node conformance/src/report/cases.mjs /tmp/cases.json
-node conformance/src/report/verify.mjs /tmp/cases.json /tmp/ledger /tmp/verify.json
+node conformance/src/report/verify.mjs /tmp/cases.json /tmp/ledger /tmp/verify.json \
+  --expect-unreplayed conformance/unreplayed.json
 ```
+
+A local run that replays only part of the corpus leaves the rest unnoted, so
+the check is for the full CI ledger; leave the flag out to only count.
 
 `cases.mjs --history` counts a past release's fixtures (a set not recorded
 then is left out).
@@ -42,7 +49,9 @@ A new directory under `fixtures/` with a README (what it covers, which
 firebase-tools or emulator version recorded it, how), the recorded requests
 and answers with synthetic names only, and a replay that compares Firenook
 with them and notes each case in the ledger, plus a reader for the
-directory in `src/report/cases.mjs`, so the record counts it.
+directory in `src/report/cases.mjs`, so the record counts it. The recording
+and its replay land together: a case that Firenook answers wrongly keeps its
+replay, waits in `unreplayed.json` with its issue, and leaves it with the fix.
 `rules-v2/contributed-rooms/` is a rules file and its cases contributed this
 way, with `test/contributed-rooms-replay.test.mjs` its replay. Recordings are
 never rewritten: a new version is a new directory.

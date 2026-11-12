@@ -1,0 +1,287 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "set": "developer-tools-coverage-v1",
+      "case": "compile-rejections/1",
+      "issue": 207,
+      "why": "a rules reload's compile error is framed and worded otherwise than the official emulator's"
+    },
+    {
+      "set": "developer-tools-coverage-v1",
+      "case": "invalid-reload",
+      "issue": 207,
+      "why": "a rules reload's compile error is framed and worded otherwise than the official emulator's"
+    },
+    {
+      "set": "developer-tools-coverage-v1",
+      "case": "profiles/missing-field",
+      "issue": 206,
+      "why": "a coverage error value spans the whole member expression, where the official one spans its root"
+    },
+    {
+      "set": "developer-tools-request-metadata-v1",
+      "case": "messages/5",
+      "issue": 208,
+      "why": "a query's evaluation in the Requests feed shows resource as undefined"
+    },
+    {
+      "set": "developer-tools-request-metadata-v1",
+      "case": "messages/6",
+      "issue": 208,
+      "why": "a query's evaluation in the Requests feed shows resource as undefined"
+    },
+    {
+      "set": "developer-tools-request-metadata-v1",
+      "case": "messages/7",
+      "issue": 208,
+      "why": "a query's evaluation in the Requests feed shows resource as undefined"
+    },
+    {
+      "set": "developer-tools-request-metadata-v1",
+      "case": "messages/8",
+      "issue": 208,
+      "why": "a query's evaluation in the Requests feed shows resource as undefined"
+    },
+    {
+      "set": "developer-tools-request-metadata-v1",
+      "case": "messages/9",
+      "issue": 208,
+      "why": "a query's evaluation in the Requests feed shows resource as undefined"
+    },
+    {
+      "set": "developer-tools-request-values-v1",
+      "case": "messages/5",
+      "issue": 208,
+      "why": "a query's evaluation in the Requests feed shows resource as undefined"
+    },
+    {
+      "set": "developer-tools-v1",
+      "case": "ui/7",
+      "issue": 209,
+      "why": "a user saved with mfaInfo: [] is returned without the field"
+    },
+    {
+      "set": "developer-tools-v1",
+      "case": "ui/8",
+      "issue": 209,
+      "why": "a user saved with mfaInfo: [] is returned without the field"
+    },
+    {
+      "set": "developer-tools-v1",
+      "case": "ui/config",
+      "issue": 210,
+      "why": "the hub's /emulators and the UI's /api/config list the emulators with other fields than firebase-tools"
+    },
+    {
+      "set": "firebase-suite-v1/suite",
+      "case": "hub-locator-export-and-background-controls/hub-emulator-map",
+      "issue": 210,
+      "why": "the hub's /emulators and the UI's /api/config list the emulators with other fields than firebase-tools"
+    },
+    {
+      "set": "firebase-suite-v1/suite",
+      "case": "ui-config-logging-and-websocket/logging-websocket/1",
+      "issue": 211,
+      "why": "the logging feed's Functions lines differ from firebase-tools'"
+    },
+    {
+      "set": "firebase-suite-v1/suite",
+      "case": "ui-config-logging-and-websocket/logging-websocket/3",
+      "issue": 211,
+      "why": "the logging feed's Functions lines differ from firebase-tools'"
+    },
+    {
+      "set": "firebase-suite-v1/suite",
+      "case": "ui-config-logging-and-websocket/ui-api-config",
+      "issue": 210,
+      "why": "the hub's /emulators and the UI's /api/config list the emulators with other fields than firebase-tools"
+    },
+    {
+      "set": "functions-runtime-v1",
+      "case": "main/discovery-backends-inventory/hub-emulators",
+      "issue": 210,
+      "why": "the hub's /emulators and the UI's /api/config list the emulators with other fields than firebase-tools"
+    },
+    {
+      "set": "rest-v1/production-cloud-firestore",
+      "case": "aggregation-composite-filter/2",
+      "issue": 202,
+      "why": "with --strict-indexes a count and sum over two equality filters is answered, where production asks for an index"
+    },
+    {
+      "set": "rules-v2/production-rules-api",
+      "case": "limit-probes/balanced-expression-terms-150",
+      "issue": 205,
+      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
+    },
+    {
+      "set": "rules-v2/production-rules-api",
+      "case": "limit-probes/balanced-expression-terms-175",
+      "issue": 205,
+      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
+    },
+    {
+      "set": "rules-v2/production-rules-api",
+      "case": "limit-probes/balanced-expression-terms-200",
+      "issue": 205,
+      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
+    },
+    {
+      "set": "rules-v2/production-rules-api",
+      "case": "limit-probes/balanced-expression-terms-225",
+      "issue": 205,
+      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
+    },
+    {
+      "set": "rules-v2/production-rules-api",
+      "case": "limit-probes/balanced-expression-terms-250",
+      "issue": 205,
+      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
+    },
+    {
+      "set": "rules-v2/production-rules-api",
+      "case": "limit-probes/balanced-expression-terms-300",
+      "issue": 205,
+      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
+    },
+    {
+      "set": "rules-v2/production-rules-api",
+      "case": "limit-probes/function-depth-21",
+      "issue": 203,
+      "why": "function call depth: a 21-function chain production allows is denied, and the compile error is not production's"
+    },
+    {
+      "set": "rules-v2/production-rules-api",
+      "case": "limit-probes/function-depth-23",
+      "issue": 203,
+      "why": "function call depth: a 21-function chain production allows is denied, and the compile error is not production's"
+    },
+    {
+      "set": "rules-v2/production-rules-api",
+      "case": "limit-probes/linear-expression-terms-60",
+      "issue": 204,
+      "why": "no expression size limit: production refuses 100 terms and fails on 60-90"
+    },
+    {
+      "set": "rules-v2/production-rules-api",
+      "case": "limit-probes/linear-expression-terms-70",
+      "issue": 204,
+      "why": "no expression size limit: production refuses 100 terms and fails on 60-90"
+    },
+    {
+      "set": "rules-v2/production-rules-api",
+      "case": "limit-probes/linear-expression-terms-80",
+      "issue": 204,
+      "why": "no expression size limit: production refuses 100 terms and fails on 60-90"
+    },
+    {
+      "set": "rules-v2/production-rules-api",
+      "case": "limit-probes/linear-expression-terms-90",
+      "issue": 204,
+      "why": "no expression size limit: production refuses 100 terms and fails on 60-90"
+    },
+    {
+      "set": "rules-v2/production-rules-api",
+      "case": "limit-probes/linear-expression-terms-100",
+      "issue": 204,
+      "why": "no expression size limit: production refuses 100 terms and fails on 60-90"
+    },
+    {
+      "set": "webchannel-v8/java-v1.22.0",
+      "case": "multiple-inequality-query/13",
+      "issue": 199,
+      "why": "a refused Listen target is removed without the ADD production sends first"
+    },
+    {
+      "set": "webchannel-v8/java-v1.22.0",
+      "case": "numeric-resource-id-ordering/15",
+      "issue": 197,
+      "why": "a Listen's first snapshot orders numeric resource ids by the path's bytes"
+    },
+    {
+      "set": "webchannel-v8/java-v1.22.0",
+      "case": "numeric-resource-id-ordering/34",
+      "issue": 197,
+      "why": "a Listen's first snapshot orders numeric resource ids by the path's bytes"
+    },
+    {
+      "set": "webchannel-v8/java-v1.22.0",
+      "case": "unicode-framing/4",
+      "issue": 198,
+      "why": "a document target on a missing document gets no documentDelete before CURRENT"
+    },
+    {
+      "set": "webchannel-v8/java-v1.22.0",
+      "case": "write-missing-update-error/4",
+      "issue": 201,
+      "why": "a Write stream update of a missing document fails with Firenook's message and envelope, not production's"
+    },
+    {
+      "set": "webchannel-v8/java-v1.22.0",
+      "case": "write-missing-update-error/7",
+      "issue": 201,
+      "why": "a Write stream update of a missing document fails with Firenook's message and envelope, not production's"
+    },
+    {
+      "set": "webchannel-v8/production-cloud-firestore",
+      "case": "multiple-inequality-query/6",
+      "issue": 199,
+      "why": "a refused Listen target is removed without the ADD production sends first"
+    },
+    {
+      "set": "webchannel-v8/production-cloud-firestore",
+      "case": "multiple-inequality-query/8",
+      "issue": 200,
+      "why": "the refusal of an order by after __name__ is the Java emulator's text, not production's"
+    },
+    {
+      "set": "webchannel-v8/production-cloud-firestore",
+      "case": "multiple-inequality-query/10",
+      "issue": 199,
+      "why": "a refused Listen target is removed without the ADD production sends first"
+    },
+    {
+      "set": "webchannel-v8/production-cloud-firestore",
+      "case": "numeric-resource-id-ordering/15",
+      "issue": 197,
+      "why": "a Listen's first snapshot orders numeric resource ids by the path's bytes"
+    },
+    {
+      "set": "webchannel-v8/production-cloud-firestore",
+      "case": "numeric-resource-id-ordering/37",
+      "issue": 197,
+      "why": "a Listen's first snapshot orders numeric resource ids by the path's bytes"
+    },
+    {
+      "set": "webchannel-v8/production-cloud-firestore",
+      "case": "reserved-resource-id-error/2",
+      "issue": 199,
+      "why": "a refused Listen target is removed without the ADD production sends first"
+    },
+    {
+      "set": "webchannel-v8/production-cloud-firestore",
+      "case": "reserved-resource-id-error/6",
+      "issue": 199,
+      "why": "a refused Listen target is removed without the ADD production sends first"
+    },
+    {
+      "set": "webchannel-v8/production-cloud-firestore",
+      "case": "unicode-framing/4",
+      "issue": 198,
+      "why": "a document target on a missing document gets no documentDelete before CURRENT"
+    },
+    {
+      "set": "webchannel-v8/production-cloud-firestore",
+      "case": "write-missing-update-error/4",
+      "issue": 201,
+      "why": "a Write stream update of a missing document fails with Firenook's message and envelope, not production's"
+    },
+    {
+      "set": "webchannel-v8/production-cloud-firestore",
+      "case": "write-missing-update-error/7",
+      "issue": 201,
+      "why": "a Write stream update of a missing document fails with Firenook's message and envelope, not production's"
+    }
+  ]
+}
