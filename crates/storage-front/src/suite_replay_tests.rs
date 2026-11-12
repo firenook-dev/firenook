@@ -372,13 +372,13 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// Why the cases in [`DIFFERS`] answer otherwise, deliberately: Firenook names
-/// a one-shot `v0` upload by its request `Content-Type` (commit "name a
+/// Why the cases in [`DIFFERS`] answer otherwise, deliberately: a one-shot
+/// `v0` upload takes its content type from the request `Content-Type` (commit "name a
 /// one-shot upload by its Content-Type"; the storage-rules-v1 replay in
 /// `rules_replay_tests.rs` records the same choice), as firebase-tools 15.34.0
 /// stores it (`storage-native-clients-v1` `uploads/object-path-media` and
 /// `uploads/bucket-path-media-put`, checked by its replay).
-const V0_CONTENT_TYPE: &str = "a v0 one-shot upload is named by its request Content-Type, as firebase-tools 15.34.0 stores it (storage-native-clients-v1 uploads/object-path-media, bucket-path-media-put); 15.22.0 stored application/octet-stream";
+const V0_CONTENT_TYPE: &str = "a v0 one-shot upload takes its content type from the request Content-Type, as firebase-tools 15.34.0 stores it (storage-native-clients-v1 uploads/object-path-media, bucket-path-media-put); 15.22.0 stored application/octet-stream";
 
 /// Cases whose only differences in status or body come from [`V0_CONTENT_TYPE`]:
 /// the upload's own answer, and every later answer about that object.
@@ -397,22 +397,20 @@ const DIFFERS: &[&str] = &[
     "storage-multi-bucket-rules-and-import-export/reimported-assets-object-byte-check",
 ];
 
-/// Bug candidates: answered otherwise with no documented reason. Kept out
-/// of the ledger; the test fails once they match, so whoever fixes one (in
-/// the engine, or by documenting it as deliberate) moves it out of here.
-const BUG_CANDIDATES: &[(&str, &str)] = &[
-    (
-        "storage-gcs-json-and-resumable-upload/gcs-json-media-upload",
-        "a GCS uploadType=media upload stores the request Content-Type (text/plain; charset=utf-8) where 15.22.0 stored application/octet-stream; no recording or document covers the GCS media path",
-    ),
-    (
-        "storage-gcs-json-and-resumable-upload/gcs-list-objects",
-        "lists the media object above with the request's Content-Type, where 15.22.0 listed application/octet-stream",
-    ),
-    (
-        "storage-gcs-json-and-resumable-upload/gcs-emulator-copy-alias",
-        "the copy of the media object above keeps the request's Content-Type, where 15.22.0 kept application/octet-stream",
-    ),
+/// Why the cases in [`GCS_DIFFERS`] answer otherwise, deliberately: a GCS
+/// JSON API media upload's `Content-Type` header is the object's content
+/// type, as Cloud Storage documents it ("Uploading objects", JSON API:
+/// `OBJECT_CONTENT_TYPE` is the content type of the object), the same choice
+/// as [`V0_CONTENT_TYPE`]; firebase-tools 15.22.0 stored
+/// `application/octet-stream`.
+const GCS_CONTENT_TYPE: &str = "a GCS uploadType=media upload's Content-Type is the object's content type, as Cloud Storage documents it (docs.cloud.google.com/storage/docs/uploading-objects, JSON API), and as firebase-tools 15.34.0 does for a v0 one-shot upload; 15.22.0 stored application/octet-stream";
+
+/// The GCS media upload, its listing and its copy: their only differences in
+/// status or body come from [`GCS_CONTENT_TYPE`].
+const GCS_DIFFERS: &[&str] = &[
+    "storage-gcs-json-and-resumable-upload/gcs-json-media-upload",
+    "storage-gcs-json-and-resumable-upload/gcs-list-objects",
+    "storage-gcs-json-and-resumable-upload/gcs-emulator-copy-alias",
 ];
 
 /// Header differences outside the recorded answer (status and body), asserted
@@ -433,7 +431,7 @@ const HEADER_DIFFERENCES: &[(&str, &str)] = &[
 ];
 
 /// Whether a difference is the object's content type, as [`V0_CONTENT_TYPE`]
-/// and the [`BUG_CANDIDATES`] describe it.
+/// and [`GCS_CONTENT_TYPE`] describe it.
 fn is_content_type(difference: &str) -> bool {
     let recorded = "where \"application/octet-stream\" was recorded";
     difference.ends_with(recorded)
@@ -442,8 +440,8 @@ fn is_content_type(difference: &str) -> bool {
             || difference.contains(": header content-type Some(\"text/plain"))
 }
 
-/// Notes every compared case: `checked`, `differs` for [`DIFFERS`], nothing
-/// for [`BUG_CANDIDATES`]; fails on any difference no table names.
+/// Notes every compared case: `checked`, or `differs` for [`DIFFERS`] and
+/// [`GCS_DIFFERS`]; fails on any difference no table names.
 fn note_compared(compared: &[(String, Vec<String>)]) {
     let mut unexplained = Vec::new();
     let mut header_seen = BTreeSet::new();
@@ -485,7 +483,7 @@ fn note_compared(compared: &[(String, Vec<String>)]) {
     let expected: BTreeSet<&str> = DIFFERS
         .iter()
         .copied()
-        .chain(BUG_CANDIDATES.iter().map(|(case, _)| *case))
+        .chain(GCS_DIFFERS.iter().copied())
         .collect();
     assert_eq!(differing, expected, "the cases that answer otherwise");
     for case in DIFFERS {
@@ -494,6 +492,14 @@ fn note_compared(compared: &[(String, Vec<String>)]) {
             case,
             firenook_conformance_ledger::Compared::Answer,
             V0_CONTENT_TYPE,
+        );
+    }
+    for case in GCS_DIFFERS {
+        firenook_conformance_ledger::differs(
+            SET,
+            case,
+            firenook_conformance_ledger::Compared::Answer,
+            GCS_CONTENT_TYPE,
         );
     }
     for (pattern, reason) in HEADER_DIFFERENCES {

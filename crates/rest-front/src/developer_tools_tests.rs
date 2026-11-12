@@ -91,10 +91,14 @@ fn normalize_rules_name(report: &mut JsonValue) {
 /// Bug candidates: answered otherwise with no documented reason, kept out
 /// of the ledger. The test fails once one matches, so whoever fixes it
 /// moves the case into the ledger.
-const BUG_CANDIDATES: &[(&str, &str)] = &[(
-    "observations/coverage-after",
-    "the write rule (line 6) counts one evaluation per PATCH (create) where the official counts two (create and update, as its denial also names both); the rest differs as documented: the jar's preliminary undefined visits and its error cause text and position (DESIGN.md)",
-)];
+/// `coverage-after`: the report after the reads and writes. Each PATCH is
+/// evaluated once, as the create it is; the official jar also evaluates its
+/// preliminary update check, so its write rule (line 6) counts two visits
+/// where Firenook counts one, and its read rule shows the planner's
+/// `undefined` visits (DESIGN.md: coverage uses actual evaluator visits and
+/// never re-evaluates policy to manufacture the jar's planner visit counts;
+/// the producer evaluates once).
+const COVERAGE_AFTER: &str = "coverage counts Firenook's one evaluation of each write, as the create it is; the official jar also counts its preliminary update check, so the write rule's visits are doubled, and its read rule shows the planner's undefined visits (DESIGN.md: coverage uses actual evaluator visits, never manufactured planner visit counts; the producer evaluates once; runtime error causes are Firenook's own text)";
 
 /// `coverage-html`: an independent same-origin renderer that fetches the
 /// JSON report, not the jar's page with the report embedded (DESIGN.md,
@@ -200,8 +204,13 @@ async fn official_developer_tools_firestore_requests_replay_in_order() {
             assert_eq!(completeness["truncated"], false);
             if id == "coverage-after" {
                 assert_eq!(actual["rules"], recorded["rules"], "{id}: rules");
-                assert_coverage_bug_candidate(&recorded["report"], &actual["report"]);
-                assert!(BUG_CANDIDATES.iter().any(|(bug, _)| *bug == case));
+                assert_coverage_after(&recorded["report"], &actual["report"]);
+                firenook_conformance_ledger::differs(
+                    SET,
+                    &case,
+                    firenook_conformance_ledger::Compared::Behaviour,
+                    COVERAGE_AFTER,
+                );
                 continue;
             }
         }
@@ -293,7 +302,7 @@ async fn official_developer_tools_firestore_requests_replay_in_order() {
     );
 }
 
-/// Pins [`BUG_CANDIDATES`]' `coverage-after`: the same tree at the same
+/// Pins [`COVERAGE_AFTER`]: the same tree at the same
 /// positions; on the read rule (line 5) the same values once the jar's
 /// manufactured `undefined` visits are left out and an error is compared as
 /// an error (its cause text and position are each engine's own, DESIGN.md);
@@ -301,7 +310,7 @@ async fn official_developer_tools_firestore_requests_replay_in_order() {
 /// twice (the operands both evaluations share) or once (the `request` itself,
 /// whose method tells the two apart), or the same request evaluated as an
 /// `update`, which Firenook does not evaluate.
-fn assert_coverage_bug_candidate(recorded: &JsonValue, actual: &JsonValue) {
+fn assert_coverage_after(recorded: &JsonValue, actual: &JsonValue) {
     let recorded = recorded.as_array().expect("nodes");
     let actual = actual.as_array().expect("nodes");
     assert_eq!(recorded.len(), actual.len(), "nodes");
@@ -343,7 +352,7 @@ fn assert_coverage_bug_candidate(recorded: &JsonValue, actual: &JsonValue) {
                     .all(|value| official.iter().any(|(candidate, _)| *candidate == value.0))
             );
         }
-        assert_coverage_bug_candidate(
+        assert_coverage_after(
             &expected.get("children").cloned().unwrap_or(json!([])),
             &node.get("children").cloned().unwrap_or(json!([])),
         );

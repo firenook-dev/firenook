@@ -328,6 +328,14 @@ const SUITE_DIFFERS = {
     reason: "the UI port's root leads to Firenook's own console at /console (COMPATIBILITY.md Hub/UI: Google's Emulator UI is not served since 0.2.0-next.3)",
     expected: [/^status 307 where 200$/u, /^content-type null where text\/html; charset=UTF-8$/u, /^body\./u],
   },
+  'ui-config-logging-and-websocket/logging-websocket/2': {
+    reason: "no warning that package.json names an outdated firebase-functions: the official CLI asks the npm registry for its latest version, and Firenook reaches the network only for its own update check and unvendored Extensions (SECURITY.md)",
+    expected: [/^not in the feed's \d+ messages: warn /u],
+  },
+  'suite-startup-readiness-shutdown-and-restart/first-stop': {
+    reason: "the stop after the origin guard refused an export is clean, exit 0; the official CLI exited 2 there, a fault the recording itself names (invariants originGuardFallthroughObservedInOfficialSuite, originGuardedRunExitedCleanly false), and its second, unguarded stop was clean",
+    expected: [/^\.clean: true where false$/u, /^\.exitCode: 0 where 2$/u],
+  },
 };
 
 /**
@@ -347,17 +355,9 @@ const SUITE_BUGS = {
     description: 'the logging feed words the line "functions: Watching ... for Cloud Functions..."; the official feed has no "functions: " prefix (the emulator is in its metadata)',
     expected: [/^worded "functions: Watching \\"<suite-root>\/functions\\" for Cloud Functions\.\.\." where "Watching \\"<suite-root>\/functions\\" for Cloud Functions\.\.\."$/u],
   },
-  'ui-config-logging-and-websocket/logging-websocket/2': {
-    description: "no warning that package.json names an outdated firebase-functions (the official CLI compares it with the npm registry's latest)",
-    expected: [/^not in the feed's \d+ messages: warn /u],
-  },
   'ui-config-logging-and-websocket/logging-websocket/3': {
     description: 'no "✔  functions: Using node@24 from host." line in the logging feed',
     expected: [/^not in the feed's \d+ messages: info ✔  functions: Using node@24 from host\.$/u],
-  },
-  'suite-startup-readiness-shutdown-and-restart/first-stop': {
-    description: 'after the origin guard refused an export, the official CLI exited 2 on SIGINT (not clean); Firenook exits 0: probably the official fault, to be documented as deliberate rather than reproduced',
-    expected: [/^\.clean: true where false$/u, /^\.exitCode: 0 where 2$/u],
   },
 };
 
