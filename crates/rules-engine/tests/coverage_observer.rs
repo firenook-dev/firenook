@@ -161,3 +161,60 @@ fn coverage_preserves_atomic_shared_access_accounting() {
     assert_eq!(result.document_cache_hits, 1);
     assert!(observer.visits.values().all(|count| *count == 2));
 }
+
+/// A failed field access is placed at the expression its member chain
+/// starts from, as the official emulator places it (coverage oracle profile
+/// missing-field: `resource`, not `resource.data.missing`), and every
+/// expression the error reaches carries that place.
+#[test]
+fn a_failed_field_access_is_placed_at_the_start_of_its_member_chain() {
+    #[derive(Default)]
+    struct Errors(Vec<(ExpressionKey, Option<ExpressionKey>)>);
+    impl CoverageObserver for Errors {
+        fn observe(&mut self, key: ExpressionKey, value: ExpressionValue<'_>) {
+            if let ExpressionValue::Error(error) = value {
+                self.0.push((key, error.expression_key()));
+            }
+        }
+    }
+    let condition = "resource.data.missing == true";
+    let source = format!(
+        "rules_version = '2'; service cloud.firestore {{ match /databases/{{d}}/documents/items/{{i}} {{ allow get: if {condition}; }} }}"
+    );
+    let rules = compile(&source).unwrap();
+    let mut request = EvaluationRequest::new(
+        RequestOperation::Get,
+        "/databases/(default)/documents/items/one",
+        Timestamp::new(0, 0),
+    );
+    request.resource = Some(Resource::new(
+        &request.path,
+        BTreeMap::from([("visible".into(), Value::Bool(true))]),
+    ));
+    let mut errors = Errors::default();
+    let (result, _) = rules.evaluate_with_coverage(
+        &request,
+        &Access(request.resource.clone().unwrap()),
+        &mut errors,
+    );
+    assert!(!result.allowed);
+    let start = source.find(condition).unwrap();
+    let root = ExpressionKey {
+        start,
+        end: start + "resource".len(),
+    };
+    let access = ExpressionKey {
+        start,
+        end: start + "resource.data.missing".len(),
+    };
+    let comparison = ExpressionKey {
+        start,
+        end: start + condition.len(),
+    };
+    assert_eq!(
+        errors.0,
+        [(access, Some(root)), (comparison, Some(root))],
+        "{source}"
+    );
+    assert_eq!(result.error.unwrap().expression_key(), Some(root));
+}

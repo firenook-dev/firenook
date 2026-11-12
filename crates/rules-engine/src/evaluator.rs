@@ -350,6 +350,15 @@ struct PinnedDocument {
     resource: Option<Resource>,
 }
 
+/// The expression a chain of field accesses starts from: `resource` for
+/// `resource.data.missing`.
+fn member_root(mut expression: &Expr) -> &Expr {
+    while let ExprKind::Field { base, .. } = &expression.kind {
+        expression = base;
+    }
+    expression
+}
+
 /// Whether a value read from a query's document data is a map: the data
 /// itself, or a field a filter names a field inside.
 fn is_query_map(value: &EvalValue) -> bool {
@@ -710,8 +719,19 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             ExprKind::Path(parts) => self.eval_path(parts, environment, functions),
             ExprKind::Variable(name) => self.variable(name, environment),
             ExprKind::Field { base, name } => {
-                let base = self.eval_expr(base, environment, functions)?;
-                self.field(base, name)
+                let value = self.eval_expr(base, environment, functions)?;
+                self.field(value, name).map_err(|mut error| {
+                    // The official emulator places a failed field access at
+                    // the expression its member chain starts from: `resource`
+                    // in `resource.data.missing` (coverage oracle profile
+                    // missing-field; its denials name that column too).
+                    let root = member_root(base);
+                    error.expression_key.get_or_insert(ExpressionKey {
+                        start: root.span.start,
+                        end: root.span.end,
+                    });
+                    error
+                })
             }
             ExprKind::Index { base, index } => {
                 let base = self.eval_expr(base, environment, functions)?;

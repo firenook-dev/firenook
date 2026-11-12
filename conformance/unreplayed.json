@@ -14,12 +14,6 @@
       "why": "a rules reload's compile error is framed and worded otherwise than the official emulator's"
     },
     {
-      "set": "developer-tools-coverage-v1",
-      "case": "profiles/missing-field",
-      "issue": 206,
-      "why": "a coverage error value spans the whole member expression, where the official one spans its root"
-    },
-    {
       "set": "developer-tools-request-metadata-v1",
       "case": "messages/5",
       "issue": 208,

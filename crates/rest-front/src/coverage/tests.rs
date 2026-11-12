@@ -215,10 +215,6 @@ mod oracle {
     /// moves it out of this table and the replay notes it in the ledger.
     const BUG_CANDIDATES: &[(&str, &str)] = &[
         (
-            "profiles/missing-field",
-            "the error value's sourcePosition is the failing field access `resource.data.missing` (offsets 127-147); the official emulator's is `resource` (127-134)",
-        ),
-        (
             "invalid-reload",
             "a rejected reload's message is `rules compilation failed: 1:1: expected \"service\"`; the official emulator's is `Error compiling rules:\\nL1:1 mismatched input 'broken' expecting {'function', 'import', 'service', 'rules_version'}`",
         ),

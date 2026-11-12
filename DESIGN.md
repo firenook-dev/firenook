@@ -518,7 +518,10 @@ bytes, timestamps and request context. A borrowed observer records the original
 evaluation's dynamic values and function-body outcomes. It performs no extra
 document reads, cloned resource-tree retention or policy re-evaluation. The full
 1,024-case expression corpus compares observed and ordinary verdicts and access
-accounting. Errors preserve their original expression position when propagated.
+accounting. Errors preserve their original expression position when propagated;
+a failed field access takes the position of the expression its member chain
+starts from (`resource` in `resource.data.missing`), as the official emulator
+gives it.
 
 The opt-in runtime exposes serialized coverage to its caller; this component is
 not yet wired to shipping HTTP/HTML reports. Successful reloads (even identical
