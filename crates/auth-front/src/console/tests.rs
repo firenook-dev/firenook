@@ -2387,25 +2387,36 @@ async fn sign_in_latencies(
 
 /// A sign-in never waits for the state to be encoded: at 10,000 users with
 /// persistence on its p99 stays within 50 ms and within three times (plus
-/// 2 ms of scheduling slack) the 100-user p99 measured in the same run.
+/// 2 ms of scheduling slack) the 100-user p99 measured in the same round.
+///
+/// The p99 of 200 sign-ins is the third slowest, so a few sign-ins slowed
+/// by a busy runner failed it now and then (the Intel macOS runner, about
+/// one run in ten): up to three rounds are measured and the first one
+/// within both bounds passes. A sign-in that waited for the encode would
+/// fail every round.
 #[tokio::test]
 async fn a_sign_in_with_persistence_on_does_not_grow_with_the_user_count() {
-    let mut p99 = Vec::new();
-    for users in [100, 10_000] {
-        let (runtime, directory, credentials) = persisted(users, 31);
-        let mut latencies = sign_in_latencies(&runtime, &credentials, 200).await;
-        p99.push(percentiles(&mut latencies).2);
-        drop(runtime);
-        let _ = std::fs::remove_dir_all(&directory);
+    const ROUNDS: usize = 3;
+    let mut rounds = Vec::new();
+    for _ in 0..ROUNDS {
+        let mut p99 = Vec::new();
+        for users in [100, 10_000] {
+            let (runtime, directory, credentials) = persisted(users, 31);
+            let mut latencies = sign_in_latencies(&runtime, &credentials, 200).await;
+            p99.push(percentiles(&mut latencies).2);
+            drop(runtime);
+            let _ = std::fs::remove_dir_all(&directory);
+        }
+        let (small, large) = (p99[0], p99[1]);
+        rounds.push(format!("{large:?} at 10,000 users, {small:?} at 100"));
+        if large <= Duration::from_millis(50) && large <= small * 3 + Duration::from_millis(2) {
+            return;
+        }
     }
-    let (small, large) = (p99[0], p99[1]);
-    assert!(
-        large <= Duration::from_millis(50),
-        "p99 {large:?} at 10,000 users"
-    );
-    assert!(
-        large <= small * 3 + Duration::from_millis(2),
-        "p99 {large:?} at 10,000 users, {small:?} at 100"
+    panic!(
+        "sign-in p99 out of bounds (at most 50 ms, and three times the 100-user p99 plus 2 ms) \
+         in all {ROUNDS} rounds: {}",
+        rounds.join("; ")
     );
 }
 
