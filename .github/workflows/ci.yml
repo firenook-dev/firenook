@@ -101,7 +101,7 @@ jobs:
           if-no-files-found: error
 
   console:
-    name: Console checks and the engine the journeys run against
+    name: Console checks
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -125,15 +125,25 @@ jobs:
           npm run test --prefix console
           npm run build --prefix console
           npm run budget --prefix console
+
+  journey-engine:
+    # Built once and handed to every journey job, beside the console checks
+    # rather than after them: the journeys need the engine, not the checks
+    # (2.5-4.5 minutes). The debug binary reads console/dist from this
+    # checkout's path at run time, which every journey job's checkout
+    # shares; each builds the console itself.
+    name: The engine the journeys run against
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install latest stable Rust
         run: |
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
-      # Built once here and handed to every journey shard: a cold debug
-      # build is most of this job, and seven shards building it would be
-      # seven times that. The debug binary reads console/dist from this
-      # checkout's path at run time, which every shard's checkout shares.
       - name: Build the engine the browser journeys run against
         run: cargo build --locked --bin firenook
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -145,16 +155,22 @@ jobs:
 
   console-journeys:
     # The whole suite is about 17 minutes on a 12-core machine; on a 4-vCPU
-    # runner it would not fit one job's budget, so each Playwright project
-    # (one engine profile) is its own job with its own limit.
-    name: Console journeys (${{ matrix.project }})
-    needs: console
+    # runner it would not fit one job's budget. Each Playwright project (one
+    # engine profile) ran as a job of its own; the six short ones (3-6
+    # minutes) now run in pairs, so the run asks for three fewer runners and
+    # waits less for them, and shell (about 10) stays alone.
+    name: Console journeys (${{ matrix.name }})
+    needs: journey-engine
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        project: [data, auth, storage, compute, messaging, observe, shell]
+        include:
+          - {name: data and storage, key: data-storage, projects: --project data --project storage}
+          - {name: auth and messaging, key: auth-messaging, projects: --project auth --project messaging}
+          - {name: compute and observe, key: compute-observe, projects: --project compute --project observe}
+          - {name: shell, key: shell, projects: --project shell}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -179,13 +195,13 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Install the pinned Functions SDK the journeys' Functions fixture links in
         run: npm run e2e:sdk --prefix console
-      - name: Run the ${{ matrix.project }} journeys against the real engine
+      - name: Run the ${{ matrix.name }} journeys against the real engine
         working-directory: console
-        run: npx playwright test --project ${{ matrix.project }}
+        run: npx playwright test ${{ matrix.projects }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: failure()
         with:
-          name: console-playwright-report-${{ matrix.project }}
+          name: console-playwright-report-${{ matrix.key }}
           path: |
             console/playwright-report
             console/test-results
@@ -194,23 +210,27 @@ jobs:
     # Functions run on the Node that runs Firenook, and every other job runs
     # Node 24. The Functions journeys again, with the engine running the
     # Functions on each other supported Node; Playwright and the console
-    # build stay on the pinned 24.20.0.
-    name: Console Functions journeys (Node ${{ matrix.node }})
-    needs: console
+    # build stay on the pinned 24.20.0. One job runs both (about 3 minutes
+    # each), so the setup is paid once.
+    name: Console Functions journeys (Node 22 and 26)
+    needs: journey-engine
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        node: [22, 26]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: ${{ matrix.node }}
-      - name: Keep the Node the engine runs the Functions on
+          node-version: 22
+      - name: Keep Node 22 for the Functions
         run: |
-          echo "FIRENOOK_NODE=$(command -v node)" >> "$GITHUB_ENV"
+          echo "NODE22=$(command -v node)" >> "$GITHUB_ENV"
+          node --version
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - name: Keep Node 26 for the Functions
+        run: |
+          echo "NODE26=$(command -v node)" >> "$GITHUB_ENV"
           node --version
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -234,15 +254,28 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Install the pinned Functions SDK the journeys' Functions fixture links in
         run: npm run e2e:sdk --prefix console
-      - name: Run the compute journeys with the Functions on Node ${{ matrix.node }}
+      - name: Run the compute journeys with the Functions on Node 22
         working-directory: console
-        run: npx playwright test --project compute
+        env:
+          FIRENOOK_NODE: ${{ env.NODE22 }}
+        run: npx playwright test --project compute --output test-results/node22
+      - name: Keep the Node 22 report
+        if: ${{ !cancelled() }}
+        working-directory: console
+        run: if [ -d playwright-report ]; then mv playwright-report playwright-report-node22; fi
+      - name: Run the compute journeys with the Functions on Node 26
+        if: ${{ !cancelled() }}
+        working-directory: console
+        env:
+          FIRENOOK_NODE: ${{ env.NODE26 }}
+        run: npx playwright test --project compute --output test-results/node26
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: failure()
         with:
-          name: console-playwright-report-compute-node${{ matrix.node }}
+          name: console-playwright-report-compute-node22-26
           path: |
             console/playwright-report
+            console/playwright-report-node22
             console/test-results
 
   functions-node:
