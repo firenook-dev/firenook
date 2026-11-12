@@ -162,6 +162,14 @@ fn check_created_id(kind: &str, id: &str) -> Result<(), Status> {
 }
 
 pub(crate) fn decode_parent(resource: &str) -> Result<(DatabaseName, Option<String>), Status> {
+    let (database, path) = decode_parent_name(resource)?;
+    check_parent_ids(path.as_deref())?;
+    Ok((database, path))
+}
+
+/// [`decode_parent`] without [`check_parent_ids`]: production adds a Listen
+/// target under a reserved id before it refuses it.
+pub(crate) fn decode_parent_name(resource: &str) -> Result<(DatabaseName, Option<String>), Status> {
     let segments = resource.split('/').collect::<Vec<_>>();
     if segments.len() < 5
         || segments[0] != PROJECTS
@@ -181,11 +189,17 @@ pub(crate) fn decode_parent(resource: &str) -> Result<(DatabaseName, Option<Stri
             resource.len()
         )));
     }
-    for segment in path {
+    Ok((database, (!path.is_empty()).then(|| path.join("/"))))
+}
+
+/// Refuses a parent path, as [`decode_parent_name`] decoded it, with an id
+/// in Firestore's reserved `__.*__` namespace.
+pub(crate) fn check_parent_ids(path: Option<&str>) -> Result<(), Status> {
+    for segment in path.into_iter().flat_map(|path| path.split('/')) {
         validate_resource_id(segment)
             .map_err(|error| Status::invalid_argument(error.to_string()))?;
     }
-    Ok((database, (!path.is_empty()).then(|| path.join("/"))))
+    Ok(())
 }
 
 /// Reads a Firestore v1 document message back into its key and fields,

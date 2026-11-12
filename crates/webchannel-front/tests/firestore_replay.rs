@@ -188,6 +188,20 @@ const DIFFERS: &[Differs] = &[
         instead: Instead::Replay(never_adds_target_1006),
     },
     Differs {
+        set: JAVA_WEBCHANNEL,
+        case: "reserved-resource-id-error/2",
+        compared: Compared::Answer,
+        reason: "a query target whose parent is under a reserved resource id is added, then removed with INVALID_ARGUMENT, as production (webchannel-v8/production-cloud-firestore reserved-resource-id-error/2 adds target 1002 before removing it); Java 1.22.0 removes it without adding it",
+        instead: Instead::Production("reserved-resource-id-error/2"),
+    },
+    Differs {
+        set: JAVA_WEBCHANNEL,
+        case: "reserved-resource-id-error/6",
+        compared: Compared::Answer,
+        reason: "a query target whose parent is under a reserved resource id is added, then removed with INVALID_ARGUMENT, as production (webchannel-v8/production-cloud-firestore reserved-resource-id-error/6 adds target 1002 before removing it); Java 1.22.0 removes it without adding it",
+        instead: Instead::Production("reserved-resource-id-error/6"),
+    },
+    Differs {
         set: CLOUD_WEBCHANNEL,
         case: "multiple-inequality-query/7",
         compared: Compared::Status,
@@ -214,34 +228,9 @@ const DIFFERS: &[Differs] = &[
 
 const BUG_CANDIDATES: &[Bug] = &[
     Bug {
-        set: JAVA_WEBCHANNEL,
-        case: "multiple-inequality-query/13",
-        description: "a target refused for an equality on `__name__` beside other inequalities is removed without first being added, where both oracles add it",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "multiple-inequality-query/6",
-        description: "a target refused for a missing composite index is removed without first being added, where production adds it",
-    },
-    Bug {
         set: CLOUD_WEBCHANNEL,
         case: "multiple-inequality-query/8",
         description: "the refusal of an order by more fields after `__name__` says Java's `order by clause cannot contain more fields after the key`, where production says `Order by clause cannot contain more fields after the key key`",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "multiple-inequality-query/10",
-        description: "a target refused for an equality on `__name__` beside other inequalities is removed without first being added, where production adds it",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "reserved-resource-id-error/2",
-        description: "a target under a reserved resource id is removed without first being added, where production adds it (Java 1.22.0 does not)",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "reserved-resource-id-error/6",
-        description: "a target under a reserved resource id is removed without first being added, where production adds it (Java 1.22.0 does not)",
     },
     Bug {
         set: JAVA_WEBCHANNEL,

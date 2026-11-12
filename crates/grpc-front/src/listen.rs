@@ -5,7 +5,7 @@ use firenook_core_store::{
     DatabaseName, DocumentKey, ListenerMemoryRegistration, Revision, RuntimeMemoryAccounting,
     Snapshot, SnapshotError, Store, Timestamp,
 };
-use firenook_query_engine::QueryPolicy;
+use firenook_query_engine::{QueryError, QueryPolicy};
 use firenook_rules_runtime::{
     Authorization, RequestOperation, RulesQuery, RulesRuntime, SnapshotAccess, evaluation_request,
 };
@@ -20,8 +20,8 @@ use tokio_stream::{Stream, StreamExt as _};
 use tonic::{Code, Status};
 
 use crate::codec::{
-    ReadTimeClass, classify_listen_read_time, decode_database_name, decode_document_name,
-    decode_parent, encode_fields, encode_timestamp,
+    ReadTimeClass, check_parent_ids, classify_listen_read_time, decode_database_name,
+    decode_document_name, decode_parent_name, encode_fields, encode_timestamp,
 };
 use crate::google::firestore::v1::listen_request::TargetChange as RequestedTargetChange;
 use crate::google::firestore::v1::listen_response::ResponseType;
@@ -97,6 +97,38 @@ struct ListenContext<'a> {
     rules: &'a RulesRuntime,
     reads: &'a ReadPool,
     authorization: &'a AuthorizationSource,
+}
+
+/// A target the stream refuses: the status its REMOVE carries, and whether
+/// production adds the target first. Production adds a target, then removes
+/// it, when it needs a composite index the project does not declare
+/// (fixture `webchannel-v8` production `multiple-inequality-query/6`), has
+/// an equality on `__name__` beside other inequalities (`/10`) or names a
+/// parent under a reserved id (`reserved-resource-id-error`); it removes a
+/// target ordered by more fields after `__name__` without adding it (`/8`).
+/// Other refusals are not recorded and are removed without the ADD.
+#[derive(Debug)]
+struct Refusal {
+    status: Status,
+    added: bool,
+}
+
+impl Refusal {
+    const fn after_add(status: Status) -> Self {
+        Self {
+            status,
+            added: true,
+        }
+    }
+}
+
+impl From<Status> for Refusal {
+    fn from(status: Status) -> Self {
+        Self {
+            status,
+            added: false,
+        }
+    }
 }
 
 struct TargetInitialization {
@@ -293,21 +325,16 @@ async fn add_target(
     let authorization = context.authorization.resolve()?;
     let (spec, policy) = match decode_target_spec(&database, target.target_type) {
         Ok(decoded) => decoded,
-        Err(error) => {
-            send_target_error(context.sender, id, error.code(), error.message()).await?;
+        Err(refusal) => {
+            send_refusal(context.sender, id, &refusal).await?;
             return Ok(());
         }
     };
     if let TargetSpec::Query(query) = &spec
         && let Err(error) = context.query_policy.validate(database.database_id(), query)
     {
-        send_target_error(
-            context.sender,
-            id,
-            Code::FailedPrecondition,
-            &error.to_string(),
-        )
-        .await?;
+        let refusal = Refusal::after_add(Status::failed_precondition(error.to_string()));
+        send_refusal(context.sender, id, &refusal).await?;
         return Ok(());
     }
     let snapshot = context.store.snapshot();
@@ -342,8 +369,8 @@ async fn add_target(
     };
     let initial = match initial {
         Ok(initial) => initial,
-        Err(error) => {
-            send_target_error(context.sender, id, error.code(), error.message()).await?;
+        Err(refusal) => {
+            send_refusal(context.sender, id, &refusal).await?;
             return Ok(());
         }
     };
@@ -400,7 +427,7 @@ fn initialize_target(
     query_policy: &QueryPolicy,
     snapshot: &Snapshot,
     initialization: TargetInitialization,
-) -> Result<InitialTarget, Status> {
+) -> Result<InitialTarget, Refusal> {
     let TargetInitialization {
         id,
         database,
@@ -434,7 +461,7 @@ fn initialize_target(
                     InitialFilter::None,
                 )?
             }
-            Err(error) => return Err(resume_snapshot_status(error)),
+            Err(error) => return Err(resume_snapshot_status(error).into()),
         },
         Some(ResumePoint::Unknown) => {
             mode = InitialMode::Reset;
@@ -450,7 +477,7 @@ fn initialize_target(
         Some(ResumePoint::ReadTime(read_time)) => {
             let baseline = store
                 .snapshot_at_time(*read_time)
-                .map_err(resume_snapshot_status)?;
+                .map_err(|error| Refusal::from(resume_snapshot_status(error)))?;
             resumed_target(
                 id,
                 database,
@@ -557,11 +584,20 @@ fn fresh_target(
     query_policy: &QueryPolicy,
     snapshot: &Snapshot,
     filter: InitialFilter,
-) -> Result<(WatchTarget, ChangeBatch, InitialFilter), Status> {
+) -> Result<(WatchTarget, ChangeBatch, InitialFilter), Refusal> {
     let (watch, initial) =
         WatchTarget::initialize(id, database, spec, query_policy.edition(), snapshot)
-            .map_err(|error| query_status(&error))?;
+            .map_err(|error| query_refusal(&error))?;
     Ok((watch, initial, filter))
+}
+
+/// See [`Refusal`]: of the query errors, production adds the target before
+/// refusing an equality on `__name__` beside other inequalities only.
+fn query_refusal(error: &QueryError) -> Refusal {
+    Refusal {
+        status: query_status(error),
+        added: matches!(error, QueryError::DocumentKeyEqualityWithOtherInequality),
+    }
 }
 
 /// A new documents target reports each document it names that does not
@@ -593,14 +629,14 @@ fn resumed_target(
     baseline: &firenook_core_store::Snapshot,
     snapshot: &firenook_core_store::Snapshot,
     expected_count: Option<i32>,
-) -> Result<(WatchTarget, ChangeBatch, InitialFilter), Status> {
+) -> Result<(WatchTarget, ChangeBatch, InitialFilter), Refusal> {
     let (mut watch, _) =
         WatchTarget::initialize(id, database, spec, query_policy.edition(), baseline)
-            .map_err(|error| query_status(&error))?;
+            .map_err(|error| query_refusal(&error))?;
     let baseline_count = i32::try_from(watch.document_keys().count()).unwrap_or(i32::MAX);
     let replay = watch
         .refresh(snapshot)
-        .map_err(|error| query_status(&error))?;
+        .map_err(|error| query_refusal(&error))?;
     let initial_filter = if expected_count.is_some_and(|expected| expected != baseline_count) {
         InitialFilter::UnchangedNames
     } else {
@@ -612,19 +648,21 @@ fn resumed_target(
 fn decode_target_spec(
     database: &DatabaseName,
     target_type: Option<TargetType>,
-) -> Result<(TargetSpec, TargetPolicy), Status> {
+) -> Result<(TargetSpec, TargetPolicy), Refusal> {
     match target_type {
         Some(TargetType::Query(target)) => {
-            let (target_database, parent) = decode_parent(&target.parent)?;
+            let (target_database, parent) = decode_parent_name(&target.parent)?;
+            check_parent_ids(parent.as_deref()).map_err(Refusal::after_add)?;
             if &target_database != database {
                 return Err(Status::invalid_argument(
                     "listen query belongs to a different database",
-                ));
+                )
+                .into());
             }
             let Some(QueryType::StructuredQuery(query)) = target.query_type else {
-                return Err(Status::invalid_argument(
-                    "listen target requires a structured query",
-                ));
+                return Err(
+                    Status::invalid_argument("listen target requires a structured query").into(),
+                );
             };
             let query = decode_query(parent.as_deref(), query)?;
             let policy = TargetPolicy::Query {
@@ -647,12 +685,29 @@ fn decode_target_spec(
                     }
                     Ok(key)
                 })
-                .collect::<Result<BTreeSet<_>, _>>()?;
+                .collect::<Result<BTreeSet<_>, Status>>()?;
             let policy = TargetPolicy::Documents(documents.iter().cloned().collect());
             Ok((TargetSpec::Documents(documents), policy))
         }
-        None => Err(Status::invalid_argument("listen target type is required")),
+        None => Err(Status::invalid_argument("listen target type is required").into()),
     }
+}
+
+async fn send_refusal(
+    sender: &mpsc::Sender<Result<ListenResponse, Status>>,
+    target_id: i32,
+    refusal: &Refusal,
+) -> Result<(), Status> {
+    if refusal.added {
+        send_target_change(sender, TargetChangeType::Add, vec![target_id], None, None).await?;
+    }
+    send_target_error(
+        sender,
+        target_id,
+        refusal.status.code(),
+        refusal.status.message(),
+    )
+    .await
 }
 
 fn authorize_target(
@@ -1204,6 +1259,123 @@ mod tests {
             kinds(&frames(&["items/a"], Some(ResumePoint::Unknown)).await),
             ["ADD", "RESET", "CURRENT", "NO_CHANGE"]
         );
+    }
+
+    /// Production adds a target, then removes it, when it needs a composite
+    /// index the project does not declare, has an equality on `__name__`
+    /// beside other inequalities, or names a parent under a reserved id; it
+    /// removes one ordered by more fields after `__name__` without adding it
+    /// (fixture `webchannel-v8` production `multiple-inequality-query/6`,
+    /// `/8`, `/10` and `reserved-resource-id-error/2`).
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)] // The four recorded refusals read best side by side.
+    async fn a_refused_target_is_added_first_where_production_adds_it() {
+        use firenook_query_engine::{DatabaseEdition, IndexCatalog};
+        use serde_json::json;
+
+        let store = Store::default();
+        let rules = RulesRuntime::default();
+        let policy = QueryPolicy::strict(DatabaseEdition::Standard, IndexCatalog::default());
+        let reads = ReadPool::default();
+        let (sender, mut receiver) = mpsc::channel(32);
+        let context = ListenContext {
+            store: &store,
+            sender: &sender,
+            query_policy: &policy,
+            rules: &rules,
+            reads: &reads,
+            authorization: &AuthorizationSource::Owner,
+        };
+        let database = DatabaseName::new("demo", "(default)").expect("database");
+        let root = format!("{database}/documents");
+        let field = |path: &str| json!({ "fieldPath": path });
+        let filter = |path: &str, op: &str, value: serde_json::Value| json!({ "fieldFilter": { "field": field(path), "op": op, "value": value } });
+        let order = |path: &str| json!({ "field": field(path), "direction": "ASCENDING" });
+        let from = json!([{ "collectionId": "items" }]);
+        let cases = [
+            // A missing composite index on (key, sort).
+            (
+                1004,
+                root.clone(),
+                json!({
+                    "from": from,
+                    "where": { "compositeFilter": { "op": "AND", "filters": [
+                        filter("key", "NOT_EQUAL", json!({ "stringValue": "a" })),
+                        filter("sort", "LESS_THAN_OR_EQUAL", json!({ "integerValue": "2" })),
+                    ] } },
+                    "orderBy": [order("key"), order("sort"), order("__name__")],
+                }),
+                true,
+                Code::FailedPrecondition,
+            ),
+            // An order by more fields after `__name__`.
+            (
+                1006,
+                root.clone(),
+                json!({
+                    "from": from,
+                    "where": filter("key", "NOT_EQUAL", json!({ "integerValue": "42" })),
+                    "orderBy": [order("__name__"), order("key")],
+                }),
+                false,
+                Code::InvalidArgument,
+            ),
+            // An equality on `__name__` beside an inequality on another field.
+            (
+                1008,
+                root.clone(),
+                json!({
+                    "from": from,
+                    "where": { "compositeFilter": { "op": "AND", "filters": [
+                        filter("key", "NOT_EQUAL", json!({ "integerValue": "42" })),
+                        filter("__name__", "EQUAL", json!({ "referenceValue": format!("{root}/items/doc1") })),
+                    ] } },
+                    "orderBy": [order("key"), order("__name__")],
+                }),
+                true,
+                Code::InvalidArgument,
+            ),
+            // A parent under a reserved id.
+            (
+                1002,
+                format!("{root}/a/__badpath__"),
+                json!({ "from": [{ "collectionId": "b" }], "orderBy": [order("__name__")] }),
+                true,
+                Code::InvalidArgument,
+            ),
+        ];
+        let mut live = BTreeMap::new();
+        let mut next = 1;
+        for (id, parent, query, added, code) in cases {
+            let target = serde_json::from_value(json!({
+                "targetId": id,
+                "query": { "parent": parent, "structuredQuery": query },
+            }))
+            .expect("target");
+            add_target(&context, &mut live, &mut next, database.clone(), target)
+                .await
+                .expect("a refusal leaves the stream open");
+            let mut frames = Vec::new();
+            while let Ok(frame) = receiver.try_recv() {
+                let Some(ResponseType::TargetChange(change)) = frame.expect("frame").response_type
+                else {
+                    panic!("target {id}: only target changes");
+                };
+                let kind = TargetChangeType::try_from(change.target_change_type).expect("kind");
+                frames.push((
+                    kind,
+                    change.target_ids,
+                    change.cause.map(|cause| cause.code),
+                ));
+            }
+            let mut expected = Vec::new();
+            if added {
+                expected.push((TargetChangeType::Add, vec![id], None));
+            }
+            expected.push((TargetChangeType::Remove, vec![id], Some(code as i32)));
+            assert_eq!(frames, expected, "target {id}");
+        }
+        assert!(live.is_empty());
     }
 
     #[test]

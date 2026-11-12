@@ -189,12 +189,6 @@
     },
     {
       "set": "webchannel-v8/java-v1.22.0",
-      "case": "multiple-inequality-query/13",
-      "issue": 199,
-      "why": "a refused Listen target is removed without the ADD production sends first"
-    },
-    {
-      "set": "webchannel-v8/java-v1.22.0",
       "case": "write-missing-update-error/4",
       "issue": 201,
       "why": "a Write stream update of a missing document fails with Firenook's message and envelope, not production's"
@@ -207,33 +201,9 @@
     },
     {
       "set": "webchannel-v8/production-cloud-firestore",
-      "case": "multiple-inequality-query/6",
-      "issue": 199,
-      "why": "a refused Listen target is removed without the ADD production sends first"
-    },
-    {
-      "set": "webchannel-v8/production-cloud-firestore",
       "case": "multiple-inequality-query/8",
       "issue": 200,
       "why": "the refusal of an order by after __name__ is the Java emulator's text, not production's"
-    },
-    {
-      "set": "webchannel-v8/production-cloud-firestore",
-      "case": "multiple-inequality-query/10",
-      "issue": 199,
-      "why": "a refused Listen target is removed without the ADD production sends first"
-    },
-    {
-      "set": "webchannel-v8/production-cloud-firestore",
-      "case": "reserved-resource-id-error/2",
-      "issue": 199,
-      "why": "a refused Listen target is removed without the ADD production sends first"
-    },
-    {
-      "set": "webchannel-v8/production-cloud-firestore",
-      "case": "reserved-resource-id-error/6",
-      "issue": 199,
-      "why": "a refused Listen target is removed without the ADD production sends first"
     },
     {
       "set": "webchannel-v8/production-cloud-firestore",
