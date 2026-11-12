@@ -195,18 +195,6 @@
     },
     {
       "set": "webchannel-v8/java-v1.22.0",
-      "case": "numeric-resource-id-ordering/15",
-      "issue": 197,
-      "why": "a Listen's first snapshot orders numeric resource ids by the path's bytes"
-    },
-    {
-      "set": "webchannel-v8/java-v1.22.0",
-      "case": "numeric-resource-id-ordering/34",
-      "issue": 197,
-      "why": "a Listen's first snapshot orders numeric resource ids by the path's bytes"
-    },
-    {
-      "set": "webchannel-v8/java-v1.22.0",
       "case": "unicode-framing/4",
       "issue": 198,
       "why": "a document target on a missing document gets no documentDelete before CURRENT"
@@ -240,18 +228,6 @@
       "case": "multiple-inequality-query/10",
       "issue": 199,
       "why": "a refused Listen target is removed without the ADD production sends first"
-    },
-    {
-      "set": "webchannel-v8/production-cloud-firestore",
-      "case": "numeric-resource-id-ordering/15",
-      "issue": 197,
-      "why": "a Listen's first snapshot orders numeric resource ids by the path's bytes"
-    },
-    {
-      "set": "webchannel-v8/production-cloud-firestore",
-      "case": "numeric-resource-id-ordering/37",
-      "issue": 197,
-      "why": "a Listen's first snapshot orders numeric resource ids by the path's bytes"
     },
     {
       "set": "webchannel-v8/production-cloud-firestore",

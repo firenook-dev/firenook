@@ -215,26 +215,6 @@ const DIFFERS: &[Differs] = &[
 const BUG_CANDIDATES: &[Bug] = &[
     Bug {
         set: JAVA_WEBCHANNEL,
-        case: "numeric-resource-id-ordering/15",
-        description: "a Listen's first snapshot sends its documents in byte order of the path (__id-2__ before __id-9223372036854775808__), not in the query's numeric resource-id order",
-    },
-    Bug {
-        set: JAVA_WEBCHANNEL,
-        case: "numeric-resource-id-ordering/34",
-        description: "a Listen's first snapshot sends its documents in byte order of the path (__id-2__ before __id-9223372036854775808__), not in the query's numeric resource-id order",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "numeric-resource-id-ordering/15",
-        description: "a Listen's first snapshot sends its documents in byte order of the path (__id-2__ before __id-9223372036854775808__), not in the query's numeric resource-id order",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "numeric-resource-id-ordering/37",
-        description: "a Listen's first snapshot sends its documents in byte order of the path (__id-2__ before __id-9223372036854775808__), not in the query's numeric resource-id order",
-    },
-    Bug {
-        set: JAVA_WEBCHANNEL,
         case: "unicode-framing/4",
         description: "a document target on a missing document becomes CURRENT without the documentDelete both oracles send first",
     },
