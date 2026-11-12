@@ -890,6 +890,18 @@ jobs:
       - name: Install pinned Firebase JS SDK dependencies
         working-directory: .phase2/firebase-js-sdk
         run: yarn install --frozen-lockfile
+      # The SDK is built from source at a pinned commit, about 4 minutes of
+      # each of these jobs. Its own build tool (Nx) keeps what it built and
+      # reuses it when the inputs are the same, so its cache is kept between
+      # runs, keyed on the SDK commit: the build then takes seconds.
+      - name: Note the SDK commit
+        run: echo "SDK_COMMIT=$(git -C .phase2/firebase-js-sdk rev-parse HEAD)" >> "$GITHUB_ENV"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .phase2/firebase-js-sdk/.nx/cache
+            .phase2/firebase-js-sdk/node_modules/.cache/nx
+          key: firebase-js-sdk-build-${{ runner.os }}-${{ env.SDK_COMMIT }}
       - name: Run Google's Firestore browser integration bootstrap
         run: >-
           npm run test:webchannel:firebase-js-sdk --prefix conformance --
