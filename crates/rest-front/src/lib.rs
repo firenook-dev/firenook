@@ -61,6 +61,8 @@ use preview::Preview;
 mod coverage;
 mod listing;
 mod methods;
+#[cfg(test)]
+mod official_export_tests;
 mod read_json;
 mod read_options;
 #[cfg(test)]
