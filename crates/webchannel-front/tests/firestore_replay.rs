@@ -91,11 +91,18 @@ const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../conformance/f
 /// wait the replay needs ends within milliseconds.
 const WAIT: Duration = Duration::from_secs(5);
 
-/// How long the replay waits, before terminating a session, for the rest of
-/// what the recording shows it carried. Nothing waits on these messages but
-/// the comparison, and where Firenook sends fewer (a listed difference) the
-/// whole wait is spent.
-const SETTLE: Duration = Duration::from_secs(1);
+/// Listed cases whose backchannel Firenook answers with fewer snapshot ends,
+/// target removals or Write responses than the recording carried, and how
+/// many it sends. Before terminating a session the replay waits for the rest
+/// of what the recording shows the session carried; for these it waits for
+/// this many instead of the recorded ones, so no wait runs out by design.
+const DELIVERS: &[(&str, &str, usize)] = &[
+    // The unchanged document and its snapshot end are not sent again.
+    (JAVA_WEBCHANNEL, "unicode-framing/18", 1),
+    // One `error` array where production sends `__sm__` and `close`.
+    (CLOUD_WEBCHANNEL, "write-missing-update-error/4", 1),
+    (CLOUD_WEBCHANNEL, "write-missing-update-error/7", 2),
+];
 
 /// The recordings `oracle_replay.rs` replays too: it notes their handshakes,
 /// forward requests and production's unknown session.
@@ -1047,6 +1054,74 @@ struct Session {
     terminated: bool,
     /// Recorded stream token to the replay's.
     stream_tokens: HashMap<String, String>,
+    /// The path and parameters of the session's first recorded backchannel.
+    backchannel: Option<(String, Vec<(String, String)>)>,
+    /// What the backend sends for each forward map sent so far.
+    effects: Vec<Effect>,
+}
+
+/// What the backend sends once it has applied one forward map. The replay
+/// waits for it before the next request, so requests on different sessions
+/// reach the store in the recorded order: a forward request is answered as
+/// soon as its maps are queued, and each session's stream applies them on
+/// its own task.
+#[derive(Clone, Copy, Debug)]
+enum Effect {
+    /// A Write handshake or write: the Write response (or the stream's error).
+    Written,
+    /// An `addTarget`: the target's ADD, or its REMOVE when it is refused.
+    Added(i64),
+    /// A `removeTarget`: the target's REMOVE.
+    Removed(i64),
+}
+
+impl Effect {
+    /// The effects of the forward maps a recorded request carried, in order.
+    fn of(exchange: &Value, listen: bool) -> Vec<Self> {
+        let mut maps = form(exchange)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(name, value)| {
+                let id = name
+                    .strip_prefix("req")?
+                    .strip_suffix("___data__")?
+                    .parse::<u64>()
+                    .ok()?;
+                Some((
+                    id,
+                    serde_json::from_str::<Value>(&value).expect("forward map is JSON"),
+                ))
+            })
+            .collect::<Vec<_>>();
+        maps.sort_by_key(|(id, _)| *id);
+        maps.into_iter()
+            .filter_map(|(_, map)| {
+                if !listen {
+                    Some(Self::Written)
+                } else if let Some(id) = map["addTarget"]["targetId"].as_i64() {
+                    Some(Self::Added(id))
+                } else {
+                    map["removeTarget"].as_i64().map(Self::Removed)
+                }
+            })
+            .collect()
+    }
+
+    fn shows_in(self, body: &Value) -> bool {
+        let change = &body["targetChange"];
+        let names = |id: i64| {
+            change["targetIds"]
+                .as_array()
+                .is_some_and(|ids| ids.contains(&json!(id)))
+        };
+        match self {
+            Self::Written => substream(body) == "stream",
+            Self::Added(id) => {
+                names(id) && matches!(change["targetChangeType"].as_str(), Some("ADD" | "REMOVE"))
+            }
+            Self::Removed(id) => names(id) && change["targetChangeType"] == "REMOVE",
+        }
+    }
 }
 
 fn milestones(arrays: &BTreeMap<u64, Value>, through: u64) -> usize {
@@ -1060,6 +1135,31 @@ fn milestones(arrays: &BTreeMap<u64, Value>, through: u64) -> usize {
 impl Session {
     fn received_milestones(&self) -> usize {
         milestones(&self.received.snapshot(), u64::MAX)
+    }
+
+    /// Whether the replay has delivered the effect of every map sent, in order.
+    fn applied(&self) -> bool {
+        let (kept, _) = normalise(&self.received.snapshot());
+        let mut messages = kept.iter();
+        self.effects
+            .iter()
+            .all(|effect| messages.any(|message| effect.shows_in(&message.body)))
+    }
+
+    /// Waits until the backend has applied every map sent on the session.
+    async fn wait_applied(&mut self) -> bool {
+        let deadline = tokio::time::Instant::now() + WAIT;
+        loop {
+            if self.applied() {
+                return true;
+            }
+            if tokio::time::timeout_at(deadline, self.changes.changed())
+                .await
+                .is_err()
+            {
+                return self.applied();
+            }
+        }
     }
 
     /// Waits until the replay has delivered `count` milestones.
@@ -1164,6 +1264,8 @@ impl<'a> Replay<'a> {
                         poll_statuses: Arc::default(),
                         terminated: false,
                         stream_tokens: HashMap::new(),
+                        backchannel: None,
+                        effects: Vec::new(),
                     },
                 );
                 order += 1;
@@ -1179,6 +1281,15 @@ impl<'a> Replay<'a> {
             {
                 for (id, payload) in recorded_arrays(exchange) {
                     session.recorded.entry(id).or_insert(payload);
+                }
+                if session.backchannel.is_none() {
+                    session.backchannel = Some((
+                        exchange["request"]["path"]
+                            .as_str()
+                            .expect("path")
+                            .to_owned(),
+                        query,
+                    ));
                 }
             }
         }
@@ -1326,7 +1437,10 @@ impl<'a> Replay<'a> {
                 Step::Handshake => self.handshake(index).await,
                 Step::Forward => self.forward(index).await,
                 Step::Terminate => self.terminate(index).await,
-                Step::Backchannel => self.backchannel(index),
+                Step::Backchannel => {
+                    let sid = self.recorded_sid(index);
+                    self.open_backchannel(&sid);
+                }
                 Step::Stray => {
                     let (observed, _) = self.send(self.channel_request(index, None)).await;
                     self.observed.insert(index, observed);
@@ -1343,11 +1457,11 @@ impl<'a> Replay<'a> {
             .collect::<Vec<_>>();
         open.sort();
         for sid in open {
+            let total = self.expected_milestones(&sid);
             let session = self.sessions.get_mut(&sid).expect("session");
-            let total = milestones(&session.recorded, u64::MAX);
-            if !session.wait_for(total, SETTLE).await {
+            if !session.wait_for(total, WAIT).await {
                 self.stalls.push(format!(
-                    "session {} delivered {} of its {total} recorded milestones",
+                    "session {} delivered {} of its {total} expected milestones",
                     session.order,
                     session.received_milestones()
                 ));
@@ -1436,7 +1550,28 @@ impl<'a> Replay<'a> {
             .unwrap_or_default()
             .clone_into(&mut session.sid);
         session.gsession = gsession.unwrap_or_default();
+        let applied = observed.status == 200;
         self.observed.insert(index, observed);
+        // The client opens the backchannel as soon as the handshake answers.
+        self.open_backchannel(&sid);
+        if applied {
+            self.wait_applied(index, &sid).await;
+        }
+    }
+
+    /// Records what the maps exchange `index` sent will make the backend
+    /// send, and waits until it has.
+    async fn wait_applied(&mut self, index: usize, sid: &str) {
+        let case = self.recording.case(index);
+        let exchange = &self.recording.exchanges[index];
+        let session = self.sessions.get_mut(sid).expect("session");
+        session.effects.extend(Effect::of(exchange, session.listen));
+        if !session.wait_applied().await {
+            self.stalls.push(format!(
+                "{case}: session {} has not applied its forward maps {:?}",
+                session.order, session.effects
+            ));
+        }
     }
 
     fn recorded_sid(&self, index: usize) -> String {
@@ -1450,17 +1585,54 @@ impl<'a> Replay<'a> {
         let sid = self.recorded_sid(index);
         let request = self.channel_request(index, self.sessions.get(&sid));
         let (observed, _) = self.send(request).await;
+        let applied = observed.status == 200;
         self.observed.insert(index, observed);
+        if applied {
+            self.wait_applied(index, &sid).await;
+        }
+    }
+
+    /// How many milestones the session must have delivered by its end: what
+    /// each recorded backchannel carried, or what [`DELIVERS`] says Firenook
+    /// sends for it.
+    fn expected_milestones(&self, sid: &str) -> usize {
+        let session = &self.sessions[sid];
+        let milestones = normalise(&session.recorded)
+            .0
+            .into_iter()
+            .filter(|message| is_milestone(&message.body))
+            .map(|message| message.id)
+            .collect::<BTreeSet<_>>();
+        let mut counted = BTreeSet::new();
+        let mut total = 0;
+        for (index, exchange) in self.recording.exchanges.iter().enumerate() {
+            if exchange["request"]["method"] != "GET"
+                || query_value(&query(exchange), "SID") != Some(sid)
+            {
+                continue;
+            }
+            // A retried backchannel replays arrays; each counts once.
+            let carried = recorded_arrays(exchange)
+                .into_iter()
+                .filter(|(id, _)| milestones.contains(id) && counted.insert(*id))
+                .count();
+            let case = self.recording.case(index);
+            total += DELIVERS
+                .iter()
+                .find(|(set, listed, _)| *set == self.recording.set && *listed == case)
+                .map_or(carried, |(_, _, delivers)| *delivers);
+        }
+        total
     }
 
     async fn terminate(&mut self, index: usize) {
         let sid = self.recorded_sid(index);
         let case = self.recording.case(index);
+        let total = self.expected_milestones(&sid);
         let session = self.sessions.get_mut(&sid).expect("session");
-        let total = milestones(&session.recorded, u64::MAX);
-        if !session.wait_for(total, SETTLE).await {
+        if !session.wait_for(total, WAIT).await {
             self.stalls.push(format!(
-                "{case}: session {} delivered {} of its {total} recorded milestones",
+                "{case}: session {} delivered {} of its {total} expected milestones",
                 session.order,
                 session.received_milestones()
             ));
@@ -1485,22 +1657,18 @@ impl<'a> Replay<'a> {
 
     /// The client keeps a backchannel open for as long as the session
     /// lives: a long poll is reopened as soon as it closes, with the last
-    /// array id received, and a streaming one stays open. From the
-    /// recording's first backchannel of a session the replay does the same,
-    /// with that request's parameters, until the session is terminated.
-    fn backchannel(&mut self, index: usize) {
-        let sid = self.recorded_sid(index);
-        let exchange = &self.recording.exchanges[index];
-        let path = exchange["request"]["path"]
-            .as_str()
-            .expect("path")
-            .to_owned();
-        let template = query(exchange);
+    /// array id received, and a streaming one stays open. From the session's
+    /// handshake the replay does the same, with the parameters of the
+    /// session's first recorded backchannel, until it is terminated.
+    fn open_backchannel(&mut self, sid: &str) {
         let application = self.application.clone();
-        let session = self.sessions.get_mut(&sid).expect("session");
+        let session = self.sessions.get_mut(sid).expect("session");
         if session.poller.is_some() || session.terminated {
             return;
         }
+        let Some((path, template)) = session.backchannel.clone() else {
+            return;
+        };
         let received = Arc::clone(&session.received);
         let stop = Arc::clone(&session.stop);
         let statuses = Arc::clone(&session.poll_statuses);
@@ -2158,6 +2326,20 @@ async fn scenario(root: &str, name: &str) {
                     firenook_conformance_ledger::checked(&outcome.set, &outcome.case, *compared);
                 }
             }
+        }
+    }
+    for (set, case, _) in DELIVERS {
+        if set.starts_with(root)
+            && case.split('/').next() == Some(name)
+            && !DIFFERS
+                .iter()
+                .map(|entry| (entry.set, entry.case))
+                .chain(BUG_CANDIDATES.iter().map(|entry| (entry.set, entry.case)))
+                .any(|listed| listed == (*set, *case))
+        {
+            failures.push(format!(
+                "{set} {case}: in DELIVERS but not a listed difference"
+            ));
         }
     }
     for (set, case) in DIFFERS
