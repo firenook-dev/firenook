@@ -215,6 +215,25 @@ const fn canonical_code(code: tonic::Code) -> &'static str {
     }
 }
 
+/// The HTTP status Google's APIs pair with a canonical status name, as an
+/// error's `code` carries it.
+fn http_status_code(status: &str) -> u16 {
+    match status {
+        "OK" => 200,
+        "INVALID_ARGUMENT" | "FAILED_PRECONDITION" | "OUT_OF_RANGE" => 400,
+        "UNAUTHENTICATED" => 401,
+        "PERMISSION_DENIED" => 403,
+        "NOT_FOUND" => 404,
+        "ALREADY_EXISTS" | "ABORTED" => 409,
+        "RESOURCE_EXHAUSTED" => 429,
+        "CANCELLED" => 499,
+        "UNIMPLEMENTED" => 501,
+        "UNAVAILABLE" => 503,
+        "DEADLINE_EXCEEDED" => 504,
+        _ => 500,
+    }
+}
+
 /// A backend error encoded into the channel rather than exposed as an HTTP
 /// transport failure.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -861,12 +880,36 @@ impl Session {
             let mut state = mutex_lock(&self.state);
             state.terminal_error = Some(error.clone());
         }
-        let _ = self.enqueue(json!([{
-            "error": {
-                "status": error.status,
-                "message": error.message
+        match self.kind {
+            // Production ends a Write stream with its status as a server
+            // message, the error in an array in an array, and then closes
+            // the channel (fixture `webchannel-v8` production
+            // `write-missing-update-error`); the client reads the error
+            // from either form.
+            ChannelKind::Write => {
+                let _ = self.enqueue(json!({
+                    "__sm__": {
+                        "status": [[{
+                            "error": {
+                                "code": http_status_code(&error.status),
+                                "message": error.message,
+                                "status": error.status
+                            }
+                        }]]
+                    }
+                }));
+                let _ = self.enqueue(json!(["close"]));
             }
-        }]));
+            // Not recorded from production on a Listen stream.
+            ChannelKind::Listen => {
+                let _ = self.enqueue(json!([{
+                    "error": {
+                        "status": error.status,
+                        "message": error.message
+                    }
+                }]));
+            }
+        }
         self.notify.notify_waiters();
     }
 
@@ -1584,6 +1627,74 @@ mod tests {
         );
         session.acknowledge(3);
         assert!(session.arrays_after(3).is_empty());
+    }
+
+    /// Production ends a Write stream with `{__sm__: {status: [[{error}]]}}`
+    /// and then a `close` array (fixture `webchannel-v8` production
+    /// `write-missing-update-error`); a Listen stream keeps its one `error`
+    /// array.
+    #[tokio::test]
+    async fn a_failed_write_stream_sends_its_status_then_closes() {
+        let name = "projects/demo/databases/(default)/documents/items/missing";
+        let mut arrays = Vec::new();
+        for (kind, sent) in [(ChannelKind::Write, 2), (ChannelKind::Listen, 1)] {
+            let (request_sender, _requests) = mpsc::channel(1);
+            let (response_sender, responses) = mpsc::channel(1);
+            // The registry ends its sessions when it is dropped.
+            let registry = SessionRegistry::default();
+            let session = registry
+                .create(
+                    kind,
+                    BackendChannel {
+                        requests: request_sender,
+                        responses,
+                    },
+                )
+                .expect("session should open");
+            response_sender
+                .send(Err(BackendError::new(
+                    "NOT_FOUND",
+                    format!("No document to update: {name}"),
+                )))
+                .await
+                .expect("the session reads its backend");
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while session.arrays_after(0).len() < sent {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .expect("the failure is framed");
+            arrays.push(
+                session
+                    .arrays_after(0)
+                    .into_iter()
+                    .map(|array| (array.id, array.payload))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        let error = json!({
+            "code": 404,
+            "message": format!("No document to update: {name}"),
+            "status": "NOT_FOUND"
+        });
+        assert_eq!(
+            arrays[0],
+            [
+                (1, json!({"__sm__": {"status": [[{"error": error}]]}})),
+                (2, json!(["close"])),
+            ]
+        );
+        assert_eq!(
+            arrays[1],
+            [(
+                1,
+                json!([{"error": {"status": "NOT_FOUND", "message": format!("No document to update: {name}")}}])
+            )]
+        );
+        assert_eq!(http_status_code("FAILED_PRECONDITION"), 400);
+        assert_eq!(http_status_code("PERMISSION_DENIED"), 403);
+        assert_eq!(http_status_code("ABORTED"), 409);
     }
 
     #[test]

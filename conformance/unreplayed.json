@@ -186,30 +186,6 @@
       "case": "limit-probes/linear-expression-terms-100",
       "issue": 204,
       "why": "no expression size limit: production refuses 100 terms and fails on 60-90"
-    },
-    {
-      "set": "webchannel-v8/java-v1.22.0",
-      "case": "write-missing-update-error/4",
-      "issue": 201,
-      "why": "a Write stream update of a missing document fails with Firenook's message and envelope, not production's"
-    },
-    {
-      "set": "webchannel-v8/java-v1.22.0",
-      "case": "write-missing-update-error/7",
-      "issue": 201,
-      "why": "a Write stream update of a missing document fails with Firenook's message and envelope, not production's"
-    },
-    {
-      "set": "webchannel-v8/production-cloud-firestore",
-      "case": "write-missing-update-error/4",
-      "issue": 201,
-      "why": "a Write stream update of a missing document fails with Firenook's message and envelope, not production's"
-    },
-    {
-      "set": "webchannel-v8/production-cloud-firestore",
-      "case": "write-missing-update-error/7",
-      "issue": 201,
-      "why": "a Write stream update of a missing document fails with Firenook's message and envelope, not production's"
     }
   ]
 }

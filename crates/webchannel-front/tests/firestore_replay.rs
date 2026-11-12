@@ -99,9 +99,6 @@ const WAIT: Duration = Duration::from_secs(5);
 const DELIVERS: &[(&str, &str, usize)] = &[
     // The unchanged document and its snapshot end are not sent again.
     (JAVA_WEBCHANNEL, "unicode-framing/18", 1),
-    // One `error` array where production sends `__sm__` and `close`.
-    (CLOUD_WEBCHANNEL, "write-missing-update-error/4", 1),
-    (CLOUD_WEBCHANNEL, "write-missing-update-error/7", 2),
 ];
 
 /// The recordings `oracle_replay.rs` replays too: it notes their handshakes,
@@ -209,6 +206,20 @@ const DIFFERS: &[Differs] = &[
         instead: Instead::Production("reserved-resource-id-error/6"),
     },
     Differs {
+        set: JAVA_WEBCHANNEL,
+        case: "write-missing-update-error/4",
+        compared: Compared::Answer,
+        reason: "a Write stream update of a missing document ends the stream as production does, with `{__sm__: {status: [[{error: {code: 404, message: No document to update: <name>, status: NOT_FOUND}}]]}}` and then a `close` array (webchannel-v8/production-cloud-firestore write-missing-update-error/4); Java 1.22.0 sends one `{error: {status, message}}` array, worded `NOT_FOUND: no entity to update: <its Datastore key>`",
+        instead: Instead::Production("write-missing-update-error/4"),
+    },
+    Differs {
+        set: JAVA_WEBCHANNEL,
+        case: "write-missing-update-error/7",
+        compared: Compared::Answer,
+        reason: "a Write stream update of a missing document ends the stream as production does, with `{__sm__: {status: [[{error: {code: 404, message: No document to update: <name>, status: NOT_FOUND}}]]}}` and then a `close` array (webchannel-v8/production-cloud-firestore write-missing-update-error/7); Java 1.22.0 sends one `{error: {status, message}}` array, worded `NOT_FOUND: no entity to update: <its Datastore key>`",
+        instead: Instead::Production("write-missing-update-error/7"),
+    },
+    Differs {
         set: CLOUD_WEBCHANNEL,
         case: "multiple-inequality-query/7",
         compared: Compared::Status,
@@ -233,33 +244,11 @@ const DIFFERS: &[Differs] = &[
     },
 ];
 
-const BUG_CANDIDATES: &[Bug] = &[
-    Bug {
-        set: JAVA_WEBCHANNEL,
-        case: "write-missing-update-error/4",
-        description: "a Write stream update of a missing document fails with `document not found: <name>`, where production says `No document to update: <name>` (and Java its own Datastore text)",
-    },
-    Bug {
-        set: JAVA_WEBCHANNEL,
-        case: "write-missing-update-error/7",
-        description: "a Write stream update of a missing document fails with `document not found: <name>`, where production says `No document to update: <name>` (and Java its own Datastore text)",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "write-missing-update-error/4",
-        description: "a Write stream error is one `{error: {status, message}}` array; production sends `{__sm__: {status: [[{error: {code: 404, message: No document to update: <name>, status}}]]}}` and then a `close` array",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "write-missing-update-error/7",
-        description: "a Write stream error is one `{error: {status, message}}` array; production sends `{__sm__: {status: [[{error: {code: 404, message: No document to update: <name>, status}}]]}}` and then a `close` array",
-    },
-    Bug {
-        set: CLOUD_REST,
-        case: "aggregation-composite-filter/2",
-        description: "with --strict-indexes, a count and sum over two equality filters is answered, where production refuses it with FAILED_PRECONDITION for want of a composite index (sequence, synthetic)",
-    },
-];
+const BUG_CANDIDATES: &[Bug] = &[Bug {
+    set: CLOUD_REST,
+    case: "aggregation-composite-filter/2",
+    description: "with --strict-indexes, a count and sum over two equality filters is answered, where production refuses it with FAILED_PRECONDITION for want of a composite index (sequence, synthetic)",
+}];
 
 fn never_adds_target_1006(outcome: &Outcome) -> bool {
     !outcome.replayed.iter().any(|message| {

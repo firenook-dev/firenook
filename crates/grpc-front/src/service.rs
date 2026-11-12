@@ -2156,10 +2156,12 @@ fn commit_status(error: CommitError) -> Status {
         CommitError::AlreadyExists(key) => {
             Status::already_exists(format!("document already exists: {key}"))
         }
+        // Production's words for an update of a missing document (fixture
+        // `webchannel-v8` production `write-missing-update-error`).
         CommitError::ExistencePrecondition {
             key,
             expected: true,
-        } => Status::not_found(format!("document not found: {key}")),
+        } => Status::not_found(format!("No document to update: {key}")),
         CommitError::ExistencePrecondition {
             key,
             expected: false,
