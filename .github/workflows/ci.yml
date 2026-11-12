@@ -82,6 +82,11 @@ jobs:
           rustup default stable
           rustup component add rustfmt clippy
           rustc --version
+      # Dependencies only (the cache drops this workspace's crates): the
+      # compile of the tree itself still runs in full.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: rust-gate
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Deny Clippy warnings
@@ -144,6 +149,11 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
+      # The dependencies of the debug engine, shared by every job that builds
+      # it; this job is the one that saves them when Cargo.lock or Rust moves.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: engine-debug
       - name: Build the engine the browser journeys run against
         run: cargo build --locked --bin firenook
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -158,7 +168,8 @@ jobs:
     # runner it would not fit one job's budget. Each Playwright project (one
     # engine profile) ran as a job of its own; the six short ones (3-6
     # minutes) now run in pairs, so the run asks for three fewer runners and
-    # waits less for them, and shell (about 10) stays alone.
+    # waits less for them. Shell (about 10) is two jobs: the typing journey
+    # over the Firestore pages, which alone is over 4 minutes, and the rest.
     name: Console journeys (${{ matrix.name }})
     needs: journey-engine
     runs-on: ubuntu-latest
@@ -170,7 +181,8 @@ jobs:
           - {name: data and storage, key: data-storage, projects: --project data --project storage}
           - {name: auth and messaging, key: auth-messaging, projects: --project auth --project messaging}
           - {name: compute and observe, key: compute-observe, projects: --project compute --project observe}
-          - {name: shell, key: shell, projects: --project shell}
+          - {name: 'shell, typing on Firestore', key: shell-typing-firestore, projects: '--project shell --grep "Firestore.*: every field keeps"'}
+          - {name: 'shell, the rest', key: shell, projects: '--project shell --grep-invert "Firestore.*: every field keeps"'}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -314,6 +326,10 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: engine-debug
+          save-if: false
       - name: Run the npm package's tests on Node ${{ matrix.node }}
         run: '"$FUNCTIONS_NODE" --test packaging/*.test.mjs'
       - name: Run the Functions runtime's tests with the workers on Node ${{ matrix.node }}
@@ -449,6 +465,10 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: engine-debug
+          save-if: false
       - name: Install pinned harness dependencies
         run: npm ci --prefix conformance
       - name: Type-check harness
@@ -595,16 +615,24 @@ jobs:
   # The Functions, Cloud Tasks, Auth and Pub/Sub oracle corpus replays
   # (about 9 minutes) beside the harness rather than in it, where they were
   # its longest steps: they compare recorded answers and start no Java.
+  # Two jobs of about equal length: Functions with Cloud Tasks, and Auth
+  # with Pub/Sub.
   oracle-replays:
-    name: Oracle corpus replays
+    name: Oracle corpus replays (${{ matrix.name }})
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: Functions and Cloud Tasks, key: functions}
+          - {name: Auth and Pub/Sub, key: auth-pubsub}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Note the recorded cases each replay compares
-        run: echo "FIRENOOK_CONFORMANCE_LEDGER=$RUNNER_TEMP/conformance-ledger/oracle-replays" >> "$GITHUB_ENV"
+        run: echo "FIRENOOK_CONFORMANCE_LEDGER=$RUNNER_TEMP/conformance-ledger/oracle-replays-${{ matrix.key }}" >> "$GITHUB_ENV"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.20.0
@@ -617,13 +645,20 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: engine-debug
+          save-if: false
       - name: Build the engine the replays run against
         run: cargo build --locked --bin firenook
       - name: Install pinned harness dependencies and the Functions peers
         run: |
           npm ci --prefix conformance
-          npm install --prefix "$RUNNER_TEMP/firenook-devtools" --ignore-scripts --no-audit --no-fund firebase-functions@7.2.5 firebase-admin@13.10.0
+          if [ "${{ matrix.key }}" = functions ]; then
+            npm install --prefix "$RUNNER_TEMP/firenook-devtools" --ignore-scripts --no-audit --no-fund firebase-functions@7.2.5 firebase-admin@13.10.0
+          fi
       - name: Replay the Functions runtime and Extensions oracle corpus
+        if: matrix.key == 'functions'
         env:
           FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
           FIRENOOK_OFFLINE: "1"
@@ -633,6 +668,7 @@ jobs:
             --profiles main,v1-blocking,inspect,ext-missing-param \
             --output "$RUNNER_TEMP/firenook-functions-runtime-replay.json"
       - name: Replay the Cloud Tasks oracle corpus against the suite
+        if: matrix.key == 'functions'
         env:
           FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
           FIRENOOK_OFFLINE: "1"
@@ -643,16 +679,19 @@ jobs:
             --fixture fixtures/tasks-v1/emulator-programs.json \
             --output "$RUNNER_TEMP/firenook-tasks-replay.json"
       - name: Replay the Auth oracle corpus against the standalone Auth service
+        if: matrix.key == 'auth-pubsub'
         run: |
           npm run replay:auth --prefix conformance -- \
             --binary ../target/debug/firenook \
             --output "$RUNNER_TEMP/firenook-auth-replay.json"
       - name: Replay the Pub/Sub oracle corpus over gRPC and HTTP/JSON
+        if: matrix.key == 'auth-pubsub'
         run: |
           npm run replay:pubsub --prefix conformance -- \
             --binary ../target/debug/firenook \
             --output "$RUNNER_TEMP/firenook-pubsub-replay.json"
       - name: Verify the pinned Pub/Sub client library against Firenook
+        if: matrix.key == 'auth-pubsub'
         run: |
           npm run verify:pubsub:client --prefix conformance -- \
             --binary ../target/debug/firenook \
@@ -660,7 +699,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
-          name: oracle-replays
+          name: oracle-replays-${{ matrix.key }}
           path: |
             ${{ runner.temp }}/firenook-functions-runtime-replay.json
             ${{ runner.temp }}/firenook-tasks-replay.json
@@ -670,7 +709,7 @@ jobs:
           if-no-files-found: ignore
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: conformance-ledger-oracle-replays
+          name: conformance-ledger-oracle-replays-${{ matrix.key }}
           path: ${{ runner.temp }}/conformance-ledger
           retention-days: 7
           if-no-files-found: error
@@ -699,6 +738,10 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: engine-debug
+          save-if: false
       - name: Install pinned harness dependencies
         run: npm ci --prefix conformance
       - name: Replay kindless queries and recursiveDelete in memory and disk/WAL
@@ -793,6 +836,10 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: engine-debug
+          save-if: false
       - name: Install Firenook conformance dependencies
         run: npm ci --prefix conformance
       - name: Install pinned Firebase JS SDK dependencies
