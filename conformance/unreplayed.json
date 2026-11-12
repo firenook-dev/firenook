@@ -141,18 +141,6 @@
     },
     {
       "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/function-depth-21",
-      "issue": 203,
-      "why": "function call depth: a 21-function chain production allows is denied, and the compile error is not production's"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/function-depth-23",
-      "issue": 203,
-      "why": "function call depth: a 21-function chain production allows is denied, and the compile error is not production's"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
       "case": "limit-probes/linear-expression-terms-60",
       "issue": 204,
       "why": "no expression size limit: production refuses 100 terms and fails on 60-90"

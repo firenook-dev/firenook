@@ -26,6 +26,9 @@ use crate::{
 mod query_constraints;
 
 const MAXIMUM_EVALUATED_EXPRESSIONS: usize = 1_000;
+/// The deepest user function frame, the first being depth 0: production
+/// evaluates the 21 frames `f0` … `f20` (`function-depth-21` of the
+/// production limit probes).
 const MAXIMUM_FUNCTION_CALL_DEPTH: usize = 20;
 const SINGLE_REQUEST_ACCESS_LIMIT: usize = 10;
 const MULTI_REQUEST_ACCESS_LIMIT: usize = 20;
@@ -1008,7 +1011,7 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 arguments.len()
             )));
         }
-        if self.call_depth >= MAXIMUM_FUNCTION_CALL_DEPTH {
+        if self.call_depth > MAXIMUM_FUNCTION_CALL_DEPTH {
             return Err(RuntimeError::new(
                 "maximum allowed call depth of 20 is reached",
             ));

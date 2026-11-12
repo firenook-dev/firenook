@@ -322,18 +322,91 @@ fn validate_function_map(
     let mut memo = BTreeMap::new();
     for name in graph.keys() {
         let mut visiting = BTreeSet::new();
-        match function_depth(name, &graph, &mut visiting, &mut memo) {
-            Ok(depth) if depth > 21 => diagnostics.push(diagnostic(
-                source,
-                0,
-                "maximum allowed function call depth of 20 is exceeded".to_owned(),
-            )),
-            Ok(_) => {}
-            Err(cycle) => diagnostics.push(diagnostic(
+        if let Err(cycle) = function_depth(name, &graph, &mut visiting, &mut memo) {
+            diagnostics.push(diagnostic(
                 source,
                 0,
                 format!("recursive function call is not allowed: {cycle}"),
-            )),
+            ));
+        }
+    }
+    // Production refuses a chain of calls that would open a 22nd frame
+    // (`function-depth-22` and `-23` of the production limit probes) with one
+    // issue, at the declaration of the function that frame would be, naming
+    // the 21 frames already open. Every longest chain starts at a function
+    // no other function calls; each over-deep function is named once.
+    let called = graph.values().flatten().collect::<BTreeSet<_>>();
+    let mut roots = graph
+        .keys()
+        .filter(|name| !called.contains(name) && memo.get(*name) > Some(&MAXIMUM_CALL_FRAMES))
+        .collect::<Vec<_>>();
+    roots.sort_by_key(|name| functions[*name].name_start);
+    let mut walk = DepthWalk {
+        source,
+        functions,
+        graph: &graph,
+        memo: &memo,
+        stack: Vec::new(),
+        walked: BTreeSet::new(),
+        reported: BTreeSet::new(),
+    };
+    for root in roots {
+        walk.stack.push(root);
+        walk.calls(diagnostics);
+        walk.stack.pop();
+    }
+}
+
+/// The frames a chain of user function calls may hold: production evaluates
+/// `f0` … `f20` and refuses a 22nd (`maximum allowed call depth of 20`, the
+/// first frame being depth 0).
+const MAXIMUM_CALL_FRAMES: usize = 21;
+
+/// The call chains of one function map that open more frames than
+/// [`MAXIMUM_CALL_FRAMES`].
+struct DepthWalk<'a> {
+    source: &'a str,
+    functions: &'a BTreeMap<String, ast::Function>,
+    graph: &'a BTreeMap<String, BTreeSet<String>>,
+    /// The frames of the longest chain from each function.
+    memo: &'a BTreeMap<String, usize>,
+    stack: Vec<&'a str>,
+    /// A function already walked at the same depth reports nothing new;
+    /// remembering it keeps the walk proportional to the calls.
+    walked: BTreeSet<(&'a str, usize)>,
+    reported: BTreeSet<&'a str>,
+}
+
+impl DepthWalk<'_> {
+    /// Walks the calls of the last function on the stack that lead to a
+    /// chain too deep, and refuses the first function each such chain would
+    /// open past the limit.
+    fn calls(&mut self, diagnostics: &mut Vec<Diagnostic>) {
+        let caller = self.stack.last().copied().expect("a frame");
+        if !self.walked.insert((caller, self.stack.len())) {
+            return;
+        }
+        let functions = self.functions;
+        let mut calls = self.graph[caller].iter().collect::<Vec<_>>();
+        calls.sort_by_key(|name| functions[*name].name_start);
+        for called in calls {
+            if self.stack.len() == MAXIMUM_CALL_FRAMES {
+                if self.reported.insert(called) {
+                    diagnostics.push(diagnostic(
+                        self.source,
+                        functions[called].name_start,
+                        format!(
+                            "Maximum allowed call depth of {} is reached for [{}] call stack.",
+                            MAXIMUM_CALL_FRAMES - 1,
+                            self.stack.join("->")
+                        ),
+                    ));
+                }
+            } else if self.stack.len() + self.memo[called] > MAXIMUM_CALL_FRAMES {
+                self.stack.push(called);
+                self.calls(diagnostics);
+                self.stack.pop();
+            }
         }
     }
 }
@@ -697,5 +770,73 @@ mod tests {
                 "{expression}"
             );
         }
+    }
+
+    /// `count` functions `f0` … in a chain, the last returning true, at the
+    /// service level; `entry` is the allow's condition.
+    fn call_chain(count: usize, entry: &str) -> String {
+        use std::fmt::Write as _;
+        let mut functions = String::new();
+        for index in 0..count - 1 {
+            writeln!(
+                functions,
+                "  function f{index}() {{ return f{}(); }}",
+                index + 1
+            )
+            .unwrap();
+        }
+        writeln!(functions, "  function f{}() {{ return true; }}", count - 1).unwrap();
+        format!(
+            "rules_version = '2';\nservice cloud.firestore {{\n{functions}  match /databases/{{database}}/documents/c/{{id}} {{\n    allow get: if {entry};\n  }}\n}}\n"
+        )
+    }
+
+    #[test]
+    fn a_too_deep_chain_is_refused_once_where_its_22nd_frame_is_declared() {
+        // Two chains share their over-deep tail and a third branch stays
+        // within the limit: one issue, for the first stack that reaches it.
+        let mut source = call_chain(23, "f0() && g0()");
+        source = source.replace(
+            "  function f0() { return f1(); }",
+            "  function f0() { return f1() && f20(); }\n  function g0() { return f1(); }",
+        );
+        let errors = compile(&source).expect_err("a 22nd frame must be refused");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let stack = (0..21).map(|index| format!("f{index}")).collect::<Vec<_>>();
+        assert_eq!(
+            errors[0].message,
+            format!(
+                "Maximum allowed call depth of 20 is reached for [{}] call stack.",
+                stack.join("->")
+            )
+        );
+        let declaration = source.find("function f21()").unwrap() + "function ".len();
+        assert_eq!(errors[0].byte_offset, declaration);
+        assert!(compile(&call_chain(21, "f0()")).is_ok());
+    }
+
+    #[test]
+    fn evaluation_opens_21_function_frames_and_refuses_a_22nd() {
+        // A match-level function calling the service-level chain is past what
+        // the compile-time check of one scope sees; evaluation holds the limit.
+        let rules = |count: usize| {
+            let source = call_chain(count, "g()").replace(
+                "    allow get:",
+                "    function g() { return f0(); }\n    allow get:",
+            );
+            compile(&source).expect("each scope's own chain is within the limit")
+        };
+        let request = EvaluationRequest::new(
+            RequestOperation::Get,
+            "/databases/(default)/documents/c/one",
+            Timestamp::new(1, 0),
+        );
+        assert!(rules(20).evaluate(&request, &EmptyDocumentAccess).allowed);
+        let refused = rules(21).evaluate(&request, &EmptyDocumentAccess);
+        assert!(!refused.allowed);
+        assert_eq!(
+            refused.error.expect("the 22nd frame").message,
+            "maximum allowed call depth of 20 is reached"
+        );
     }
 }

@@ -213,14 +213,6 @@ fn denies_at_the_frozen_evaluated_expression_limit() {
 /// notes it in the ledger.
 const LIMIT_BUG_CANDIDATES: &[(&str, &str)] = &[
     (
-        "function-depth-21",
-        "production evaluates the 21-function chain f0..f20 and allows; Firenook compiles it but denies at run time: `maximum allowed call depth of 20 is reached` at `f20()` (22:27)",
-    ),
-    (
-        "function-depth-23",
-        "both refuse to compile; production answers one issue, `Maximum allowed call depth of 20 is reached for [f0->f1->...->f20] call stack.` at 24:12 (the declaration of f21); Firenook answers `maximum allowed function call depth of 20 is exceeded` at 1:1 for each of f0 and f1",
-    ),
-    (
         "linear-expression-terms-60",
         "production answers 500 INTERNAL `Internal error encountered.` (backendError); Firenook compiles and allows",
     ),
