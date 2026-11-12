@@ -36,7 +36,9 @@ tokio.workspace = true
 tonic.workspace = true
 
 [dev-dependencies]
+firenook-conformance-ledger = { path = "../conformance-ledger" }
 redb.workspace = true
+sha2.workspace = true
 tower = { version = "0.5.3", features = ["util"] }
 
 [lints]

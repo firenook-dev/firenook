@@ -25,5 +25,12 @@ url.workspace = true
 
 [dev-dependencies]
 firenook-conformance-ledger = { path = "../conformance-ledger" }
+firenook-core-store = { path = "../core-store" }
+# The recorded-browser replays compose the product's Firestore HTTP router
+# (REST beside WebChannel over one service) the way the CLI and the suite do.
+firenook-functions-bridge = { path = "../functions-bridge" }
+firenook-query-engine = { path = "../query-engine" }
+firenook-rest-front = { path = "../rest-front" }
+firenook-rules-runtime = { path = "../rules-runtime" }
 http-body-util = "0.1.3"
 tower = { version = "0.5.3", features = ["util"] }

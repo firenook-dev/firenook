@@ -431,3 +431,173 @@ async fn rest_consistency_selectors_share_native_snapshots_and_rollback() {
             .is_success()
     );
 }
+
+/// The capture's three gRPC `GetDocument` calls (`grpcGet` in
+/// `conformance/src/suite/capture-rest-read-options.mjs`), each in the
+/// read-only transaction the REST `beginTransaction` opened, sent to the
+/// gRPC service the REST routes share, as the product composes them: before
+/// the mutation, after it, and after the REST rollback.
+#[tokio::test]
+#[allow(clippy::too_many_lines)] // The capture's sequence reads best whole.
+async fn grpc_get_document_in_the_rest_transaction_matches_the_captured_calls() {
+    use firenook_grpc_front::FirestoreService;
+    use firenook_grpc_front::google::firestore::v1::firestore_server::Firestore as _;
+    use firenook_grpc_front::google::firestore::v1::{
+        DocumentMask, GetDocumentRequest, get_document_request::ConsistencySelector,
+    };
+
+    const SET: &str = "rest-read-options-v1";
+    let fixture = fixture();
+    let recorded = |id: &str| {
+        fixture["grpc"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|call| call["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    let rules = RulesRuntime::default();
+    rules
+        .install_default(fixture["rules"].as_str().unwrap())
+        .unwrap();
+    let store = Store::default();
+    let service = FirestoreService::new_with_query_policy_and_rules(
+        store.clone(),
+        QueryPolicy::default(),
+        rules.clone(),
+    );
+    let router = router_with_shared_service(
+        store,
+        QueryPolicy::default(),
+        None,
+        rules,
+        TriggerRegistry::default(),
+        service.clone(),
+    );
+    let (status, seed) = request(
+        &router,
+        "/notes/a",
+        "PATCH",
+        fixture["exchanges"][0]["body"].clone(),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let token = transaction(&router, true).await;
+    let get = || {
+        let mut call = tonic::Request::new(GetDocumentRequest {
+            name: format!("{}/notes/a", &ROOT[4..]),
+            mask: Some(DocumentMask {
+                field_paths: vec!["title".to_owned()],
+            }),
+            consistency_selector: Some(ConsistencySelector::Transaction(
+                BASE64.decode(&token).unwrap(),
+            )),
+            ..GetDocumentRequest::default()
+        });
+        call.metadata_mut()
+            .insert("authorization", "Bearer owner".parse().unwrap());
+        service.get_document(call)
+    };
+    // A document read in the transaction: its name, the masked field and the
+    // seed's version, which the recording shows as `{seconds, nanos}` equal
+    // to the seed answer's `updateTime` (and here the replay's own seed).
+    let seed_version = time::OffsetDateTime::parse(seed["updateTime"].as_str().unwrap(), &Rfc3339)
+        .unwrap()
+        .unix_timestamp_nanos();
+    let recorded_seed_version = time::OffsetDateTime::parse(
+        fixture["exchanges"][0]["response"]["updateTime"]
+            .as_str()
+            .unwrap(),
+        &Rfc3339,
+    )
+    .unwrap()
+    .unix_timestamp_nanos();
+    let instant = |timestamp: &JsonValue| {
+        i128::from(
+            timestamp["seconds"]
+                .as_str()
+                .unwrap()
+                .parse::<i64>()
+                .unwrap(),
+        ) * 1_000_000_000
+            + i128::from(timestamp["nanos"].as_i64().unwrap())
+    };
+    let matches_read =
+        |id: &str, document: &firenook_grpc_front::google::firestore::v1::Document| {
+            let call = recorded(id);
+            let create = document
+                .create_time
+                .as_ref()
+                .map(|time| i128::from(time.seconds) * 1_000_000_000 + i128::from(time.nanos));
+            let update = document
+                .update_time
+                .as_ref()
+                .map(|time| i128::from(time.seconds) * 1_000_000_000 + i128::from(time.nanos));
+            call["status"] == 0
+                && document.name == call["response"]["name"]
+                && document.fields.keys().collect::<Vec<_>>() == ["title"]
+                && call["response"]["fields"].as_object().unwrap().len() == 1
+                && matches!(
+                    &document.fields["title"].value_type,
+                    Some(firenook_grpc_front::google::firestore::v1::value::ValueType::StringValue(title))
+                        if *title == call["response"]["fields"]["title"]["stringValue"]
+                )
+                && instant(&call["response"]["createTime"]) == recorded_seed_version
+                && instant(&call["response"]["updateTime"]) == recorded_seed_version
+                && create == Some(seed_version)
+                && update == Some(seed_version)
+        };
+
+    let before = get().await.unwrap().into_inner();
+    assert!(matches_read("get-in-read-only", &before), "{before:?}");
+    firenook_conformance_ledger::checked(
+        SET,
+        "grpc/get-in-read-only",
+        firenook_conformance_ledger::Compared::Answer,
+    );
+
+    let mutate = fixture["exchanges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|exchange| exchange["id"] == "mutate")
+        .unwrap();
+    let (status, _) = request(&router, "/notes/a", "PATCH", mutate["body"].clone(), true).await;
+    assert_eq!(status, StatusCode::OK);
+    let after = get().await.unwrap().into_inner();
+    assert!(
+        matches_read("get-read-only-after-mutation", &after),
+        "{after:?}"
+    );
+    firenook_conformance_ledger::checked(
+        SET,
+        "grpc/get-read-only-after-mutation",
+        firenook_conformance_ledger::Compared::Answer,
+    );
+
+    let (status, _) = request(
+        &router,
+        ":rollback",
+        "POST",
+        json!({"transaction":token}),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let refused = get()
+        .await
+        .expect_err("a rolled-back transaction refuses reads");
+    let call = recorded("get-rolled-back");
+    assert_eq!(
+        i64::from(refused.code() as i32),
+        call["status"].as_i64().unwrap()
+    );
+    assert_eq!(refused.message(), call["details"].as_str().unwrap());
+    firenook_conformance_ledger::checked(
+        SET,
+        "grpc/get-rolled-back",
+        firenook_conformance_ledger::Compared::Error,
+    );
+}

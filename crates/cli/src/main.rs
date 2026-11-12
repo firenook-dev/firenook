@@ -2917,4 +2917,201 @@ mod tests {
              fireside_export_fixture/reference-target"
         );
     }
+
+    /// Replays `conformance/fixtures/firebase-suite-v1/firestore-multi-shard-export-metadata`:
+    /// the official export's four records reframed one per `LevelDB` shard,
+    /// rebuilt as `conformance/src/capture-multishard-import.mjs` built them
+    /// (each shard's SHA-256 is checked against the recording, so the input
+    /// is the one the official importer took), then imported with
+    /// `--seed_from_export` and the project the capture gave the official
+    /// emulator, and verified as `conformance/src/assert-export-import.ts`
+    /// verified the official import.
+    #[test]
+    #[allow(clippy::too_many_lines)] // The verifier's assertions read best whole.
+    fn a_multi_shard_export_imports_as_the_official_importer_accepted_it() {
+        use firenook_export_format::{LevelDbLogReader, LevelDbLogWriter, LogOptions};
+        use sha2::{Digest as _, Sha256};
+
+        const PROJECT: &str = "demo-fireside-export-oracle";
+        let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/../../conformance/fixtures");
+        let fixture: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(format!(
+                "{fixtures}/firebase-suite-v1/firestore-multi-shard-export-metadata/fixture.json"
+            ))
+            .expect("multi-shard fixture"),
+        )
+        .expect("multi-shard fixture is JSON");
+        let source = format!("{fixtures}/official-export-v1.22.0/firestore_export");
+        let hex = |bytes: &[u8]| {
+            bytes.iter().fold(String::new(), |mut out, byte| {
+                use std::fmt::Write as _;
+                let _ = write!(out, "{byte:02x}");
+                out
+            })
+        };
+        let log = fs::read(format!("{source}/all_namespaces/all_kinds/output-0")).expect("log");
+        assert_eq!(
+            hex(&Sha256::digest(&log)),
+            fixture["sourceLogSha256"].as_str().expect("source hash")
+        );
+        let mut reader = LevelDbLogReader::new(log.as_slice(), LogOptions::default());
+        let mut records = Vec::new();
+        while let Some(record) = reader.next_record().expect("official records") {
+            records.push(record);
+        }
+        assert_eq!(records.len(), 4);
+
+        let root = std::env::temp_dir().join(format!(
+            "firenook-multishard-replay-{}-{}",
+            std::process::id(),
+            TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let kinds = root.join("firestore_export/all_namespaces/all_kinds");
+        fs::create_dir_all(&kinds).expect("export directory");
+        let metadata = fixture["kindMetadataHex"].as_str().expect("metadata hex");
+        let metadata = (0..metadata.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&metadata[at..at + 2], 16).expect("hex"))
+            .collect::<Vec<_>>();
+        fs::write(
+            kinds.join("all_namespaces_all_kinds.export_metadata"),
+            metadata,
+        )
+        .expect("kind metadata");
+        let overall = root.join("firestore_export/firestore_export.overall_export_metadata");
+        fs::copy(
+            format!("{source}/firestore_export.overall_export_metadata"),
+            &overall,
+        )
+        .expect("overall metadata");
+        let inputs = fixture["inputFiles"].as_array().expect("input files");
+        assert_eq!(inputs.len(), records.len());
+        for (record, input) in records.iter().zip(inputs) {
+            let mut writer = LevelDbLogWriter::new(Vec::new());
+            writer.write_record(record).expect("shard");
+            let shard = writer.into_inner();
+            assert_eq!(
+                hex(&Sha256::digest(&shard)),
+                input["sha256"].as_str().expect("shard hash"),
+                "{input}"
+            );
+            fs::write(
+                kinds.join(input["name"].as_str().expect("shard name")),
+                shard,
+            )
+            .expect("shard file");
+        }
+
+        let store = Store::default();
+        let count = seed_store_from_export(&store, &overall, Some(PROJECT))
+            .expect("the multi-shard export imports");
+        fs::remove_dir_all(&root).expect("export directory removed");
+        let recorded = &fixture["observations"];
+        assert_eq!(recorded["importAccepted"], true);
+        assert_eq!(
+            count,
+            recorded["verifiedDocuments"]
+                .as_u64()
+                .expect("verified documents")
+        );
+        let database = DatabaseName::new(PROJECT, "(default)").unwrap();
+        let snapshot = store.snapshot();
+        let document = |path: &str| {
+            snapshot
+                .get(&DocumentKey::new(database.clone(), path).unwrap())
+                .unwrap_or_else(|| panic!("{path} was imported"))
+        };
+        let root_documents = snapshot
+            .iter_documents(&database)
+            .filter(|(key, _)| !key.path().contains("/parent/"))
+            .count();
+        assert_eq!(root_documents, 3);
+        let values = document("fireside_export_fixture/values");
+        let fields = values.fields();
+        assert_eq!(fields["emptyArray"], Value::Array(Vec::new()));
+        assert_eq!(
+            fields["array"],
+            Value::Array(vec![
+                Value::Null,
+                Value::Boolean(true),
+                Value::Integer(42),
+                Value::Double(4.25),
+                Value::String("array-value".into()),
+            ])
+        );
+        assert_eq!(
+            fields["bytes"],
+            Value::Bytes(Arc::from([0_u8, 1, 2, 127, 128, 255]))
+        );
+        assert_eq!(fields["emptyBytes"], Value::Bytes(Arc::from([])));
+        assert_eq!(fields["emptyString"], Value::String("".into()));
+        let Value::Map(floating) = &fields["floating"] else {
+            panic!("floating is a map");
+        };
+        assert!(matches!(floating["nan"], Value::Double(value) if value.is_nan()));
+        assert_eq!(
+            floating["negativeInfinity"],
+            Value::Double(f64::NEG_INFINITY)
+        );
+        assert!(
+            matches!(floating["negativeZero"], Value::Double(value) if value == 0.0 && value.is_sign_negative())
+        );
+        assert_eq!(floating["positiveInfinity"], Value::Double(f64::INFINITY));
+        assert_eq!(
+            fields["integerBoundaries"],
+            Value::Array(vec![
+                Value::Integer(-9_007_199_254_740_991),
+                Value::Integer(9_007_199_254_740_991),
+            ])
+        );
+        assert_eq!(
+            fields["location"],
+            Value::GeoPoint {
+                latitude: 3.139,
+                longitude: 101.6869
+            }
+        );
+        assert_eq!(fields["nullValue"], Value::Null);
+        assert_eq!(
+            fields["reference"],
+            Value::Reference(Arc::from(
+                "projects/demo-fireside-export-oracle/databases/(default)/documents/\
+                 fireside_export_fixture/reference-target"
+            ))
+        );
+        assert_eq!(fields["string"], Value::String("fireside-export-🔥".into()));
+        assert_eq!(
+            fields["timestamp"],
+            Value::Timestamp(
+                firenook_core_store::Timestamp::new(1_700_000_000, 123_000_000).unwrap()
+            )
+        );
+        assert_eq!(fields["vector"], Value::Vector(vec![1.25, -2.5, 0.0]));
+        let Value::Array(complex) = &fields["arrayWithComplexValues"] else {
+            panic!("arrayWithComplexValues is an array");
+        };
+        assert_eq!(complex.len(), 5);
+        assert_eq!(complex[0], Value::Bytes(Arc::from([9_u8, 8, 7])));
+        assert_eq!(
+            complex[1],
+            Value::Timestamp(firenook_core_store::Timestamp::new(-1, 877_000_000).unwrap())
+        );
+        assert_eq!(
+            document("fireside_export_fixture/large").fields()["payload"],
+            Value::String("🔥".repeat(40_000).into())
+        );
+        assert_eq!(
+            document("fireside_export_fixture/reference-target").fields()["kind"],
+            Value::String("reference-target".into())
+        );
+        assert_eq!(
+            document("fireside_export_fixture/parent/children/leaf").fields()["depth"],
+            Value::Integer(2)
+        );
+        firenook_conformance_ledger::checked(
+            "firebase-suite-v1/firestore-export",
+            "firestore-multi-shard-export-metadata/import",
+            firenook_conformance_ledger::Compared::Behaviour,
+        );
+    }
 }

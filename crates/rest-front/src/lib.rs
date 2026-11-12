@@ -61,6 +61,8 @@ use preview::Preview;
 mod coverage;
 mod listing;
 mod methods;
+#[cfg(test)]
+mod official_export_tests;
 mod read_json;
 mod read_options;
 #[cfg(test)]
@@ -3862,7 +3864,6 @@ mod tests {
             .await
             .expect("REST router should respond");
         assert_eq!(response.status(), StatusCode::OK);
-        let status = response.status();
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("aggregation response should be readable");
@@ -3876,14 +3877,9 @@ mod tests {
             response[0]["result"]["aggregateFields"]["aggregate_1"]["integerValue"],
             "1"
         );
-        ledger_rest_exchange(
-            "rest-v1/java-v1.22.0",
-            "aggregation-composite-filter",
-            &contract,
-            fixture_post_exchange(&contract),
-            status,
-            firenook_conformance_ledger::Compared::Answer,
-        );
+        // The aggregate values only; webchannel-front's firestore_replay
+        // compares the whole body and notes the case (it differs on purpose:
+        // no `"done": true`, as production answers an aggregation).
     }
 
     #[tokio::test]
