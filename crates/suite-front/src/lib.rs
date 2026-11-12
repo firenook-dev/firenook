@@ -25,6 +25,8 @@ pub use overview_input::{
 pub use replay::{Cursor, Entry, Follow, ReplayRing, RingBudget, RingLimits, RingSize};
 #[cfg(test)]
 mod logging_tests;
+#[cfg(test)]
+mod requests_oracle_tests;
 pub use release::{ENGINE_REVISION_VARIABLE, EngineRelease, RELEASE_VERSION_VARIABLE};
 pub use requests::{requests_router, requests_router_with_log};
 
