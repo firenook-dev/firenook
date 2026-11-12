@@ -193,8 +193,13 @@ test('the set-up pins and installs side by side, builds after the packages, and 
   const quiet = await unpinned.run();
   assert.deepEqual(nextSteps(everything({install: false}), quiet.steps, {manager: unpinned.manager, node: '24.20.0', platform: 'darwin'}).map(step => step.command),
     ['npm install --prefix functions', 'npm install', 'npm run emulators']);
+  // Firestore alone starts without --keep-data, which keeps Firestore, Auth
+  // and Storage together; with all three it keeps the data.
   assert.deepEqual(nextSteps(everything({install: false, pin: false, language: 'javascript'}), [], {manager: unpinned.manager, node: '24.20.0', platform: 'darwin'}).map(step => step.command),
+    ['npm install --prefix functions', 'npx firenook emulators:start']);
+  assert.deepEqual(nextSteps(everything({install: false, pin: false, language: 'javascript', emulators: new Set(['firestore', 'auth', 'storage', 'ui'])}), [], {manager: unpinned.manager, node: '24.20.0', platform: 'darwin'}).map(step => step.command),
     ['npm install --prefix functions', 'npx firenook emulators:start --keep-data']);
+  assert.equal(readJson(join(dir, 'package.json')).scripts.emulators, 'firenook emulators:start --build');
 });
 
 test('a build\'s lines are read as TypeScript writes them, in watch mode and once', async () => {
@@ -313,7 +318,10 @@ test('in a terminal, changed choices are what is written, No prints the next ste
   assert.deepEqual(readJson(join(dir, '.firebaserc')), {projects: {default: 'demo-shop'}});
   assert.ok(existsSync(join(dir, 'functions/index.js')));
   assert.ok(!existsSync(join(dir, 'functions/node_modules')) && readJson(join(dir, 'package.json')).devDependencies.firenook === '9.9.9-next.1');
+  // Without Storage there is no --keep-data, which keeps Firestore, Auth and Storage together.
+  assert.equal(readJson(join(dir, 'package.json')).scripts.emulators, 'firenook emulators:start');
   for (const expected of ['npm install --prefix functions', 'npm install', 'npm run emulators', 'Connect']) shows(text(), expected);
+  assert.ok(!text().includes('data stays between runs'));
 
   const empty = folder();
   const second = terminal();
@@ -372,6 +380,7 @@ test('in a terminal, a folder with a firebase.json is shown what init --adopt ad
   await typing('y');
   assert.equal(await running, 0);
   for (const expected of ['Added', '.firebaserc', 'npx firenook emulators:start']) shows(text(), expected);
+  assert.ok(!text().includes('--keep-data'), 'Firestore alone: --keep-data would refuse it');
   assert.ok(existsSync(join(dir, 'firestore.rules')) && existsSync(join(dir, '.firebaserc')));
 });
 

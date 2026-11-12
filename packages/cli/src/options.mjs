@@ -18,6 +18,10 @@ export const LOOPBACK = ['localhost', '127.0.0.1', '::1', '[::1]'];
 export const VERBOSITIES = ['DEBUG', 'INFO', 'QUIET', 'SILENT', 'WARN', 'ERROR'];
 // Where --keep-data keeps the data, inside the project directory.
 export const KEEP_DATA_DIR = join('.firenook', 'state');
+// What saved data holds, together: its receipt covers the three stores, so
+// --keep-data (and --resume-state) start only with all of them.
+export const KEPT_SERVICES = ['firestore', 'auth', 'storage'];
+export const keepsData = services => KEPT_SERVICES.every(name => [...services].includes(name));
 
 const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'instance', 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'log-verbosity', 'alias', 'add', 'unalias', 'database', 'agent', 'language']);
 const durabilities = new Set(['write-behind', 'per-commit']);
@@ -293,6 +297,16 @@ export function inspectProject(options, cwd = process.cwd()) {
     fail('state', 'State must be separate from seed/export directories and must not contain the project');
   }
   if (resume && !state) fail('state', '--resume-state requires --state-dir; --keep-data alone keeps the data in .firenook/state');
+  if (resume && services.length && !keepsData(services)) {
+    // Named as typed: --keep-data is --resume-state to the engine, which
+    // would refuse it in those words.
+    const flag = options['keep-data'] ? '--keep-data' : '--resume-state';
+    const missing = KEPT_SERVICES.filter(name => !services.includes(name));
+    const excluded = missing.filter(name => configured.includes(name));
+    const where = !excluded.length ? 'firebase.json' : excluded.length === missing.length ? '--only' : 'firebase.json and --only';
+    const shown = {firestore:'Firestore', auth:'Auth', storage:'Storage'};
+    fail('state', `${flag} keeps Firestore, Auth and Storage together (its saved data holds all three), and this start runs no ${missing.map(name => shown[name]).join(' or ')}: add ${missing.join(' and ')} to ${where}, or start without ${flag}`);
+  }
   if (resume && imported && exported && (contains(imported, exported) || contains(exported, imported))) fail('state', 'Resume exports must be separate from the immutable seed');
   // The engine needs a positive minimum only when a Functions codebase exists.
   const functionsConfigured = has('functions') || has('extensions');

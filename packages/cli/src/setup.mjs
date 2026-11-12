@@ -10,6 +10,7 @@ import { basename, dirname, join } from 'node:path';
 import { applyAgents, planAgents, shown } from './agents.mjs';
 import { nodeCheck } from './binary.mjs';
 import { setMember } from './json-text.mjs';
+import { keepsData } from './options.mjs';
 
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[c78]/g;
@@ -46,9 +47,10 @@ export const packageName = folder => folder.toLowerCase().replace(/[^a-z0-9._~-]
 // Firenook as an exact devDependency and that script as `emulators`. A
 // script or a pin already there is kept, and an existing package.json is
 // edited as text: only what is added changes, in the layout of the object
-// it joins.
-export const startScript = ({build = false} = {}) => `firenook emulators:start --keep-data${build ? ' --build' : ''}`;
-export function pinPlan(directory, {version, build = false}) {
+// it joins. `keep`: the project runs Firestore, Auth and Storage, which
+// --keep-data keeps together and refuses without.
+export const startScript = ({build = false, keep = true} = {}) => `firenook emulators:start${keep ? ' --keep-data' : ''}${build ? ' --build' : ''}`;
+export function pinPlan(directory, {version, build = false, keep = true}) {
   const path = join(directory, 'package.json');
   const exists = existsSync(path);
   let original = '';
@@ -58,7 +60,7 @@ export function pinPlan(directory, {version, build = false}) {
     try { data = JSON.parse(original); } catch (error) { throw new Error(`${path} is not valid JSON: ${error.message}`); }
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error(`${path} must contain a JSON object`);
   } else data = {name: packageName(basename(directory)), private: true};
-  const command = startScript({build});
+  const command = startScript({build, keep});
   const kept = [];
   const scripts = {...(data.scripts ?? {})};
   if (scripts.emulators === undefined) scripts.emulators = command;
@@ -183,7 +185,7 @@ export function setUpSteps(choices, directory, {version, config, env = process.e
     if (pin) {
       const began = Date.now();
       try {
-        const plan = pinPlan(directory, {version, build: typescript});
+        const plan = pinPlan(directory, {version, build: typescript, keep: keepsData(choices.emulators)});
         if (plan.changed) writeFileSync(plan.path, plan.content);
         pinned = plan;
         pin.written = true;
@@ -227,7 +229,8 @@ export function nextSteps(choices, steps, {manager, node = process.versions.node
   }
   const pin = find('firenook');
   if (pin?.written && !pin.installed) lines.push({label: 'Firenook', command: said(manager.install), why: 'installs Firenook, as package.json pins it'});
-  const why = typescript ? 'starts the emulators and compiles your TypeScript as you save' : 'starts the emulators; your data stays between runs';
-  lines.push({label: 'Start', command: pin?.written ? manager.run('emulators') : `npx firenook emulators:start --keep-data${typescript ? ' --build' : ''}`, why});
+  const keep = keepsData(choices.emulators);
+  const why = typescript ? 'starts the emulators and compiles your TypeScript as you save' : keep ? 'starts the emulators; your data stays between runs' : 'starts the emulators';
+  lines.push({label: 'Start', command: pin?.written ? manager.run('emulators') : `npx ${startScript({build: typescript, keep})}`, why});
   return lines;
 }

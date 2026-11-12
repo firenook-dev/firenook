@@ -44,7 +44,8 @@ agents given the MCP server (those the folder shows), and whether to install
 the packages and pin Firenook. Enter takes them; Esc writes nothing. It then
 writes the files, gives the agents the server, writes `package.json` (Firenook
 as an exact devDependency and an `emulators` script,
-`firenook emulators:start --keep-data`, with `--build` for TypeScript; a
+`firenook emulators:start --keep-data`, with `--build` for TypeScript and
+without `--keep-data` when Firestore, Auth or Storage is turned off; a
 script or a pin already there is kept), runs `npm install` in `functions/` and
 the project's package manager's install beside it (the lockfile's, else the
 one that ran `init`, else npm), builds a TypeScript codebase once, and offers
