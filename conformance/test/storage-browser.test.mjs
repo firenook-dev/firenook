@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
+import * as ledger from '../src/report/ledger.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const execute = promisify(execFile);
@@ -116,6 +117,25 @@ test('the Firebase JS SDK uploads, reads back and lists in a real browser', { ti
     tab.on('console', (message) => { if (/CORS|Access-Control/i.test(message.text())) refused.push(message.text()); });
     await tab.goto(`http://127.0.0.1:${server.address().port}/`);
     results = await tab.evaluate((settings) => window.runStorageScenario(settings), { host: '127.0.0.1', port, bucket });
+    // firebase-suite-v1 storage-missing-object browser/1: a cross-origin <img>
+    // of an object that does not exist, where the rules allow the read (the
+    // recording's rules allowed every read; here the recursive rule does).
+    // The browser must see the 404 itself, then the element's error event,
+    // not a blocked response.
+    const mediaUrl = `${origin}/v0/b/${bucket}/o/${encodeURIComponent('deep/samples/missing/picture.png')}?alt=media`;
+    const events = [];
+    tab.on('response', (response) => { if (response.url() === mediaUrl) events.push({ kind: 'response', status: response.status(), statusText: response.statusText() }); });
+    tab.on('requestfailed', (request) => { if (request.url() === mediaUrl) events.push({ kind: 'request-failed', errorText: request.failure()?.errorText ?? null }); });
+    const domEvent = await tab.evaluate((src) => new Promise((done) => {
+      const image = document.createElement('img');
+      image.onload = () => done('load');
+      image.onerror = () => done('error');
+      image.src = src;
+      document.body.append(image);
+    }), mediaUrl);
+    const settled = Date.now() + 5_000;
+    while (events.length === 0 && Date.now() < settled) await delay(20);
+    results.missingImage = { domEvent, events };
   } finally {
     await browser.close();
     server.close();
@@ -142,4 +162,8 @@ test('the Firebase JS SDK uploads, reads back and lists in a real browser', { ti
   assert.deepEqual(results['listAll above a single-segment rule'], { ok: false, code: 'storage/unauthorized' });
   assert.deepEqual(results['listAll under a recursive rule'], { ok: true, items: ['deep/one.txt'], prefixes: ['deep/sub'] });
   assert.deepEqual(results['listAll deeper under a recursive rule'], { ok: true, items: ['deep/sub/two.txt'], prefixes: [] });
+
+  const missing = JSON.parse(await readFile(new URL('../fixtures/firebase-suite-v1/storage-missing-object/fixture.json', import.meta.url), 'utf8')).browser;
+  assert.deepEqual(results.missingImage, { domEvent: missing.domEvent, events: missing.events }, 'a missing image loads as the official emulator answered it');
+  ledger.checked('firebase-suite-v1/storage', 'storage-missing-object/browser/1', ledger.COMPARED.behaviour);
 });
