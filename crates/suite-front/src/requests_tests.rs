@@ -100,7 +100,45 @@ async fn real_websocket_replays_the_oracle_then_delivers_live_events_and_reconne
     drop(client);
     slots(&history, 0).await;
     let mut reconnected = server.client().await;
-    assert_eq!(json_frame(&mut reconnected).await, json!(events));
+    let history = json_frame(&mut reconnected).await;
+    assert_eq!(history, json!(events));
+    // `websocket/reconnected/0`: the official reconnect replayed the same ten
+    // evaluations in order, five of them with the outcome of a later line
+    // appended to `granularAllowOutcomes` (the jar mutates retained events).
+    // This transport replays each event as it was sent (DESIGN.md, Requests
+    // transport component); the events come from the recording here, as the
+    // test's producer.
+    let recorded = &fixture["websocket"]["reconnected"][0];
+    let recorded = recorded.as_array().expect("recorded history");
+    let history = history.as_array().expect("history");
+    assert_eq!(history.len(), recorded.len());
+    let mut enriched = 0;
+    for (sent, official) in history.iter().zip(recorded) {
+        let outcomes = |event: &Value| event["granularAllowOutcomes"].as_array().cloned();
+        let (ours, theirs) = (outcomes(sent).unwrap(), outcomes(official).unwrap());
+        assert_eq!(
+            theirs[..ours.len()],
+            ours[..],
+            "a prefix of the official outcomes"
+        );
+        enriched += usize::from(theirs.len() > ours.len());
+        let strip = |event: &Value| {
+            let mut event = event.clone();
+            event
+                .as_object_mut()
+                .unwrap()
+                .remove("granularAllowOutcomes");
+            event
+        };
+        assert_eq!(strip(sent), strip(official));
+    }
+    assert_eq!(enriched, 5, "the official enrichment is still what differs");
+    firenook_conformance_ledger::differs(
+        "developer-tools-v1",
+        "websocket/reconnected/0",
+        firenook_conformance_ledger::Compared::Behaviour,
+        "reconnecting replays the ten retained evaluations in order as they were sent; the official jar's history had appended later line outcomes to five of them (DESIGN.md, Requests transport component: no synthesized enrichment)",
+    );
 }
 
 #[tokio::test]
