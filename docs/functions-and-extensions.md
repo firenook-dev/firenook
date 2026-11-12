@@ -141,7 +141,9 @@ for the same Node does not repeat it.
 `functions:invoke` finds the running suite through the hub locator (so a
 suite started on other ports is found) and, without `--event-data`, sends a
 plain request (`--method`, default `POST`) or a callable body (`--data`) to the
-function's HTTPS route. With `--event-data` it reads the loaded functions
+function's HTTPS route; a scheduled function, which answers no HTTPS request,
+gets its schedule event instead, as with `--event-data '{}'`. With
+`--event-data` it reads the loaded functions
 (`GET /backends`), selects the named one (`--region` when a name is deployed
 in several regions), builds the event exactly as the official `functions:shell`
 does (`createLegacyEvent` for first-generation functions, a structured
@@ -158,7 +160,7 @@ Database functions are not emulated.
 | Storage (v1 `google.storage.object.*`, v2 `google.cloud.storage.object.v1.*`) | the object metadata; `name` is required, `bucket` defaults to the trigger's bucket, `contentType`, `size`, `generation`, `metageneration`, timestamps, `id`, `selfLink` and `mediaLink` are defaulted | v1 events carry `resource: projects/_/buckets/<bucket>/objects/<name>`. |
 | Pub/Sub (v1 `google.pubsub.topic.publish`, v2 `messagePublished`) | `{"data": <string or JSON>, "attributes": {...}, "orderingKey": "..."}` (string data is sent as given, other JSON as its text; both base64 on the wire) | Published through the Pub/Sub emulator when it runs, so every subscriber sees the message; otherwise the shell envelope goes straight to the trigger. |
 | Auth v1 (`user.create`, `user.delete`) | a UserRecord (`uid` and `metadata` timestamps are defaulted) | `resource` defaults to `projects/<id>`. |
-| Schedule | ignored (`{}`) | v2: an empty CloudEvent with Cloud Scheduler's `X-CloudScheduler-*` headers; v1: the legacy event on the `firebase-schedule-<name>` topic. |
+| Schedule | ignored (`{}`), and may be left out | v2: an empty CloudEvent with Cloud Scheduler's `X-CloudScheduler-*` headers; v1: the legacy event on the `firebase-schedule-<name>` topic. |
 | Eventarc custom (`onCustomEventPublished`) | the CloudEvent `data` | `--event-type` overrides the type; the channel is part of the trigger key. |
 | Task queue (`onTaskDispatched`) | the task payload, enqueued as `{"data": ...}` | Sent to the Cloud Tasks emulator (`POST .../queues/<name>/tasks`) with the Admin SDK's request, so retries and rate limits apply. |
 

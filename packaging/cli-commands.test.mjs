@@ -982,6 +982,40 @@ test('Storage, Auth and schedule events carry the shell envelopes with the offic
     assert.equal(sent.headers['x-cloudscheduler-jobname'], undefined);
   });
 });
+test('functions:invoke sends a scheduled function its schedule event without --event-data, as --event-data \'{}\' does', async () => {
+  const {dir} = project();
+  await withSuite(fake.full, async () => {
+    // A scheduled function answers no plain HTTPS request.
+    let mark = fake.requests.length;
+    const output = log();
+    assert.equal(await invokeFunction('nightly', options, dir, output), 0);
+    assert.ok(!since(mark).some(request => request.path.startsWith('/demo-fixture/')), 'no HTTPS request');
+    let sent = delivery(since(mark));
+    assert.equal(sent.key, 'us-central1-nightly-3');
+    assert.deepEqual(cloud(sent.body, 'pubsub', ''), {data:{}});
+    assert.equal(sent.headers['x-cloudscheduler-jobname'], 'firebase-schedule-nightly-us-central1');
+    assert.deepEqual(output.err, ['Firenook: schedule event pubsub for nightly (us-central1, gcfv2) via trigger key us-central1-nightly-3']);
+    assert.deepEqual(output.out[0], `200 OK ${fake.origin}/functions/projects/demo-fixture/triggers/us-central1-nightly-3`);
+    // The same envelope as --event-data '{}'.
+    const explicit = await runInvoke('nightly', {...options, 'event-data':'{}'}, dir);
+    const implicit = await runInvoke('nightly', options, dir);
+    assert.deepEqual([implicit.kind, implicit.key, implicit.transport, implicit.ok], [explicit.kind, explicit.key, explicit.transport, explicit.ok]);
+    mark = fake.requests.length;
+    await runInvoke('nightlyV1', options, dir);
+    sent = delivery(since(mark));
+    assert.equal(sent.key, 'us-central1-nightlyV1-3');
+    assert.deepEqual(legacy(sent.body, 'pubsub', 'projects/demo-fixture/topics/firebase-schedule-nightlyV1'), {data:{}});
+    await assert.rejects(runInvoke('nightly', {...options, data:'{"a":1}'}, dir), /nightly is a scheduled function, which takes no --data: firenook functions:invoke nightly sends its schedule event/);
+    await assert.rejects(runInvoke('nightly', {...options, method:'GET'}, dir), /takes no --method/);
+    // Any other function, or one the suite does not list, still gets the plain request.
+    mark = fake.requests.length;
+    const plain = await runInvoke('helloWorld', options, dir);
+    assert.equal(plain.transport, 'https');
+    assert.equal(since(mark).at(-1).path, '/demo-fixture/us-central1/helloWorld');
+    assert.equal((await runInvoke('nightly', {...options, region:'europe-west1'}, dir)).transport, 'https');
+    assert.equal((await runInvoke('missing', options, dir)).transport, 'https');
+  });
+});
 test('Pub/Sub events publish through the broker when it runs, otherwise carry the shell envelopes', async () => {
   const {dir} = project();
   const encoded = Buffer.from('{"id":7}').toString('base64');

@@ -1,5 +1,6 @@
 // functions:invoke. Without --event-data: an HTTPS/callable request to the
-// function's route. With --event-data: a background event shaped like the
+// function's route, or for a scheduled function its schedule event. With
+// --event-data: a background event shaped like the
 // official functions shell builds it (firebase-tools 15.22.0
 // FunctionsEmulatorShell.createLegacyEvent / createCloudEvent fed by
 // LocalFunction.triggerEvent) and posted to the running suite's trigger route,
@@ -297,8 +298,15 @@ export async function runInvoke(name, options, cwd = process.cwd()) {
   const project = resolveProject(options, cwd);
   const services = await locateServices(project, options);
   const functions = services.origin('functions');
-  const eventData = jsonOption(options['event-data'], '--event-data');
-  if (options['event-data'] === undefined) {
+  let eventData = jsonOption(options['event-data'], '--event-data');
+  // A scheduled function answers no plain HTTPS request: without
+  // --event-data it gets its schedule event, as --event-data '{}' sends it.
+  const scheduled = options['event-data'] === undefined ? await scheduledTrigger(functions, name, options.region) : undefined;
+  if (scheduled) {
+    for (const flag of ['data', 'method']) if (options[flag] !== undefined) throw new Error(`${scheduled.name} is a scheduled function, which takes no --${flag}: firenook functions:invoke ${scheduled.name} sends its schedule event`);
+    eventData = {};
+  }
+  if (options['event-data'] === undefined && !scheduled) {
     const region = options.region || 'us-central1';
     const url = `${functions}/${encodeURIComponent(project.project)}/${encodeURIComponent(region)}/${encodeURIComponent(name)}`;
     const method = (options.method || 'POST').toUpperCase();
@@ -315,8 +323,7 @@ export async function runInvoke(name, options, cwd = process.cwd()) {
   }
   const opts = {params:jsonOption(options.params, '--params'), auth:eventAuth(jsonOption(options.auth, '--auth')), resource:options.resource, eventType:options['event-type']};
   if (opts.params !== undefined && !isObject(opts.params)) throw new Error('--params must be a JSON object of wildcard values');
-  const triggers = await listFunctions(functions);
-  const trigger = selectTrigger(triggers, name, options.region);
+  const trigger = scheduled ?? selectTrigger(await listFunctions(functions), name, options.region);
   const storage = services.running('storage') ? services.origin('storage') : undefined;
   const envelope = buildEnvelope(trigger, project.project, eventData, opts, {storage});
   const base = {function:trigger.name, region:trigger.region, platform:trigger.platform, kind:envelope.kind, eventType:trigger.eventTrigger?.eventType};
@@ -338,6 +345,17 @@ export async function runInvoke(name, options, cwd = process.cwd()) {
   const url = `${functions}/functions/projects/${encodeURIComponent(project.project)}/triggers/${key}`;
   const response = await post(url, envelope.body, envelope.headers);
   return {...base, transport:'functions', key, keys, url, envelope:envelope.body, ...response};
+}
+
+// The scheduled function NAME (in REGION, when given) the running suite
+// lists; undefined for any other, or when /backends does not answer, so
+// the plain request goes out and answers for itself.
+async function scheduledTrigger(functions, name, region) {
+  let triggers;
+  try { triggers = await listFunctions(functions); } catch { return undefined; }
+  let trigger;
+  try { trigger = selectTrigger(triggers, name, region); } catch { return undefined; }
+  return triggerKind(trigger) === 'schedule' ? trigger : undefined;
 }
 
 async function post(url, body, headers = {}) {
