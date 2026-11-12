@@ -195,12 +195,6 @@
     },
     {
       "set": "webchannel-v8/java-v1.22.0",
-      "case": "unicode-framing/4",
-      "issue": 198,
-      "why": "a document target on a missing document gets no documentDelete before CURRENT"
-    },
-    {
-      "set": "webchannel-v8/java-v1.22.0",
       "case": "write-missing-update-error/4",
       "issue": 201,
       "why": "a Write stream update of a missing document fails with Firenook's message and envelope, not production's"
@@ -240,12 +234,6 @@
       "case": "reserved-resource-id-error/6",
       "issue": 199,
       "why": "a refused Listen target is removed without the ADD production sends first"
-    },
-    {
-      "set": "webchannel-v8/production-cloud-firestore",
-      "case": "unicode-framing/4",
-      "issue": 198,
-      "why": "a document target on a missing document gets no documentDelete before CURRENT"
     },
     {
       "set": "webchannel-v8/production-cloud-firestore",

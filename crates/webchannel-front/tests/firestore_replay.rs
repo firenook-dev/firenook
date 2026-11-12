@@ -215,16 +215,6 @@ const DIFFERS: &[Differs] = &[
 const BUG_CANDIDATES: &[Bug] = &[
     Bug {
         set: JAVA_WEBCHANNEL,
-        case: "unicode-framing/4",
-        description: "a document target on a missing document becomes CURRENT without the documentDelete both oracles send first",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "unicode-framing/4",
-        description: "a document target on a missing document becomes CURRENT without the documentDelete both oracles send first",
-    },
-    Bug {
-        set: JAVA_WEBCHANNEL,
         case: "multiple-inequality-query/13",
         description: "a target refused for an equality on `__name__` beside other inequalities is removed without first being added, where both oracles add it",
     },

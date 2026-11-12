@@ -469,14 +469,18 @@ fn initialize_target(
             snapshot,
             InitialFilter::CountOnly,
         )?,
-        None => fresh_target(
-            id,
-            database,
-            spec,
-            query_policy,
-            snapshot,
-            InitialFilter::None,
-        )?,
+        None => {
+            let (watch, mut changes, filter) = fresh_target(
+                id,
+                database,
+                spec,
+                query_policy,
+                snapshot,
+                InitialFilter::None,
+            )?;
+            report_missing_documents(&watch, &mut changes);
+            (watch, changes, filter)
+        }
     };
     let token = resume_token(store, changes.revision);
     Ok(InitialTarget {
@@ -558,6 +562,27 @@ fn fresh_target(
         WatchTarget::initialize(id, database, spec, query_policy.edition(), snapshot)
             .map_err(|error| query_status(&error))?;
     Ok((watch, initial, filter))
+}
+
+/// A new documents target reports each document it names that does not
+/// exist with a `documentDelete` before CURRENT, as both oracles do
+/// (fixture `webchannel-v8` `unicode-framing`); the batch stays in key
+/// order. A reset or resumed target is not recorded on a missing document
+/// and sends only the documents that exist.
+fn report_missing_documents(watch: &WatchTarget, batch: &mut ChangeBatch) {
+    let found = batch.changes.len();
+    batch
+        .changes
+        .extend(watch.missing_documents().map(|key| WatchChange {
+            key: key.clone(),
+            kind: ChangeKind::Delete,
+            document: None,
+        }));
+    if batch.changes.len() > found && found > 0 {
+        batch
+            .changes
+            .sort_by(|left, right| left.key.cmp(&right.key));
+    }
 }
 
 fn resumed_target(
@@ -1076,6 +1101,109 @@ mod tests {
         assert_eq!(two_bits.bitmap.len(), 7);
         assert_eq!(two_bits.padding, 3);
         assert_eq!(two.hash_count, 18);
+    }
+
+    /// Both oracles answer a new target on a document that does not exist
+    /// with ADD, `documentDelete`, CURRENT and `NO_CHANGE` (fixture
+    /// `webchannel-v8` `unicode-framing`); a document that exists beside it
+    /// is sent as before, in key order.
+    #[tokio::test]
+    async fn a_new_document_target_reports_a_missing_document_deleted() {
+        use firenook_core_store::{Precondition, Value, Write};
+
+        let store = Store::default();
+        let database = DatabaseName::new("demo", "(default)").expect("database");
+        let key = |path: &str| DocumentKey::new(database.clone(), path).expect("key");
+        store
+            .commit(&[Write::Set {
+                key: key("items/b"),
+                fields: BTreeMap::from([("value".to_owned(), Value::Integer(1))]),
+                transforms: Vec::new(),
+                precondition: Precondition::None,
+            }])
+            .expect("seed");
+        let frames = |names: &[&str], resume_point| {
+            let initial = initialize_target(
+                &store,
+                &QueryPolicy::default(),
+                &store.snapshot(),
+                TargetInitialization {
+                    id: 7,
+                    database: database.clone(),
+                    spec: TargetSpec::Documents(names.iter().map(|name| key(name)).collect()),
+                    resume_point,
+                    expected_count: None,
+                },
+            )
+            .expect("target");
+            async move {
+                let (sender, mut receiver) = mpsc::channel(16);
+                send_initial_target(&sender, 7, &initial)
+                    .await
+                    .expect("frames");
+                drop(sender);
+                let mut frames = Vec::new();
+                while let Some(frame) = receiver.recv().await {
+                    frames.push(frame.expect("frame").response_type.expect("type"));
+                }
+                frames
+            }
+        };
+        let kinds = |frames: &[ResponseType]| {
+            frames
+                .iter()
+                .map(|frame| match frame {
+                    ResponseType::TargetChange(change) => {
+                        TargetChangeType::try_from(change.target_change_type)
+                            .expect("kind")
+                            .as_str_name()
+                            .to_owned()
+                    }
+                    ResponseType::DocumentChange(change) => format!(
+                        "change {}",
+                        change.document.as_ref().expect("document").name
+                    ),
+                    ResponseType::DocumentDelete(delete) => format!("delete {}", delete.document),
+                    other => format!("{other:?}"),
+                })
+                .collect::<Vec<_>>()
+        };
+        let name = |path: &str| key(path).to_string();
+
+        let missing = frames(&["items/a"], None).await;
+        assert_eq!(
+            kinds(&missing),
+            [
+                "ADD".to_owned(),
+                format!("delete {}", name("items/a")),
+                "CURRENT".to_owned(),
+                "NO_CHANGE".to_owned(),
+            ]
+        );
+        let (ResponseType::DocumentDelete(delete), ResponseType::TargetChange(current)) =
+            (&missing[1], &missing[2])
+        else {
+            panic!("a documentDelete, then CURRENT");
+        };
+        assert_eq!(delete.removed_target_ids, [7]);
+        assert_eq!(delete.read_time, current.read_time);
+
+        assert_eq!(
+            kinds(&frames(&["items/c", "items/b", "items/a"], None).await),
+            [
+                "ADD".to_owned(),
+                format!("delete {}", name("items/a")),
+                format!("change {}", name("items/b")),
+                format!("delete {}", name("items/c")),
+                "CURRENT".to_owned(),
+                "NO_CHANGE".to_owned(),
+            ]
+        );
+        // A reset target is not recorded on a missing document.
+        assert_eq!(
+            kinds(&frames(&["items/a"], Some(ResumePoint::Unknown)).await),
+            ["ADD", "RESET", "CURRENT", "NO_CHANGE"]
+        );
     }
 
     #[test]

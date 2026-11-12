@@ -126,6 +126,19 @@ impl WatchTarget {
         self.documents.keys()
     }
 
+    /// The documents an explicit documents target names that its view does
+    /// not hold, because they do not exist; none for a query target.
+    pub fn missing_documents(&self) -> impl Iterator<Item = &DocumentKey> {
+        let named = match &self.spec {
+            TargetSpec::Documents(keys) => Some(keys),
+            TargetSpec::Query(_) => None,
+        };
+        named
+            .into_iter()
+            .flatten()
+            .filter(|key| !self.documents.contains_key(*key))
+    }
+
     /// Logical bytes retained by this target's specification and visible view.
     /// Computed when the view changes; polling this getter is constant-time.
     #[must_use]
