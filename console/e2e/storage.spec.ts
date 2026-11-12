@@ -1299,7 +1299,18 @@ test('the list follows the app live: one row, a burst, a delete, and a dropped c
   // A burst of forty, one every 100 ms: the list grows while it lasts, a
   // row read at a time and the one page it falls in, never every page.
   const before = { batches: batches.length, pages: pages.length }
-  const growth: number[] = []
+  // Every row count the list shows while the burst lasts, as it changes. A
+  // count read once each upload returns misses a step a busy runner draws
+  // in between.
+  await list(page).evaluate((element) => {
+    const counts = new Set<number>()
+    const view = element.ownerDocument.defaultView!
+    const observer = new view.MutationObserver(() =>
+      counts.add(element.querySelectorAll('tr[data-key^="live/a-burst-"]').length),
+    )
+    observer.observe(element, { childList: true, subtree: true })
+    Object.assign(view, { burstGrowth: { counts, observer } })
+  })
   const burst = (async () => {
     for (let index = 0; index < 40; index += 1) {
       const sent = Date.now()
@@ -1310,7 +1321,6 @@ test('the list follows the app live: one row, a burst, a delete, and a dropped c
         contentType: 'image/png',
         token: owner,
       })
-      growth.push(await list(page).locator('tr[data-key^="live/a-burst-"]').count())
       // The app's pace, not a wait for the page.
       await new Promise((resolve) => setTimeout(resolve, Math.max(0, 100 - (Date.now() - sent))))
     }
@@ -1318,7 +1328,16 @@ test('the list follows the app live: one row, a burst, a delete, and a dropped c
   await burst
   const during = batches.length - before.batches
   expect(during).toBeGreaterThanOrEqual(8)
-  expect(new Set(growth).size).toBeGreaterThanOrEqual(8)
+  const growth = await page.evaluate(() => {
+    const { counts, observer } = (
+      globalThis as unknown as {
+        burstGrowth: { counts: Set<number>; observer: { disconnect(): void } }
+      }
+    ).burstGrowth
+    observer.disconnect()
+    return [...counts]
+  })
+  expect(growth.length).toBeGreaterThanOrEqual(8)
   const total = 2 * PAGE_LIMIT + 50 + 1 + 40
   await expect(count(page)).toHaveText(new RegExp(`^${figure(total)} files · `))
   await expect(page.getByTestId('table-footer-text')).toHaveText(`${figure(total)} loaded`)

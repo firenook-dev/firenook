@@ -89,7 +89,11 @@ test('errors badge Logs in every tab until Logs is opened', async ({ browser, en
   await expect(two).toHaveURL(/\/console\/logs\?/)
   const url = new URL(two.url())
   expect(url.searchParams.get('q')).toBe('level:error')
-  expect(url.searchParams.get('since')).toMatch(/^[\w-]+\.\d+$/)
+  // Read as the console reads it (`parseSearchValue`, src/lib/search-params.ts):
+  // a cursor whose first part is all digits looks like a number, so the link
+  // carries it quoted, and the page reads it back as the text.
+  const since = url.searchParams.get('since') ?? ''
+  expect(/^".*"$/.test(since) ? JSON.parse(since) : since).toMatch(/^[\w-]+\.\d+$/)
   const marker = two.getByTestId('log-marker').filter({ hasText: 'New since your last visit' })
   await expect(marker).toBeVisible()
   const newest = two.locator(`[data-testid="feed-row"]:has([data-cursor="${error.cursor}"])`)
