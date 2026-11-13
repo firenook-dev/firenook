@@ -25,6 +25,7 @@ firenook-functions-runtime = { path = "../functions-runtime" }
 firenook-grpc-front = { path = "../grpc-front" }
 firenook-query-engine = { path = "../query-engine" }
 firenook-rest-front = { path = "../rest-front" }
+firenook-rules-engine = { path = "../rules-engine" }
 firenook-rules-runtime = { path = "../rules-runtime" }
 firenook-suite-runtime = { path = "../suite-runtime" }
 firenook-suite-front = { path = "../suite-front" }

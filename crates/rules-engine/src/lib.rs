@@ -51,6 +51,23 @@ use ast::{Expr, ExprKind, MatchBlock, Program};
 /// Maximum UTF-8 source size accepted by a deployed ruleset.
 pub const MAXIMUM_SOURCE_BYTES: usize = 262_144;
 
+/// The stack a thread that evaluates rules is given (#228).
+///
+/// Compile lets a call stack reach 21 functions and an expression 99 levels,
+/// so one evaluation nests about 2,100 levels at most, and every level is a
+/// frame of the evaluator's. Measured at those limits, with each call at the
+/// deepest point of its expression, the hungriest shape (a function's
+/// argument nested in another's) overflows 8 MiB and fits in 10 in a release
+/// build, and fits in 48 MiB in a debug build; chains of `&&`, `!`, the
+/// conditional, lists, maps, methods and arithmetic need less. The stack
+/// given is several times that. A thread's stack is reserved, not committed,
+/// so a thread that never nests deep uses no more memory for it.
+pub const EVALUATION_STACK_BYTES: usize = if cfg!(debug_assertions) {
+    128 * 1024 * 1024
+} else {
+    32 * 1024 * 1024
+};
+
 /// Severity attached to a compiler diagnostic.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DiagnosticSeverity {
