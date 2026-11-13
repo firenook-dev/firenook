@@ -70,9 +70,9 @@ test('candidate checks reject missing platforms, wrong identity, corrupted bytes
 function assertWorkflowSeparation(workflow) {
   assert.match(workflow, /candidate\?process.env.CANDIDATE_REVISION:r.engineRevision/);
   assert.match(workflow, /github.event.pull_request.head.sha \|\| github.sha/);
-  assert.match(workflow, /if: inputs.candidate \|\| github.event_name == 'pull_request'/);
+  assert.match(workflow, /if: inputs.candidate \|\| github.event_name == 'pull_request' \|\| github.event_name == 'push'\r?\n/);
   assert.match(workflow, /node packaging\/check-local-platforms.mjs dist "\$CANDIDATE_REVISION"/);
-  assert.match(workflow, /if: \$\{\{ !inputs.candidate && github.event_name != 'pull_request' \}\}\r?\n\s+run: node packaging\/publish-packages.mjs dist --check/);
+  assert.match(workflow, /if: \$\{\{ !inputs.candidate && github.event_name != 'pull_request' && github.event_name != 'push' \}\}\r?\n\s+run: node packaging\/publish-packages.mjs dist --check/);
   assert.doesNotMatch(workflow, /--publish|id-token: write/);
 }
 test('manual candidate workflow preserves the separate release-pinned verification path with LF and CRLF', () => {

@@ -28,6 +28,11 @@ interface Arguments {
   readonly diskMode: boolean;
   readonly grep?: string;
   readonly outputPath?: string;
+  /**
+   * The SDK packages this run needs are already built at the pinned revision
+   * (CI restores them from its cache), so `build:deps` is not run again.
+   */
+  readonly prebuiltDependencies: boolean;
   readonly sdkDirectory: string;
 }
 
@@ -130,12 +135,19 @@ async function main(): Promise<void> {
       join(sdkDirectory, "config", "project.json"),
     );
 
-    let dependencyBuild = await runObservedCommand(
-      "yarn",
-      ["--cwd", join(sdkDirectory, "packages", "firestore"), "build:deps"],
-      sdkDirectory,
-      process.env,
-    );
+    let dependencyBuild = arguments_.prebuiltDependencies
+      ? { exitCode: 0, output: "", signal: null }
+      : await runObservedCommand(
+          "yarn",
+          ["--cwd", join(sdkDirectory, "packages", "firestore"), "build:deps"],
+          sdkDirectory,
+          process.env,
+        );
+    if (arguments_.prebuiltDependencies) {
+      process.stdout.write(
+        "firebase-js-sdk dependency packages restored as built at the pinned revision; build:deps skipped.\n",
+      );
+    }
     if (dependencyBuild.exitCode !== 0) {
       if (!dependencyBuild.output.includes("Unexpected end of JSON input")) {
         throw observedCommandError("yarn build:deps", dependencyBuild);
@@ -311,6 +323,7 @@ function combineFilters(
 function parseArguments(arguments_: readonly string[]): Arguments {
   let clientPersistence: "memory" | "persistence" | undefined;
   let diskMode = false;
+  let prebuiltDependencies = false;
   let grep: string | undefined;
   let outputPath: string | undefined;
   let sdkDirectory: string | undefined;
@@ -318,6 +331,10 @@ function parseArguments(arguments_: readonly string[]): Arguments {
     const argument = arguments_[index];
     if (argument === "--disk") {
       diskMode = true;
+      continue;
+    }
+    if (argument === "--prebuilt-dependencies") {
+      prebuiltDependencies = true;
       continue;
     }
     if (
@@ -358,6 +375,7 @@ function parseArguments(arguments_: readonly string[]): Arguments {
     diskMode,
     ...(grep === undefined ? {} : { grep }),
     ...(outputPath === undefined ? {} : { outputPath }),
+    prebuiltDependencies,
     sdkDirectory,
   };
 }

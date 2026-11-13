@@ -27,7 +27,8 @@ consumer seed are named only as such.
 | --- | --- | --- | --- | --- |
 | 1 | Oracle recording — a new or extended conformance fixture for the behaviour | contributor machine | minutes to an hour, once | fixture frozen: `SHA256SUMS`, README, `benchmarks/*.json` receipt |
 | 2 | Implement and replay the touched fixture | contributor machine | seconds per iteration | touched fixture 100 % |
-| 3 | Deterministic PR gate | GitHub CI | ~15 min, parallel jobs | every corpus replays; Rust gate; packaging checks; SDK browser matrix; five-platform packed installs; independence check |
+| 3 | Deterministic PR gate | GitHub CI | ~10–15 min, parallel jobs | every corpus replays; Rust gate; packaging checks; SDK browser matrix; independence check; the `CI result` check main requires; five-platform packed installs when the change touches packaging, the packages, a manifest, a build script, the lock file or the toolchain |
+| 3b | After merge | GitHub CI | ~20 min | five-platform packed installs of main after a merge that touches the engine; a break found here belongs to that merge and is fixed before the next release |
 | 4 | Review | human | — | behaviour changes cite the oracle diff; performance claims cite numbers (see below) |
 | 5 | Consumer gates on the packed candidate | private harness, private acceptance host | ~10 min | the consumer's integration and extensions gates, its browser journeys, an offline vendored start |
 | 6 | Candidate benchmark | private acceptance host | ~30 min | readiness, latency lanes, peak memory, lifecycle parity against the previous release row and the banked official row; no lane regresses beyond its recorded band |
