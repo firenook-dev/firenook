@@ -1370,6 +1370,54 @@ function developerToolsCoverage() {
   );
 }
 
+function developerToolsCompileErrors() {
+  const dir = 'developer-tools-compile-errors-v1';
+  const fixture = readJson(`${dir}/fixture.json`);
+  const scenarios = {
+    baseline: 'The ruleset the other inputs change',
+    top: 'A stray or wrong word at the top level',
+    version: 'rules_version gone wrong',
+    braces: 'A missing or extra brace',
+    semicolons: 'A missing or extra semicolon',
+    parens: 'A missing or extra parenthesis',
+    strings: 'A string left open',
+    paths: 'A bad match path',
+    conditions: 'A condition cut short or mistyped',
+    functions: 'A bad function header or body',
+    let: 'let misused',
+    keywords: 'A misspelled keyword',
+    eof: 'The source ends inside a block',
+    two: 'Two mistakes in one source',
+    positions: 'Where a position is counted from',
+    production: "The production Rules API's refusals, sent unchanged",
+  };
+  const items = fixture.reloads.map((reload) => {
+    const scenario = scenarios[reload.id.split('/')[0]];
+    if (!scenario) throw new Error(`${dir}: no scenario for ${reload.id}`);
+    const warnings = reload.response.issues?.length;
+    return {
+      id: reload.id,
+      scenario,
+      title: reload.mistake,
+      request: `PUT :securityRules (${reload.mistake})`,
+      answer:
+        reload.status === 200
+          ? `200 compiled${warnings ? ` with ${plural(warnings, 'warning')}` : ''}`
+          : `${reload.status} ${reload.response.error.message.split('\n').slice(1).join(' · ')}`,
+    };
+  });
+  addSet(
+    {
+      id: dir,
+      service: 'firestore-rules',
+      area: 'Rules reloads that do not compile: the compiler\'s messages',
+      reference: official('Firestore emulator (Java)', fixture.oracle.firestore),
+      recordedAt: day(fixture.capturedAt),
+    },
+    items,
+  );
+}
+
 function evaluationMessage(message) {
   if (Array.isArray(message)) return `history replay of ${plural(message.length, 'evaluation')}`;
   const context = message.rulesContext ?? {};
@@ -1977,6 +2025,7 @@ function build() {
   attempt(() => rulesDocumentPaths());
   attempt(() => rulesUnitTesting());
   attempt(() => developerToolsCoverage());
+  attempt(() => developerToolsCompileErrors());
   attempt(() => developerToolsRequests('developer-tools-request-metadata-v1', 'Rules evaluation context of queries, writes and transactions', { operations: 23, messages: 25 }));
   attempt(() => developerToolsRequests('developer-tools-request-values-v1', 'Rules evaluation context of typed request values'));
   attempt(() => developerToolsListing());

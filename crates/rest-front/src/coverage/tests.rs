@@ -213,10 +213,7 @@ mod oracle {
     /// Recorded answers Firenook gives otherwise with no documented reason.
     /// The replay asserts each still differs as described; whoever fixes one
     /// moves it out of this table and the replay notes it in the ledger.
-    const BUG_CANDIDATES: &[(&str, &str)] = &[(
-        "invalid-reload",
-        "a rejected reload is framed as the official emulator frames it, but the parser's own words differ: Firenook's is `Error compiling rules:\\nL1:1 expected \"service\"`, the official emulator's `Error compiling rules:\\nL1:1 mismatched input 'broken' expecting {'function', 'import', 'service', 'rules_version'}`",
-    )];
+    const BUG_CANDIDATES: &[(&str, &str)] = &[];
 
     // The documented reasons a recorded report differs.
     const LAZY_PLANNER: &str = "coverage counts Firenook's one evaluation of each read, with the document; the official emulator's lazy planner first evaluates without it (bare undefined values and doubled counts) and gives short-circuited expressions empty values (DESIGN.md, Live bounded coverage observations)";
@@ -573,9 +570,12 @@ mod oracle {
         .await;
         let (actual, recorded) =
             rejected(status, &answer, &invalid["status"], &invalid["response"]);
-        assert_eq!(actual, "Error compiling rules:\nL1:1 expected \"service\"");
-        assert_ne!(actual, recorded);
-        outcomes.push(("invalid-reload".to_owned(), Outcome::Bug));
+        assert_eq!(actual, recorded);
+        assert_eq!(answer, invalid["response"]);
+        outcomes.push((
+            "invalid-reload".to_owned(),
+            Outcome::Noted(Compared::Answer, vec![]),
+        ));
         assert_eq!(
             report(coverage(app).await),
             normalized(fixture["afterInvalidReload"].clone()),

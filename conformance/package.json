@@ -75,7 +75,7 @@
     "capture:storage:missing": "node --import tsx src/suite/capture-storage-missing-object.ts",
     "capture:developer-tools": "node src/developer-tools/capture-oracle.mjs",
     "benchmark:developer-tools:baseline": "node src/developer-tools/starting-baseline.mjs",
-    "test:developer-tools-fixtures": "node --test test/developer-tools-fixtures.test.mjs test/developer-tools-coverage-fixtures.test.mjs test/developer-tools-listing-fixtures.test.mjs",
+    "test:developer-tools-fixtures": "node --test test/developer-tools-fixtures.test.mjs test/developer-tools-coverage-fixtures.test.mjs test/developer-tools-compile-errors-fixture.test.mjs test/developer-tools-listing-fixtures.test.mjs",
     "probe:storage:rules": "node --import tsx src/storage-rules/probe-rules-api.ts",
     "capture:storage:rules": "node --import tsx src/storage-rules/capture-emulator.ts",
     "capture:auth:emulator": "node --import tsx src/auth/capture-emulator.ts",

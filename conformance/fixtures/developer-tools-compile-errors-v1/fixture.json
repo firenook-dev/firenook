@@ -1,0 +1,1643 @@
+{
+  "schemaVersion": 1,
+  "syntheticOnly": true,
+  "capturedAt": "2026-11-13T04:25:08.948Z",
+  "project": "demo-firenook-compile-errors",
+  "captureSha256": "1f445ba808a1d85e806435b6b5ec22e75739a56989b9bc0badb32e7aad6352f5",
+  "oracle": {
+    "firestore": "1.21.0",
+    "firebaseTools": "15.22.0",
+    "jarSha256": "c3d3680a89d946a90a027365ea14c26c6472a162bcf37f099bbb1ebd66d25e8e",
+    "node": "24.20.0",
+    "java": "openjdk version \"26.0.2.1\" 2026-08-18\nOpenJDK Runtime Environment (build 26.0.2.1+1-7)\nOpenJDK 64-Bit Server VM (build 26.0.2.1+1-7, mixed mode, sharing)"
+  },
+  "request": {
+    "method": "PUT",
+    "path": "/emulator/v1/projects/demo-firenook-compile-errors:securityRules",
+    "file": "firestore.rules"
+  },
+  "reloads": [
+    {
+      "id": "baseline",
+      "mistake": "the ruleset every other input changes, which compiles",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 200,
+      "response": {}
+    },
+    {
+      "id": "top/broken",
+      "mistake": "one word and nothing else (developer-tools-coverage-v1 invalid-reload)",
+      "source": "broken",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL1:1 mismatched input 'broken' expecting {'function', 'import', 'service', 'rules_version'}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "top/empty",
+      "mistake": "an empty source",
+      "source": "",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL0:0 Rules content empty. Compilation aborted.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "top/whitespace-only",
+      "mistake": "only blank lines",
+      "source": "\n  \n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL3:1 mismatched input '<EOF>' expecting {'function', 'import', 'service', 'rules_version'}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "top/comment-only",
+      "mistake": "a comment and nothing else",
+      "source": "// rules\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL2:1 mismatched input '<EOF>' expecting {'function', 'import', 'service', 'rules_version'}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "top/word-before",
+      "mistake": "a stray word before rules_version",
+      "source": "hello\nrules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL1:1 Unexpected 'hello'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "top/word-after",
+      "mistake": "a stray word after the service block",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\nextra\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL13:1 Unexpected 'extra'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "top/word-after-function",
+      "mistake": "a stray word after a function before the service block",
+      "source": "rules_version = '2';\nfunction open() { return true; }\nhello\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL3:1 Unexpected 'hello'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "top/two-services",
+      "mistake": "a second service block",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\nservice cloud.firestore {\n  match /databases/{database}/documents {\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL15:3 The 'match' body must contain at least one declaration.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "top/service-name-misspelled",
+      "mistake": "service cloud.firestor",
+      "source": "rules_version = '2';\nservice cloud.firestor {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 200,
+      "response": {
+        "issues": [
+          {
+            "sourcePosition": {
+              "fileName": "firestore.rules",
+              "line": 2,
+              "column": 9,
+              "currentOffset": 29,
+              "endOffset": 42
+            },
+            "description": "Invalid service name: cloud.firestor.",
+            "severity": "WARNING"
+          },
+          {
+            "sourcePosition": {
+              "fileName": "firestore.rules",
+              "line": 5,
+              "column": 14,
+              "currentOffset": 127,
+              "endOffset": 133
+            },
+            "description": "Invalid variable name: request.",
+            "severity": "WARNING"
+          },
+          {
+            "sourcePosition": {
+              "fileName": "firestore.rules",
+              "line": 8,
+              "column": 13,
+              "currentOffset": 193,
+              "endOffset": 196
+            },
+            "description": "Invalid method name: read.",
+            "severity": "WARNING"
+          },
+          {
+            "sourcePosition": {
+              "fileName": "firestore.rules",
+              "line": 9,
+              "column": 13,
+              "currentOffset": 226,
+              "endOffset": 230
+            },
+            "description": "Invalid method name: write.",
+            "severity": "WARNING"
+          },
+          {
+            "sourcePosition": {
+              "fileName": "firestore.rules",
+              "line": 9,
+              "column": 23,
+              "currentOffset": 236,
+              "endOffset": 242
+            },
+            "description": "Invalid variable name: request.",
+            "severity": "WARNING"
+          },
+          {
+            "sourcePosition": {
+              "fileName": "firestore.rules",
+              "line": 9,
+              "column": 43,
+              "currentOffset": 256,
+              "endOffset": 263
+            },
+            "description": "Invalid variable name: resource.",
+            "severity": "WARNING"
+          }
+        ]
+      }
+    },
+    {
+      "id": "top/service-name-missing",
+      "mistake": "service with no name",
+      "source": "rules_version = '2';\nservice {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL3:9 Unexpected '/databases'.\nL7:5 Unexpected 'match'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "top/match-outside-service",
+      "mistake": "a match block before the service block",
+      "source": "rules_version = '2';\nmatch /items/{item} {\n  allow read: if true;\n}\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL2:1 mismatched input 'match' expecting {'function', 'import', 'service'}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "version/number",
+      "mistake": "rules_version = 2",
+      "source": "rules_version = 2;\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL1:17 mismatched input '2' expecting STRING",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "version/one",
+      "mistake": "rules_version = '1'",
+      "source": "rules_version = '1';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 200,
+      "response": {
+        "issues": [
+          {
+            "sourcePosition": {
+              "fileName": "firestore.rules"
+            },
+            "description": "Ruleset uses old version (version [1]). Please update to the latest version (version [2]).",
+            "severity": "WARNING"
+          }
+        ]
+      }
+    },
+    {
+      "id": "version/equals-missing",
+      "mistake": "rules_version '2'",
+      "source": "rules_version '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL1:15 missing '=' at ''2''",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "version/colon",
+      "mistake": "rules_version: '2'",
+      "source": "rules_version: '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL1:14 mismatched input ':' expecting '='",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "version/value-missing",
+      "mistake": "rules_version = ;",
+      "source": "rules_version = ;\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL1:17 missing STRING at ';'",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "version/unterminated",
+      "mistake": "rules_version = '2; (an unterminated string)",
+      "source": "rules_version = '2;\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL1:17 mismatched input ''2;' expecting STRING",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "version/after-service",
+      "mistake": "rules_version after the service block",
+      "source": "service cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\nrules_version = '2';\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL12:1 Unexpected 'rules_version'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "braces/service-open-missing",
+      "mistake": "no { after the service name",
+      "source": "rules_version = '2';\nservice cloud.firestore\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL3:3 Unexpected 'match'.\nL7:5 Unexpected 'match'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "braces/service-body-word",
+      "mistake": "a stray word first in the service block",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  hello\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL3:3 Unexpected 'hello'.\nL8:5 Unexpected 'match'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "braces/service-body-allow",
+      "mistake": "an allow in the service block after its match",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n  allow read: if true;\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL12:3 Unexpected 'allow'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "braces/match-open-missing",
+      "mistake": "no { after a match path",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item}\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL7:11 Missing 'match' keyword before path.\nL8:7 Unexpected 'allow'.\nL8:7 mismatched input 'allow' expecting {'{', '/', PATH_SEGMENT}\nL12:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "braces/function-open-missing",
+      "mistake": "no { before a function body",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn()\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL5:7 Unexpected 'return'.\nL12:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "braces/function-close-missing",
+      "mistake": "no } after a function body",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL6:5 missing '}' at 'match'",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "braces/match-close-missing",
+      "mistake": "no } closing the inner match",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL12:1 Unexpected '<EOF>'.\nL12:1 missing '}' at '<EOF>'",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "braces/service-close-missing",
+      "mistake": "no } closing the service block",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL12:1 Unexpected '<EOF>'.\nL12:1 missing '}' at '<EOF>'",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "semicolons/allow-missing",
+      "mistake": "no ; after an allow followed by another",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn()\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 200,
+      "response": {}
+    },
+    {
+      "id": "semicolons/last-allow-missing",
+      "mistake": "no ; after the last allow of a block",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner\n    }\n  }\n}\n",
+      "status": 200,
+      "response": {}
+    },
+    {
+      "id": "semicolons/allow-doubled",
+      "mistake": ";; after an allow",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:33 Unexpected ';'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "semicolons/match-close",
+      "mistake": "a ; after a match block",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    };\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL10:6 Unexpected ';'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "semicolons/let-missing",
+      "mistake": "no ; after a let",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      let auth = request.auth\n      return auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL6:7 missing ';' at 'return'",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "parens/condition-close-missing",
+      "mistake": "if (signedIn();",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if (signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:33 Unexpected ';'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "parens/condition-close-extra",
+      "mistake": "if signedIn());",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn());\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:32 Unexpected ')'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "parens/call-close-missing",
+      "mistake": "if signedIn(;",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn(;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:31 Unexpected ';'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "parens/parameters-close-missing",
+      "mistake": "function signedIn( {",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn( {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL4:24 Unexpected '{'.\nL12:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "parens/parameters-missing",
+      "mistake": "function signedIn {",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL4:23 Missing 'function' signature",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "strings/single-unterminated",
+      "mistake": "== 'public; (single quote)",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if resource.data.kind == 'public;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL9:7 Missing a closing '",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "strings/double-unterminated",
+      "mistake": "== \"public; (double quote)",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if resource.data.kind == \"public;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL9:7 Missing a closing \"",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "strings/newline-inside",
+      "mistake": "a line break inside a string",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if resource.data.kind == 'pub\nlic';\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL9:1 Missing a closing '\nL9:1 Unexpected 'lic'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "strings/escaped-close",
+      "mistake": "== 'public\\'; (the closing quote escaped)",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if resource.data.kind == 'public\\';\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL9:7 Missing a closing '",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "paths/leading-slash-missing",
+      "mistake": "match items/{item}",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL7:11 Unexpected 'items'.\nL7:16 Missing 'match' keyword before path.\nL8:7 missing '}' at 'allow'\nL12:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "paths/single-star",
+      "mistake": "match /items/{item=*}",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item=*} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 200,
+      "response": {}
+    },
+    {
+      "id": "paths/wildcard-empty",
+      "mistake": "match /items/{}",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL7:17 Forward slash '/' found where identifier or binding expected.\nL7:19 The 'match' body must contain at least one declaration.\nL7:21 Unexpected '{'.\nL12:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "paths/double-slash",
+      "mistake": "match /items//{item}",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items//{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL7:11 Missing 'match' keyword before path.\nL8:7 Unexpected 'allow'.\nL8:7 mismatched input 'allow' expecting {'{', '/', PATH_SEGMENT}\nL12:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "paths/trailing-slash",
+      "mistake": "match /items/{item}/",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item}/ {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL7:24 Forward slash '/' found where identifier or binding expected.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "paths/interpolation",
+      "mistake": "match /items/$(item)",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/$(item) {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL7:11 Missing 'match' keyword before path.\nL7:17 Forward slash '/' found where identifier or binding expected.\nL7:18 Unexpected '$'.\nL7:18 mismatched input '$' expecting {'{', '/', PATH_SEGMENT}\nL12:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "paths/missing",
+      "mistake": "match with no path",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL7:11 Unexpected '{'.\nL12:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/if-space",
+      "mistake": "allow read: if ;",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if ;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:22 Missing conditional expression after 'if'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/if-at-line-end",
+      "mistake": "allow read: if, then the next allow",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL9:7 Missing conditional expression after 'if'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/not-equal-cut",
+      "mistake": "if request.auth !=;",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if request.auth !=;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:37 mismatched input ';' expecting {'--', '++', '{', '[', '(', '-', '!', '/', 'false', 'null', 'true', PATH_SEGMENT, IDENTIFIER, NUM_INT, NUM_FLOAT, UNPAIRED_DOUBLE_QUOTE, UNPAIRED_SINGLE_QUOTE, STRING, BYTES}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/not-equal-at-close",
+      "mistake": "if request.auth != then the closing }",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth !=\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL10:5 mismatched input '}' expecting {'--', '++', '{', '[', '(', '-', '!', '/', 'false', 'null', 'true', PATH_SEGMENT, IDENTIFIER, NUM_INT, NUM_FLOAT, UNPAIRED_DOUBLE_QUOTE, UNPAIRED_SINGLE_QUOTE, STRING, BYTES}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/not-cut",
+      "mistake": "if !;",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if !;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:23 mismatched input ';' expecting {'--', '++', '{', '[', '(', '-', '!', '/', 'false', 'null', 'true', PATH_SEGMENT, IDENTIFIER, NUM_INT, NUM_FLOAT, UNPAIRED_DOUBLE_QUOTE, UNPAIRED_SINGLE_QUOTE, STRING, BYTES}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/group-cut",
+      "mistake": "if (;",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if (;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:23 Unexpected ';'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/single-equals",
+      "mistake": "request.auth.uid = resource.data.owner",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid = resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL9:40 Unexpected '='.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/triple-equals",
+      "mistake": "request.auth.uid === resource.data.owner",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid === resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL9:42 Unexpected '='.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/single-ampersand",
+      "mistake": "signedIn() & true",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn() & true;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:35 Unexpected 'true'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/stray-ampersand",
+      "mistake": "a lone & before the ;",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn() &;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:34 token recognition error at: '&;'",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/single-pipe",
+      "mistake": "signedIn() | true",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn() | true;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:35 Unexpected 'true'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/tilde",
+      "mistake": "a ~ before the condition",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if ~signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:22 token recognition error at: '~'",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/if-missing",
+      "mistake": "allow read: signedIn();",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:19 Missing 'if' before conditional expression.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/colon-alone",
+      "mistake": "allow read: ;",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: ;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:19 Unexpected ';'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/colon-missing",
+      "mistake": "allow read if signedIn();",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:18 Missing ':' before 'if' condition.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/method-comma-missing",
+      "mistake": "allow get list:",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow get list: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:17 Unexpected 'list'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/method-unknown",
+      "mistake": "allow reads:",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow reads: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 200,
+      "response": {
+        "issues": [
+          {
+            "sourcePosition": {
+              "fileName": "firestore.rules",
+              "line": 5,
+              "column": 14,
+              "currentOffset": 128,
+              "endOffset": 134
+            },
+            "description": "Invalid variable name: request.",
+            "severity": "WARNING"
+          },
+          {
+            "sourcePosition": {
+              "fileName": "firestore.rules",
+              "line": 8,
+              "column": 13,
+              "currentOffset": 194,
+              "endOffset": 198
+            },
+            "description": "Invalid method name: reads.",
+            "severity": "WARNING"
+          }
+        ]
+      }
+    },
+    {
+      "id": "conditions/method-missing",
+      "mistake": "allow: if",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:12 Expected at least one 'operation' after 'allow'.\nL8:12 Unexpected ':'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/trailing-dot",
+      "mistake": "== resource.data.;",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL9:57 Unexpected ';'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/bad-character-at",
+      "mistake": "an @ in a condition",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if @signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:22 Missing conditional expression after 'if'.\nL8:22 Unexpected '@'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/bad-character-hash",
+      "mistake": "a # comment in a condition",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn(); # signed in\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:36 Unexpected 'signed'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "conditions/is-type-unknown",
+      "mistake": "is text",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if resource.data.kind is text;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:48 An unsupported type identifier was used with the 'is' operator. Received text. Expected one of bool,bytes,constraint,duration,float,int,latlng,list,vector,set,number,map,string,timestamp,path,map_diff",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "functions/name-missing",
+      "mistake": "function () {",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function () {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL4:14 Missing 'function' id",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "functions/parameter-comma-missing",
+      "mistake": "function signedIn(a b)",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn(a b) {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL4:25 Unexpected 'b'.\nL12:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "functions/return-missing",
+      "mistake": "a body with no return",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL5:7 Unexpected 'request'.\nL12:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "functions/return-value-missing",
+      "mistake": "return;",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL5:13 mismatched input ';' expecting {'--', '++', '{', '[', '(', '-', '!', '/', 'false', 'null', 'true', PATH_SEGMENT, IDENTIFIER, NUM_INT, NUM_FLOAT, UNPAIRED_DOUBLE_QUOTE, UNPAIRED_SINGLE_QUOTE, STRING, BYTES}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "functions/two-returns",
+      "mistake": "two returns",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n      return true;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL6:7 mismatched input 'return' expecting '}'\nL13:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "functions/body-empty",
+      "mistake": "function signedIn() {}",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {}\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL4:26 Missing 'function' body",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "functions/if-statement",
+      "mistake": "an if statement in a body",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      if (request.auth != null) { return true; }\n      return false;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL5:7 Unexpected 'if'.\nL6:7 Unexpected 'return'.\nL8:5 Unexpected 'match'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "let/name-missing",
+      "mistake": "let = request.auth;",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      let = request.auth;\n      return true;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL5:11 Unexpected '='.\nL5:20 mismatched input '.' expecting '='",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "let/equals-missing",
+      "mistake": "let auth request.auth;",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      let auth request.auth;\n      return auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL5:16 missing '=' at 'request'",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "let/without-return",
+      "mistake": "a let and no return",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      let auth = request.auth;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL6:5 Unexpected '}'.\nL6:5 mismatched input '}' expecting {'&&', '.', '==', '>', '>=', '[', '<', '<=', '-', '%', '!=', '||', '+', ';', '/', '*', '?', 'in', 'is'}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "let/then-word",
+      "mistake": "a word where return belongs after a let",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      let auth = request.auth;\n      retrun auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL6:7 Unexpected 'retrun'.\nL7:5 mismatched input '}' expecting {'&&', '.', '==', '>', '>=', '[', '<', '<=', '-', '%', '!=', '||', '+', ';', '/', '*', '?', 'in', 'is'}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "let/in-match",
+      "mistake": "a let in a match block",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      let owner = resource.data.owner;\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL7:11 Missing 'match' keyword before path.\nL8:7 Unexpected 'let'.\nL8:7 mismatched input 'let' expecting {'{', '/', PATH_SEGMENT}\nL13:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "keywords/servce",
+      "mistake": "servce cloud.firestore",
+      "source": "rules_version = '2';\nservce cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL2:1 mismatched input 'servce' expecting {'function', 'import', 'service'}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "keywords/rules-verison",
+      "mistake": "rules_verison",
+      "source": "rules_verison = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL1:1 mismatched input 'rules_verison' expecting {'function', 'import', 'service', 'rules_version'}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "keywords/fucntion",
+      "mistake": "fucntion signedIn()",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    fucntion signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL3:9 Missing 'match' keyword before path.\nL4:5 Unexpected 'fucntion'.\nL4:5 mismatched input 'fucntion' expecting {'{', '/', PATH_SEGMENT}\nL7:5 Unexpected 'match'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "keywords/retrun",
+      "mistake": "retrun request.auth",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      retrun request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL5:7 Unexpected 'retrun'.\nL12:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "keywords/alow",
+      "mistake": "alow read",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      alow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL7:11 Missing 'match' keyword before path.\nL8:7 Unexpected 'alow'.\nL8:7 mismatched input 'alow' expecting {'{', '/', PATH_SEGMENT}\nL12:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/after-rules-version",
+      "mistake": "the source ends after rules_version",
+      "source": "rules_version = '2';",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL1:21 mismatched input '<EOF>' expecting {'function', 'import', 'service'}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/after-service",
+      "mistake": "the source ends after service",
+      "source": "rules_version = '2';\nservice",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL2:8 Unexpected '<EOF>'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/after-service-name",
+      "mistake": "the source ends after the service name",
+      "source": "rules_version = '2';\nservice cloud.firestore",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL2:24 Unexpected '<EOF>'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/in-service",
+      "mistake": "the source ends inside the service block",
+      "source": "rules_version = '2';\nservice cloud.firestore {",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL2:26 Unexpected '<EOF>'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/after-match",
+      "mistake": "the source ends after match",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL3:8 Unexpected '<EOF>'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/after-match-path",
+      "mistake": "the source ends after a match path",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL3:9 Missing 'match' keyword before path.\nL3:40 Unexpected '<EOF>'.\nL3:40 mismatched input '<EOF>' expecting {'{', '/', PATH_SEGMENT}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/in-match",
+      "mistake": "the source ends inside a match block",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL7:11 Missing 'match' keyword before path.\nL7:26 Unexpected '<EOF>'.\nL7:26 mismatched input '<EOF>' expecting {'{', '/', PATH_SEGMENT}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/in-parameters",
+      "mistake": "the source ends inside a parameter list",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn(",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL4:23 Unexpected '<EOF>'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/in-function",
+      "mistake": "the source ends inside a function body",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL4:26 Unexpected '<EOF>'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/after-return",
+      "mistake": "the source ends after return",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL5:13 mismatched input '<EOF>' expecting {'--', '++', '{', '[', '(', '-', '!', '/', 'false', 'null', 'true', PATH_SEGMENT, IDENTIFIER, NUM_INT, NUM_FLOAT, UNPAIRED_DOUBLE_QUOTE, UNPAIRED_SINGLE_QUOTE, STRING, BYTES}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/after-allow",
+      "mistake": "the source ends after allow",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL9:12 Expected at least one 'operation' after 'allow'.\nL9:12 Unexpected '<EOF>'.\nL9:12 mismatched input '<EOF>' expecting '}'",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/after-method",
+      "mistake": "the source ends after an allow method",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:17 Unexpected '<EOF>'.\nL8:17 mismatched input '<EOF>' expecting {':', ',', '}', ';', '/', 'allow', 'function', 'if', 'match', PATH_SEGMENT}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/after-if",
+      "mistake": "the source ends after if",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:21 Missing conditional expression after 'if'.\nL8:21 Unexpected '<EOF>'.\nL8:21 mismatched input '<EOF>' expecting {'}', ';', '/', 'allow', 'function', 'match', PATH_SEGMENT}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/in-condition",
+      "mistake": "the source ends inside a condition",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid ==",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL9:42 mismatched input '<EOF>' expecting {'--', '++', '{', '[', '(', '-', '!', '/', 'false', 'null', 'true', PATH_SEGMENT, IDENTIFIER, NUM_INT, NUM_FLOAT, UNPAIRED_DOUBLE_QUOTE, UNPAIRED_SINGLE_QUOTE, STRING, BYTES}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/after-condition",
+      "mistake": "the source ends after a condition",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn()",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:32 Unexpected '<EOF>'.\nL8:32 mismatched input '<EOF>' expecting {'&&', '.', '==', '>', '>=', '[', '<', '<=', '-', '%', '!=', '||', '+', '}', ';', '/', '*', '?', 'allow', 'function', 'in', 'is', 'match', PATH_SEGMENT}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/in-arguments",
+      "mistake": "the source ends inside call arguments",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn(",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:31 Unexpected '<EOF>'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/after-declaration",
+      "mistake": "the source ends after a complete allow",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:33 Unexpected '<EOF>'.\nL8:33 mismatched input '<EOF>' expecting '}'",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/after-inner-match",
+      "mistake": "the source ends after a nested match block",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL10:6 Unexpected '<EOF>'.\nL10:6 mismatched input '<EOF>' expecting '}'",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/in-string",
+      "mistake": "the source ends inside a string",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if resource.data.kind == 'pub",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL9:49 Missing a closing '\nL9:49 Unexpected '<EOF>'.\nL9:49 mismatched input '<EOF>' expecting {'&&', '.', '==', '>', '>=', '[', '<', '<=', '-', '%', '!=', '||', '+', '}', ';', '/', '*', '?', 'allow', 'function', 'in', 'is', 'match', PATH_SEGMENT}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "eof/in-block-comment",
+      "mistake": "the source ends inside a block comment",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n/* unfinished",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL13:1 Unexpected '/*'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "two/empty-conditions",
+      "mistake": "two allows with no condition",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if ;\n      allow write: if ;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:22 Missing conditional expression after 'if'.\nL9:23 Missing conditional expression after 'if'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "two/semicolon-and-brace",
+      "mistake": "a missing ; and a missing final }",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn()\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL12:1 Unexpected '<EOF>'.\nL12:1 missing '}' at '<EOF>'",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "two/misspelling-and-string",
+      "mistake": "alow and an unterminated string",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      alow read: if signedIn();\n      allow write: if resource.data.kind == 'owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL7:11 Missing 'match' keyword before path.\nL8:7 Unexpected 'alow'.\nL8:7 mismatched input 'alow' expecting {'{', '/', PATH_SEGMENT}\nL10:5 Missing a closing '\nL12:1 Unexpected '}'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "two/method-and-if",
+      "mistake": "allow reads and a missing if",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow reads: if signedIn();\n      allow write: request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL9:20 Missing 'if' before conditional expression.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "two/package-and-syntax",
+      "mistake": "a package name as a parameter and a cut condition",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn(duration) {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if signedIn();\n      allow write: if request.auth.uid ==;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL9:42 mismatched input ';' expecting {'--', '++', '{', '[', '(', '-', '!', '/', 'false', 'null', 'true', PATH_SEGMENT, IDENTIFIER, NUM_INT, NUM_FLOAT, UNPAIRED_DOUBLE_QUOTE, UNPAIRED_SINGLE_QUOTE, STRING, BYTES}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "positions/crlf",
+      "mistake": "Windows line endings",
+      "source": "rules_version = '2';\r\nservice cloud.firestore {\r\n  match /databases/{database}/documents {\r\n    function signedIn() {\r\n      return request.auth != null;\r\n    }\r\n    match /items/{item} {\r\n      allow read: if ;\r\n      allow write: if request.auth.uid == resource.data.owner;\r\n    }\r\n  }\r\n}\r\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:22 Missing conditional expression after 'if'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "positions/unicode",
+      "mistake": "non-ASCII text before the mistake on its line",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n      allow read: if '中文🚀' == ;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:31 mismatched input ';' expecting {'--', '++', '{', '[', '(', '-', '!', '/', 'false', 'null', 'true', PATH_SEGMENT, IDENTIFIER, NUM_INT, NUM_FLOAT, UNPAIRED_DOUBLE_QUOTE, UNPAIRED_SINGLE_QUOTE, STRING, BYTES}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "positions/tab",
+      "mistake": "a tab before the mistake",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    function signedIn() {\n      return request.auth != null;\n    }\n    match /items/{item} {\n\tallow read: if ;\n      allow write: if request.auth.uid == resource.data.owner;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL8:17 Missing conditional expression after 'if'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "production/unexpected-token",
+      "mistake": "rules-v2 production-parse-errors unexpected-token, unchanged",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /phase3/{document} {\n      allow get: if ;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL5:21 Missing conditional expression after 'if'.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "production/unclosed-block",
+      "mistake": "rules-v2 production-parse-errors unclosed-block, unchanged",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL3:9 Missing 'match' keyword before path.\nL4:1 Unexpected '<EOF>'.\nL4:1 mismatched input '<EOF>' expecting {'{', '/', PATH_SEGMENT}",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "production/duplicate-let",
+      "mistake": "rules-v2 production-parse-errors duplicate-let, unchanged",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /phase3/{document} {\n      function duplicate() { let value = 1; let value = 2; return value == 2; }\n      allow get: if duplicate();\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL5:34 Unused variable: value.\nL5:49 The identifier [value] is already bound in the current scope.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "production/recursive-function",
+      "mistake": "rules-v2 production-parse-errors recursive-function, unchanged",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /phase3/{document} {\n      function recurse() { return recurse(); }\n      allow get: if recurse();\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL5:16 Recursive call is not allowed.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    },
+    {
+      "id": "production/invalid-recursive-wildcard",
+      "mistake": "rules-v2 production-parse-errors invalid-recursive-wildcard, unchanged",
+      "source": "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /{first=**}/{second=**} {\n      allow get: if true;\n    }\n  }\n}\n",
+      "status": 400,
+      "response": {
+        "error": {
+          "code": 400,
+          "message": "Error compiling rules:\nL4:22 Invalid glob match expression. Only one glob match is permitted in a match declaration path.",
+          "status": "INVALID_ARGUMENT"
+        }
+      }
+    }
+  ]
+}
