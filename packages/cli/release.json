@@ -1,6 +1,6 @@
 {
-  "engineRevision": "2294132253f03395b0d9bafe391d35075e928112",
-  "rustToolchain": "1.98.0",
+  "engineRevision": "4be26bedd0ce6124c3267d6936ec6d9b539a2bc9",
+  "rustToolchain": "1.100.0",
   "platforms": {
     "darwin-arm64": "aarch64-apple-darwin",
     "darwin-x64": "x86_64-apple-darwin",
