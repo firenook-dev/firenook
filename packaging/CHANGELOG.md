@@ -1,3 +1,91 @@
+# 0.2.4 — all but 26 recorded answers replayed, 18 bugs fixed, and deep Security Rules no longer stop the engine
+
+- Pin the engine to `4be26bedd0ce6124c3267d6936ec6d9b539a2bc9`, main after
+  every 0.2.4 pull request merged (the merge of
+  [PR #233](https://github.com/firenook-dev/firenook/pull/233)). CI
+  ([run 43380050621](https://github.com/firenook-dev/firenook/actions/runs/43380050621)),
+  the five-platform packed-install matrix
+  ([run 43380050691](https://github.com/firenook-dev/firenook/actions/runs/43380050691))
+  and the real SDK clients on Android, iOS and the web
+  ([run 43380477649](https://github.com/firenook-dev/firenook/actions/runs/43380477649))
+  passed on it. The engine is built with Rust 1.100.0 (1.98.0 before).
+- **The conformance record.** 0.2.3 published 6,592 answers recorded from
+  production and the official emulators, 516 of them with no replay. 0.2.4
+  records 6,791 in 43 sets and replays all but 26: 6,414 are compared
+  exactly, 351 are compared and different on purpose, each with its reason,
+  and the 26 wait on #229. CI fails when a recorded answer has no replay, or
+  when a listed one is replayed again (#212). Two sets are new: 79
+  production probes of how deep one rules expression may nest, and 120 rules
+  reloads that do not compile, recorded from the official emulator. The
+  replays found the differences below.
+- **Firestore.**
+  - A listen's first snapshot comes in the query's order, numeric document
+    ids included (#197).
+  - A target on a missing document is told it is missing (`documentDelete`)
+    before it becomes current (#198).
+  - A refused target is added before it is removed, as production sends it
+    (#199).
+  - `orderBy('__name__')` followed by another field is refused in
+    production's words (#200).
+  - A WebChannel write that updates a missing document fails with
+    production's message and envelope (#201).
+  - An aggregation over two or more equality filters needs a composite
+    index, as production asks: refused with `--strict-indexes`, a
+    missing-index warning without it (#202).
+- **Security Rules.**
+  - Calls nest 21 frames deep, as production allows; the 22nd is refused at
+    compile, in production's words, at the function's declaration (#203).
+  - An expression is refused at compile once part of it sits 100 levels
+    down: `Expression is too complex to evaluate safely.`, at each place
+    production names (#204).
+  - The 1,000-expression budget runs out at the expression where
+    production's does (#205).
+  - Coverage places a failed field access where its member chain starts
+    (#206).
+  - A reload that does not compile is answered `Error compiling rules:` with
+    the official parser's own words (`mismatched input 'broken' expecting
+    {…}`, `missing '=' at …`, `Unexpected '}'.`) at its line and column
+    (#207). Sources the official emulator refuses are refused too: an empty
+    match block, a keyword used as a name, a string left open at the end of
+    its line. 26 of the 120 recorded mistakes are still answered otherwise
+    (#229).
+  - The Requests feed shows a query's `resource` as recorded (#208).
+  - Two ways to stop the engine are gone. Functions that call each other
+    from the depths of long expressions overflowed the stack that evaluated
+    them (#228): rules are now evaluated on 32 MiB stacks, more than three
+    times what the deepest ruleset both limits allow needs. A source of
+    thousands of nested brackets or match blocks overflowed the parser
+    (#231): it now stops at 240 levels with the same refusal, and refuses
+    match blocks nested more than 128 deep.
+- **CLI, Functions and the suite.**
+  - `firenook init` writes, prints and runs `--keep-data` only for a project
+    that runs Firestore, Auth and Storage, which saved data holds together;
+    the launcher refuses the flag before the engine starts otherwise, and
+    says what to add (#187).
+  - A Functions save that does not load prints
+    `Failed to load function definition from source: …` in the plain output,
+    as the first load always did (#188).
+  - `functions:invoke` sends a scheduled function its schedule event without
+    `--event-data` (#189).
+  - `accounts:signUp` keeps an empty `mfaInfo` list, as the official one does
+    (#209).
+  - The hub's `/emulators` and the UI's `/api/config` list the emulators as
+    firebase-tools does. The logging emulator runs whether or not the UI
+    does, and when 4500 is taken and neither `--logging-port` nor
+    `emulators.logging.port` chose it, it starts on the next free port with
+    a warning, as firebase-tools does (#210).
+  - The Logs feed files `Watching "<dir>" for Cloud Functions...` without a
+    label, and gains `Using node@<major> from host.` on each load, as the
+    official logger does (#211).
+- Dependencies: `notify` 8.2.2. Cargo now leaves out crate versions published
+  less than a week ago when it picks new ones, and Dependabot waits the same
+  week.
+- No data format changed: nothing in how Firestore, Auth, Storage or an
+  export is saved changed since 0.2.3, so 0.2.4 opens what 0.2.3 saved as it
+  is, and 0.2.3 opens what 0.2.4 saves. The one port that can move is the
+  logging emulator's, as above.
+- Published straight to `latest`, as 0.2.3 was.
+
 # 0.2.3 — the Indexes page, three reported bugs fixed, and a container image
 
 - Pin the engine to `2294132253f03395b0d9bafe391d35075e928112`, main after
