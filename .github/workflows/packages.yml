@@ -1,8 +1,24 @@
 name: Installable packages
 
+# The release build, release-mode tests and packed installs on all five
+# platforms. Six jobs, two of them on macOS, so it runs where it can find
+# something the Linux jobs of CI cannot:
+#
+# - on a pull request, only when the change touches what differs by platform
+#   or by package: the packages, the packaging, a manifest, a build script,
+#   the lock file or the toolchain;
+# - on main, after each merge that touches the engine, so a break that only
+#   Windows, macOS or the old glibc shows is found within one build and
+#   belongs to one merge;
+# - in a release, which builds everything again before anything is published;
+# - by hand, on any branch (workflow_dispatch with `candidate`), for a change
+#   to platform-specific code that should be seen before it merges.
 on:
   pull_request:
-    paths: ['crates/**', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'support/functions-worker.mjs', 'conformance/fixtures/**', 'packages/**', 'packaging/**', '.github/workflows/packages.yml', '.github/workflows/release-npm.yml', '!**/*.md']
+    paths: ['Cargo.toml', 'Cargo.lock', 'crates/*/Cargo.toml', 'crates/*/build.rs', 'rust-toolchain.toml', '.cargo/**', 'support/functions-worker.mjs', 'packages/**', 'packaging/**', '.github/workflows/packages.yml', '.github/workflows/release-npm.yml', '!**/*.md']
+  push:
+    branches: [main]
+    paths: ['crates/**', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', '.cargo/**', 'support/functions-worker.mjs', 'conformance/fixtures/**', 'packages/**', 'packaging/**', '.github/workflows/packages.yml', '.github/workflows/release-npm.yml', '!**/*.md']
   workflow_dispatch:
     inputs:
       candidate:
@@ -19,6 +35,14 @@ on:
 
 permissions:
   contents: read
+
+# A new push to a pull request ends the build of the push before it. On main
+# a build runs to its end and at most one waits behind it, the newest: every
+# merge is covered by a build, without one build per merge. In a release
+# `github.workflow` is the release's name, so nothing else shares its group.
+concurrency:
+  group: packages-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -87,7 +111,9 @@ jobs:
       - name: Resolve pinned engine source
         id: engine
         env:
-          CANDIDATE_BUILD: ${{ inputs.candidate || github.event_name == 'pull_request' }}
+          # A pull request and a merge build their own commit; a release
+          # builds the engine revision its release.json pins.
+          CANDIDATE_BUILD: ${{ inputs.candidate || github.event_name == 'pull_request' || github.event_name == 'push' }}
           CANDIDATE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           node -e 'const fs=require("node:fs"),assert=require("node:assert/strict"); const r=require("./packages/cli/release.json"); const candidate=process.env.CANDIDATE_BUILD==="true"; const revision=candidate?process.env.CANDIDATE_REVISION:r.engineRevision; assert(/^[a-f0-9]{40}$/.test(revision)); fs.appendFileSync(process.env.GITHUB_OUTPUT,`revision=${revision}\nlocal_revision=${candidate?revision:""}\ntoolchain=${r.rustToolchain}\n`);'
@@ -169,10 +195,10 @@ jobs:
         with:
           path: dist
       - name: Verify exact non-publishing candidate platform set
-        if: inputs.candidate || github.event_name == 'pull_request'
+        if: inputs.candidate || github.event_name == 'pull_request' || github.event_name == 'push'
         env:
           CANDIDATE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
         run: node packaging/check-local-platforms.mjs dist "$CANDIDATE_REVISION"
       - name: Verify release-pinned artifact set
-        if: ${{ !inputs.candidate && github.event_name != 'pull_request' }}
+        if: ${{ !inputs.candidate && github.event_name != 'pull_request' && github.event_name != 'push' }}
         run: node packaging/publish-packages.mjs dist --check
