@@ -643,4 +643,90 @@ mod tests {
             .join()
             .expect("no stack overflow");
     }
+
+    /// `compile` on a 2 MiB thread, as a test or a Tokio worker has: each
+    /// diagnostic's line, column and message.
+    fn compile_on_2_mib(source: String) -> Result<(), Vec<(usize, usize, String)>> {
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                compile(&source).map(|_| ()).map_err(|diagnostics| {
+                    diagnostics
+                        .into_iter()
+                        .map(|diagnostic| (diagnostic.line, diagnostic.column, diagnostic.message))
+                        .collect()
+                })
+            })
+            .expect("a test thread")
+            .join()
+            .expect("no stack overflow")
+    }
+
+    /// Thousands of nested brackets overflowed the parser before anything
+    /// could refuse them (#231). Past the parser's bound every nesting shape
+    /// is refused as the depth check refuses it when it can walk the source:
+    /// once, where its 100th level starts.
+    #[test]
+    fn nesting_past_the_parsers_bound_is_refused_as_the_depth_check_refuses_it() {
+        type Shape = fn(usize) -> String;
+        let shapes: [(&str, Shape, usize); 5] = [
+            (
+                "brackets",
+                |n| format!("{}true{}", "(".repeat(n), ")".repeat(n)),
+                100_000,
+            ),
+            ("unary", |n| format!("{}true", "!".repeat(n)), 200_000),
+            (
+                "lists",
+                |n| format!("{}1{}", "[".repeat(n), "]".repeat(n)),
+                100_000,
+            ),
+            (
+                "maps",
+                |n| format!("{}1{}", "{'a': ".repeat(n), "}".repeat(n)),
+                30_000,
+            ),
+            (
+                "calls",
+                |n| format!("{}true{}", "string(".repeat(n), ")".repeat(n)),
+                30_000,
+            ),
+        ];
+        for (name, shape, deepest) in shapes {
+            // Just under the bound (each shape is one level deeper than its
+            // openers) the parser takes it all and the depth check refuses it;
+            // at the bound and far past it, the parser stops.
+            let walked = compile_on_2_mib(probe(&shape(239))).expect_err(name);
+            assert_eq!(walked.len(), 1, "{name}");
+            assert_eq!(walked[0].2, TOO_COMPLEX, "{name}");
+            for depth in [240, deepest] {
+                assert_eq!(
+                    compile_on_2_mib(probe(&shape(depth))).expect_err(name),
+                    walked,
+                    "{name} {depth}"
+                );
+            }
+        }
+    }
+
+    /// Match blocks nest 128 deep; the 129th is refused where it starts, and
+    /// thousands no longer overflow the parser (#231).
+    #[test]
+    fn match_blocks_nest_128_deep() {
+        let nested = |n: usize| {
+            format!(
+                "rules_version = '2';\nservice cloud.firestore {{\n  match /databases/{{database}}/documents {{\n{}allow get: if true;\n{}  }}\n}}\n",
+                "match /a {\n".repeat(n),
+                "}\n".repeat(n)
+            )
+        };
+        assert_eq!(compile_on_2_mib(nested(127)), Ok(()));
+        let refused = vec![(
+            131,
+            1,
+            "match blocks are nested more than 128 deep".to_owned(),
+        )];
+        assert_eq!(compile_on_2_mib(nested(128)), Err(refused.clone()));
+        assert_eq!(compile_on_2_mib(nested(20_000)), Err(refused));
+    }
 }

@@ -1087,6 +1087,22 @@ standalone Firestore's) give their threads `EVALUATION_STACK_BYTES`: 32 MiB in a
 release build, where the hungriest shape at the limits needs 8 to 10, and 128 MiB
 in a debug build, where it needs up to 48. Stacks are reserved, not committed.
 
+The parser comes before the depth check, and it recurses once per nested
+operand and per match block, so a source of thousands of brackets, `!`, lists
+or match blocks overflowed it before anything could refuse it (#231); a
+ruleset may hold about 128,000 brackets, more than any stack holds. The parser
+goes 240 expression levels deep: past that it stops with `Expression is too
+complex to evaluate safely.` where the 100th level starts, the node the depth
+check names for brackets, unary operators, lists, maps and calls. Below it the
+depth check answers, so every recorded refusal keeps its answer (the deepest,
+100 terms bracketed to the right, is parsed 200 levels deep), and at 240 the
+hungriest shapes still parse on a 2 MiB thread in a debug build. Match blocks
+nest 128 deep, in Firenook's words past that: nothing records production's
+limit, and rules nest a handful. A chain of `&&` is parsed in a loop, not
+recursively, so it has no such bound. Only freeing a very long one recurses
+deep, and only a debug build runs out: on 2 MiB it frees 5,000 terms but not
+32,000, about the longest a ruleset holds, which a release build frees.
+
 Below the limit production fails some long chains with 500 INTERNAL, from an edge
 that moves with what a term is (52 `>=` terms, between 61 and 70 `true` terms).
 No one measure places it, so Firenook evaluates those chains and the replay notes
