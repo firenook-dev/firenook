@@ -736,7 +736,9 @@ async fn project_operation(
 /// A reload that does not compile, as the official emulator frames it:
 /// `Error compiling rules:` and a line `L<line>:<column> <message>` for each
 /// diagnostic (developer-tools-coverage-v1 compile-rejections,
-/// rule-bindings-v1). The messages are Firenook's own compiler's.
+/// rule-bindings-v1, developer-tools-compile-errors-v1). The messages are the
+/// compiler's, worded as the official parser's where a recording shows them
+/// (DESIGN.md, Rules compile errors).
 fn compile_error_message(error: &firenook_rules_runtime::LoadError) -> String {
     use std::fmt::Write as _;
     let mut message = String::from("Error compiling rules:");
@@ -4579,7 +4581,7 @@ mod tests {
         assert_eq!(error.diagnostics.len(), 2, "{error:?}");
         assert_eq!(
             compile_error_message(&error),
-            "Error compiling rules:\nL1:1 recursive function call is not allowed: a\nL1:1 recursive function call is not allowed: b"
+            "Error compiling rules:\nL3:12 Recursive call is not allowed.\nL4:12 Recursive call is not allowed."
         );
     }
 }

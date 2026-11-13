@@ -279,8 +279,26 @@ pub fn compile(source: &str) -> Result<Ruleset, Vec<Diagnostic>> {
             ),
         )]);
     }
-    let program = parser::parse(source)
-        .map_err(|error| vec![diagnostic(source, error.offset, error.message)])?;
+    if source.is_empty() {
+        // At no line or column, as the official emulator answers it
+        // (developer-tools-compile-errors-v1 top/empty).
+        return Err(vec![Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            message: "Rules content empty. Compilation aborted.".to_owned(),
+            line: 0,
+            column: 0,
+            byte_offset: 0,
+            from: 0,
+            to: 0,
+            code: None,
+        }]);
+    }
+    let program = parser::parse(source).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|error| diagnostic(source, error.offset, error.message))
+            .collect::<Vec<_>>()
+    })?;
     let mut validation = Vec::new();
     validate_function_map(source, &program.functions, &mut validation);
     for block in &program.matches {
@@ -323,15 +341,26 @@ fn validate_function_map(
         })
         .collect::<BTreeMap<_, _>>();
     let mut memo = BTreeMap::new();
+    let mut recursive = BTreeSet::new();
     for name in graph.keys() {
         let mut visiting = BTreeSet::new();
         if let Err(cycle) = function_depth(name, &graph, &mut visiting, &mut memo) {
-            diagnostics.push(diagnostic(
-                source,
-                0,
-                format!("recursive function call is not allowed: {cycle}"),
-            ));
+            recursive.insert(cycle);
         }
+    }
+    // Each function a cycle of calls returns to, once, at its name. One that
+    // calls itself is worded as production and the official emulator word
+    // it (rules-v2 production-parse-errors recursive-function,
+    // developer-tools-compile-errors-v1 production/recursive-function).
+    let mut recursive = recursive.into_iter().collect::<Vec<_>>();
+    recursive.sort_by_key(|name| functions[name].name_start);
+    for name in recursive {
+        let message = if graph[&name].contains(&name) {
+            "Recursive call is not allowed.".to_owned()
+        } else {
+            format!("recursive function call is not allowed: {name}")
+        };
+        diagnostics.push(diagnostic(source, functions[&name].name_start, message));
     }
     // Production refuses a chain of calls that would open a 22nd frame
     // (`function-depth-22` and `-23` of the production limit probes) with one
@@ -622,7 +651,23 @@ mod tests {
           }
         ";
         let error = compile(source).expect_err("recursive function must fail");
-        assert!(error[0].message.contains("recursive function"));
+        // Once, at the function's name, as production words it.
+        assert_eq!(error.len(), 1, "{error:?}");
+        assert_eq!(error[0].message, "Recursive call is not allowed.");
+        assert_eq!((error[0].line, error[0].column), (4, 24));
+    }
+
+    #[test]
+    fn an_empty_source_is_refused_at_no_position() {
+        let error = compile("").expect_err("an empty source is refused");
+        assert_eq!(
+            error[0].message,
+            "Rules content empty. Compilation aborted."
+        );
+        assert_eq!((error[0].line, error[0].column), (0, 0));
+        // Only an empty one: blank lines are a source that ends too soon.
+        let error = compile("\n").expect_err("a blank source is refused");
+        assert_eq!((error[0].line, error[0].column), (2, 1));
     }
 
     #[test]
