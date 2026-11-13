@@ -865,14 +865,13 @@ fn eventarc_subscription(
     let filters = event
         .get("eventFilters")
         .and_then(Value::as_object)
-        .map(|map| {
+        .map_or_default(|map| {
             map.iter()
                 .filter_map(|(name, value)| {
                     value.as_str().map(|text| (name.clone(), text.to_owned()))
                 })
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     Some(EventarcSubscription {
         project: project.to_owned(),
         trigger_key: key.to_owned(),

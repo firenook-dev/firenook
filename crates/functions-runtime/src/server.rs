@@ -1068,14 +1068,13 @@ async fn eventarc_register(
             let filters: BTreeMap<String, String> = trigger
                 .get("eventFilters")
                 .and_then(Value::as_object)
-                .map(|map| {
+                .map_or_default(|map| {
                     map.iter()
                         .filter_map(|(name, value)| {
                             value.as_str().map(|text| (name.clone(), text.to_owned()))
                         })
                         .collect()
-                })
-                .unwrap_or_default();
+                });
             state.registry.write().await.add_external_eventarc(
                 project,
                 key.clone(),

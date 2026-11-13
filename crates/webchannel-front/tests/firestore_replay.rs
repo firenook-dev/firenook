@@ -402,7 +402,7 @@ impl Recording {
 fn query(exchange: &Value) -> Vec<(String, String)> {
     exchange["request"]["query"]
         .as_array()
-        .map(|pairs| {
+        .map_or_default(|pairs| {
             pairs
                 .iter()
                 .map(|pair| {
@@ -413,7 +413,6 @@ fn query(exchange: &Value) -> Vec<(String, String)> {
                 })
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 fn query_value<'a>(query: &'a [(String, String)], name: &str) -> Option<&'a str> {

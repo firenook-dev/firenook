@@ -646,12 +646,14 @@ impl ConsoleHandle {
         let (secrets_provided, params, declared) = match backend {
             Some(backend) => {
                 let loaded = backend.loaded.read().await;
-                let extension_secrets = backend
-                    .read_source()
-                    .extension
-                    .as_ref()
-                    .map(|extension| extension.secret_values.keys().cloned().collect::<Vec<_>>())
-                    .unwrap_or_default();
+                let extension_secrets =
+                    backend
+                        .read_source()
+                        .extension
+                        .as_ref()
+                        .map_or_default(|extension| {
+                            extension.secret_values.keys().cloned().collect::<Vec<_>>()
+                        });
                 let provided: Vec<String> = loaded
                     .secrets
                     .keys()
@@ -671,16 +673,12 @@ impl ConsoleHandle {
                         )
                     })
                     .collect();
-                let declared = loaded
-                    .declared
-                    .get(&id)
-                    .map(|options| {
-                        options
-                            .iter()
-                            .map(|(name, value)| (name.clone(), value.clone()))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let declared = loaded.declared.get(&id).map_or_default(|options| {
+                    options
+                        .iter()
+                        .map(|(name, value)| (name.clone(), value.clone()))
+                        .collect()
+                });
                 (provided, params, declared)
             }
             None => (Vec::new(), Vec::new(), Vec::new()),
@@ -1510,14 +1508,13 @@ impl ConsoleHandle {
                     allowed: extension
                         .env
                         .get("ALLOWED_EVENT_TYPES")
-                        .map(|types| {
+                        .map_or_default(|types| {
                             types
                                 .split(',')
                                 .filter(|entry| !entry.is_empty())
                                 .map(str::to_owned)
                                 .collect()
-                        })
-                        .unwrap_or_default(),
+                        }),
                 });
         }
         EventarcView {

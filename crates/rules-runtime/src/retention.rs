@@ -346,8 +346,7 @@ impl RulesRuntime {
     pub fn retained_decisions(&self, database: &DatabaseName) -> Vec<Arc<RetainedDecision>> {
         self.recorder
             .as_ref()
-            .map(|recorder| recorder.retention().of_database(database))
-            .unwrap_or_default()
+            .map_or_default(|recorder| recorder.retention().of_database(database))
     }
 
     /// How many decisions can be re-run now (every database), and how many

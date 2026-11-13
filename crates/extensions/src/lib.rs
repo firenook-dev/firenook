@@ -561,10 +561,7 @@ fn replace_console_links(content: &str, ui_origin: Option<&str>) -> String {
             && let Some(captures) = regex.captures(&text)
         {
             let whole = captures.get(0).map(|m| m.range());
-            let terminator = captures
-                .get(3)
-                .map(|m| m.as_str().to_owned())
-                .unwrap_or_default();
+            let terminator = captures.get(3).map_or_default(|m| m.as_str().to_owned());
             if let Some(range) = whole {
                 text.replace_range(range, &format!("{ui}{target}{terminator}"));
             }
@@ -624,8 +621,7 @@ fn auto_populated_params(config: &ExtensionsConfig, instance: &Instance) -> Para
         instance
             .allowed_event_types
             .as_ref()
-            .map(|types| types.join(","))
-            .unwrap_or_default(),
+            .map_or_default(|types| types.join(",")),
     );
     params.set(
         "EVENTARC_CHANNEL",
@@ -985,13 +981,12 @@ pub fn extensions_from_config(config: &Map<String, Value>) -> Vec<(String, Strin
     config
         .get("extensions")
         .and_then(Value::as_object)
-        .map(|entries| {
+        .map_or_default(|entries| {
             entries
                 .iter()
                 .filter_map(|(id, value)| value.as_str().map(|text| (id.clone(), text.to_owned())))
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

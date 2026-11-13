@@ -175,19 +175,14 @@ impl ExportStream {
 /// RFC 4180 quoting.
 fn csv_row(out: &mut Vec<u8>, user: &UserRecord) {
     let text = |field: &str| str_field(user, field).unwrap_or_default().to_owned();
-    let time = |field: &str| {
-        millis_field(user, field)
-            .map(iso_from_millis)
-            .unwrap_or_default()
-    };
+    let time = |field: &str| millis_field(user, field).map_or_default(iso_from_millis);
     let providers: Vec<String> = provider_infos(user)
         .iter()
         .filter_map(|info| str_field(info, "providerId").map(str::to_owned))
         .collect();
     let claims = str_field(user, "customAttributes")
         .and_then(|claims| serde_json::from_str::<JsonValue>(claims).ok())
-        .map(|claims| claims.to_string())
-        .unwrap_or_default();
+        .map_or_default(|claims| claims.to_string());
     let cells = [
         text("localId"),
         text("email"),

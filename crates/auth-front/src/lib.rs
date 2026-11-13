@@ -861,22 +861,19 @@ impl Runtime {
                 uri: report.uri,
                 duration: report.duration,
                 invocation: report.invocation,
-                changed: updates
-                    .map(|updates| {
-                        updates
-                            .keys()
-                            .filter(|key| key.as_str() != "customAttributes")
-                            .cloned()
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                changed: updates.map_or_default(|updates| {
+                    updates
+                        .keys()
+                        .filter(|key| key.as_str() != "customAttributes")
+                        .cloned()
+                        .collect()
+                }),
                 custom_claims: observe::object_keys_of_text(
                     updates.and_then(|updates| str_field(updates, "customAttributes")),
                 ),
                 session_claims: outcome
                     .and_then(|outcome| outcome.extra_claims.as_ref())
-                    .map(|claims| claims.keys().cloned().collect())
-                    .unwrap_or_default(),
+                    .map_or_default(|claims| claims.keys().cloned().collect()),
                 failure: report.failure,
             });
         }
@@ -1235,13 +1232,11 @@ fn preflight(request: &Request, origin: Option<&HeaderValue>, private_network: b
 }
 
 fn query_pairs(query: Option<&str>) -> Vec<(String, String)> {
-    query
-        .map(|query| {
-            url::form_urlencoded::parse(query.as_bytes())
-                .map(|(key, value)| (key.into_owned(), value.into_owned()))
-                .collect()
-        })
-        .unwrap_or_default()
+    query.map_or_default(|query| {
+        url::form_urlencoded::parse(query.as_bytes())
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect()
+    })
 }
 
 async fn route(

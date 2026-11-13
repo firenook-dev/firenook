@@ -2822,16 +2822,13 @@ async fn start_functions_runtime(
     let codebases: Vec<CodebaseConfig> = codebases_from_config(&firebase_json, &config.project_dir);
     let sink = console_wiring::compute::functions_log(logging);
     let extensions = load_extensions(config, &sink).await?;
-    let backends = extensions
-        .as_ref()
-        .map(|outcome| {
-            outcome
-                .loaded
-                .iter()
-                .map(|extension| extension.backend.clone())
-                .collect()
-        })
-        .unwrap_or_default();
+    let backends = extensions.as_ref().map_or_default(|outcome| {
+        outcome
+            .loaded
+            .iter()
+            .map(|extension| extension.backend.clone())
+            .collect()
+    });
     if let (Some(parts), Some(outcome)) = (&compute, extensions) {
         parts.hand_over_extensions(outcome);
     }
@@ -2970,15 +2967,14 @@ pub fn extensions_config_from(
     let extensions: Vec<(String, String)> = ordered
         .get("extensions")
         .and_then(serde_norway::Value::as_mapping)
-        .map(|entries| {
+        .map_or_default(|entries| {
             entries
                 .iter()
                 .filter_map(|(id, value)| {
                     Some((id.as_str()?.to_owned(), value.as_str()?.to_owned()))
                 })
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     let npm = config
         .node
         .parent()
@@ -3017,14 +3013,13 @@ fn project_aliases(project_dir: &Path, project_id: &str) -> Vec<String> {
     parsed
         .get("projects")
         .and_then(serde_json::Value::as_object)
-        .map(|projects| {
+        .map_or_default(|projects| {
             projects
                 .iter()
                 .filter(|(_, value)| value.as_str() == Some(project_id))
                 .map(|(alias, _)| alias.clone())
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 fn spawn_exporter(

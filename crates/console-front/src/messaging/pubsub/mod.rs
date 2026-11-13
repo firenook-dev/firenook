@@ -1646,16 +1646,12 @@ async fn check_filter(
             }));
         }
     };
-    let messages = body
-        .topic
-        .as_deref()
-        .map(|topic| {
-            console
-                .runtime
-                .broker()
-                .newest_messages(topic, FILTER_CHECK)
-        })
-        .unwrap_or_default();
+    let messages = body.topic.as_deref().map_or_default(|topic| {
+        console
+            .runtime
+            .broker()
+            .newest_messages(topic, FILTER_CHECK)
+    });
     let (checked, matched, sample_ids) = blocking("the filter check", move || {
         let mut matched = 0_u32;
         let mut samples = Vec::new();

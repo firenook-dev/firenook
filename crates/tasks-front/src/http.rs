@@ -675,8 +675,7 @@ fn random_safe_integer() -> u64 {
     hasher.write_u128(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|elapsed| elapsed.as_nanos())
-            .unwrap_or_default(),
+            .map_or_default(|elapsed| elapsed.as_nanos()),
     );
     hasher.finish() % (MAX_SAFE_INTEGER + 1)
 }

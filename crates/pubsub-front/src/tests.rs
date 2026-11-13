@@ -876,8 +876,7 @@ mod backlog {
             data: text.as_bytes().to_vec(),
             ordering_key: key.to_owned(),
             attributes: kind
-                .map(|kind| BTreeMap::from([("kind".to_owned(), kind.to_owned())]))
-                .unwrap_or_default(),
+                .map_or_default(|kind| BTreeMap::from([("kind".to_owned(), kind.to_owned())])),
             ..PubsubMessage::default()
         }
     }

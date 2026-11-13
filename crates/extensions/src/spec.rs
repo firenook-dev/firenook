@@ -111,7 +111,7 @@ pub fn function_resources(spec: &Value, params: &Params) -> Result<Vec<Value>, E
     let resources: Vec<Value> = spec
         .get("resources")
         .and_then(Value::as_array)
-        .map(|list| {
+        .map_or_default(|list| {
             list.iter()
                 .filter(|resource| {
                     resource
@@ -121,8 +121,7 @@ pub fn function_resources(spec: &Value, params: &Params) -> Result<Vec<Value>, E
                 })
                 .cloned()
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     let substituted = substitute_params(&Value::Array(resources), params)?;
     Ok(substituted.as_array().cloned().unwrap_or_default())
 }

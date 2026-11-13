@@ -939,8 +939,7 @@ impl PubsubRuntime {
     pub fn function_targets(&self, topic: &str) -> Vec<FunctionTarget> {
         lock(&self.inner.targets)
             .get(topic)
-            .map(|targets| targets.iter().map(Target::describe).collect())
-            .unwrap_or_default()
+            .map_or_default(|targets| targets.iter().map(Target::describe).collect())
     }
 
     /// Every topic with function targets, and its targets.

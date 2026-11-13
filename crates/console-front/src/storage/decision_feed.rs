@@ -422,12 +422,11 @@ impl DecisionFeed {
         index
             .by_name
             .get(&(Arc::from(bucket), Arc::from(name)))
-            .map(|list| {
+            .map_or_default(|list| {
                 list.iter()
                     .map(|(_, decision)| decision.as_ref().clone())
                     .collect()
             })
-            .unwrap_or_default()
     }
 
     /// The oldest decision the ring holds, RFC 3339.

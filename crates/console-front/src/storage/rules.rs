@@ -802,13 +802,11 @@ pub(crate) async fn read_rules(
         mode: rules_mode(mode),
         source: current
             .as_ref()
-            .map(|installed| installed.ruleset.source().to_owned())
-            .unwrap_or_default(),
+            .map_or_default(|installed| installed.ruleset.source().to_owned()),
         enforced: current.is_some(),
         hash: current
             .as_ref()
-            .map(|installed| installed.hash.clone())
-            .unwrap_or_default(),
+            .map_or_default(|installed| installed.hash.clone()),
         origin: current.as_ref().map(|installed| origin(installed.origin)),
         path: path.map(|path| path.display().to_string()),
         file_source,

@@ -400,15 +400,12 @@ impl MockAccess {
                 let name = value["__name__"]
                     .as_str()
                     .map_or_else(|| path.clone().unwrap_or_default(), str::to_owned);
-                let data = value["data"]
-                    .as_object()
-                    .map(|fields| {
-                        fields
-                            .iter()
-                            .map(|(key, value)| (key.clone(), json_value(value)))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let data = value["data"].as_object().map_or_default(|fields| {
+                    fields
+                        .iter()
+                        .map(|(key, value)| (key.clone(), json_value(value)))
+                        .collect()
+                });
                 Ok(Some(Resource::new(name, data)))
             };
             entries.push((path, result));

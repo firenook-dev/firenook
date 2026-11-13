@@ -241,8 +241,7 @@ async fn snapshot(State(state): State<ComputeState>) -> Json<EventarcSnapshot> {
                     .backend
                     .env
                     .get("ALLOWED_EVENT_TYPES")
-                    .map(|types| types.split(',').map(str::trim).collect())
-                    .unwrap_or_default();
+                    .map_or_default(|types| types.split(',').map(str::trim).collect());
                 let events = loaded
                     .spec
                     .get("events")

@@ -147,15 +147,13 @@ fn changed_paths(
         return match mode {
             WatchMode::Recursive => vec![root.to_path_buf()],
             WatchMode::NonRecursive => {
-                let mut entries: Vec<PathBuf> = std::fs::read_dir(root)
-                    .map(|entries| {
-                        entries
-                            .filter_map(Result::ok)
-                            .map(|entry| entry.path())
-                            .filter(|path| keep(path))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let mut entries: Vec<PathBuf> = std::fs::read_dir(root).map_or_default(|entries| {
+                    entries
+                        .filter_map(Result::ok)
+                        .map(|entry| entry.path())
+                        .filter(|path| keep(path))
+                        .collect()
+                });
                 entries.sort();
                 entries
             }

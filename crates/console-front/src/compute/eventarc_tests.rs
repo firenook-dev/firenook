@@ -285,8 +285,7 @@ fn the_event_filter_is_one_language_in_the_console_and_the_engine() {
         assert_eq!(field["help"], info.help.as_str(), "{}", info.key);
         let values: Vec<&str> = field["values"]
             .as_array()
-            .map(|values| values.iter().filter_map(Value::as_str).collect())
-            .unwrap_or_default();
+            .map_or_default(|values| values.iter().filter_map(Value::as_str).collect());
         assert_eq!(values, info.values, "{}", info.key);
     }
     assert!(crate::filter::golden::run(EVENT_CASES) >= 30);

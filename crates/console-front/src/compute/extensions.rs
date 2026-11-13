@@ -591,8 +591,7 @@ fn summary(
     let project_dir = control
         .extensions
         .as_ref()
-        .map(|extensions| extensions.config().project_dir.clone())
-        .unwrap_or_default();
+        .map_or_default(|extensions| extensions.config().project_dir.clone());
     let loaded = instance.loaded.as_ref();
     let spec = loaded.map_or(&Value::Null, |loaded| &loaded.spec);
     let registry = instance.status.kind != "local";
@@ -868,8 +867,7 @@ async fn instance_detail(
     let spec = &loaded.spec;
     let project_dir = config
         .as_ref()
-        .map(|config| config.project_dir.clone())
-        .unwrap_or_default();
+        .map_or_default(|config| config.project_dir.clone());
     ExtensionInstanceDetail {
         author: spec.get("author").and_then(|author| {
             Some(ExtensionAuthor {
@@ -967,17 +965,14 @@ fn apis_of(spec: &Value) -> Vec<ExtensionApi> {
 /// instance publishes with.
 fn events_of(loaded: &firenook_extensions::LoadedExtension) -> ExtensionEvents {
     let env = &loaded.backend.env;
-    let allowed: Vec<String> = env
-        .get("ALLOWED_EVENT_TYPES")
-        .map(|types| {
-            types
-                .split(',')
-                .map(str::trim)
-                .filter(|entry| !entry.is_empty())
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
+    let allowed: Vec<String> = env.get("ALLOWED_EVENT_TYPES").map_or_default(|types| {
+        types
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(str::to_owned)
+            .collect()
+    });
     let channel = env
         .get("EVENTARC_CHANNEL")
         .filter(|channel| !channel.is_empty())
@@ -1006,7 +1001,7 @@ fn events_of(loaded: &firenook_extensions::LoadedExtension) -> ExtensionEvents {
 fn lifecycle_of(spec: &Value) -> Vec<ExtensionLifecycleHook> {
     spec.get("lifecycleEvents")
         .and_then(Value::as_object)
-        .map(|hooks| {
+        .map_or_default(|hooks| {
             hooks
                 .iter()
                 .map(|(stage, hook)| ExtensionLifecycleHook {
@@ -1017,7 +1012,6 @@ fn lifecycle_of(spec: &Value) -> Vec<ExtensionLifecycleHook> {
                 })
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 /// The instance's parameter files that exist, relative to the project.
@@ -1048,8 +1042,7 @@ fn functions_of(
     let not_loaded = state
         .monitor()
         .codebase(id)
-        .map(|codebase| codebase.not_loaded)
-        .unwrap_or_default();
+        .map_or_default(|codebase| codebase.not_loaded);
     let mut functions = Vec::new();
     for resource in list(spec, "resources") {
         let Some(name) = text(resource, "name") else {

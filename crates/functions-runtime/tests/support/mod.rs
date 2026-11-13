@@ -250,10 +250,7 @@ impl Harness {
     }
 
     pub fn events(&self) -> Vec<LogEvent> {
-        self.events
-            .lock()
-            .map(|events| events.clone())
-            .unwrap_or_default()
+        self.events.lock().map_or_default(|events| events.clone())
     }
 
     /// The end lines written for one invocation.

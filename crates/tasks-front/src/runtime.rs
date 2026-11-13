@@ -625,8 +625,7 @@ impl State {
     fn controls(&self, key: &str) -> Controls {
         self.console
             .get(key)
-            .map(|console| console.controls)
-            .unwrap_or_default()
+            .map_or_default(|console| console.controls)
     }
 }
 
@@ -1168,10 +1167,7 @@ impl TasksRuntime {
             let mut active = false;
             let mut next_due: Option<SystemTime> = None;
             for (key, queue) in queues.iter_mut() {
-                let controls = console
-                    .get(key)
-                    .map(|console| console.controls)
-                    .unwrap_or_default();
+                let controls = console.get(key).map_or_default(|console| console.controls);
                 queue.release_due(wall);
                 queue.trim_windows(now);
                 queue.refill_tokens(now);

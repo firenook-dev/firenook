@@ -239,14 +239,13 @@ pub fn codebases_from_config(config: &Value, project_dir: &Path) -> Vec<Codebase
                 ignore: entry
                     .get("ignore")
                     .and_then(Value::as_array)
-                    .map(|values| {
+                    .map_or_default(|values| {
                         values
                             .iter()
                             .filter_map(Value::as_str)
                             .map(str::to_owned)
                             .collect()
-                    })
-                    .unwrap_or_default(),
+                    }),
                 config_dir: entry
                     .get("configDir")
                     .and_then(Value::as_str)

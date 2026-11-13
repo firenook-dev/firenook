@@ -1855,8 +1855,7 @@ mod console {
             state
                 .console
                 .get(key)
-                .map(|console| console.history.iter().cloned().collect())
-                .unwrap_or_default()
+                .map_or_default(|console| console.history.iter().cloned().collect())
         })
     }
 

@@ -436,8 +436,7 @@ impl MonitorView<'_> {
         self.state
             .stats
             .get(function_id)
-            .map(store::StatsState::snapshot)
-            .unwrap_or_default()
+            .map_or_default(store::StatsState::snapshot)
     }
 
     /// Kept invocations, running and finished, newest first, older than

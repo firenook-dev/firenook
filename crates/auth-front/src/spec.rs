@@ -93,30 +93,24 @@ impl Spec {
                 let Some(operation_id) = op["operationId"].as_str() else {
                     continue;
                 };
-                let security = op["security"]
-                    .as_array()
-                    .map(|entries| {
-                        entries
-                            .iter()
-                            .filter_map(|entry| entry.as_object())
-                            .flat_map(|entry| entry.keys().cloned())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
+                let security = op["security"].as_array().map_or_default(|entries| {
+                    entries
+                        .iter()
+                        .filter_map(|entry| entry.as_object())
+                        .flat_map(|entry| entry.keys().cloned())
+                        .collect::<Vec<_>>()
+                });
                 let (body_schema, body_content_types) = resolve_body(&document, &op["requestBody"]);
-                let query_parameters = op["parameters"]
-                    .as_array()
-                    .map(|parameters| {
-                        parameters
-                            .iter()
-                            .filter(|parameter| parameter["in"] == "query")
-                            .map(|parameter| Parameter {
-                                name: parameter["name"].as_str().unwrap_or_default().to_owned(),
-                                schema: parameter["schema"].clone(),
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let query_parameters = op["parameters"].as_array().map_or_default(|parameters| {
+                    parameters
+                        .iter()
+                        .filter(|parameter| parameter["in"] == "query")
+                        .map(|parameter| Parameter {
+                            name: parameter["name"].as_str().unwrap_or_default().to_owned(),
+                            schema: parameter["schema"].clone(),
+                        })
+                        .collect()
+                });
                 operations.insert(
                     method.to_uppercase(),
                     Operation {
@@ -191,9 +185,7 @@ impl Spec {
     #[must_use]
     pub fn served_document(&self, protocol: &str, host: Option<&str>) -> JsonValue {
         let mut document = self.document.clone();
-        let default_host = host
-            .map(|host| format!("{protocol}://{host}"))
-            .unwrap_or_default();
+        let default_host = host.map_or_default(|host| format!("{protocol}://{host}"));
         let servers_with_emulators = |servers: &JsonValue| -> JsonValue {
             let mut result = Vec::new();
             for server in servers.as_array().into_iter().flatten() {
@@ -543,8 +535,7 @@ fn validate_value(
                 {
                     let known: Vec<&String> = schema["properties"]
                         .as_object()
-                        .map(|properties| properties.keys().collect())
-                        .unwrap_or_default();
+                        .map_or_default(|properties| properties.keys().collect());
                     for (name, child) in object {
                         if !known.contains(&name) {
                             validate_value(additional, child, &format!("{path}/{name}"), errors);
