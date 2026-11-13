@@ -1922,3 +1922,40 @@ behaviour was the question.
   latest.
 - [x] The CLI's `next` moved to 0.2.3 by hand on 2026-11-12 (trusted publishing
   cannot move a tag), so `latest` and `next` are both 0.2.3.
+
+## 0.2.4, every recorded answer replayed but 26, 18 bugs fixed, and deep Security Rules that no longer stop the engine
+
+- [x] The conformance record replayed: of the 6,592 answers 0.2.3 published,
+  516 had no replay. The Firestore, Rules, suite, Storage, Functions and
+  developer-tools recordings got theirs (PR #194, #195, #196), and CI fails
+  when a recorded answer has no replay or a listed one is replayed again
+  (PR #212). 0.2.4 records 6,791 in 43 sets: 6,414 compared exactly, 351
+  different on purpose with their reasons, 26 listed under #229.
+- [x] What those replays found, each fixed as the recording answers: six
+  Firestore differences (#197–#202, PR #215), four in Security Rules (#203,
+  #205, #206, #208, PR #219), and six in the CLI, Functions, the hub and
+  Auth, three of them 0.2.3's known issues (#187–#189, #209–#211, PR #216).
+- [x] Security Rules limits as production has them, recorded first: an
+  expression refused at compile 100 levels deep (#204, PR #226, from 79 new
+  production probes), and a reload that does not compile answered in the
+  official parser's words (#207, PR #230, from 120 reloads recorded from the
+  official emulator; the 26 still answered otherwise are #229).
+- [x] Two ways deep rules stopped the engine, found while doing so: functions
+  chained at both limits overflowed the evaluator's stack (#228, PR #232),
+  and thousands of nested brackets or match blocks overflowed the parser
+  (#231, PR #233).
+- [x] CI: Rust 1.100's Clippy (PR #217) and Cargo (PR #224, with a week's
+  wait before a new crate version), three flaky console journeys (#214,
+  #220, PR #218, #225), and the five-platform packed install run after a
+  merge instead of on every pull request, one `CI result` check main
+  requires, and the browser suite's SDK build kept between runs (PR #227).
+- [x] Published as `firenook@0.2.4` with `@firenook/cli-<platform>` ×5
+  (release PR #236, tag `npm-v0.2.4` on bb425dd, engine 4be26be, built with
+  Rust 1.100.0). Release run 43391194693, dispatched with `latest` and
+  approved on 2026-11-13, passed every gate on its first attempt and
+  published all six packages: the CLI on `latest`, the native packages on
+  `next`. Registry integrity equals the release assets for all six, and
+  registry signatures and provenance attestations verify on a fresh install,
+  which answers `firenook --version` with 0.2.4 and its engine. The image is
+  public as `0.2.4` and `latest`, and the GitHub release is the repository's
+  latest.
