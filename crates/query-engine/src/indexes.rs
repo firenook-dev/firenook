@@ -227,13 +227,23 @@ impl IndexCatalog {
     /// automatic indexes are assumed unless a field override replaces them;
     /// collection-group automatic indexes must be declared explicitly.
     pub fn validate(&self, query: &Query) -> Result<(), IndexConfigError> {
+        self.check(query, false)
+    }
+
+    /// [`Self::validate`] for an aggregation over `query`, which merged
+    /// single-field indexes never serve (see [`composite_need`]).
+    pub fn validate_aggregation(&self, query: &Query) -> Result<(), IndexConfigError> {
+        self.check(query, true)
+    }
+
+    fn check(&self, query: &Query, aggregation: bool) -> Result<(), IndexConfigError> {
         let (collection_group, scope) = query_target(query.scope_ref());
         let usages = collect_usages(query);
         if usages.is_empty() {
             return Ok(());
         }
 
-        if let Some(need) = composite_need(&collection_group, scope, &usages, query) {
+        if let Some(need) = composite_need(&collection_group, scope, &usages, query, aggregation) {
             if self.serves(&need) {
                 return Ok(());
             }
@@ -270,11 +280,22 @@ impl IndexCatalog {
     /// is the same question as "what must be declared".
     #[must_use]
     pub fn advise(&self, query: &Query) -> Option<IndexAdvice> {
-        let Err(IndexConfigError::Missing(requirement)) = Self::default().validate(query) else {
+        self.advice(query, false)
+    }
+
+    /// [`Self::advise`] for an aggregation over `query`.
+    #[must_use]
+    pub fn advise_aggregation(&self, query: &Query) -> Option<IndexAdvice> {
+        self.advice(query, true)
+    }
+
+    fn advice(&self, query: &Query, aggregation: bool) -> Option<IndexAdvice> {
+        let Err(IndexConfigError::Missing(requirement)) = Self::default().check(query, aggregation)
+        else {
             return None;
         };
         Some(IndexAdvice {
-            declared: self.validate(query).is_ok(),
+            declared: self.check(query, aggregation).is_ok(),
             requirement,
         })
     }
@@ -549,11 +570,18 @@ fn prefix_field_matches(wanted: &IndexRequirementField, declared: &IndexRequirem
 /// query's ordering as Firestore normalizes it: the `orderBy` fields, then
 /// each other inequality field in field-path order, in the direction of the
 /// last `orderBy` (ascending without one), then a vector field.
+///
+/// An `aggregation` is served by one index, never by merged single-field
+/// ones: production refuses a count and sum over two equality filters for
+/// want of the composite index on those two fields (fixture `rest-v1`
+/// production `aggregation-composite-filter/2`), where a query for the
+/// documents is served by merging.
 fn composite_need(
     collection_group: &str,
     scope: IndexScope,
     usages: &BTreeMap<String, FieldUsage>,
     query: &Query,
+    aggregation: bool,
 ) -> Option<CompositeNeed> {
     let vector = usages.values().find_map(|usage| {
         usage.special_modes.iter().find_map(|mode| match mode {
@@ -576,7 +604,8 @@ fn composite_need(
     let constrained = !equality.is_empty() || !contains.is_empty();
     let requires_manual = vector.is_some()
         || range_or_order.len() > 1
-        || (constrained && range_or_order.iter().any(|usage| !usage.equality));
+        || (constrained && range_or_order.iter().any(|usage| !usage.equality))
+        || (aggregation && usages.len() > 1);
     if !requires_manual {
         return None;
     }
@@ -616,8 +645,10 @@ fn composite_need(
             fields,
         },
         prefix,
-        // Merging serves equalities and an order alone.
-        mergeable: vector.is_none() && !usages.values().any(|usage| usage.inequality),
+        // Merging serves equalities and an order alone, for documents.
+        mergeable: !aggregation
+            && vector.is_none()
+            && !usages.values().any(|usage| usage.inequality),
     })
 }
 
@@ -1251,6 +1282,63 @@ mod tests {
             ))
             .order_by(field("population"), Direction::Descending);
         assert_eq!(IndexCatalog::default().advise(&one_range), None);
+    }
+
+    /// An aggregation is answered from one index: production refuses a
+    /// count and sum over equalities on `synthetic` and `sequence` for want
+    /// of the composite index on (`sequence`, `synthetic`) (fixture
+    /// `rest-v1` production `aggregation-composite-filter/2`), the
+    /// documents of which merged single-field indexes serve.
+    #[test]
+    fn an_aggregation_over_two_equalities_needs_their_composite_index() {
+        let equalities = items().filter(Filter::And(vec![
+            filter("synthetic", FieldOperator::Equal, Value::Boolean(true)),
+            filter("sequence", FieldOperator::Equal, Value::Integer(1)),
+        ]));
+        let empty = IndexCatalog::default();
+        assert_eq!(empty.advise(&equalities), None);
+        assert!(empty.validate(&equalities).is_ok());
+        let advice = empty
+            .advise_aggregation(&equalities)
+            .expect("an aggregation needs a composite index");
+        assert!(!advice.declared);
+        assert_eq!(
+            advice.requirement.config_entry(),
+            serde_json::json!({
+                "collectionGroup": "items",
+                "queryScope": "COLLECTION",
+                "fields": [
+                    {"fieldPath": "sequence", "order": "ASCENDING"},
+                    {"fieldPath": "synthetic", "order": "ASCENDING"},
+                ],
+            })
+        );
+        assert_eq!(
+            empty.validate_aggregation(&equalities),
+            Err(IndexConfigError::Missing(advice.requirement))
+        );
+        // The equality fields in either order and direction serve it.
+        let declared_index = declared("COLLECTION", &[&["synthetic desc", "sequence"]]);
+        assert!(declared_index.validate_aggregation(&equalities).is_ok());
+        assert!(
+            declared_index
+                .advise_aggregation(&equalities)
+                .is_some_and(|advice| advice.declared)
+        );
+        // Merged indexes, which serve the documents ordered by `rank`, do
+        // not serve the aggregation.
+        let ordered = equalities
+            .clone()
+            .order_by(field("rank"), Direction::Ascending);
+        let merged = declared(
+            "COLLECTION",
+            &[&["sequence", "rank"], &["synthetic", "rank"]],
+        );
+        assert_eq!(needed(&merged, &ordered), None);
+        assert!(merged.validate_aggregation(&ordered).is_err());
+        // One field is served by its automatic index.
+        let one = items().filter(equality("sequence"));
+        assert_eq!(empty.advise_aggregation(&one), None);
     }
 
     /// A single-field index a collection group query needs is declared by a

@@ -1725,7 +1725,7 @@ impl Firestore for FirestoreService {
         let rules_candidate = firenook_rules_runtime::query_candidate(&database, &query)
             .map_err(Status::invalid_argument)?;
         self.query_policy
-            .validate(database.database_id(), &query)
+            .validate_aggregation(database.database_id(), &query)
             .map_err(|error| index_status(&error))?;
         let (token, new_transaction, historical) = match request.consistency_selector {
             None => (Vec::new(), false, None),
@@ -2156,10 +2156,12 @@ fn commit_status(error: CommitError) -> Status {
         CommitError::AlreadyExists(key) => {
             Status::already_exists(format!("document already exists: {key}"))
         }
+        // Production's words for an update of a missing document (fixture
+        // `webchannel-v8` production `write-missing-update-error`).
         CommitError::ExistencePrecondition {
             key,
             expected: true,
-        } => Status::not_found(format!("document not found: {key}")),
+        } => Status::not_found(format!("No document to update: {key}")),
         CommitError::ExistencePrecondition {
             key,
             expected: false,

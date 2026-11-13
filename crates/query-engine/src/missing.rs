@@ -178,6 +178,9 @@ pub type MissingIndexListener = Arc<dyn Fn(MissingIndexChange) + Send + Sync>;
 /// so a saved file can be asked whether it declares the index now.
 struct Slot {
     query: Query,
+    /// Whether the query was an aggregation's, which merged indexes never
+    /// serve.
+    aggregation: bool,
     shape: QueryShape,
     queries: u64,
     first_seen: SystemTime,
@@ -235,9 +238,15 @@ impl MissingIndexes {
         lock(&self.listeners).push(listener);
     }
 
-    /// Counts a query on `database` that needed `requirement`, undeclared,
-    /// and warns when that is news.
-    pub(crate) fn record(&self, database: &str, requirement: &IndexRequirement, query: &Query) {
+    /// Counts a query on `database` (an aggregation's, when `aggregation`)
+    /// that needed `requirement`, undeclared, and warns when that is news.
+    pub(crate) fn record(
+        &self,
+        database: &str,
+        requirement: &IndexRequirement,
+        query: &Query,
+        aggregation: bool,
+    ) {
         let now = SystemTime::now();
         let (change, warn) = {
             let mut slots = lock(&self.slots);
@@ -260,6 +269,7 @@ impl MissingIndexes {
                     requirement.clone(),
                     Slot {
                         query: query.clone(),
+                        aggregation,
                         shape: QueryShape::of(query),
                         queries: 1,
                         first_seen: now,
@@ -290,9 +300,12 @@ impl MissingIndexes {
             for (database, indexes) in &mut slots.by_database {
                 let catalog = catalogs.catalog(database);
                 for slot in indexes.values_mut() {
-                    let declared = catalog
-                        .advise(&slot.query)
-                        .is_none_or(|advice| advice.declared);
+                    let advice = if slot.aggregation {
+                        catalog.advise_aggregation(&slot.query)
+                    } else {
+                        catalog.advise(&slot.query)
+                    };
+                    let declared = advice.is_none_or(|advice| advice.declared);
                     moved |= declared != slot.declared;
                     slot.declared = declared;
                     // Declared, it is news again the next time it is missing.
@@ -529,6 +542,42 @@ mod tests {
             .expect("answered");
         assert_eq!(lock(&fixture.warned).len(), 2, "news again");
         assert_eq!(fixture.missing.list()[0].queries, 2);
+    }
+
+    /// An aggregation's index stays missing when a file is saved that does
+    /// not declare it, though merged single-field indexes serve the same
+    /// query's documents.
+    #[test]
+    fn an_aggregation_stays_missing_until_its_index_is_declared() {
+        let strict = fixture(true);
+        let fixture = fixture(false);
+        let query =
+            Query::new(QueryScope::collection("orders").expect("scope")).filter(Filter::And(vec![
+                equal("status", Value::Integer(1)),
+                equal("total", Value::Integer(2)),
+            ]));
+        fixture
+            .policy
+            .validate("(default)", &query)
+            .expect("documents are answered");
+        assert_eq!(fixture.missing.missing(), 0, "merged indexes serve them");
+        fixture
+            .policy
+            .validate_aggregation("(default)", &query)
+            .expect("answered, as the official emulator answers it");
+        assert_eq!(*lock(&fixture.warned), ["(default) orders"]);
+        fixture.missing.refresh(&fixture.catalogs);
+        assert_eq!(fixture.missing.missing(), 1, "still undeclared");
+        fixture.catalogs.replace(
+            "(default)",
+            IndexCatalog::from_json(DECLARED).expect("catalog"),
+        );
+        fixture.missing.refresh(&fixture.catalogs);
+        assert_eq!(fixture.missing.missing(), 0, "(status, total) serves it");
+        strict
+            .policy
+            .validate_aggregation("(default)", &query)
+            .expect_err("refused under --strict-indexes");
     }
 
     #[test]

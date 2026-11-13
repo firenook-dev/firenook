@@ -55,7 +55,10 @@ pub struct WatchChange {
 pub struct ChangeBatch {
     /// Revision that was evaluated.
     pub revision: Revision,
-    /// Target-relative transitions in document-key order.
+    /// Target-relative transitions. A query target's initial batch lists its
+    /// documents in the query's order, as Firestore sends a first snapshot
+    /// (fixture `webchannel-v8` `numeric-resource-id-ordering`); every other
+    /// batch is in document-key order.
     pub changes: Vec<WatchChange>,
 }
 
@@ -83,17 +86,10 @@ impl WatchTarget {
         edition: DatabaseEdition,
         snapshot: &Snapshot,
     ) -> Result<(Self, ChangeBatch), QueryError> {
-        let (documents, order_keys) = evaluate(snapshot, &database, &spec, edition)?;
+        let mut changes = Vec::new();
+        let (documents, order_keys) =
+            evaluate(snapshot, &database, &spec, edition, Some(&mut changes))?;
         let logical_usage = visible_logical_usage(&database, &spec, &documents);
-        let changes = documents
-            .values()
-            .cloned()
-            .map(|document| WatchChange {
-                key: document.key.clone(),
-                kind: ChangeKind::Upsert,
-                document: Some(document),
-            })
-            .collect();
         let batch = ChangeBatch {
             revision: snapshot.revision(),
             changes,
@@ -128,6 +124,19 @@ impl WatchTarget {
     /// Current target document keys in stable resource-name order.
     pub fn document_keys(&self) -> impl Iterator<Item = &DocumentKey> {
         self.documents.keys()
+    }
+
+    /// The documents an explicit documents target names that its view does
+    /// not hold, because they do not exist; none for a query target.
+    pub fn missing_documents(&self) -> impl Iterator<Item = &DocumentKey> {
+        let named = match &self.spec {
+            TargetSpec::Documents(keys) => Some(keys),
+            TargetSpec::Query(_) => None,
+        };
+        named
+            .into_iter()
+            .flatten()
+            .filter(|key| !self.documents.contains_key(*key))
     }
 
     /// Logical bytes retained by this target's specification and visible view.
@@ -378,7 +387,8 @@ impl WatchTarget {
 
     /// Re-evaluates the target and returns only transitions from its prior view.
     pub fn refresh(&mut self, snapshot: &Snapshot) -> Result<ChangeBatch, QueryError> {
-        let (next, order_keys) = evaluate(snapshot, &self.database, &self.spec, self.edition)?;
+        let (next, order_keys) =
+            evaluate(snapshot, &self.database, &self.spec, self.edition, None)?;
         let keys = self
             .documents
             .keys()
@@ -453,13 +463,23 @@ type View = (
 
 /// Evaluates the target. A query target's sort keys are taken while each
 /// result is still decoded, so a compact disk view is never decoded again
-/// just to place a later change.
+/// just to place a later change. With `initial`, each visible document is
+/// also pushed there as an upsert, in the order the query returned it (a
+/// documents target's in key order): the view's map orders documents by
+/// key bytes, which is neither a query's order nor Firestore's name order
+/// (`__id-2__` sorts before `__id-9223372036854775808__` by bytes).
 fn evaluate(
     snapshot: &Snapshot,
     database: &DatabaseName,
     spec: &TargetSpec,
     edition: DatabaseEdition,
+    mut initial: Option<&mut Vec<WatchChange>>,
 ) -> Result<View, QueryError> {
+    let upsert = |document: &WatchDocument| WatchChange {
+        key: document.key.clone(),
+        kind: ChangeKind::Upsert,
+        document: Some(document.clone()),
+    };
     match spec {
         TargetSpec::Query(query) => {
             let incremental = IncrementalQuery::new(query, edition)?;
@@ -478,12 +498,16 @@ fn evaluate(
                     document.projected_fields().cloned(),
                     snapshot.is_disk_backed(),
                 );
+                if let Some(initial) = initial.as_deref_mut() {
+                    initial.push(upsert(&visible));
+                }
                 documents.insert(visible.key.clone(), visible);
             }
             Ok((documents, order_keys))
         }
-        TargetSpec::Documents(keys) => Ok((
-            keys.iter()
+        TargetSpec::Documents(keys) => {
+            let documents = keys
+                .iter()
                 .filter_map(|key| {
                     snapshot.get(key).map(|document| {
                         let visible = WatchDocument::new(
@@ -495,9 +519,12 @@ fn evaluate(
                         (key.clone(), visible)
                     })
                 })
-                .collect(),
-            BTreeMap::new(),
-        )),
+                .collect::<BTreeMap<_, _>>();
+            if let Some(initial) = initial {
+                initial.extend(documents.values().map(upsert));
+            }
+            Ok((documents, BTreeMap::new()))
+        }
     }
 }
 
@@ -640,6 +667,75 @@ mod tests {
             "nested_listener_accounting_profile documents={} polls=1000 elapsed_ns={}",
             expected.entries,
             started.elapsed().as_nanos()
+        );
+    }
+
+    /// A first snapshot lists the documents as the query returns them, as
+    /// both oracles send them (fixture `webchannel-v8`
+    /// `numeric-resource-id-ordering`): numeric ids by value before string
+    /// ids, and a field order by that field, never by the key's bytes.
+    #[test]
+    fn initial_batch_follows_the_query_order_not_the_key_bytes() {
+        let database = DatabaseName::new("demo", "(default)").expect("valid database");
+        let store = Store::default();
+        let ids = [
+            ("plain", 1),
+            ("__id-2__", 2),
+            ("__id9223372036854775807__", 3),
+            ("__id7__", 4),
+            ("__id-9223372036854775808__", 5),
+        ];
+        let writes = ids
+            .iter()
+            .map(|(id, rank)| Write::Set {
+                key: DocumentKey::new(database.clone(), format!("ids/{id}")).expect("valid key"),
+                fields: BTreeMap::from([("rank".to_owned(), Value::Integer(*rank))]),
+                transforms: Vec::new(),
+                precondition: Precondition::None,
+            })
+            .collect::<Vec<_>>();
+        store.commit(&writes).expect("seed should commit");
+        let initial = |query: Query| {
+            WatchTarget::initialize(
+                1,
+                database.clone(),
+                TargetSpec::Query(Box::new(query)),
+                DatabaseEdition::Standard,
+                &store.snapshot(),
+            )
+            .expect("target should initialize")
+            .1
+            .changes
+            .into_iter()
+            .map(|change| {
+                assert_eq!(change.kind, ChangeKind::Upsert);
+                change.key.path().rsplit('/').next().expect("id").to_owned()
+            })
+            .collect::<Vec<_>>()
+        };
+        let scope = || QueryScope::collection("ids").expect("valid scope");
+        assert_eq!(
+            initial(Query::new(scope()).order_by(FieldPath::DocumentId, Direction::Ascending)),
+            [
+                "__id-9223372036854775808__",
+                "__id-2__",
+                "__id7__",
+                "__id9223372036854775807__",
+                "plain",
+            ]
+        );
+        assert_eq!(
+            initial(Query::new(scope()).order_by(
+                FieldPath::field(["rank"]).expect("valid field"),
+                Direction::Descending,
+            )),
+            [
+                "__id-9223372036854775808__",
+                "__id7__",
+                "__id9223372036854775807__",
+                "__id-2__",
+                "plain",
+            ]
         );
     }
 

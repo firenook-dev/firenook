@@ -109,6 +109,7 @@ fn initialize(
             expected_count,
         },
     )
+    .map_err(|refusal| refusal.status)
 }
 
 async fn initial_frames(initial: &InitialTarget) -> Vec<ListenResponse> {

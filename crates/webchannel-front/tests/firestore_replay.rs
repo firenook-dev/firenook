@@ -99,9 +99,6 @@ const WAIT: Duration = Duration::from_secs(5);
 const DELIVERS: &[(&str, &str, usize)] = &[
     // The unchanged document and its snapshot end are not sent again.
     (JAVA_WEBCHANNEL, "unicode-framing/18", 1),
-    // One `error` array where production sends `__sm__` and `close`.
-    (CLOUD_WEBCHANNEL, "write-missing-update-error/4", 1),
-    (CLOUD_WEBCHANNEL, "write-missing-update-error/7", 2),
 ];
 
 /// The recordings `oracle_replay.rs` replays too: it notes their handshakes,
@@ -188,11 +185,53 @@ const DIFFERS: &[Differs] = &[
         instead: Instead::Replay(never_adds_target_1006),
     },
     Differs {
+        set: JAVA_WEBCHANNEL,
+        case: "multiple-inequality-query/12",
+        compared: Compared::Answer,
+        reason: "a query ordered by more fields after `__name__` is refused with production's message, `Order by clause cannot contain more fields after the key key` (webchannel-v8/production-cloud-firestore multiple-inequality-query/8); Java 1.22.0 says `order by clause cannot contain more fields after the key`",
+        instead: Instead::Production("multiple-inequality-query/8"),
+    },
+    Differs {
+        set: JAVA_WEBCHANNEL,
+        case: "reserved-resource-id-error/2",
+        compared: Compared::Answer,
+        reason: "a query target whose parent is under a reserved resource id is added, then removed with INVALID_ARGUMENT, as production (webchannel-v8/production-cloud-firestore reserved-resource-id-error/2 adds target 1002 before removing it); Java 1.22.0 removes it without adding it",
+        instead: Instead::Production("reserved-resource-id-error/2"),
+    },
+    Differs {
+        set: JAVA_WEBCHANNEL,
+        case: "reserved-resource-id-error/6",
+        compared: Compared::Answer,
+        reason: "a query target whose parent is under a reserved resource id is added, then removed with INVALID_ARGUMENT, as production (webchannel-v8/production-cloud-firestore reserved-resource-id-error/6 adds target 1002 before removing it); Java 1.22.0 removes it without adding it",
+        instead: Instead::Production("reserved-resource-id-error/6"),
+    },
+    Differs {
+        set: JAVA_WEBCHANNEL,
+        case: "write-missing-update-error/4",
+        compared: Compared::Answer,
+        reason: "a Write stream update of a missing document ends the stream as production does, with `{__sm__: {status: [[{error: {code: 404, message: No document to update: <name>, status: NOT_FOUND}}]]}}` and then a `close` array (webchannel-v8/production-cloud-firestore write-missing-update-error/4); Java 1.22.0 sends one `{error: {status, message}}` array, worded `NOT_FOUND: no entity to update: <its Datastore key>`",
+        instead: Instead::Production("write-missing-update-error/4"),
+    },
+    Differs {
+        set: JAVA_WEBCHANNEL,
+        case: "write-missing-update-error/7",
+        compared: Compared::Answer,
+        reason: "a Write stream update of a missing document ends the stream as production does, with `{__sm__: {status: [[{error: {code: 404, message: No document to update: <name>, status: NOT_FOUND}}]]}}` and then a `close` array (webchannel-v8/production-cloud-firestore write-missing-update-error/7); Java 1.22.0 sends one `{error: {status, message}}` array, worded `NOT_FOUND: no entity to update: <its Datastore key>`",
+        instead: Instead::Production("write-missing-update-error/7"),
+    },
+    Differs {
         set: CLOUD_WEBCHANNEL,
         case: "multiple-inequality-query/7",
         compared: Compared::Status,
         reason: "with --strict-indexes a query whose composite index is not declared is refused with FAILED_PRECONDITION as production does; the message is Firenook's own, naming the entry to add to firestore.indexes.json (COMPATIBILITY.md)",
         instead: Instead::Replay(refuses_target_1004_for_its_index),
+    },
+    Differs {
+        set: CLOUD_REST,
+        case: "aggregation-composite-filter/2",
+        compared: Compared::Status,
+        reason: "with --strict-indexes an aggregation whose composite index is not declared is refused with FAILED_PRECONDITION as production does, here for a count and sum over two equality filters, which merged single-field indexes do not serve; the message is Firenook's own, naming the entry to add to firestore.indexes.json (COMPATIBILITY.md)",
+        instead: Instead::Replay(refuses_the_aggregation_for_its_index),
     },
     Differs {
         set: JAVA_REST,
@@ -212,93 +251,7 @@ const DIFFERS: &[Differs] = &[
     },
 ];
 
-const BUG_CANDIDATES: &[Bug] = &[
-    Bug {
-        set: JAVA_WEBCHANNEL,
-        case: "numeric-resource-id-ordering/15",
-        description: "a Listen's first snapshot sends its documents in byte order of the path (__id-2__ before __id-9223372036854775808__), not in the query's numeric resource-id order",
-    },
-    Bug {
-        set: JAVA_WEBCHANNEL,
-        case: "numeric-resource-id-ordering/34",
-        description: "a Listen's first snapshot sends its documents in byte order of the path (__id-2__ before __id-9223372036854775808__), not in the query's numeric resource-id order",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "numeric-resource-id-ordering/15",
-        description: "a Listen's first snapshot sends its documents in byte order of the path (__id-2__ before __id-9223372036854775808__), not in the query's numeric resource-id order",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "numeric-resource-id-ordering/37",
-        description: "a Listen's first snapshot sends its documents in byte order of the path (__id-2__ before __id-9223372036854775808__), not in the query's numeric resource-id order",
-    },
-    Bug {
-        set: JAVA_WEBCHANNEL,
-        case: "unicode-framing/4",
-        description: "a document target on a missing document becomes CURRENT without the documentDelete both oracles send first",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "unicode-framing/4",
-        description: "a document target on a missing document becomes CURRENT without the documentDelete both oracles send first",
-    },
-    Bug {
-        set: JAVA_WEBCHANNEL,
-        case: "multiple-inequality-query/13",
-        description: "a target refused for an equality on `__name__` beside other inequalities is removed without first being added, where both oracles add it",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "multiple-inequality-query/6",
-        description: "a target refused for a missing composite index is removed without first being added, where production adds it",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "multiple-inequality-query/8",
-        description: "the refusal of an order by more fields after `__name__` says Java's `order by clause cannot contain more fields after the key`, where production says `Order by clause cannot contain more fields after the key key`",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "multiple-inequality-query/10",
-        description: "a target refused for an equality on `__name__` beside other inequalities is removed without first being added, where production adds it",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "reserved-resource-id-error/2",
-        description: "a target under a reserved resource id is removed without first being added, where production adds it (Java 1.22.0 does not)",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "reserved-resource-id-error/6",
-        description: "a target under a reserved resource id is removed without first being added, where production adds it (Java 1.22.0 does not)",
-    },
-    Bug {
-        set: JAVA_WEBCHANNEL,
-        case: "write-missing-update-error/4",
-        description: "a Write stream update of a missing document fails with `document not found: <name>`, where production says `No document to update: <name>` (and Java its own Datastore text)",
-    },
-    Bug {
-        set: JAVA_WEBCHANNEL,
-        case: "write-missing-update-error/7",
-        description: "a Write stream update of a missing document fails with `document not found: <name>`, where production says `No document to update: <name>` (and Java its own Datastore text)",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "write-missing-update-error/4",
-        description: "a Write stream error is one `{error: {status, message}}` array; production sends `{__sm__: {status: [[{error: {code: 404, message: No document to update: <name>, status}}]]}}` and then a `close` array",
-    },
-    Bug {
-        set: CLOUD_WEBCHANNEL,
-        case: "write-missing-update-error/7",
-        description: "a Write stream error is one `{error: {status, message}}` array; production sends `{__sm__: {status: [[{error: {code: 404, message: No document to update: <name>, status}}]]}}` and then a `close` array",
-    },
-    Bug {
-        set: CLOUD_REST,
-        case: "aggregation-composite-filter/2",
-        description: "with --strict-indexes, a count and sum over two equality filters is answered, where production refuses it with FAILED_PRECONDITION for want of a composite index (sequence, synthetic)",
-    },
-];
+const BUG_CANDIDATES: &[Bug] = &[];
 
 fn never_adds_target_1006(outcome: &Outcome) -> bool {
     !outcome.replayed.iter().any(|message| {
@@ -316,6 +269,18 @@ fn refuses_target_1004_for_its_index(outcome: &Outcome) -> bool {
         message["targetChange"]["targetChangeType"] == "REMOVE"
             && message["targetChange"]["targetIds"] == json!([1004])
             && message["targetChange"]["cause"]["code"] == 9
+    })
+}
+
+fn refuses_the_aggregation_for_its_index(outcome: &Outcome) -> bool {
+    outcome.replayed.first().is_some_and(|body| {
+        let error = &body[0]["error"];
+        error["code"] == 400
+            && error["status"] == "FAILED_PRECONDITION"
+            && error["message"].as_str().is_some_and(|message| {
+                message.contains("\"fieldPath\": \"sequence\"")
+                    && message.contains("\"fieldPath\": \"synthetic\"")
+            })
     })
 }
 

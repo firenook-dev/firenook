@@ -2698,9 +2698,13 @@ impl Display for QueryError {
             Self::UnsupportedVectorShape => {
                 formatter.write_str("vector queries do not support cursors or limit-to-last")
             }
-            Self::DocumentKeyOrderNotLast => {
-                formatter.write_str("order by clause cannot contain more fields after the key")
-            }
+            // Production's words for `orderBy('__name__').orderBy('key')`
+            // (fixture `webchannel-v8` production
+            // `multiple-inequality-query/8`); the Java emulator ends after
+            // "the key". Whether the last word names the field after
+            // `__name__`, which that query calls `key`, is not recorded.
+            Self::DocumentKeyOrderNotLast => formatter
+                .write_str("Order by clause cannot contain more fields after the key key"),
             Self::DocumentKeyEqualityWithOtherInequality => formatter.write_str(
                 "Equality on key is not allowed if there are other inequality fields and key does not appear in inequalities.",
             ),
@@ -3394,7 +3398,7 @@ mod tests {
         );
         assert_eq!(
             QueryError::DocumentKeyOrderNotLast.to_string(),
-            "order by clause cannot contain more fields after the key"
+            "Order by clause cannot contain more fields after the key key"
         );
 
         let key_equality = collection_query().filter(Filter::And(vec![

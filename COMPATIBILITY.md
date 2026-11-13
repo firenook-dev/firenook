@@ -82,13 +82,18 @@ field-path order with the last `orderBy`'s direction), a reversed index being
 another index; several indexes merged for equalities and an `orderBy` alone,
 each ending with that ordering, but not for a range or inequality filter;
 equalities alone, array-contains beside equalities, and one inequality
-ordered by its own field need no composite index. Not documented, and so not
+ordered by its own field need no composite index. An aggregation is answered
+from one index, never from merged ones, so one over more than one field needs
+the composite index: production refuses a count and sum over two equalities
+for want of it (`conformance/fixtures/rest-v1`). Not documented, and so not
 verified against production: equality fields in any order within an index (the
 documentation shows them as a prefix), merging with more than one `orderBy`
 field or with array-contains, a collection-group index serving a collection
 query (treated as not serving), an explicit `orderBy('__name__')` (not part of
-the index required), and queries with `or`, whose fields are checked as one
-query instead of one disjunction at a time.
+the index required), queries with `or`, whose fields are checked as one
+query instead of one disjunction at a time, and the aggregation rule for any
+other aggregation than that count and sum over equalities (a count alone, an
+average, array-contains).
 
 Who a Firestore request is from follows the official emulator on gRPC, REST
 and WebChannel alike (`conformance/fixtures/request-identity-v1`). A request
