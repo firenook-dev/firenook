@@ -566,8 +566,12 @@ test('completion offers the claim keys users carry, in the editor and the playgr
     const claims = page.getByTestId('playground-who-custom-dialog-claims')
     await claims.click()
     await page.keyboard.type('{"cons')
-    await expect(options.filter({ hasText: 'console_tier' })).toHaveCount(1)
-    await page.keyboard.press('Enter')
+    const tier = options.filter({ hasText: 'console_tier' })
+    await expect(tier).toHaveCount(1)
+    // Enter accepts an option only once the list has been open for
+    // CodeMirror's interactionDelay (75 ms), and a quick runner presses it
+    // sooner; a click on the option accepts it at once.
+    await tier.click()
     await expect(claims).toContainText('"console_tier":')
     await page.keyboard.press('Escape')
     await page.keyboard.press('Escape')
