@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { binaryPath, manifest, nodeCheck, release } from './binary.mjs';
@@ -82,6 +83,7 @@ export async function diagnose(options, cwd = process.cwd(), {quiet = false, rep
   const problems = node.problem ? [node.problem] : [];
   // Configuration findings first: they need no installed engine.
   const project = loadProject(options, cwd);
+  await moveLogging(project);
   if (node.note) project.warnings.unshift(`Firenook: ${node.note}`);
   if (!quiet) for (const warning of project.warnings) console.error(warning);
   let binary;
@@ -93,6 +95,33 @@ export async function diagnose(options, cwd = process.cwd(), {quiet = false, rep
   return {binary, node:{...node, path:process.execPath}, project, extensions, services:project.services, demo:project.demo, ui:project.ui,
     singleProjectMode:project.singleProjectMode, warnings:project.warnings, problems, version:manifest.version, engineRevision:release.engineRevision};
 }
+
+// The logging emulator runs whatever the UI, as officially, and as the
+// official CLI does it starts on the next free port when its own is taken
+// and neither --logging-port nor emulators.logging.port chose it: two starts
+// that set every other port apart both start. Past 50 ports it keeps its
+// own, and the engine says who holds it.
+async function moveLogging(project) {
+  if (!project.defaulted?.includes('logging')) return;
+  const host = project.host === 'localhost' ? '127.0.0.1' : project.host.replace(/^\[|\]$/g, '');
+  const given = new Set(Object.values(project.ports));
+  const wanted = project.ports.logging;
+  for (let port = wanted; port < wanted + 50 && port < 65536; port += 1) {
+    if (port !== wanted && given.has(port)) continue;
+    if (!await listenable(host, port)) continue;
+    if (port !== wanted) {
+      project.warnings.push(`Firenook: port ${wanted} for the logging emulator is taken; it starts on ${port} instead (emulators.logging.port in firebase.json chooses it).`);
+      project.ports.logging = port;
+    }
+    return;
+  }
+}
+
+const listenable = (host, port) => new Promise(done => {
+  const server = createServer();
+  server.once('error', () => done(false));
+  server.listen(port, host, () => server.close(() => done(true)));
+});
 
 // Read-only: which extension instances start offline, and which still need the
 // registry (a Firebase CLI login or FIREBASE_TOKEN) on first start.

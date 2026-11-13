@@ -1081,6 +1081,7 @@ version = "0.0.1"
 dependencies = [
  "axum",
  "firenook-auth-front",
+ "firenook-conformance-ledger",
  "firenook-console-front",
  "firenook-core-store",
  "firenook-export-format",

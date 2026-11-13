@@ -137,6 +137,10 @@ pub struct LogInput {
     /// The emulator name the official feed has always carried, when it
     /// differs from `service` (Eventarc lines were filed under functions).
     pub legacy_emulator: Option<&'static str>,
+    /// The official feed carries the line bare, with no emulator metadata
+    /// (`data: {}`), as the official CLI's own labelled lines reach it
+    /// (`✔  functions: Using node@24 from host.`).
+    pub legacy_bare: bool,
 }
 
 /// Where [`LoggingRuntime::emit`](crate::LoggingRuntime::emit) hands every

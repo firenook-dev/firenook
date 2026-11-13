@@ -103,11 +103,9 @@ pub async fn sign_up(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiError> {
             updates.insert("passwordUpdatedAt".to_owned(), json!(now));
             updates.insert("validSince".to_owned(), json!(now_seconds().to_string()));
         }
-        if let Some(enrollments) = body
-            .get("mfaInfo")
-            .and_then(JsonValue::as_array)
-            .filter(|list| !list.is_empty())
-        {
+        // The official `if (reqBody.mfaInfo)`: an empty list is kept, as
+        // the Emulator UI's add-user form sends one.
+        if let Some(enrollments) = body.get("mfaInfo").and_then(JsonValue::as_array) {
             updates.insert(
                 "mfaInfo".to_owned(),
                 JsonValue::Array(mfa_enrollments_from_request(enrollments, true)?),

@@ -347,6 +347,12 @@ pub(crate) fn functions_line(event: &LogEvent) {
     ) {
         return;
     }
+    // A save that does not load is drawn from its `codebase` event, where
+    // the error is placed in its file; before readiness the line joins the
+    // start-up log, as the first load's always has.
+    if event.kind == Some(firenook_functions_runtime::log::CODEBASE_FAILED) && start().ready {
+        return;
+    }
     let level = event.level.to_ascii_lowercase();
     // The runtime's own information lines (which files it loaded, which
     // functions it initialized, a change it saw) are said by the `codebase`

@@ -415,8 +415,8 @@ struct SuiteArgs {
     /// every service. Eventarc and Tasks follow Functions; the hub always runs.
     #[arg(long)]
     only: Option<String>,
-    /// Do not start the Emulator UI (nor the logging emulator), as
-    /// `emulators.ui.enabled: false` does officially.
+    /// Do not start the Emulator UI, as `emulators.ui.enabled: false` does
+    /// officially (the logging emulator still runs, as officially).
     #[arg(long = "no-ui", conflicts_with = "ui")]
     no_ui: bool,
     /// Start the Emulator UI even when `emulators.ui.enabled` is false, as

@@ -18,6 +18,10 @@ export const LOOPBACK = ['localhost', '127.0.0.1', '::1', '[::1]'];
 export const VERBOSITIES = ['DEBUG', 'INFO', 'QUIET', 'SILENT', 'WARN', 'ERROR'];
 // Where --keep-data keeps the data, inside the project directory.
 export const KEEP_DATA_DIR = join('.firenook', 'state');
+// What saved data holds, together: its receipt covers the three stores, so
+// --keep-data (and --resume-state) start only with all of them.
+export const KEPT_SERVICES = ['firestore', 'auth', 'storage'];
+export const keepsData = services => KEPT_SERVICES.every(name => [...services].includes(name));
 
 const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'instance', 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'log-verbosity', 'alias', 'add', 'unalias', 'database', 'agent', 'language']);
 const durabilities = new Set(['write-behind', 'per-commit']);
@@ -257,9 +261,13 @@ export function inspectProject(options, cwd = process.cwd()) {
   if (typeof host === 'string' && !isLoopback(host)) warnings.push(`Firenook: binding ${host}; the emulators have no authentication, so every service, the data and arbitrary Functions execution are reachable from any device that can reach this host.`);
 
   const ports = {};
+  // The listeners whose port neither a flag nor firebase.json chose.
+  const defaulted = [];
   for (const name of [...LISTENERS, 'firestore-websocket']) {
     const override = options[`${name}-port`];
-    const value = override ?? (name === 'firestore-websocket' ? entry('firestore')?.websocketPort : entry(name)?.port) ?? DEFAULT_PORTS[name];
+    const chosen = override ?? (name === 'firestore-websocket' ? entry('firestore')?.websocketPort : entry(name)?.port);
+    if (chosen === undefined) defaulted.push(name);
+    const value = chosen ?? DEFAULT_PORTS[name];
     if (value !== undefined) {
       if (!/^\d+$/.test(String(value)) || Number(value) < 1 || Number(value) > 65535) fail('port', `Invalid port for ${name}`);
       ports[name] = Number(value);
@@ -293,11 +301,21 @@ export function inspectProject(options, cwd = process.cwd()) {
     fail('state', 'State must be separate from seed/export directories and must not contain the project');
   }
   if (resume && !state) fail('state', '--resume-state requires --state-dir; --keep-data alone keeps the data in .firenook/state');
+  if (resume && services.length && !keepsData(services)) {
+    // Named as typed: --keep-data is --resume-state to the engine, which
+    // would refuse it in those words.
+    const flag = options['keep-data'] ? '--keep-data' : '--resume-state';
+    const missing = KEPT_SERVICES.filter(name => !services.includes(name));
+    const excluded = missing.filter(name => configured.includes(name));
+    const where = !excluded.length ? 'firebase.json' : excluded.length === missing.length ? '--only' : 'firebase.json and --only';
+    const shown = {firestore:'Firestore', auth:'Auth', storage:'Storage'};
+    fail('state', `${flag} keeps Firestore, Auth and Storage together (its saved data holds all three), and this start runs no ${missing.map(name => shown[name]).join(' or ')}: add ${missing.join(' and ')} to ${where}, or start without ${flag}`);
+  }
   if (resume && imported && exported && (contains(imported, exported) || contains(exported, imported))) fail('state', 'Resume exports must be separate from the immutable seed');
   // The engine needs a positive minimum only when a Functions codebase exists.
   const functionsConfigured = has('functions') || has('extensions');
   const minimumFunctions = options['minimum-functions'] !== undefined ? String(options['minimum-functions']) : (services.includes('functions') && functionsConfigured ? '1' : '0');
-  return {config, directory, rc, data, project, alias, projectFrom, demo, configured, services, skipped, ui, uiExplicit, singleProjectMode, host, ports, imported, exported, state, resume, minimumFunctions, errors, warnings, skips};
+  return {config, directory, rc, data, project, alias, projectFrom, demo, configured, services, skipped, ui, uiExplicit, singleProjectMode, host, ports, defaulted, imported, exported, state, resume, minimumFunctions, errors, warnings, skips};
 }
 
 // What the engine is told about this launch (--launch-context), so the

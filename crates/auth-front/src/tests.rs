@@ -742,16 +742,7 @@ fn ui_sanitize(value: &JsonValue) -> JsonValue {
 /// Bug candidates of the UI's Auth session: answered otherwise with no
 /// documented reason, kept out of the ledger. The test fails once one
 /// matches, so whoever fixes it moves the case into the ledger.
-const UI_AUTH_BUG_CANDIDATES: &[(&str, &str)] = &[
-    (
-        "ui/7",
-        "the user the UI added with `mfaInfo: []` is looked up without `mfaInfo`; the official signUp keeps the empty list (`if (reqBody.mfaInfo)`), Firenook's skips an empty one (ops/signup.rs)",
-    ),
-    (
-        "ui/8",
-        "the same user is listed by accounts:query without its empty `mfaInfo`",
-    ),
-];
+const UI_AUTH_BUG_CANDIDATES: &[(&str, &str)] = &[];
 
 /// Every Auth request the official Emulator UI made in `developer-tools-v1`
 /// (`browser.exchanges`, service `auth`), in order: list, tenants, config,
@@ -853,14 +844,6 @@ async fn developer_tools_auth_requests_replay_the_official_ui_session() {
             assert_ne!(
                 &answer, recorded,
                 "{case} matches now: note it and leave the table"
-            );
-            // The only difference is the empty list.
-            for user in answer[key].as_array_mut().into_iter().flatten() {
-                user["mfaInfo"] = json!([]);
-            }
-            assert_eq!(
-                &answer, recorded,
-                "{case}: body apart from the bug candidate"
             );
             continue;
         }

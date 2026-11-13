@@ -69,11 +69,15 @@ stopped working directories. Do not point state at your seed/export directory.
 
 To keep data between runs, add `--keep-data`: it is short for
 `--state-dir ./.firenook/state --resume-state`, and `--state-dir` names another
-directory. `--import ./seed` is optional. With a seed, the first start imports
-it and every later start picks up the saved data; without one, the first start
-begins empty. Saved data remembers how it began, so data started from a seed
-refuses a start without that `--import`, and data started without a seed
-refuses one with `--import` (import a seed into a new `--state-dir` instead).
+directory. Saved data holds Firestore, Auth and Storage together, so
+`--keep-data` refuses a start that does not run all three and names what is
+missing; a project without one of them starts without it (`firenook init`
+writes its `emulators` script so). `--import ./seed` is optional. With a seed,
+the first start imports it and every later start picks up the saved data;
+without one, the first start begins empty. Saved data remembers how it began,
+so data started from a seed refuses a start without that `--import`, and data
+started without a seed refuses one with `--import` (import a seed into a new
+`--state-dir` instead).
 The seed must stay immutable; export elsewhere. Without resume, never reuse a
 state directory as an implicit reset/reimport. Data kept without a seed needs
 0.2.0-next.7 or later; an earlier release refuses it and changes nothing.

@@ -599,6 +599,33 @@ test('init --only picks the data services, the console comes along, and a chosen
   assert.throws(() => scaffold({...options, only:'firestore', language:'typescript'}, mkdtempSync(join(tmpdir(), 'firenook-init-only-')), log(), hermetic), /--language typescript needs functions in --only/);
   assert.throws(() => scaffold({...options, language:'go'}, mkdtempSync(join(tmpdir(), 'firenook-init-only-')), log(), hermetic), /--language takes typescript, javascript, none/);
 });
+test('init leaves --keep-data out of a project without Firestore, Auth and Storage, and --keep-data says what it needs', async () => {
+  // Saved data keeps the three stores together: --keep-data starts only with all of them.
+  const root = mkdtempSync(join(tmpdir(), 'firenook-init-keep-'));
+  const dir = join(root, 'firestore-only'); mkdirSync(dir);
+  const output = log();
+  assert.equal(await scaffold({...options, only:'firestore', yes:true, 'no-install':true}, dir, output, {...hermetic, home:root, version:'9.9.9'}), 0);
+  assert.equal(readJson(join(dir, 'package.json')).scripts.emulators, 'firenook emulators:start');
+  assert.match(output.err.join('\n'), /Next steps:\n {2}npm install\n {2}npm run emulators$/);
+  const printed = log();
+  assert.equal(scaffold({...options, only:'firestore,auth,functions', language:'javascript'}, mkdtempSync(join(tmpdir(), 'firenook-init-keep-')), printed, hermetic), 0);
+  assert.match(printed.err.join('\n'), /\n {2}npx firenook emulators:start$/);
+  const all = log();
+  assert.equal(scaffold({...options, 'no-functions':true}, mkdtempSync(join(tmpdir(), 'firenook-init-keep-')), all, hermetic), 0);
+  assert.match(all.err.join('\n'), /\n {2}npx firenook emulators:start --keep-data$/, 'with all three it keeps the data');
+  // The flag typed is the one named, with what it needs and where it goes.
+  assert.throws(() => loadProject({...options, 'keep-data':true}, dir),
+    /--keep-data keeps Firestore, Auth and Storage together \(its saved data holds all three\), and this start runs no Auth or Storage: add auth and storage to firebase\.json, or start without --keep-data$/);
+  assert.throws(() => loadProject({...options, 'state-dir':'kept', 'resume-state':true}, dir), /--resume-state keeps Firestore, Auth and Storage together .* start without --resume-state$/);
+  const {dir:full} = project();
+  assert.throws(() => loadProject({...options, 'keep-data':true, only:'firestore,functions'}, full), /runs no Auth or Storage: add auth and storage to --only, or start without --keep-data$/);
+  assert.equal(loadProject({...options, 'keep-data':true, only:'auth,storage,firestore'}, full).resume, true);
+  // From the command line, before the engine starts.
+  const refused = await runCli(['emulators:exec', '--keep-data', '--plain', 'echo started'], dir);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /Firenook: --keep-data keeps Firestore, Auth and Storage together/);
+  assert.doesNotMatch(refused.stdout + refused.stderr, /started|Services:/);
+});
 test('init --adopt lists skips, errors and additions, then applies only the additions', () => {
   const dir = mkdtempSync(join(tmpdir(), 'firenook-adopt-'));
   const original = {hosting:{public:'public'}, firestore:{rules:'firestore.rules', indexes:'firestore.indexes.json'}, functions:{source:'functions'},
@@ -953,6 +980,40 @@ test('Storage, Auth and schedule events carry the shell envelopes with the offic
     rest = legacy(sent.body, 'pubsub', 'projects/demo-fixture/topics/firebase-schedule-nightlyV1');
     assert.deepEqual(rest, {data:{}});
     assert.equal(sent.headers['x-cloudscheduler-jobname'], undefined);
+  });
+});
+test('functions:invoke sends a scheduled function its schedule event without --event-data, as --event-data \'{}\' does', async () => {
+  const {dir} = project();
+  await withSuite(fake.full, async () => {
+    // A scheduled function answers no plain HTTPS request.
+    let mark = fake.requests.length;
+    const output = log();
+    assert.equal(await invokeFunction('nightly', options, dir, output), 0);
+    assert.ok(!since(mark).some(request => request.path.startsWith('/demo-fixture/')), 'no HTTPS request');
+    let sent = delivery(since(mark));
+    assert.equal(sent.key, 'us-central1-nightly-3');
+    assert.deepEqual(cloud(sent.body, 'pubsub', ''), {data:{}});
+    assert.equal(sent.headers['x-cloudscheduler-jobname'], 'firebase-schedule-nightly-us-central1');
+    assert.deepEqual(output.err, ['Firenook: schedule event pubsub for nightly (us-central1, gcfv2) via trigger key us-central1-nightly-3']);
+    assert.deepEqual(output.out[0], `200 OK ${fake.origin}/functions/projects/demo-fixture/triggers/us-central1-nightly-3`);
+    // The same envelope as --event-data '{}'.
+    const explicit = await runInvoke('nightly', {...options, 'event-data':'{}'}, dir);
+    const implicit = await runInvoke('nightly', options, dir);
+    assert.deepEqual([implicit.kind, implicit.key, implicit.transport, implicit.ok], [explicit.kind, explicit.key, explicit.transport, explicit.ok]);
+    mark = fake.requests.length;
+    await runInvoke('nightlyV1', options, dir);
+    sent = delivery(since(mark));
+    assert.equal(sent.key, 'us-central1-nightlyV1-3');
+    assert.deepEqual(legacy(sent.body, 'pubsub', 'projects/demo-fixture/topics/firebase-schedule-nightlyV1'), {data:{}});
+    await assert.rejects(runInvoke('nightly', {...options, data:'{"a":1}'}, dir), /nightly is a scheduled function, which takes no --data: firenook functions:invoke nightly sends its schedule event/);
+    await assert.rejects(runInvoke('nightly', {...options, method:'GET'}, dir), /takes no --method/);
+    // Any other function, or one the suite does not list, still gets the plain request.
+    mark = fake.requests.length;
+    const plain = await runInvoke('helloWorld', options, dir);
+    assert.equal(plain.transport, 'https');
+    assert.equal(since(mark).at(-1).path, '/demo-fixture/us-central1/helloWorld');
+    assert.equal((await runInvoke('nightly', {...options, region:'europe-west1'}, dir)).transport, 'https');
+    assert.equal((await runInvoke('missing', options, dir)).transport, 'https');
   });
 });
 test('Pub/Sub events publish through the broker when it runs, otherwise carry the shell envelopes', async () => {

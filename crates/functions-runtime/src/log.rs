@@ -23,6 +23,19 @@ impl LogStream {
     }
 }
 
+/// The kind of a codebase load that failed, the first load's or a save's
+/// (`Failed to load function definition from source: …`). The codebase's
+/// monitor event says the same, so the terminal screen draws that instead.
+pub const CODEBASE_FAILED: &str = "codebase.failed";
+/// The kind of `Watching "<dir>" for Cloud Functions...`, which the
+/// official emulator logs through its own logger: its record in the logging
+/// feed carries the text without the label.
+pub const CODEBASE_WATCHING: &str = "codebase.watching";
+/// The kind of `Using node@<major> from host.`: the official CLI prints it
+/// with its own label (`✔  functions: …`), so the logging feed carries it
+/// as printed, with no emulator metadata.
+pub const CODEBASE_NODE: &str = "codebase.node";
+
 /// One log line with the official emulator's level vocabulary, and what the
 /// runtime knows about who printed it.
 #[derive(Debug, Clone, PartialEq, Eq)]

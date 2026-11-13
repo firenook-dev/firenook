@@ -5,8 +5,8 @@ mod support;
 
 use std::time::{Duration, SystemTime};
 
-use firenook_functions_runtime::LogDelivery;
 use firenook_functions_runtime::monitor::{FunctionLoadState, FunctionStale};
+use firenook_functions_runtime::{LogDelivery, LogEvent};
 use support::Harness;
 
 const INDEX: &str = "exports.api = (req, res) => res.send('ok');\n";
@@ -261,4 +261,125 @@ async fn functions_on_a_node_their_codebase_does_not_ask_for_are_warned_about_on
         )]
     );
     harness.stop().await;
+}
+
+/// A save that does not load is said in the log, as the first load's
+/// failure is: the plain output, which pipes and CI read, prints it, and the
+/// functions loaded before keep answering.
+#[tokio::test]
+async fn a_save_that_does_not_load_is_said_in_the_log() {
+    let harness = Harness::start_without_worker(MANIFEST, &[]).await;
+    let loaded = |harness: &Harness| harness.monitor.codebase("default").expect("registered");
+    assert_eq!(loaded(&harness).state, FunctionLoadState::Ready);
+    let before = harness.events().len();
+    std::fs::write(
+        harness.directory.path().join("functions/functions.yaml"),
+        "endpoints: [\n",
+    )
+    .expect("written");
+    let reloaded = harness.runtime.console().reload("default").await;
+    assert!(reloaded.is_ok(), "{reloaded:?}");
+    let codebase = loaded(&harness);
+    assert_eq!(codebase.loads, 2);
+    assert!(
+        codebase.serving_previous,
+        "the functions loaded before still answer"
+    );
+    assert_eq!(codebase.function_count, 1);
+    let failed: Vec<LogEvent> = harness.events()[before..]
+        .iter()
+        .filter(|event| event.level == "ERROR")
+        .cloned()
+        .collect();
+    assert_eq!(failed.len(), 1, "{failed:#?}");
+    let line = &failed[0];
+    assert_eq!(line.label, "functions");
+    assert!(
+        line.message.starts_with(
+            "Failed to load function definition from source: FirebaseError: Failed to parse build specification: "
+        ),
+        "{}",
+        line.message
+    );
+    assert_eq!(line.codebase.as_deref(), Some("default"));
+    assert_eq!(
+        line.kind,
+        Some(firenook_functions_runtime::log::CODEBASE_FAILED)
+    );
+    // The first load's failure is the same line.
+    let broken = Harness::start_without_worker("endpoints: [\n", &[]).await;
+    let first: Vec<LogEvent> = broken
+        .events()
+        .into_iter()
+        .filter(|event| event.level == "ERROR")
+        .collect();
+    assert_eq!(first.len(), 1, "{first:#?}");
+    assert_eq!(first[0].kind, line.kind);
+    assert_eq!(first[0].message, line.message);
+    broken.stop().await;
+    harness.stop().await;
+}
+
+/// A codebase that asks for the running Node's major is told so on every
+/// load, in the official words; one that asks for another, or for a range,
+/// is not.
+#[tokio::test]
+async fn a_codebase_on_the_node_it_asks_for_is_told_so_on_every_load() {
+    let Ok((node, _)) = support::requirements() else {
+        eprintln!("skipped: no Node or Functions SDK");
+        return;
+    };
+    let version = firenook_functions_runtime::node::probe(&node)
+        .await
+        .expect("the test Node prints its version");
+    let said = |harness: &Harness| {
+        harness
+            .events()
+            .into_iter()
+            .filter(|event| event.kind == Some(firenook_functions_runtime::log::CODEBASE_NODE))
+            .map(|event| {
+                (
+                    event.level,
+                    event.label,
+                    event.message,
+                    event.codebase.unwrap_or_default(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let package = |node: &str| {
+        format!(r#"{{"name":"dispatch","main":"index.js","engines":{{"node":"{node}"}}}}"#)
+    };
+    let running = package(&version.major.to_string());
+    let harness = Harness::start_with_runtime(INDEX, MANIFEST, &[("package.json", &running)], None)
+        .await
+        .expect("the runtime starts");
+    let line = (
+        "INFO".to_owned(),
+        "functions".to_owned(),
+        format!("Using node@{} from host.", version.major),
+        "default".to_owned(),
+    );
+    assert_eq!(said(&harness), std::slice::from_ref(&line));
+    let mut updates = harness.runtime.updates();
+    std::fs::write(
+        harness.directory.path().join("functions/index.js"),
+        format!("{INDEX}// saved again\n"),
+    )
+    .expect("written");
+    tokio::time::timeout(Duration::from_secs(15), updates.changed())
+        .await
+        .expect("a reload")
+        .expect("the runtime runs");
+    assert_eq!(said(&harness), [line.clone(), line]);
+    harness.stop().await;
+    let other = if version.major == 22 { "24" } else { "22" };
+    for asks in [package(other), package(">=22")] {
+        let harness =
+            Harness::start_with_runtime(INDEX, MANIFEST, &[("package.json", &asks)], None)
+                .await
+                .expect("the runtime starts");
+        assert!(said(&harness).is_empty(), "{asks}: {:?}", said(&harness));
+        harness.stop().await;
+    }
 }

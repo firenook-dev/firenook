@@ -115,6 +115,29 @@ test('doctor reports the Node it runs on, a refused one among its problems, inst
   assert.equal(run.status,printed.problems.length ? 1 : 0);
   if (NODE_TESTED.includes(Number(process.versions.node.split('.')[0]))) assert.ok(printed.problems.every(problem => !problem.includes('Node')),printed.problems.join('\n'));
 });
+test('a taken logging port nobody chose moves to the next free one, as officially', async () => {
+  const {dir,config,save,options} = project();
+  // Held here, or already by something else: taken either way.
+  const holder = createServer();
+  await new Promise(done => { holder.once('error', done); holder.listen(4500, '127.0.0.1', done); });
+  try {
+    const start = extra => diagnose({...options,...extra},dir,{quiet:true,node:nodeCheck('24.20.0'),locate:()=>'/fake/firenook'});
+    const moved = await start();
+    assert.ok(moved.project.ports.logging > 4500 && moved.project.ports.logging < 4550, String(moved.project.ports.logging));
+    assert.ok(!Object.entries(moved.project.ports).some(([name, port]) => name !== 'logging' && port === moved.project.ports.logging));
+    assert.ok(moved.warnings.includes(`Firenook: port 4500 for the logging emulator is taken; it starts on ${moved.project.ports.logging} instead (emulators.logging.port in firebase.json chooses it).`), moved.warnings.join('\n'));
+    // A port a flag or firebase.json chose is kept: the engine says who holds it.
+    const flagged = await start({'logging-port':'4500'});
+    assert.equal(flagged.project.ports.logging, 4500);
+    assert.ok(!flagged.warnings.some(warning => warning.includes('logging emulator')));
+    save({...config, emulators:{...config.emulators, logging:{port:4500}}});
+    const configured = await start();
+    assert.equal(configured.project.ports.logging, 4500);
+    assert.ok(!configured.warnings.some(warning => warning.includes('logging emulator')));
+  } finally {
+    await new Promise(done => holder.close(() => done()));
+  }
+});
 test('explicit supported platforms; untested architectures and musl rejected', () => {
   assert.equal(platformKey('linux','x64',{header:{glibcVersionRuntime:'2.39'}}),'linux-x64');
   assert.equal(platformKey('darwin','arm64',{}),'darwin-arm64');

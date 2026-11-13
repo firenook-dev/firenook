@@ -12,9 +12,9 @@ import { PROJECT_AGENTS, planAgents, shown } from './agents.mjs';
 import { manifest, nodeCheck } from './binary.mjs';
 import { choiceField, createForm, formKeys, formRows, keyLines, keys, press, textField } from './form.mjs';
 import { INIT_EMULATORS, INIT_PORTS, adopt, agentNames, initChoices, scaffoldPlan, writeScaffold } from './init.mjs';
-import { isDemoProject, parseOptions, validProjectId } from './options.mjs';
+import { inspectProject, isDemoProject, keepsData, parseOptions, validProjectId } from './options.mjs';
 import { holderName, portHolder } from './session.mjs';
-import { enclosingPackage, nextSteps, setUpSteps } from './setup.mjs';
+import { enclosingPackage, nextSteps, setUpSteps, startScript } from './setup.mjs';
 import { BODY, INSET, capabilities, createInk, createLayout, createScreen, took, wrap } from './terminal.mjs';
 
 const NAMES = {firestore: 'Firestore', auth: 'Auth', storage: 'Storage', pubsub: 'Pub/Sub', ui: 'Console', functions: 'Functions', tasks: 'Cloud Tasks', eventarc: 'Eventarc', hub: 'Hub', logging: 'Console log'};
@@ -199,6 +199,9 @@ export async function initInTerminal(options, {cwd = process.cwd(), out = proces
   choices = {project: project.value, language: language.value, emulators: new Set(emulators.value), agents: [...agents.value],
     install: setUp.value.has('install'), pin: setUp.value.has('pin')};
   const typescript = choices.language === 'typescript';
+  // --keep-data keeps Firestore, Auth and Storage together, and refuses a
+  // project without all three.
+  const keep = keepsData(choices.emulators);
 
   // ── The set-up ──────────────────────────────────────────────────────
   const began = Date.now();
@@ -244,13 +247,13 @@ export async function initInTerminal(options, {cwd = process.cwd(), out = proces
   const ready = !stopped && result.ok && !runtime.problem && (choices.language === 'none' || work.steps.find(item => item.id === 'packages')?.state === 'done');
   if (ready && start) {
     const yes = await ask('Start the emulators now?', {above: [bottom()],
-      hint: `${pin?.written ? work.manager.run('emulators') : `npx firenook emulators:start --keep-data${typescript ? ' --build' : ''}`} starts them any time; your data stays between runs`});
+      hint: `${pin?.written ? work.manager.run('emulators') : `npx ${startScript({build: typescript, keep})}`} starts them any time${keep ? '; your data stays between runs' : ''}`});
     if (yes) {
       screen.live(() => []);
       screen.emit(() => [bottom(), '']);
       screen.end();
       release();
-      const args = ['--keep-data', ...(typescript ? ['--build'] : []), ...(options.config ? ['--config', options.config] : [])];
+      const args = [...(keep ? ['--keep-data'] : []), ...(typescript ? ['--build'] : []), ...(options.config ? ['--config', options.config] : [])];
       return start(parseOptions(args).options, args);
     }
   }
@@ -304,9 +307,16 @@ export async function initInTerminal(options, {cwd = process.cwd(), out = proces
     const intro = field(dim('Check'), errors ? 'Firenook cannot start this project until these are fixed:' : additions ? 'Firenook can start it once these are added; nothing that is there changes:' : 'Firenook can start it as it is.', dim);
     const report = [heading, ...t.air(), ...[...intro, ...findings(dry.lines)].map(inside), ...t.air()];
     const startLine = `npx firenook emulators:start${options.config ? ` --config ${options.config}` : ''}`;
+    // --keep-data is said only where it starts: with Firestore, Auth and
+    // Storage, which it keeps together.
+    const keepHint = () => {
+      let services = [];
+      try { services = inspectProject(options, cwd).services; } catch { /* the lines above say why */ }
+      return keepsData(services) ? field('', '--keep-data keeps the data between runs', dim) : [];
+    };
     if (errors || !additions) {
       return finish([...report, ...section(divider(bold('Next')), (errors ? field(dim('Fix'), 'fix firebase.json as each line says, then run npx firenook init again', dim)
-        : [cells(dim('Start'), '', bold(startLine)), ...field('', '--keep-data keeps the data between runs', dim)]).map(inside)), bottom(), ''], errors ? 1 : 0);
+        : [cells(dim('Start'), '', bold(startLine)), ...keepHint()]).map(inside)), bottom(), ''], errors ? 1 : 0);
     }
     screen.emit(() => report);
     const yes = await ask(`Add ${additions === 1 ? 'it' : `these ${additions}`}?`, {above: [bottom()], hint: 'npx firenook init --adopt adds them the same way'});
@@ -315,6 +325,6 @@ export async function initInTerminal(options, {cwd = process.cwd(), out = proces
     const code = adopt(options, cwd, applied.log, {env});
     const wrote = findings(applied.lines.filter(text => /^ {2}(wrote|error) /.test(text)));
     return finish([...section(divider(bold(code ? 'Not added' : 'Added')), wrote.map(inside)),
-      ...section(divider(bold('Next')), [cells(dim('Start'), '', bold(startLine)), ...field('', '--keep-data keeps the data between runs', dim)].map(inside)), bottom(), ''], code);
+      ...section(divider(bold('Next')), [cells(dim('Start'), '', bold(startLine)), ...keepHint()].map(inside)), bottom(), ''], code);
   }
 }

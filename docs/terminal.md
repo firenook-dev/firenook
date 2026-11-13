@@ -52,8 +52,10 @@ none, with the load error under it. Fix it and start again, or start with
 (another codebase, an Extension), a codebase that does not is shown on the
 card with its error and the code around it, every emulator runs, and the
 next save loads it again. Once the emulators are running, a save that does
-not load is a line of the log with its error, and the version loaded before
-it, if there is one, keeps answering; nothing stops.
+not load is a line of the log with its error (the plain output prints the
+official `Failed to load function definition from source` line with it), and
+the version loaded before it, if there is one, keeps answering; nothing
+stops.
 
 ![firenook init: the choices, the set-up and the start in one terminal](assets/init.gif)
 
