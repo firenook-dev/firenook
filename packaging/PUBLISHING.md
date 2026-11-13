@@ -120,10 +120,14 @@ macOS notarization and more platforms remain separate supported-platform work.
    Each index must carry the tag its package was published with. Unexpected
    automatic `latest` on a prerelease stops for owner review; a CLI published
    to `latest` on request holds it on purpose.
-6. After successful npm publication, a **draft** GitHub release gets the exact
-   tarballs/manifests/test receipts, with this version's section of
-   `packaging/CHANGELOG.md` as its notes (`packaging/release-notes.mjs`).
-   Review and publish those notes. Without
+6. After successful npm publication, the tag's GitHub release gets the exact
+   tarballs/manifests/test receipts and the conformance record, with this
+   version's section of `packaging/CHANGELOG.md` as its notes
+   (`packaging/release-notes.mjs`), and the workflow publishes it: as the
+   repository's latest release for a run dispatched with `latest`, as a
+   prerelease for a preview. The approval before npm publication is the review
+   of what it carries; correct the notes afterwards in the release itself and
+   in the changelog. Without
    `latest`, the workflow publishes to `next` only. Until the first stable
    release, `latest` follows the newest verified prerelease so that
    `npx firenook` resolves to a real engine rather than the `0.0.0`
@@ -135,14 +139,18 @@ macOS notarization and more platforms remain separate supported-platform work.
    preview never moves it, by hand or otherwise. npm OIDC does not
    authenticate dist-tag management; never add a long-lived token merely to
    automate that step.
-7. After a stable version is verified on npm, the release owner publishes its
-   [MCP Registry](https://registry.modelcontextprotocol.io) entry from the
-   repository root with `mcp-publisher publish`. The registry reads `mcpName`
-   from that exact npm version, so it cannot be published first. `mcp-publisher
-   login github` cannot publish an organisation's name: an owner of the
-   organisation logs in with `mcp-publisher login github --token <token>`, using
-   a token that can read organisation membership and has no repository access.
-   Previews are not listed.
+7. After npm publication the workflow also lists a stable version on the
+   [MCP Registry](https://registry.modelcontextprotocol.io)
+   (`.github/workflows/mcp-registry.yml`, behind the same approval). The
+   registry reads `mcpName` from that exact npm version, so it cannot be listed
+   first. The job logs in with the run's GitHub OIDC token, which the registry
+   takes for the `io.github.firenook-dev` namespace, so no token is stored;
+   `mcp-publisher` is pinned with the checksum its release published. A version
+   already listed is left as it is, and previews are not listed. If the job
+   fails, dispatch **MCP Registry** on main with the tag once npm has the
+   version. Then, for a stable release, the release owner moves the CLI's
+   `next` to it by hand (see "What happens to `next`" below): it is the one
+   step left after the approval.
 
 ## Publishing the CLI straight to `latest`
 

@@ -109,6 +109,19 @@ jobs:
       version: ${{ inputs.tag }}
       latest: ${{ inputs.latest }}
 
+  mcp-registry:
+    needs: [authorize, publish]
+    # Once npm has the version, behind the same approval: the registry reads
+    # `mcpName` from that exact npm version. Stable versions only; GitHub OIDC,
+    # no stored token.
+    if: ${{ always() && needs.authorize.result == 'success' && needs.publish.result == 'success' }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/mcp-registry.yml
+    with:
+      tag: ${{ inputs.tag }}
+
   release-notes:
     needs: [authorize, publish]
     # A resume skips the build jobs, and a job skips whenever a job upstream
@@ -134,11 +147,16 @@ jobs:
           path: conformance-report
           github-token: ${{ github.token }}
           run-id: ${{ needs.authorize.outputs.source_run || github.run_id }}
-      - name: Attach artifacts to draft GitHub release for final review
+      # Drafted while its files go up, then published: the approval before
+      # the npm publication was the review of what it carries. A run that
+      # published the CLI to `latest` makes it the repository's latest
+      # release; a preview is a prerelease.
+      - name: Attach the artifacts and publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
           SOURCE_RUN: ${{ needs.authorize.outputs.source_run || github.run_id }}
+          GITHUB_RELEASE_LATEST: ${{ inputs.latest && 'true' || 'false' }}
         run: |
           VERSION="${RELEASE_TAG#npm-v}"
           # This version's section of the changelog, not the whole file.
@@ -156,3 +174,7 @@ jobs:
           cp conformance-report/cases.json conformance-cases.json
           cp conformance-report/verify.json conformance-verify.json
           gh release upload "$RELEASE_TAG" conformance-cases.json conformance-verify.json
+          case "$VERSION" in
+            *-*) gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false ;;
+            *) gh release edit "$RELEASE_TAG" --draft=false --latest="$GITHUB_RELEASE_LATEST" ;;
+          esac
