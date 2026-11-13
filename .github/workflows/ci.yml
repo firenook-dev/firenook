@@ -879,6 +879,10 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      # Also pinned in conformance/src/webchannel/run-firebase-js-sdk.ts,
+      # which refuses any other.
+      FIREBASE_JS_SDK_REVISION: 6cde0c0230b4c1da01d4a058333daa7663322fd1
     strategy:
       fail-fast: false
       matrix:
@@ -889,7 +893,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: firebase/firebase-js-sdk
-          ref: 6cde0c0230b4c1da01d4a058333daa7663322fd1
+          ref: ${{ env.FIREBASE_JS_SDK_REVISION }}
           path: .phase2/firebase-js-sdk
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -917,9 +921,62 @@ jobs:
       - name: Install pinned Firebase JS SDK dependencies
         working-directory: .phase2/firebase-js-sdk
         run: yarn install --frozen-lockfile
+      # The SDK packages the suite builds on (8 of them, three minutes) come
+      # out the same at the pinned revision every time: test bundles built on
+      # a restored copy are byte for byte those built on a fresh build. So
+      # they are kept between runs, saved by one cell of a push to main, and a
+      # change to the revision, Node or the run script builds them afresh.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: sdk-packages
+        with:
+          path: |
+            .phase2/firebase-js-sdk/packages/*/dist
+            .phase2/firebase-js-sdk/packages/*/temp
+          key: firebase-js-sdk-packages-${{ runner.os }}-node24.20.0-${{ env.FIREBASE_JS_SDK_REVISION }}-${{ hashFiles('conformance/src/webchannel/run-firebase-js-sdk.ts') }}
       - name: Run Google's Firestore browser integration bootstrap
         run: >-
           npm run test:webchannel:firebase-js-sdk --prefix conformance --
           --sdk-dir "${{ github.workspace }}/.phase2/firebase-js-sdk"
           --client-persistence "${{ matrix.client_persistence }}"
           ${{ matrix.server_mode == 'disk-wal' && '--disk' || '' }}
+          ${{ steps.sdk-packages.outputs.cache-hit == 'true' && '--prebuilt-dependencies' || '' }}
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: >-
+          github.event_name == 'push' && steps.sdk-packages.outputs.cache-hit != 'true' &&
+          matrix.server_mode == 'memory' && matrix.client_persistence == 'memory'
+        with:
+          path: |
+            .phase2/firebase-js-sdk/packages/*/dist
+            .phase2/firebase-js-sdk/packages/*/temp
+          key: ${{ steps.sdk-packages.outputs.cache-primary-key }}
+
+  # The one check main's branch protection asks for: it fails when any job
+  # above failed, and passes when each passed or was skipped (a change that
+  # is documentation only skips most of them). Jobs can then be split or
+  # renamed without touching the protection.
+  result:
+    name: CI result
+    needs:
+      - changes
+      - rust
+      - console
+      - journey-engine
+      - console-journeys
+      - console-functions-node
+      - functions-node
+      - public-contracts
+      - conformance
+      - oracle-replays
+      - client-replays
+      - conformance-ledger
+      - firebase-js-sdk
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.value.result)\t\(.key)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")' > /dev/null
