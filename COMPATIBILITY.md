@@ -125,6 +125,14 @@ request view marks the lines in the rules. The REST front reads a body typed
 official emulator does, so the reload route takes the rules
 `@firebase/rules-unit-testing` sends.
 
+Rules that nest one expression too deep do not compile, as in production: a
+node 100 levels down (99 `&&` terms of `request.auth.token.n >= k`, or 100
+`true` terms) is refused with production's `Expression is too complex to
+evaluate safely.`, once per such node, where it starts, in a reload's
+`Error compiling rules:` answer as anywhere else. Production also fails some
+shorter long chains with 500 INTERNAL (from 52 such terms); Firenook evaluates
+them. Since `0.2.4`.
+
 Firestore timestamp values are stored to the microsecond, as production
 stores them ("any additional precision is rounded down") and as the official
 emulator answers a write (`conformance/fixtures/developer-tools-request-values-v1`):

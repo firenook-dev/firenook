@@ -11,6 +11,7 @@ mod coverage_layout;
 mod coverage_observer;
 mod evaluator;
 mod explain;
+mod expression_depth;
 mod lexer;
 mod model;
 mod parser;
@@ -264,8 +265,9 @@ impl Ruleset {
 /// # Errors
 ///
 /// Returns source-positioned diagnostics for oversized, malformed, recursive,
-/// or over-depth rulesets. A caller must keep the previously installed ruleset
-/// when this function returns an error.
+/// or over-depth rulesets: a chain of calls too deep, or an expression nested
+/// too deep. A caller must keep the previously installed ruleset when this
+/// function returns an error.
 pub fn compile(source: &str) -> Result<Ruleset, Vec<Diagnostic>> {
     if source.len() > MAXIMUM_SOURCE_BYTES {
         return Err(vec![diagnostic(
@@ -284,6 +286,7 @@ pub fn compile(source: &str) -> Result<Ruleset, Vec<Diagnostic>> {
     for block in &program.matches {
         validate_functions(source, block, &mut validation);
     }
+    expression_depth::check(source, &program, &mut validation);
     if validation.is_empty() {
         Ok(Ruleset {
             program: Arc::new(program),
