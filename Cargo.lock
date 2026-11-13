@@ -744,6 +744,7 @@ dependencies = [
  "firenook-pubsub-front",
  "firenook-query-engine",
  "firenook-rest-front",
+ "firenook-rules-engine",
  "firenook-rules-runtime",
  "firenook-suite-front",
  "firenook-suite-runtime",

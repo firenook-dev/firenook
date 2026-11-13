@@ -939,11 +939,7 @@ fn run_suite_runtime_inner(arguments: &SuiteArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let runtime = match tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(arguments.worker_threads)
-        .enable_all()
-        .build()
-    {
+    let runtime = match rules_runtime(arguments.worker_threads) {
         Ok(runtime) => runtime,
         Err(error) => {
             eprintln!("suite runtime failed to start: {error}");
@@ -1492,11 +1488,7 @@ fn run_firestore_runtime(
         eprintln!("--worker-threads must be at least 1");
         return ExitCode::FAILURE;
     }
-    let runtime = match tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(arguments.worker_threads)
-        .enable_all()
-        .build()
-    {
+    let runtime = match rules_runtime(arguments.worker_threads) {
         Ok(runtime) => runtime,
         Err(error) => {
             eprintln!("Firestore runtime failed to start: {error}");
@@ -2011,6 +2003,17 @@ fn normalize_arguments(arguments: impl IntoIterator<Item = OsString>) -> Vec<OsS
     normalized
 }
 
+/// A runtime rules are evaluated in: its workers and its blocking threads get
+/// the stack the deepest ruleset compile allows needs, instead of Tokio's
+/// 2 MiB, on which such a ruleset aborted the engine (#228).
+fn rules_runtime(worker_threads: usize) -> std::io::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(worker_threads)
+        .thread_stack_size(firenook_rules_engine::EVALUATION_STACK_BYTES)
+        .enable_all()
+        .build()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2023,6 +2026,53 @@ mod tests {
     use tower::ServiceExt as _;
 
     static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    /// Evaluates, on the calling thread, 21 functions each calling the next
+    /// from the deepest point of an expression at the limit, nested as a
+    /// function's argument in another's: the hungriest ruleset both rules
+    /// limits allow.
+    fn evaluate_the_deepest_call_chain() -> bool {
+        use std::fmt::Write as _;
+
+        let functions = (0..21).fold(String::new(), |mut text, index| {
+            let mut nested = if index == 20 {
+                "true".to_owned()
+            } else {
+                format!("f{}()", index + 1)
+            };
+            for _ in 0..96 {
+                nested = format!("string({nested})");
+            }
+            writeln!(text, "  function f{index}() {{ return {nested} == 'x'; }}")
+                .expect("a String takes any text");
+            text
+        });
+        let source = format!(
+            "rules_version = '2';\nservice cloud.firestore {{\n{functions}  match /databases/{{database}}/documents/items/{{item}} {{\n    allow get: if f0();\n  }}\n}}\n"
+        );
+        let rules = firenook_rules_engine::compile(&source).expect("within both limits");
+        let request = firenook_rules_engine::EvaluationRequest::new(
+            firenook_rules_engine::RequestOperation::Get,
+            "/databases/(default)/documents/items/one",
+            firenook_rules_engine::Timestamp::new(1, 0),
+        );
+        rules
+            .evaluate(&request, &firenook_rules_engine::EmptyDocumentAccess)
+            .allowed
+    }
+
+    #[test]
+    fn a_rules_runtime_evaluates_the_deepest_ruleset_on_workers_and_blocking_threads() {
+        // On Tokio's default 2 MiB this aborted the engine (#228).
+        let runtime = rules_runtime(1).expect("a runtime");
+        let on_a_worker = runtime
+            .block_on(runtime.spawn(async { evaluate_the_deepest_call_chain() }))
+            .expect("a worker evaluates it");
+        let on_a_blocking_thread = runtime
+            .block_on(runtime.spawn_blocking(evaluate_the_deepest_call_chain))
+            .expect("a blocking thread evaluates it");
+        assert_eq!(on_a_worker, on_a_blocking_thread);
+    }
 
     #[test]
     fn standalone_diagnostics_are_explicit_and_disabled_reports_are_not_empty_successes() {

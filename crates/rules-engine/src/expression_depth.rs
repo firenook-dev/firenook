@@ -567,4 +567,80 @@ mod tests {
             .join()
             .expect("no stack overflow");
     }
+
+    /// A ruleset of 21 functions, each calling the next from the deepest
+    /// point of an expression at the limit, in one of two shapes: a chain of
+    /// 98 `&&` terms, and a function's argument nested in another's 96 times
+    /// (the hungriest shape measured).
+    fn deepest_call_chain(shape: &str) -> String {
+        use std::fmt::Write as _;
+
+        let functions = (0..21).fold(String::new(), |mut text, index| {
+            let inner = if index == 20 {
+                "true".to_owned()
+            } else {
+                format!("f{}()", index + 1)
+            };
+            let body = if shape == "chain" {
+                format!("{inner} && {}", chain(97, |term| token_term(term + 1)))
+            } else {
+                let mut nested = inner;
+                for _ in 0..96 {
+                    nested = format!("string({nested})");
+                }
+                format!("{nested} == 'x'")
+            };
+            writeln!(text, "  function f{index}() {{ return {body}; }}")
+                .expect("a String takes any text");
+            text
+        });
+        format!(
+            "rules_version = '2';\nservice cloud.firestore {{\n{functions}  match /databases/{{database}}/documents/phase3/limit-probe {{\n    allow get: if f0();\n  }}\n}}\n"
+        )
+    }
+
+    /// Both limits allow 21 calls each nesting an expression 99 levels deep;
+    /// evaluating that on Tokio's 2 MiB aborted the engine (#228). On
+    /// `EVALUATION_STACK_BYTES`, every way of evaluating it ends.
+    #[test]
+    fn the_deepest_call_chains_evaluate_on_the_evaluation_stack() {
+        std::thread::Builder::new()
+            .stack_size(crate::EVALUATION_STACK_BYTES)
+            .spawn(|| {
+                for shape in ["chain", "calls"] {
+                    let rules = compile(&deepest_call_chain(shape)).expect("within both limits");
+                    let mut request = EvaluationRequest::new(
+                        RequestOperation::Get,
+                        "/databases/(default)/documents/phase3/limit-probe",
+                        Timestamp::new(1, 0),
+                    );
+                    request.auth = Some(Auth {
+                        uid: Some("limit-probe".to_owned()),
+                        token: BTreeMap::from([("n".to_owned(), Value::Integer(10_000))]),
+                    });
+                    let result = rules.evaluate(&request, &EmptyDocumentAccess);
+                    assert_eq!(
+                        rules.evaluate_with_trace(&request, &EmptyDocumentAccess).0,
+                        result,
+                        "{shape}"
+                    );
+                    let mut count = Count::default();
+                    assert_eq!(
+                        rules
+                            .evaluate_with_coverage(&request, &EmptyDocumentAccess, &mut count)
+                            .0,
+                        result,
+                        "{shape}"
+                    );
+                    assert_eq!(
+                        rules.explainer().evaluate(&request, &EmptyDocumentAccess).0,
+                        result,
+                        "{shape}"
+                    );
+                }
+            })
+            .expect("a test thread")
+            .join()
+            .expect("no stack overflow");
+    }
 }

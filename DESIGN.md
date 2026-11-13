@@ -1078,6 +1078,15 @@ no deeper than the limit, so evaluation is unchanged. The deepest expressions it
 lets through evaluate on a 2 MiB stack in a debug build, with little to spare (98
 `>=` terms need about 1.9 MiB), which the module's own test guards.
 
+One expression is bounded; a call is not a level of it. With 21 functions, each
+calling the next from the deepest point of an expression at the limit, one
+evaluation nests about 2,100 levels, which overflowed Tokio's 2 MiB worker stack
+and aborted the engine (#228): from 2 such functions in a debug build, from 6 in
+a release build. The runtimes rules are evaluated in (the suite's and the
+standalone Firestore's) give their threads `EVALUATION_STACK_BYTES`: 32 MiB in a
+release build, where the hungriest shape at the limits needs 8 to 10, and 128 MiB
+in a debug build, where it needs up to 48. Stacks are reserved, not committed.
+
 Below the limit production fails some long chains with 500 INTERNAL, from an edge
 that moves with what a term is (52 `>=` terms, between 61 and 70 `true` terms).
 No one measure places it, so Firenook evaluates those chains and the replay notes
