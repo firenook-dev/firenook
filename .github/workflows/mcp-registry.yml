@@ -1,0 +1,111 @@
+name: MCP Registry
+
+# Lists a stable release on the MCP Registry (registry.modelcontextprotocol.io)
+# from the tag's server.json. The release calls it once npm has the version:
+# the registry reads `mcpName` from that exact npm version, so it cannot go
+# first. It can also be dispatched from main for a version already on npm, to
+# list it again after a failure.
+#
+# GitHub's OIDC token proves the run belongs to a firenook-dev repository,
+# which the registry takes for the io.github.firenook-dev namespace, so no
+# token is stored anywhere. A version the registry already lists is left as
+# it is, and previews are never listed.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'The npm-vVERSION tag whose server.json is listed'
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'An npm-vVERSION tag already published to npm, such as npm-v0.2.4'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: List the release on the MCP Registry
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      # Pinned with the checksum its release published
+      # (registry_1.8.7_checksums.txt); update the two together, deliberately.
+      MCP_PUBLISHER_VERSION: v1.8.7
+      MCP_PUBLISHER_SHA256: 00b21004149a4ce66f0782508ae4a2bce67d1bea395a8da0bd8028159fb59579
+      REGISTRY: https://registry.modelcontextprotocol.io
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.tag }}
+      - name: The tag's server.json names a stable version npm has and the registry does not list
+        id: check
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#npm-v}"
+          node -e '
+            const fs = require("node:fs");
+            const server = JSON.parse(fs.readFileSync("server.json", "utf8"));
+            const cli = JSON.parse(fs.readFileSync("packages/cli/package.json", "utf8"));
+            const version = process.argv[1];
+            const named = [server.version, ...server.packages.map(entry => entry.version), cli.version];
+            if (named.some(value => value !== version)) {
+              console.error(`server.json and the CLI name ${named.join(", ")}, not ${version}`);
+              process.exit(1);
+            }
+            if (cli.mcpName !== server.name) {
+              console.error(`the CLI declares mcpName ${cli.mcpName}, server.json is ${server.name}`);
+              process.exit(1);
+            }
+          ' "$version"
+          case "$version" in
+            *-*)
+              echo "::notice::$version is a preview; previews are not listed."
+              echo "list=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          test "$(npm view "firenook@$version" version)" = "$version"
+          name="$(node -p 'require("./server.json").name')"
+          status="$(curl --silent --output /dev/null --write-out '%{http_code}' "$REGISTRY/v0/servers/${name//\//%2F}/versions/$version")"
+          case "$status" in
+            200)
+              echo "::notice::$name $version is already listed."
+              echo "list=false" >> "$GITHUB_OUTPUT"
+              ;;
+            404) echo "list=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "The registry answered $status for $name $version." >&2; exit 1 ;;
+          esac
+      - name: Download mcp-publisher and check its checksum
+        if: steps.check.outputs.list == 'true'
+        run: |
+          set -euo pipefail
+          archive=mcp-publisher_linux_amd64.tar.gz
+          curl --fail --location --silent --show-error --output "$RUNNER_TEMP/$archive" \
+            "https://github.com/modelcontextprotocol/registry/releases/download/$MCP_PUBLISHER_VERSION/$archive"
+          echo "$MCP_PUBLISHER_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" mcp-publisher
+      - name: Log in with this run's GitHub OIDC token and list the release
+        if: steps.check.outputs.list == 'true'
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/mcp-publisher" login github-oidc
+          "$RUNNER_TEMP/mcp-publisher" publish
+      - name: The registry lists it
+        if: steps.check.outputs.list == 'true'
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#npm-v}"
+          name="$(node -p 'require("./server.json").name')"
+          curl --fail --silent --show-error "$REGISTRY/v0/servers/${name//\//%2F}/versions/$version" > /dev/null
+          echo "::notice::$name $version is listed on the MCP Registry."
