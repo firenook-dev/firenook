@@ -6,6 +6,708 @@
       "case": "invalid-reload",
       "issue": 207,
       "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "top/broken",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "top/empty",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "top/whitespace-only",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "top/comment-only",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "top/word-before",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "top/word-after",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "top/word-after-function",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "top/two-services",
+      "issue": 207,
+      "why": "Firenook takes one service block; the official emulator takes a second, and refuses this source for its empty match block"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "top/service-name-misspelled",
+      "issue": 207,
+      "why": "the official emulator compiles this source and answers its warnings; Firenook refuses it"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "top/service-name-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "top/match-outside-service",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "version/number",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "version/one",
+      "issue": 207,
+      "why": "the official emulator compiles this source and answers its warnings; Firenook refuses it"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "version/equals-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "version/colon",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "version/value-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "version/unterminated",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "version/after-service",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "braces/service-open-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "braces/service-body-word",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "braces/service-body-allow",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "braces/match-open-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "braces/function-open-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "braces/function-close-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "braces/match-close-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "braces/service-close-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "semicolons/allow-missing",
+      "issue": 207,
+      "why": "the official emulator takes an allow without its `;` before another declaration; Firenook refuses it"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "semicolons/allow-doubled",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "semicolons/match-close",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "semicolons/let-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "parens/condition-close-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "parens/condition-close-extra",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "parens/call-close-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "parens/parameters-close-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "parens/parameters-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "strings/single-unterminated",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "strings/double-unterminated",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "strings/newline-inside",
+      "issue": 207,
+      "why": "Firenook compiles a source the official emulator refuses"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "strings/escaped-close",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "paths/leading-slash-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "paths/wildcard-empty",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "paths/double-slash",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "paths/trailing-slash",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "paths/interpolation",
+      "issue": 207,
+      "why": "Firenook compiles a source the official emulator refuses"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "paths/missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/if-space",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/if-at-line-end",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/not-equal-cut",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/not-equal-at-close",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/not-cut",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/group-cut",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/single-equals",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/triple-equals",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/single-ampersand",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/stray-ampersand",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/single-pipe",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/tilde",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/if-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/colon-alone",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/colon-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/method-comma-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/method-unknown",
+      "issue": 207,
+      "why": "the official emulator compiles this source and answers its warnings; Firenook refuses it"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/method-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/trailing-dot",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/bad-character-at",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/bad-character-hash",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "conditions/is-type-unknown",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "functions/name-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "functions/parameter-comma-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "functions/return-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "functions/return-value-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "functions/two-returns",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "functions/body-empty",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "functions/if-statement",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "let/name-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "let/equals-missing",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "let/without-return",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "let/then-word",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "let/in-match",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "keywords/servce",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "keywords/rules-verison",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "keywords/fucntion",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "keywords/retrun",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "keywords/alow",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/after-rules-version",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/after-service",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/after-service-name",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/in-service",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/after-match",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/after-match-path",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/in-match",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/in-parameters",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/in-function",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/after-return",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/after-allow",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/after-method",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/after-if",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/in-condition",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/after-condition",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/in-arguments",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/after-declaration",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/after-inner-match",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/in-string",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "eof/in-block-comment",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "two/empty-conditions",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "two/semicolon-and-brace",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "two/misspelling-and-string",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "two/method-and-if",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "two/package-and-syntax",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "positions/crlf",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "positions/unicode",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "positions/tab",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "production/unexpected-token",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "production/unclosed-block",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "production/duplicate-let",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "production/recursive-function",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
+    },
+    {
+      "set": "developer-tools-compile-errors-v1",
+      "case": "production/invalid-recursive-wildcard",
+      "issue": 207,
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
     }
   ]
 }

@@ -58,6 +58,8 @@ const JSON_CONTENT_TYPE: HeaderValue = HeaderValue::from_static("application/jso
 
 mod preview;
 use preview::Preview;
+#[cfg(test)]
+mod compile_errors_tests;
 mod coverage;
 #[cfg(test)]
 mod developer_tools_tests;
