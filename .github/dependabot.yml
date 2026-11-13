@@ -4,6 +4,9 @@ updates:
     directory: /
     schedule:
       interval: daily
+    # The same week .cargo/config.toml asks of cargo itself.
+    cooldown:
+      default-days: 7
     groups:
       rust-dependencies:
         patterns:
