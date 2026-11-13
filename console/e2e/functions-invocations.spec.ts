@@ -41,22 +41,34 @@ test('a burst stays readable: virtualized, filtered by the engine, paused and re
 }) => {
   const burst = unique('burst')
   const created = `function:${functionId('onOrderCreated')}`
+  const written = `function:${functionId('onOrderWritten')}`
   const before = await invocationTotal(engine, created)
+  const writtenBefore = await invocationTotal(engine, written)
   await page.goto(`${engine.origin}/console/functions/invocations`)
   await expect(page.getByTestId('invocations-toolbar')).toBeVisible()
 
-  // 300 documents in one commit: 600 invocations, two functions each.
+  // 300 documents in one commit: 600 invocations, two functions each. The
+  // burst is over once both functions have run for every document.
   await orders(engine, burst, 300)
-  await expect.poll(() => invocationTotal(engine, created), { timeout: 60_000 }).toBe(before + 300)
-  await expect
-    .poll(() => invocationTotal(engine, `${created} outcome:running`), { timeout: 30_000 })
-    .toBe(0)
-  // A window over fifty rows is one marker row; Show reads the newest page.
-  const marker = page.getByTestId('feed-marker').filter({ hasText: /more/ })
-  if ((await marker.count()) > 0) {
-    await marker.first().getByRole('button', { name: 'Show' }).click()
-    await expect(page.getByTestId('feed-marker').filter({ hasText: /more/ })).toHaveCount(0)
+  for (const [fn, from] of [
+    [created, before],
+    [written, writtenBefore],
+  ] as const) {
+    await expect.poll(() => invocationTotal(engine, fn), { timeout: 60_000 }).toBe(from + 300)
+    await expect
+      .poll(() => invocationTotal(engine, `${fn} outcome:running`), { timeout: 30_000 })
+      .toBe(0)
   }
+  // A window over fifty rows is one marker row; Show reads the newest page.
+  // The page can still be drawing the burst's last windows when the engine
+  // is done, so a marker may come after a Show, or be redrawn under the
+  // click: Show again until none is left.
+  const marker = page.getByTestId('feed-marker').filter({ hasText: /more/ })
+  await expect(async () => {
+    if ((await marker.count()) > 0)
+      await marker.first().getByRole('button', { name: 'Show' }).click({ timeout: 2_000 })
+    await expect(marker).toHaveCount(0, { timeout: 2_000 })
+  }).toPass({ timeout: 30_000 })
   await expect(rows(page).first().getByTestId('invocation-summary')).toContainText(burst)
   // However many there are, the page holds only what is in view.
   expect(await rows(page).count()).toBeLessThan(60)
