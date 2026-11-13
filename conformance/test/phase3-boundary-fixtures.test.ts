@@ -6,6 +6,7 @@ import test from "node:test";
 interface Issue {
   readonly severity?: string;
   readonly description?: string;
+  readonly sourcePosition?: { readonly line?: number; readonly column?: number };
 }
 
 interface Observation {
@@ -105,6 +106,57 @@ test("production parser and source-envelope boundaries remain frozen", async () 
     assert.equal(observation?.httpStatus, 400);
     assert.match(JSON.stringify(observation?.response), /INVALID_ARGUMENT/);
   }
+});
+
+test("production's limit on one expression's depth remains frozen", async () => {
+  const fixture = await readFixture(
+    "expression-size/production-expression-size-probes.json",
+    "be09d56db34475fa2f71b895702776b3394060f6040e1c4a2b205f5614980db8",
+  );
+  assert.equal(fixture.observations.length, 79);
+  const byId = new Map(fixture.observations.map((value) => [value.id, value]));
+  const status = (id: string): number | undefined => byId.get(id)?.httpStatus;
+  const state = (id: string): string | undefined =>
+    byId.get(id)?.response.testResults?.[0]?.state;
+  const refused = (id: string): string[] | undefined =>
+    byId.get(id)?.response.issues?.map(({ severity, description, sourcePosition }) => {
+      assert.equal(severity, "ERROR");
+      assert.equal(description, "Expression is too complex to evaluate safely.");
+      return `${sourcePosition?.line}:${sourcePosition?.column}`;
+    });
+
+  // Answered, then 500 INTERNAL, then refused at compile, each edge to the term.
+  for (const id of [
+    "linear-expression-terms-51",
+    "true-chain-terms-60",
+    "time-chain-terms-50",
+    "literal-left-terms-50",
+    "right-nested-terms-20",
+    "balanced-parenthesised-terms-60",
+    "balanced-parenthesised-terms-100",
+  ]) {
+    assert.equal(state(id), "SUCCESS", id);
+  }
+  for (const id of [
+    "linear-expression-terms-52",
+    "linear-expression-terms-98",
+    "true-chain-terms-70",
+    "true-chain-terms-99",
+    "time-chain-terms-55",
+    "time-chain-terms-98",
+    "literal-left-terms-60",
+    "literal-left-terms-98",
+  ]) {
+    assert.equal(status(id), 500, id);
+  }
+  // Every node 100 levels down is named once, where it starts.
+  assert.deepEqual(refused("linear-expression-terms-99"), ["5:21", "5:45", "5:50", "5:74"]);
+  assert.deepEqual(refused("time-chain-terms-99"), ["5:21", "5:37", "5:45", "5:61"]);
+  assert.deepEqual(refused("literal-left-terms-99"), ["5:21", "5:26", "5:50", "5:55"]);
+  assert.deepEqual(refused("true-chain-terms-100"), ["5:21", "5:29"]);
+  assert.deepEqual(refused("true-chain-terms-200"), ["5:21", "5:829"]);
+  assert.deepEqual(refused("right-nested-terms-50"), ["5:1530", "5:1554"]);
+  assert.deepEqual(refused("right-nested-terms-100"), ["5:1530", "5:1560"]);
 });
 
 test("production call-depth and expression budgets remain frozen", async () => {
