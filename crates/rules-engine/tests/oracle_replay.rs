@@ -213,14 +213,6 @@ fn denies_at_the_frozen_evaluated_expression_limit() {
 /// notes it in the ledger.
 const LIMIT_BUG_CANDIDATES: &[(&str, &str)] = &[
     (
-        "function-depth-21",
-        "production evaluates the 21-function chain f0..f20 and allows; Firenook compiles it but denies at run time: `maximum allowed call depth of 20 is reached` at `f20()` (22:27)",
-    ),
-    (
-        "function-depth-23",
-        "both refuse to compile; production answers one issue, `Maximum allowed call depth of 20 is reached for [f0->f1->...->f20] call stack.` at 24:12 (the declaration of f21); Firenook answers `maximum allowed function call depth of 20 is exceeded` at 1:1 for each of f0 and f1",
-    ),
-    (
         "linear-expression-terms-60",
         "production answers 500 INTERNAL `Internal error encountered.` (backendError); Firenook compiles and allows",
     ),
@@ -239,30 +231,6 @@ const LIMIT_BUG_CANDIDATES: &[(&str, &str)] = &[
     (
         "linear-expression-terms-100",
         "production refuses to compile, `Expression is too complex to evaluate safely.` (4 issues, the first at 5:21); Firenook has no such limit, compiles and allows (not implemented)",
-    ),
-    (
-        "balanced-expression-terms-150",
-        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:116 (inside leaf12), Firenook at 24:33 (the call `leaf12()`): the budget is spent at another expression",
-    ),
-    (
-        "balanced-expression-terms-175",
-        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 33:33 (the call `branch0_6()`): the budget is spent at another expression",
-    ),
-    (
-        "balanced-expression-terms-200",
-        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 36:33 (the call `branch0_6()`): the budget is spent at another expression",
-    ),
-    (
-        "balanced-expression-terms-225",
-        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 40:33 (the call `branch0_6()`): the budget is spent at another expression",
-    ),
-    (
-        "balanced-expression-terms-250",
-        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 43:33 (the call `branch0_6()`): the budget is spent at another expression",
-    ),
-    (
-        "balanced-expression-terms-300",
-        "both deny with `maximum of 1000 expressions to evaluate has been reached`; production stops at 15:89 (inside leaf12), Firenook at 51:33 (the call `branch0_6()`): the budget is spent at another expression",
     ),
 ];
 

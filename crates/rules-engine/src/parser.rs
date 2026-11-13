@@ -187,6 +187,7 @@ impl Parser {
     fn function(&mut self) -> Result<(String, Function), ParseError> {
         self.expect_identifier("function")?;
         let name = self.take_identifier("function name")?;
+        let name_start = self.previous_offset();
         self.expect(&TokenKind::LeftParen, "'(' after function name")?;
         let mut parameters = Vec::new();
         if !self.check(&TokenKind::RightParen) {
@@ -231,6 +232,7 @@ impl Parser {
         Ok((
             name,
             Function {
+                name_start,
                 body_start,
                 scope: self.scope.clone(),
                 parameters,
@@ -382,11 +384,13 @@ impl Parser {
             if left_binding_power < minimum_binding_power {
                 break;
             }
+            let operator_at = self.current().offset;
             self.advance();
             let right = self.expression(right_binding_power)?;
             left = Expr::new(
                 ExprKind::Binary {
                     operator,
+                    operator_at,
                     left: Box::new(left),
                     right: Box::new(right),
                 },

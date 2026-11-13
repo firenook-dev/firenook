@@ -164,6 +164,9 @@ pub(crate) enum PatternSegment {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Function {
+    /// Byte offset of the name in the declaration, where a compile-time call
+    /// depth refusal is reported.
+    pub(crate) name_start: usize,
     pub(crate) body_start: usize,
     /// Wildcard bindings of the match blocks enclosing the definition; a
     /// function never sees the caller's bindings (lexical scope).
@@ -245,6 +248,9 @@ pub(crate) enum ExprKind {
     },
     Binary {
         operator: BinaryOperator,
+        /// Byte offset of the operator token, where a step of the operator
+        /// itself fails.
+        operator_at: usize,
         left: Box<Expr>,
         right: Box<Expr>,
     },

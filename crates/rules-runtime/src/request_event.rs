@@ -409,6 +409,10 @@ impl Serialize for Context<'_> {
         map.serialize_entry("request", &RequestValue(self))?;
         if let Some(resource) = &self.request.resource {
             map.serialize_entry("resource", &ResourceValue(resource))?;
+        } else if self.request.operation == RequestOperation::List
+            && self.request.query.filter.is_none()
+        {
+            map.serialize_entry("resource", &metadata::QueryResource(self.request))?;
         } else {
             map.serialize_entry("resource", &Undefined)?;
         }

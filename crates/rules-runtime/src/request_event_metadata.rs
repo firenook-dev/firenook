@@ -82,6 +82,43 @@ impl Serialize for QueryPath<'_> {
     }
 }
 
+/// The `resource` of a query without filters, as the official emulator's
+/// Requests feed shows it: empty data, and a constraint on the name when a
+/// collection group is queried below a document
+/// (developer-tools-request-metadata-v1 messages 5 to 9). A filter's
+/// rendering is not recorded; the caller shows such a query's resource as
+/// undefined.
+pub(super) struct QueryResource<'a>(pub &'a EvaluationRequest);
+impl Serialize for QueryResource<'_> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        struct Fields(bool);
+        impl Serialize for Fields {
+            fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                let mut map = s.serialize_map(None)?;
+                map.serialize_entry("data", &EmptyMap)?;
+                if self.0 {
+                    map.serialize_entry("__name__", &Constraint)?;
+                }
+                map.end()
+            }
+        }
+        struct Constraint;
+        impl Serialize for Constraint {
+            fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                tagged(s, "constraintValue", &Empty {})
+            }
+        }
+        let domain = Domain::new(self.0).map_err(S::Error::custom)?;
+        tagged(
+            s,
+            "mapValue",
+            &WithFields {
+                fields: Fields(domain.group && domain.parent.is_some()),
+            },
+        )
+    }
+}
+
 pub(super) struct QueryValue<'a>(pub &'a EvaluationRequest);
 impl Serialize for QueryValue<'_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {

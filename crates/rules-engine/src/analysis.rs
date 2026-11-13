@@ -649,6 +649,7 @@ fn is_signed_in_check(condition: &Expr) -> bool {
         operator: BinaryOperator::NotEqual,
         left,
         right,
+        ..
     } = &condition.kind
     else {
         return false;

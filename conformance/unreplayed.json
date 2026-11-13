@@ -3,57 +3,9 @@
   "cases": [
     {
       "set": "developer-tools-coverage-v1",
-      "case": "compile-rejections/1",
-      "issue": 207,
-      "why": "a rules reload's compile error is framed and worded otherwise than the official emulator's"
-    },
-    {
-      "set": "developer-tools-coverage-v1",
       "case": "invalid-reload",
       "issue": 207,
-      "why": "a rules reload's compile error is framed and worded otherwise than the official emulator's"
-    },
-    {
-      "set": "developer-tools-coverage-v1",
-      "case": "profiles/missing-field",
-      "issue": 206,
-      "why": "a coverage error value spans the whole member expression, where the official one spans its root"
-    },
-    {
-      "set": "developer-tools-request-metadata-v1",
-      "case": "messages/5",
-      "issue": 208,
-      "why": "a query's evaluation in the Requests feed shows resource as undefined"
-    },
-    {
-      "set": "developer-tools-request-metadata-v1",
-      "case": "messages/6",
-      "issue": 208,
-      "why": "a query's evaluation in the Requests feed shows resource as undefined"
-    },
-    {
-      "set": "developer-tools-request-metadata-v1",
-      "case": "messages/7",
-      "issue": 208,
-      "why": "a query's evaluation in the Requests feed shows resource as undefined"
-    },
-    {
-      "set": "developer-tools-request-metadata-v1",
-      "case": "messages/8",
-      "issue": 208,
-      "why": "a query's evaluation in the Requests feed shows resource as undefined"
-    },
-    {
-      "set": "developer-tools-request-metadata-v1",
-      "case": "messages/9",
-      "issue": 208,
-      "why": "a query's evaluation in the Requests feed shows resource as undefined"
-    },
-    {
-      "set": "developer-tools-request-values-v1",
-      "case": "messages/5",
-      "issue": 208,
-      "why": "a query's evaluation in the Requests feed shows resource as undefined"
+      "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
     },
     {
       "set": "developer-tools-v1",
@@ -102,54 +54,6 @@
       "case": "main/discovery-backends-inventory/hub-emulators",
       "issue": 210,
       "why": "the hub's /emulators and the UI's /api/config list the emulators with other fields than firebase-tools"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/balanced-expression-terms-150",
-      "issue": 205,
-      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/balanced-expression-terms-175",
-      "issue": 205,
-      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/balanced-expression-terms-200",
-      "issue": 205,
-      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/balanced-expression-terms-225",
-      "issue": 205,
-      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/balanced-expression-terms-250",
-      "issue": 205,
-      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/balanced-expression-terms-300",
-      "issue": 205,
-      "why": "the expression budget runs out at a call site, where production's runs out inside the function"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/function-depth-21",
-      "issue": 203,
-      "why": "function call depth: a 21-function chain production allows is denied, and the compile error is not production's"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/function-depth-23",
-      "issue": 203,
-      "why": "function call depth: a 21-function chain production allows is denied, and the compile error is not production's"
     },
     {
       "set": "rules-v2/production-rules-api",

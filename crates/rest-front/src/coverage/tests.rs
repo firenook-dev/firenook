@@ -213,20 +213,10 @@ mod oracle {
     /// Recorded answers Firenook gives otherwise with no documented reason.
     /// The replay asserts each still differs as described; whoever fixes one
     /// moves it out of this table and the replay notes it in the ledger.
-    const BUG_CANDIDATES: &[(&str, &str)] = &[
-        (
-            "profiles/missing-field",
-            "the error value's sourcePosition is the failing field access `resource.data.missing` (offsets 127-147); the official emulator's is `resource` (127-134)",
-        ),
-        (
-            "invalid-reload",
-            "a rejected reload's message is `rules compilation failed: 1:1: expected \"service\"`; the official emulator's is `Error compiling rules:\\nL1:1 mismatched input 'broken' expecting {'function', 'import', 'service', 'rules_version'}`",
-        ),
-        (
-            "compile-rejections/1",
-            "a rejected reload's message is `rules compilation failed: 4:19: <diagnostic>`; the official emulator frames the same diagnostic as `Error compiling rules:\\nL4:19 <diagnostic>`",
-        ),
-    ];
+    const BUG_CANDIDATES: &[(&str, &str)] = &[(
+        "invalid-reload",
+        "a rejected reload is framed as the official emulator frames it, but the parser's own words differ: Firenook's is `Error compiling rules:\\nL1:1 expected \"service\"`, the official emulator's `Error compiling rules:\\nL1:1 mismatched input 'broken' expecting {'function', 'import', 'service', 'rules_version'}`",
+    )];
 
     // The documented reasons a recorded report differs.
     const LAZY_PLANNER: &str = "coverage counts Firenook's one evaluation of each read, with the document; the official emulator's lazy planner first evaluates without it (bare undefined values and doubled counts) and gives short-circuited expressions empty values (DESIGN.md, Live bounded coverage observations)";
@@ -583,10 +573,7 @@ mod oracle {
         .await;
         let (actual, recorded) =
             rejected(status, &answer, &invalid["status"], &invalid["response"]);
-        assert_eq!(
-            actual,
-            "rules compilation failed: 1:1: expected \"service\""
-        );
+        assert_eq!(actual, "Error compiling rules:\nL1:1 expected \"service\"");
         assert_ne!(actual, recorded);
         outcomes.push(("invalid-reload".to_owned(), Outcome::Bug));
         assert_eq!(
@@ -614,13 +601,12 @@ mod oracle {
             .await;
             let (actual, recorded) =
                 rejected(status, &answer, &rejection["status"], &rejection["data"]);
-            // The same diagnostic at the same place, framed differently.
-            let diagnostic = recorded
-                .strip_prefix("Error compiling rules:\nL")
-                .unwrap()
-                .replacen(' ', ": ", 1);
-            assert_eq!(actual, format!("rules compilation failed: {diagnostic}"));
-            outcomes.push((format!("compile-rejections/{}", index + 1), Outcome::Bug));
+            assert_eq!(actual, recorded);
+            assert_eq!(answer, rejection["data"]);
+            outcomes.push((
+                format!("compile-rejections/{}", index + 1),
+                Outcome::Noted(Compared::Answer, vec![]),
+            ));
         }
         outcomes
     }
