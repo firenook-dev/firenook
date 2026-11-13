@@ -777,16 +777,17 @@ function rulesV2() {
       answer: rulesVerdict(language.response.testResults[index]),
     });
   });
-  for (const [file, label] of [
-    ['production-limit-probes', 'Limits'],
-    ['production-parse-errors', 'Compiler and source size'],
+  for (const [file, prefix, label] of [
+    ['production-limit-probes', 'limit-probes', 'Limits'],
+    ['expression-size/production-expression-size-probes', 'expression-size-probes', 'Limits'],
+    ['production-parse-errors', 'parse-errors', 'Compiler and source size'],
   ]) {
     const fixture = readJson(`rules-v2/${file}.json`);
     latest.push(fixture.capturedAt);
     for (const observation of fixture.observations) {
       const family = observation.id.replace(/-\d+$/, '');
       prod.push({
-        id: `${file.replace('production-', '')}/${observation.id}`,
+        id: `${prefix}/${observation.id}`,
         scenario: `${label}: ${family}`,
         title: observation.id,
         request: `projects.test with the ${observation.id} source (${observation.sourceBytes} bytes)`,

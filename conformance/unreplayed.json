@@ -6,36 +6,6 @@
       "case": "invalid-reload",
       "issue": 207,
       "why": "a rules reload's compile error is worded by Firenook's parser, where the official emulator's parser words it otherwise"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/linear-expression-terms-60",
-      "issue": 204,
-      "why": "no expression size limit: production refuses 100 terms and fails on 60-90"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/linear-expression-terms-70",
-      "issue": 204,
-      "why": "no expression size limit: production refuses 100 terms and fails on 60-90"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/linear-expression-terms-80",
-      "issue": 204,
-      "why": "no expression size limit: production refuses 100 terms and fails on 60-90"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/linear-expression-terms-90",
-      "issue": 204,
-      "why": "no expression size limit: production refuses 100 terms and fails on 60-90"
-    },
-    {
-      "set": "rules-v2/production-rules-api",
-      "case": "limit-probes/linear-expression-terms-100",
-      "issue": 204,
-      "why": "no expression size limit: production refuses 100 terms and fails on 60-90"
     }
   ]
 }

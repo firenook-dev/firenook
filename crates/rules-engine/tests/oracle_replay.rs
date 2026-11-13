@@ -17,6 +17,9 @@ const LANGUAGE_CONTRACT: &str =
     include_str!("../../../conformance/fixtures/rules-v2/production-language-contract.json");
 const LIMIT_PROBES: &str =
     include_str!("../../../conformance/fixtures/rules-v2/production-limit-probes.json");
+const EXPRESSION_SIZE_PROBES: &str = include_str!(
+    "../../../conformance/fixtures/rules-v2/expression-size/production-expression-size-probes.json"
+);
 const JAVA_ACCESS: &str =
     include_str!("../../../conformance/fixtures/rules-v2/java-access-accounting.json");
 // Recorded with the same rules source as `JAVA_ACCESS`; read only for the
@@ -207,32 +210,37 @@ fn denies_at_the_frozen_evaluated_expression_limit() {
     }
 }
 
-/// Limit probes Firenook answers otherwise than production, with no
-/// documented reason. The replay below asserts each still differs as
-/// described; whoever fixes one moves it out of this table and the replay
-/// notes it in the ledger.
-const LIMIT_BUG_CANDIDATES: &[(&str, &str)] = &[
-    (
-        "linear-expression-terms-60",
-        "production answers 500 INTERNAL `Internal error encountered.` (backendError); Firenook compiles and allows",
-    ),
-    (
-        "linear-expression-terms-70",
-        "production answers 500 INTERNAL `Internal error encountered.` (backendError); Firenook compiles and allows",
-    ),
-    (
-        "linear-expression-terms-80",
-        "production answers 500 INTERNAL `Internal error encountered.` (backendError); Firenook compiles and allows",
-    ),
-    (
-        "linear-expression-terms-90",
-        "production answers 500 INTERNAL `Internal error encountered.` (backendError); Firenook compiles and allows",
-    ),
-    (
-        "linear-expression-terms-100",
-        "production refuses to compile, `Expression is too complex to evaluate safely.` (4 issues, the first at 5:21); Firenook has no such limit, compiles and allows (not implemented)",
-    ),
+/// Chains of `&&` that production's `projects.test` answers with 500
+/// INTERNAL (`backendError`) although they are within its compile-time
+/// depth limit: (case prefix, family, first and last count of terms). The
+/// edge moves with what a term is, so no one measure places it: 51 `>=`
+/// terms are answered and 52 fail, 60 `true` terms are answered and 70
+/// fail, 50 `!=` terms are answered and 55 fail, 50 with the literal on the
+/// left are answered and 60 fail. Firenook does not model it and evaluates
+/// these chains; the replay asserts each recorded case in a range is such a
+/// failure that Firenook allows.
+const UNANSWERED_CHAINS: &[(&str, &str, usize, usize)] = &[
+    ("limit-probes", "linear-expression-terms", 60, 90),
+    ("expression-size-probes", "linear-expression-terms", 52, 98),
+    ("expression-size-probes", "true-chain-terms", 70, 99),
+    ("expression-size-probes", "time-chain-terms", 55, 98),
+    ("expression-size-probes", "literal-left-terms", 60, 98),
 ];
+
+const UNANSWERED_CHAIN: &str = "production's projects.test fails with 500 INTERNAL on a long chain below its compile-time depth limit, from an edge that moves with what a term is (52 `>=` terms, 61 to 70 `true` terms); Firenook does not model that edge and evaluates the chain";
+
+/// Whether `id` of the fixture `prefix` names is in [`UNANSWERED_CHAINS`].
+fn unanswered_chain(prefix: &str, id: &str) -> bool {
+    let Some((family, terms)) = id.rsplit_once('-') else {
+        return false;
+    };
+    let Ok(terms) = terms.parse::<usize>() else {
+        return false;
+    };
+    UNANSWERED_CHAINS.iter().any(|(set, chain, first, last)| {
+        *set == prefix && *chain == family && (*first..=*last).contains(&terms)
+    })
+}
 
 /// What `projects.test` answered for one probe, or what Firenook does with
 /// it, in the terms both can be compared in.
@@ -310,8 +318,9 @@ fn recorded_probe(observation: &JsonValue) -> ProbeAnswer {
 }
 
 /// Firenook's answer: the source compiled, then evaluated with the test
-/// case the capture sent with every limit probe
-/// (`conformance/src/rules/capture-phase3-boundaries.ts`).
+/// case both captures sent with every probe
+/// (`conformance/src/rules/capture-phase3-boundaries.ts`,
+/// `capture-expression-size-probes.ts`).
 fn firenook_probe(source: &str) -> ProbeAnswer {
     let rules = match compile(source) {
         Ok(rules) => rules,
@@ -350,46 +359,121 @@ fn firenook_probe(source: &str) -> ProbeAnswer {
     )
 }
 
-/// Every limit probe the two tests above do not note: compile and verdict
-/// for an accepted source (production's expression reports are not a
-/// Firenook surface, so an allowed probe is compared as a verdict), and the
-/// message with its line and column for a refusal or an evaluation error.
-#[test]
-fn replays_the_remaining_frozen_limit_probes() {
-    let fixture: JsonValue = serde_json::from_str(LIMIT_PROBES).expect("valid fixture");
-    let mut differing = Vec::new();
+/// How the probes of one fixture compared.
+#[derive(Debug, Default, PartialEq)]
+struct ProbeReplay {
+    /// Allowed by both.
+    allowed: usize,
+    /// Refused at compile by both, with the same issues.
+    refused: usize,
+    /// Failed in evaluation by both, with the same message and position.
+    failed: usize,
+    /// Chains of [`UNANSWERED_CHAINS`]: 500 INTERNAL in production, allowed
+    /// by Firenook.
+    unanswered: usize,
+    /// Anything else, by id.
+    differing: Vec<String>,
+}
+
+/// Replays each probe of `fixture` but those in `skip`, as the case
+/// `<prefix>/<id>`: compile and verdict for an accepted source (production's
+/// expression reports are not a Firenook surface, so an allowed probe is
+/// compared as a verdict), and the message with its line and column for a
+/// refusal or an evaluation error.
+fn replay_probes(fixture: &str, prefix: &str, skip: &[&str]) -> ProbeReplay {
+    let fixture: JsonValue = serde_json::from_str(fixture).expect("valid fixture");
+    let mut replay = ProbeReplay::default();
     for observation in fixture["observations"].as_array().expect("observations") {
         let id = observation["id"].as_str().expect("id");
-        // Noted by the two tests above.
-        if matches!(
-            id,
-            "function-depth-22" | "balanced-expression-terms-100" | "balanced-expression-terms-125"
-        ) {
+        if skip.contains(&id) {
             continue;
         }
         let recorded = recorded_probe(observation);
         let actual = firenook_probe(observation["source"].as_str().expect("source"));
-        let case = format!("limit-probes/{id}");
+        let case = format!("{prefix}/{id}");
         match (&recorded, &actual) {
             (ProbeAnswer::Allowed, ProbeAnswer::Allowed) => {
                 ledger::checked(PRODUCTION_SET, &case, ledger::Compared::Verdict);
+                replay.allowed += 1;
             }
             _ if recorded == actual => {
                 ledger::checked(PRODUCTION_SET, &case, ledger::Compared::Error);
+                if matches!(recorded, ProbeAnswer::Refused(_)) {
+                    replay.refused += 1;
+                } else {
+                    replay.failed += 1;
+                }
+            }
+            (ProbeAnswer::Unanswered(500, message), ProbeAnswer::Allowed)
+                if unanswered_chain(prefix, id)
+                    && matches!(
+                        message.as_str(),
+                        "Internal error encountered." | "Failed to convert server response to JSON"
+                    ) =>
+            {
+                ledger::differs(
+                    PRODUCTION_SET,
+                    &case,
+                    ledger::Compared::Status,
+                    UNANSWERED_CHAIN,
+                );
+                replay.unanswered += 1;
             }
             _ => {
-                eprintln!("{id}: production {recorded:?}, Firenook {actual:?}");
-                differing.push(id);
+                eprintln!("{case}: production {recorded:?}, Firenook {actual:?}");
+                replay.differing.push(id.to_owned());
             }
         }
     }
+    replay
+}
+
+/// Every limit probe the two tests above do not note.
+#[test]
+fn replays_the_remaining_frozen_limit_probes() {
+    let replay = replay_probes(
+        LIMIT_PROBES,
+        "limit-probes",
+        // Noted by the two tests above.
+        &[
+            "function-depth-22",
+            "balanced-expression-terms-100",
+            "balanced-expression-terms-125",
+        ],
+    );
     assert_eq!(
-        differing,
-        LIMIT_BUG_CANDIDATES
-            .iter()
-            .map(|(id, _)| *id)
-            .collect::<Vec<_>>(),
-        "every listed bug candidate still differs, and nothing else does"
+        replay,
+        ProbeReplay {
+            // function-depth-15 … -21, linear-expression-terms-20 … -50.
+            allowed: 11,
+            // function-depth-23, linear-expression-terms-100.
+            refused: 2,
+            // balanced-expression-terms-150 … -300: the 1,000-expression budget.
+            failed: 6,
+            // linear-expression-terms-60 … -90.
+            unanswered: 4,
+            differing: Vec::new(),
+        }
+    );
+}
+
+/// Where production stops one expression (`rules-v2/expression-size`): each
+/// chain refused at compile with every node 100 levels down named where it
+/// starts, the chains below that answered or failing with 500 INTERNAL, and
+/// a balanced bracketing that is never refused and meets the 1,000-expression
+/// budget instead.
+#[test]
+fn replays_the_frozen_expression_size_probes() {
+    let replay = replay_probes(EXPRESSION_SIZE_PROBES, "expression-size-probes", &[]);
+    assert_eq!(
+        replay,
+        ProbeReplay {
+            allowed: 9,
+            refused: 29,
+            failed: 2,
+            unanswered: 39,
+            differing: Vec::new(),
+        }
     );
 }
 

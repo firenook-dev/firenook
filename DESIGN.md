@@ -1030,6 +1030,33 @@ A document's name reaches rules without its project, the form the store keeps be
 for the wire. Under Storage, `firestore.get(...).__name__` keeps the project, as
 `storage-rules-v1` records.
 
+### How deep one rules expression may nest
+
+Production's Rules compiler refuses an expression once a node of it sits 100
+levels down, the expression's root being level 1: `Expression is too complex to
+evaluate safely.` once per such node, at its start, and nothing for the nodes
+under one it names (`rules-v2/expression-size`). A binary operator is a level, a
+grouping bracket is a level of its own, named at its `(`, and a chain of fields
+down to a variable (`request.auth.token.n`) is one node. So 99 terms
+`request.auth.token.n >= k` joined by `&&` are refused and 98 compile, 100 `true`
+terms are refused, and a chain bracketed to the right is refused at 50 terms.
+The parser keeps no grouping node, so `expression_depth.rs` reads a node's
+brackets from its span, which starts at the outermost `(`.
+
+Nothing records the other node kinds. Firenook counts a unary operator, an
+index, a slice, a call or method call, a list, a map, a path, `is` and the
+conditional as a level each over their operands; a field chain over anything
+but a variable has its base one level down; and function `return` and `let`
+values are checked as allow conditions are. The check runs at compile and walks
+no deeper than the limit, so evaluation is unchanged. The deepest expressions it
+lets through evaluate on a 2 MiB stack in a debug build, with little to spare (98
+`>=` terms need about 1.9 MiB), which the module's own test guards.
+
+Below the limit production fails some long chains with 500 INTERNAL, from an edge
+that moves with what a term is (52 `>=` terms, between 61 and 70 `true` terms).
+No one measure places it, so Firenook evaluates those chains and the replay notes
+them as differing.
+
 ### REST document reads and transaction boundary
 
 `rest-read-options-v1` records independent official-jar HTTP observations before
