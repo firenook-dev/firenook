@@ -6,6 +6,7 @@ use crate::ast::{
     Allow, BinaryOperator, Expr, ExprKind, Function, MatchBlock, Operation, PathPart,
     PatternSegment, Program, TypeName, UnaryOperator, decode_path_text,
 };
+use crate::expression_depth::{REFUSED_LEVEL, TOO_COMPLEX};
 use crate::lexer::{LexError, Token, TokenKind, lex};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -45,6 +46,27 @@ const AFTER_LET: &str = "{'&&', '.', '==', '>', '>=', '[', '<', '<=', '-', '%', 
 /// The type names the official parser takes after `is`, in its order
 /// (conditions/is-type-unknown).
 const OFFICIAL_TYPES: &str = "bool,bytes,constraint,duration,float,int,latlng,list,vector,set,number,map,string,timestamp,path,map_diff";
+
+/// How many expressions deep the parser goes (#231). Every operand nested in
+/// another (a bracket's content, the operand of `!` or `-`, a list or map
+/// element, a call argument, an index, a branch of the conditional, a path
+/// interpolation) is parsed one level down, each a frame of the parser's, so
+/// a source of thousands of brackets overflowed its stack before anything
+/// could refuse it. Past this the parser stops and answers what the depth
+/// check would ([`crate::expression_depth`]): `Expression is too complex to
+/// evaluate safely.` where the 100th level starts, which for brackets, unary
+/// operators, lists, maps and calls is the node the depth check names.
+///
+/// Anything shallower is left to the depth check, so every recorded refusal
+/// keeps its answer: the deepest recorded, 100 terms bracketed to the right
+/// (`rules-v2/expression-size`), is parsed 200 levels deep. At 240 the
+/// hungriest shapes (lists, maps, `!`) still parse on a 2 MiB thread in a
+/// debug build, where they overflowed at 300.
+const MAXIMUM_EXPRESSION_NESTING: usize = 240;
+
+/// How many match blocks deep the parser goes (#231), for the same reason.
+/// Production's limit is not recorded; rules nest a handful of blocks.
+const MAXIMUM_MATCH_NESTING: usize = 128;
 
 /// How a declaration in a match block ended, which decides what the
 /// official parser says when the source ends after it.
@@ -106,6 +128,10 @@ struct Parser<'s> {
     skipped: Vec<ParseError>,
     /// What Firenook refuses in a source that parses.
     semantic: Vec<ParseError>,
+    /// Where each expression being parsed starts, outermost first.
+    expression_starts: Vec<usize>,
+    /// How many match blocks are open.
+    open_matches: usize,
 }
 
 impl<'s> Parser<'s> {
@@ -127,6 +153,8 @@ impl<'s> Parser<'s> {
             reported: Vec::new(),
             skipped: Vec::new(),
             semantic: Vec::new(),
+            expression_starts: Vec::new(),
+            open_matches: 0,
         }
     }
 
@@ -351,6 +379,18 @@ impl<'s> Parser<'s> {
     }
 
     fn match_block(&mut self) -> Result<MatchBlock, ParseError> {
+        if self.open_matches == MAXIMUM_MATCH_NESTING {
+            return Err(self.error(format!(
+                "match blocks are nested more than {MAXIMUM_MATCH_NESTING} deep"
+            )));
+        }
+        self.open_matches += 1;
+        let block = self.match_block_within();
+        self.open_matches -= 1;
+        block
+    }
+
+    fn match_block_within(&mut self) -> Result<MatchBlock, ParseError> {
         let header_start = self.current().offset;
         self.advance();
         // After `match` anything but a path is unwanted (eof/after-match,
@@ -776,6 +816,19 @@ impl<'s> Parser<'s> {
     }
 
     fn expression(&mut self, minimum_binding_power: u8) -> Result<Expr, ParseError> {
+        if self.expression_starts.len() == MAXIMUM_EXPRESSION_NESTING {
+            return Err(ParseError {
+                message: TOO_COMPLEX.to_owned(),
+                offset: self.expression_starts[REFUSED_LEVEL - 1],
+            });
+        }
+        self.expression_starts.push(self.current().offset);
+        let expression = self.expression_within(minimum_binding_power);
+        self.expression_starts.pop();
+        expression
+    }
+
+    fn expression_within(&mut self, minimum_binding_power: u8) -> Result<Expr, ParseError> {
         let mut left = self.prefix()?;
         loop {
             let start = left.span.start;
