@@ -213,6 +213,10 @@ jobs:
 
   verify:
     needs: packages
+    # Not the default success(): it is false when any job before, such as
+    # scope (pull requests only), was skipped, and that skipped this check on
+    # main and in the 0.2.5 release run. It runs whenever the builds did.
+    if: ${{ !cancelled() && needs.packages.result == 'success' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
