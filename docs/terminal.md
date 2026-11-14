@@ -84,8 +84,7 @@ The release check asks firenook.dev for `firenook`'s version tags at most
 once a day, in the background, and the npm registry when firenook.dev does
 not answer. The request names the installed version and the platform
 (`darwin-arm64`, say), and firenook.dev counts the day's checks by them and
-keeps nothing else: no address, id or project (its daily totals are public
-at https://firenook.dev/api/usage). The answer shows on the next start, so
+keeps nothing else: no address, id or project. The answer shows on the next start, so
 the check never slows a start down. It follows the channel of the version
 you have (`next` or `latest`; a preview also hears of a later release on
 `latest`) and writes the install command for your project's package manager. It is off in CI, in the plain output, and with
