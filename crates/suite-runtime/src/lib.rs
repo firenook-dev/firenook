@@ -2482,6 +2482,22 @@ async fn free_locator(config: &SuiteConfig) -> Option<PathBuf> {
     None
 }
 
+/// How long a locator origin that is an IP address may take to accept a
+/// connection. Windows does not refuse a connection to a loopback port nobody
+/// listens on: it retries the SYN until the connect times out, so a locator a
+/// killed suite left behind cost the whole request timeout per origin (#181).
+/// A suite that is running accepts at once, whatever its load, since the
+/// kernel completes the handshake before the suite sees it.
+const LOCATOR_ADDRESS_CONNECT_TIMEOUT: Duration = Duration::from_millis(200);
+
+/// How long a locator origin may take to answer. A host name keeps this
+/// whole budget for its connection too, since resolving the name counts
+/// towards a connection's time.
+const LOCATOR_ANSWER_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Whether a suite still answers at one of the locator's origins with the
+/// pid the locator records. The origins are asked at once, and the first
+/// that answers with that pid settles it.
 async fn locator_answers(path: &Path) -> bool {
     let Ok(bytes) = std::fs::read(path) else {
         return false;
@@ -2492,23 +2508,55 @@ async fn locator_answers(path: &Path) -> bool {
     let Some(pid) = locator["pid"].as_u64() else {
         return false;
     };
-    let Ok(client) = reqwest::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(2))
-        .build()
-    else {
+    let origins = locator["origins"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .collect::<Vec<_>>();
+    origin_answers_with_pid(&origins, pid).await
+}
+
+async fn origin_answers_with_pid(origins: &[&str], pid: u64) -> bool {
+    let client = |connect: Duration| {
+        reqwest::Client::builder()
+            .no_proxy()
+            .connect_timeout(connect)
+            .timeout(LOCATOR_ANSWER_TIMEOUT)
+            .build()
+            .ok()
+    };
+    let (Some(addresses), Some(names)) = (
+        client(LOCATOR_ADDRESS_CONNECT_TIMEOUT),
+        client(LOCATOR_ANSWER_TIMEOUT),
+    ) else {
         return false;
     };
-    for origin in locator["origins"].as_array().into_iter().flatten() {
-        let Some(origin) = origin.as_str() else {
-            continue;
-        };
-        let Ok(response) = client.get(format!("{origin}/")).send().await else {
-            continue;
-        };
-        if let Ok(status) = response.json::<serde_json::Value>().await
-            && status["pid"].as_u64() == Some(pid)
-        {
+    let mut probes = origins
+        .iter()
+        .map(|origin| {
+            let is_address = reqwest::Url::parse(origin).is_ok_and(|url| {
+                url.host_str().is_some_and(|host| {
+                    host.trim_start_matches('[')
+                        .trim_end_matches(']')
+                        .parse::<std::net::IpAddr>()
+                        .is_ok()
+                })
+            });
+            let request = if is_address { &addresses } else { &names }.get(format!("{origin}/"));
+            async move {
+                let Ok(response) = request.send().await else {
+                    return false;
+                };
+                response
+                    .json::<serde_json::Value>()
+                    .await
+                    .is_ok_and(|status| status["pid"].as_u64() == Some(pid))
+            }
+        })
+        .collect::<futures_util::stream::FuturesUnordered<_>>();
+    while let Some(answered) = probes.next().await {
+        if answered {
             return true;
         }
     }
