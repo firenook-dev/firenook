@@ -91,6 +91,8 @@ mod console_rules_tests;
 #[cfg(test)]
 mod diagnostics_tests;
 #[cfg(test)]
+mod locator_tests;
+#[cfg(test)]
 mod no_delay_tests;
 #[cfg(test)]
 mod transport_tests;
