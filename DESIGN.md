@@ -1021,7 +1021,7 @@ official keywords are not variables, and a match block must hold a
 declaration. Production's Rules API words the five refusals recorded from
 both alike. The official emulator compiles `rules_version = '1'` with a
 warning and serves version 1 of the language; Firenook serves version 2
-only, so that answer is listed in `conformance/unreplayed.json` under #229.
+only, so that answer is listed in `conformance/unreplayed.json` under #247.
 
 ### Queries that name no collection
 

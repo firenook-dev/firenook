@@ -4,7 +4,7 @@
     {
       "set": "developer-tools-compile-errors-v1",
       "case": "version/one",
-      "issue": 229,
+      "issue": 247,
       "why": "the official emulator compiles rules_version '1' and answers its warning; Firenook serves version 2 only, and no recording shows version 1 of the language, which the official emulator evaluates otherwise (a recursive wildcard matches one or more segments) and compiles otherwise (no let)"
     }
   ]
