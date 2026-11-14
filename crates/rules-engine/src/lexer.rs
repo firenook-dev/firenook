@@ -72,6 +72,16 @@ pub(crate) fn lex(source: &str) -> (Vec<Token>, Vec<LexError>) {
     Lexer::new(source).lex()
 }
 
+/// The tokens of `source`, an expression on its own (a path's
+/// interpolation, `$(…)`): no declaration starts in it, so a `/` at its
+/// start begins a path in an expression, read as one token (`$(/b/c)`), not a
+/// match path read segment by segment.
+pub(crate) fn lex_expression(source: &str) -> (Vec<Token>, Vec<LexError>) {
+    let mut lexer = Lexer::new(source);
+    lexer.expression = true;
+    lexer.lex()
+}
+
 /// The tokens of the path at `start..end` of `source` as a match path is
 /// read: where the official lexer reads its parts, Firenook having read it
 /// as one token in an expression.
@@ -93,6 +103,8 @@ struct Lexer<'a> {
     service_name: bool,
     /// Where in a match path the lexer is.
     path: PathState,
+    /// The source is an expression on its own, where no declaration starts.
+    expression: bool,
 }
 
 /// Where in a match path the lexer is. A match path is read as the official
@@ -128,6 +140,7 @@ impl<'a> Lexer<'a> {
             skipped: Vec::new(),
             service_name: false,
             path: PathState::Outside,
+            expression: false,
         }
     }
 
@@ -300,8 +313,9 @@ impl<'a> Lexer<'a> {
     /// path: at the start, after `match`, `{`, `}` or `;`.
     fn declaration_starts(&self) -> bool {
         match self.tokens.last().map(|token| &token.kind) {
-            None | Some(TokenKind::LeftBrace | TokenKind::RightBrace | TokenKind::Semicolon) => {
-                true
+            None => !self.expression,
+            Some(TokenKind::LeftBrace | TokenKind::RightBrace | TokenKind::Semicolon) => {
+                !self.expression
             }
             Some(TokenKind::Identifier(word)) => word == "match",
             Some(_) => false,
@@ -783,6 +797,21 @@ mod tests {
     /// A match path is read as the official lexer reads it, a segment with
     /// its `/` as one token, so that a parser can say which token of it does
     /// not fit; `//` in it starts a comment (paths/double-slash).
+    #[test]
+    fn reads_a_path_at_the_start_of_an_interpolation_as_one_token() {
+        // `/a/$(/b/c)`: the interpolation is an expression, where a `/`
+        // starts a path in an expression, not a match path.
+        let (tokens, skipped) = lex_expression("/b/c");
+        assert_eq!(skipped, []);
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| token.kind.clone())
+                .collect::<Vec<_>>(),
+            [TokenKind::Path("/b/c".to_owned()), TokenKind::Eof]
+        );
+    }
+
     #[test]
     fn reads_a_match_path_as_the_official_lexer() {
         assert_eq!(

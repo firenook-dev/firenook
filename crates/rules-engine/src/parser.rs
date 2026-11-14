@@ -7,7 +7,9 @@ use crate::ast::{
     PatternSegment, Program, TypeName, UnaryOperator, decode_path_text,
 };
 use crate::expression_depth::{REFUSED_LEVEL, TOO_COMPLEX};
-use crate::lexer::{LexError, Token, TokenKind, lex, lex_match_path, segment_length};
+use crate::lexer::{
+    LexError, Token, TokenKind, lex, lex_expression, lex_match_path, segment_length,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ParseError {
@@ -1871,7 +1873,7 @@ impl<'s> Parser<'s> {
             // The interpolation's own tokens, placed in the whole source,
             // parsed in place of the ruleset's.
             let base = offset + expression_start;
-            let (mut tokens, skipped) = lex(&raw[expression_start..expression_end]);
+            let (mut tokens, skipped) = lex_expression(&raw[expression_start..expression_end]);
             for token in &mut tokens {
                 token.offset += base;
                 token.end_offset += base;
