@@ -80,10 +80,13 @@ engine that ends without being asked to (killed, or exiting on its own once
 ready) adds a line that says so, `firenook: the engine was ended (SIGKILL)
 while it was running; …`, and the command exits non-zero.
 
-The release check asks the npm registry for `firenook`'s version tags at
-most once a day, in the background. The answer shows on the next start, so
+The release check asks firenook.dev for `firenook`'s version tags at most
+once a day, in the background, and the npm registry when firenook.dev does
+not answer. The request names the installed version and the platform
+(`darwin-arm64`, say), and firenook.dev counts the day's checks by them and
+keeps nothing else: no address, id or project. The answer shows on the next start, so
 the check never slows a start down. It follows the channel of the version
 you have (`next` or `latest`; a preview also hears of a later release on
 `latest`) and writes the install command for your project's package manager. It is off in CI, in the plain output, and with
-`FIRENOOK_NO_UPDATE_CHECK=1` or `NO_UPDATE_NOTIFIER=1`. As elsewhere, a
+`FIRENOOK_NO_UPDATE_CHECK=1`, `NO_UPDATE_NOTIFIER=1` or `DO_NOT_TRACK=1`. As elsewhere, a
 variable set to nothing, `0` or `false` is not set: `CI=false` is no CI.
