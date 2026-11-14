@@ -38,6 +38,11 @@ pub(crate) enum TokenKind {
     RightBrace,
     LeftBracket,
     RightBracket,
+    /// `**` in a match path's recursive wildcard.
+    DoubleStar,
+    /// The word after `service`, read as the official lexer reads it there:
+    /// letters, digits, `.` and `-`.
+    ServiceName(String),
     /// A string its line ends in before it closes, from the quote to the end
     /// of the line, as the official lexer reads it (`UNPAIRED_SINGLE_QUOTE`,
     /// `UNPAIRED_DOUBLE_QUOTE`); the quote it opens with.
@@ -67,11 +72,63 @@ pub(crate) fn lex(source: &str) -> (Vec<Token>, Vec<LexError>) {
     Lexer::new(source).lex()
 }
 
+/// The tokens of `source`, an expression on its own (a path's
+/// interpolation, `$(…)`): no declaration starts in it, so a `/` at its
+/// start begins a path in an expression, read as one token (`$(/b/c)`), not a
+/// match path read segment by segment.
+pub(crate) fn lex_expression(source: &str) -> (Vec<Token>, Vec<LexError>) {
+    let mut lexer = Lexer::new(source);
+    lexer.expression = true;
+    lexer.lex()
+}
+
+/// The tokens of the path at `start..end` of `source` as a match path is
+/// read: where the official lexer reads its parts, Firenook having read it
+/// as one token in an expression.
+pub(crate) fn lex_match_path(source: &str, start: usize, end: usize) -> Vec<Token> {
+    let mut lexer = Lexer::new(&source[..end]);
+    lexer.offset = start;
+    lexer.path = PathState::AfterSegment;
+    let (mut tokens, _) = lexer.lex();
+    tokens.pop();
+    tokens
+}
+
 struct Lexer<'a> {
     source: &'a str,
     offset: usize,
     tokens: Vec<Token>,
     skipped: Vec<LexError>,
+    /// After the word `service`: the next word is the service's name.
+    service_name: bool,
+    /// Where in a match path the lexer is.
+    path: PathState,
+    /// The source is an expression on its own, where no declaration starts.
+    expression: bool,
+}
+
+/// Where in a match path the lexer is. A match path is read as the official
+/// lexer reads every path: a `/` and the segment after it are one token
+/// (`PATH_SEGMENT`), a `/` before anything else is `/`, and a wildcard is
+/// `{`, its name, `=` and `**` or `*`, and `}`. Firenook reads a path in an
+/// expression as one token, so it reads a path this way only where an
+/// expression cannot be: after `match`, and where a declaration starts.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum PathState {
+    /// Not in a match path.
+    Outside,
+    /// After a segment or a wildcard.
+    AfterSegment,
+    /// After a `/` with no segment.
+    AfterSlash,
+    /// In a wildcard, after its `{`.
+    InWildcard,
+    /// After a wildcard's name.
+    AfterName,
+    /// After a wildcard's `=`.
+    AfterAssign,
+    /// After a wildcard's `**` or `*`.
+    AfterStar,
 }
 
 impl<'a> Lexer<'a> {
@@ -81,11 +138,18 @@ impl<'a> Lexer<'a> {
             offset: 0,
             tokens: Vec::new(),
             skipped: Vec::new(),
+            service_name: false,
+            path: PathState::Outside,
+            expression: false,
         }
     }
 
     fn lex(mut self) -> (Vec<Token>, Vec<LexError>) {
         while self.offset < self.source.len() {
+            if self.service_name {
+                self.service_name();
+                continue;
+            }
             self.skip_trivia();
             if self.offset == self.source.len() {
                 break;
@@ -101,6 +165,12 @@ impl<'a> Lexer<'a> {
                 '/' if self.remaining().starts_with("/*") => {
                     self.offset += 2;
                     TokenKind::Stray
+                }
+                '/' if self.path != PathState::Outside || self.declaration_starts() => {
+                    self.path_segment()
+                }
+                '*' if self.path == PathState::AfterAssign && self.consume_pair("**") => {
+                    TokenKind::DoubleStar
                 }
                 '\'' | '"' => self.string(character),
                 '0'..='9' => self.number(),
@@ -132,7 +202,18 @@ impl<'a> Lexer<'a> {
                 '}' => self.single(TokenKind::RightBrace),
                 '[' => self.single(TokenKind::LeftBracket),
                 ']' => self.single(TokenKind::RightBracket),
-                '@' | '$' => self.single(TokenKind::Stray),
+                '@' => self.single(TokenKind::Stray),
+                // With the name after it, one token (`$b` in a match path).
+                '$' => {
+                    self.advance();
+                    let length = self
+                        .remaining()
+                        .bytes()
+                        .position(|byte| !is_identifier_continue(char::from(byte)))
+                        .unwrap_or(self.remaining().len());
+                    self.offset += length;
+                    TokenKind::Stray
+                }
                 '&' | '|' | '#' | '~' => {
                     self.skip_unrecognised(character);
                     continue;
@@ -142,6 +223,16 @@ impl<'a> Lexer<'a> {
                     invalid(format!("unexpected character {character:?}"), start)
                 }
             };
+            self.path = self.path_after(&kind);
+            // After `service`, but not after a `.`, where it is a field.
+            self.service_name = matches!(&kind, TokenKind::Identifier(word) if word == "service")
+                && !matches!(
+                    self.tokens.last(),
+                    Some(Token {
+                        kind: TokenKind::Dot,
+                        ..
+                    })
+                );
             self.tokens.push(Token {
                 kind,
                 offset: start,
@@ -177,6 +268,98 @@ impl<'a> Lexer<'a> {
             message: format!("token recognition error at: '{text}'"),
             offset: at,
         });
+    }
+
+    /// The service's name. In the official lexer's mode after `service`
+    /// whitespace is skipped, comments are not read, and a character no name
+    /// is made of is skipped and reported (developer-tools-compile-errors-v1
+    /// top/service-name-missing: `service {` names the service `match`).
+    fn service_name(&mut self) {
+        while self.current().is_some_and(char::is_whitespace) {
+            self.advance();
+        }
+        let start = self.offset;
+        if start == self.source.len() {
+            self.service_name = false;
+            return;
+        }
+        let length = self
+            .remaining()
+            .bytes()
+            .position(|byte| !is_service_name_byte(byte))
+            .unwrap_or(self.remaining().len());
+        if length == 0 {
+            self.advance();
+            let text = self.source[start..self.offset]
+                .replace('\n', "\\n")
+                .replace('\r', "\\r")
+                .replace('\t', "\\t");
+            self.skipped.push(LexError {
+                message: format!("token recognition error at: '{text}'"),
+                offset: start,
+            });
+            return;
+        }
+        self.offset += length;
+        self.tokens.push(Token {
+            kind: TokenKind::ServiceName(self.source[start..self.offset].to_owned()),
+            offset: start,
+            end_offset: self.offset,
+        });
+        self.service_name = false;
+    }
+
+    /// Whether a declaration may start here, so that a `/` starts a match
+    /// path: at the start, after `match`, `{`, `}` or `;`.
+    fn declaration_starts(&self) -> bool {
+        match self.tokens.last().map(|token| &token.kind) {
+            None => !self.expression,
+            Some(TokenKind::LeftBrace | TokenKind::RightBrace | TokenKind::Semicolon) => {
+                !self.expression
+            }
+            Some(TokenKind::Identifier(word)) => word == "match",
+            Some(_) => false,
+        }
+    }
+
+    /// A `/` in a match path: with the segment after it, or alone.
+    fn path_segment(&mut self) -> TokenKind {
+        let start = self.offset;
+        self.advance();
+        let length = segment_length(self.remaining());
+        self.offset += length;
+        if length == 0 {
+            TokenKind::Slash
+        } else {
+            TokenKind::Path(self.source[start..self.offset].to_owned())
+        }
+    }
+
+    /// Where in a match path the lexer is after `kind`.
+    fn path_after(&self, kind: &TokenKind) -> PathState {
+        match (self.path, kind) {
+            (_, TokenKind::Slash)
+                if self.path != PathState::Outside || self.declaration_starts() =>
+            {
+                PathState::AfterSlash
+            }
+            (_, TokenKind::Path(_))
+                if self.path != PathState::Outside || self.declaration_starts() =>
+            {
+                PathState::AfterSegment
+            }
+            (PathState::AfterSlash, TokenKind::LeftBrace) => PathState::InWildcard,
+            (PathState::InWildcard, TokenKind::Identifier(_)) => PathState::AfterName,
+            (PathState::AfterName, TokenKind::Assign) => PathState::AfterAssign,
+            (PathState::AfterAssign, TokenKind::DoubleStar | TokenKind::Star) => {
+                PathState::AfterStar
+            }
+            (
+                PathState::InWildcard | PathState::AfterName | PathState::AfterStar,
+                TokenKind::RightBrace,
+            ) => PathState::AfterSegment,
+            _ => PathState::Outside,
+        }
     }
 
     /// Whitespace and comments. A block comment that never closes is left
@@ -340,6 +523,10 @@ impl<'a> Lexer<'a> {
         // `/databases/(default)/documents` is part of the path.
         let mut literal_parentheses = 0_usize;
         while let Some(character) = self.current() {
+            // `//` starts a comment wherever it is, as in the official lexer.
+            if self.offset > start && self.remaining().starts_with("//") {
+                break;
+            }
             if interpolation_depth == 0 && braces == 0 && literal_parentheses == 0 {
                 if character.is_whitespace()
                     || matches!(character, ';' | ',' | ')' | '[' | ']' | ':' | '&' | '|')
@@ -424,6 +611,51 @@ fn is_identifier_start(character: char) -> bool {
 
 fn is_identifier_continue(character: char) -> bool {
     character == '_' || character.is_ascii_alphanumeric()
+}
+
+/// A byte of a service's name.
+const fn is_service_name_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-')
+}
+
+/// How long the path segment at the start of `text`, after its `/`, is as
+/// the official lexer reads it: letters, digits and `_-.*~@:+'&`, with `%`
+/// only before two hexadecimal digits, or one group of those in
+/// parentheses, such as `(default)`; none of it, where the `/` is alone.
+pub(crate) fn segment_length(text: &str) -> usize {
+    let bytes = text.as_bytes();
+    let run = |from: usize| {
+        let mut at = from;
+        loop {
+            match bytes.get(at) {
+                Some(byte) if is_segment_byte(*byte) => at += 1,
+                Some(b'%')
+                    if bytes.get(at + 1).is_some_and(u8::is_ascii_hexdigit)
+                        && bytes.get(at + 2).is_some_and(u8::is_ascii_hexdigit) =>
+                {
+                    at += 3;
+                }
+                _ => return at - from,
+            }
+        }
+    };
+    if bytes.first() == Some(&b'(') {
+        let inner = run(1);
+        return if inner > 0 && bytes.get(inner + 1) == Some(&b')') {
+            inner + 2
+        } else {
+            0
+        };
+    }
+    run(0)
+}
+
+const fn is_segment_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'_' | b'-' | b'.' | b'*' | b'~' | b'@' | b':' | b'+' | b'\'' | b'&'
+        )
 }
 
 fn is_path_character(character: char) -> bool {
@@ -520,5 +752,117 @@ mod tests {
                 (20, "token recognition error at: '|'"),
             ]
         );
+    }
+
+    fn kinds(source: &str) -> Vec<TokenKind> {
+        lex(source).0.into_iter().map(|token| token.kind).collect()
+    }
+
+    /// After `service` the next word is its name: whitespace is skipped,
+    /// and a character no name has is reported and skipped
+    /// (developer-tools-compile-errors-v1 top/service-name-missing).
+    #[test]
+    fn reads_the_word_after_service_as_its_name() {
+        assert_eq!(
+            kinds("service cloud.fire-store {"),
+            [
+                TokenKind::Identifier("service".to_owned()),
+                TokenKind::ServiceName("cloud.fire-store".to_owned()),
+                TokenKind::LeftBrace,
+                TokenKind::Eof,
+            ]
+        );
+        let (tokens, skipped) = lex("service {\n  match /a");
+        assert!(matches!(&tokens[1].kind, TokenKind::ServiceName(name) if name == "match"));
+        assert_eq!(
+            skipped,
+            [LexError {
+                message: "token recognition error at: '{'".to_owned(),
+                offset: 8,
+            }]
+        );
+        // A field of that name is not followed by one.
+        assert!(matches!(
+            kinds("request.service == 1").as_slice(),
+            [
+                _,
+                TokenKind::Dot,
+                TokenKind::Identifier(_),
+                TokenKind::Equal,
+                ..
+            ]
+        ));
+    }
+
+    /// A match path is read as the official lexer reads it, a segment with
+    /// its `/` as one token, so that a parser can say which token of it does
+    /// not fit; `//` in it starts a comment (paths/double-slash).
+    #[test]
+    fn reads_a_path_at_the_start_of_an_interpolation_as_one_token() {
+        // `/a/$(/b/c)`: the interpolation is an expression, where a `/`
+        // starts a path in an expression, not a match path.
+        let (tokens, skipped) = lex_expression("/b/c");
+        assert_eq!(skipped, []);
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| token.kind.clone())
+                .collect::<Vec<_>>(),
+            [TokenKind::Path("/b/c".to_owned()), TokenKind::Eof]
+        );
+    }
+
+    #[test]
+    fn reads_a_match_path_as_the_official_lexer() {
+        assert_eq!(
+            kinds("match /a/(default)/{b=**} {"),
+            [
+                TokenKind::Identifier("match".to_owned()),
+                TokenKind::Path("/a".to_owned()),
+                TokenKind::Path("/(default)".to_owned()),
+                TokenKind::Slash,
+                TokenKind::LeftBrace,
+                TokenKind::Identifier("b".to_owned()),
+                TokenKind::Assign,
+                TokenKind::DoubleStar,
+                TokenKind::RightBrace,
+                TokenKind::LeftBrace,
+                TokenKind::Eof,
+            ]
+        );
+        assert_eq!(
+            kinds("match /a//{b} {\n}"),
+            [
+                TokenKind::Identifier("match".to_owned()),
+                TokenKind::Path("/a".to_owned()),
+                TokenKind::RightBrace,
+                TokenKind::Eof,
+            ]
+        );
+        assert!(matches!(
+            kinds("match /a/$(b) {").as_slice(),
+            [
+                _,
+                TokenKind::Path(_),
+                TokenKind::Slash,
+                TokenKind::Stray,
+                TokenKind::LeftParen,
+                ..
+            ]
+        ));
+        // In an expression a path stays one token, and `//` still ends it.
+        assert_eq!(
+            kinds("return /a/$(b)//c\n;")[1],
+            TokenKind::Path("/a/$(b)".to_owned())
+        );
+        for (segment, length) in [
+            ("a%20b c", 5),
+            ("(default)/", 9),
+            ("()", 0),
+            ("%2", 0),
+            ("a()", 1),
+        ] {
+            assert_eq!(segment_length(segment), length, "{segment}");
+        }
     }
 }

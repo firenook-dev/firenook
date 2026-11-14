@@ -466,7 +466,9 @@ mod tests {
         let source = format!(
             "rules_version = '2';\nservice cloud.firestore {{\n  function z() {{ let a = {deep}; return {deep}; }}\n  match /databases/{{database}}/documents/c/{{id}} {{\n    function a() {{ return {deep}; }}\n    allow get: if {deep};\n  }}\n}}\n"
         );
-        let diagnostics = compile(&source).expect_err("four deep roots");
+        let mut diagnostics = compile(&source).expect_err("four deep roots");
+        // Beside the official compiler's warning for the let nothing reads.
+        diagnostics.retain(|diagnostic| diagnostic.severity == crate::DiagnosticSeverity::Error);
         assert_eq!(diagnostics.len(), 8, "{diagnostics:?}");
         let lines = diagnostics
             .iter()

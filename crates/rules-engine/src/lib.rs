@@ -12,6 +12,7 @@ mod coverage_observer;
 mod evaluator;
 mod explain;
 mod expression_depth;
+mod issues;
 mod lexer;
 mod model;
 mod parser;
@@ -125,6 +126,7 @@ pub struct RulesetStatistics {
 pub struct Ruleset {
     program: Arc<Program>,
     source: Arc<str>,
+    issues: Arc<[Diagnostic]>,
 }
 
 impl Ruleset {
@@ -154,6 +156,15 @@ impl Ruleset {
     #[must_use]
     pub fn outline(&self) -> RulesOutline {
         analysis::outline(&self.program, &self.source)
+    }
+
+    /// The official compiler's warnings for this source, in its words and in
+    /// source order: what the official emulator answers as `issues` with a
+    /// rules reload. Each spans the name it is about; a [`Self::lints`]
+    /// warning is Firenook's own.
+    #[must_use]
+    pub fn issues(&self) -> &[Diagnostic] {
+        &self.issues
     }
 
     /// Warnings about constructs that compile but rarely mean what was
@@ -310,26 +321,58 @@ pub fn compile(source: &str) -> Result<Ruleset, Vec<Diagnostic>> {
             code: None,
         }]);
     }
-    let program = parser::parse(source).map_err(|errors| {
+    let (mut program, refused) = parser::parse_program(source).map_err(|errors| {
         errors
             .into_iter()
             .map(|error| diagnostic(source, error.offset, error.message))
             .collect::<Vec<_>>()
     })?;
+    // The official compiler's warnings are answered beside what is refused
+    // in a source that parses (production/duplicate-let), and with it in
+    // source order.
+    let issues = issues::warnings(&program)
+        .into_iter()
+        .map(|(span, message)| Diagnostic {
+            severity: DiagnosticSeverity::Warning,
+            to: utf16_offset(source, span.end),
+            ..diagnostic(source, span.start, message)
+        })
+        .collect::<Vec<_>>();
+    let refuse = |mut refused: Vec<Diagnostic>| {
+        refused.extend(issues.iter().cloned());
+        refused.sort_by(|left, right| {
+            (left.byte_offset, &left.message).cmp(&(right.byte_offset, &right.message))
+        });
+        refused
+    };
+    if !refused.is_empty() {
+        return Err(refuse(
+            refused
+                .into_iter()
+                .map(|error| diagnostic(source, error.offset, error.message))
+                .collect(),
+        ));
+    }
     let mut validation = Vec::new();
     validate_function_map(source, &program.functions, &mut validation);
     for block in &program.matches {
         validate_functions(source, block, &mut validation);
     }
     expression_depth::check(source, &program, &mut validation);
-    if validation.is_empty() {
-        Ok(Ruleset {
-            program: Arc::new(program),
-            source: Arc::from(source),
-        })
-    } else {
-        Err(validation)
+    if !validation.is_empty() {
+        return Err(refuse(validation));
     }
+    // The rules of a service the official compiler does not know govern
+    // nothing (top/service-name-misspelled: the official emulator then
+    // refuses every request).
+    if !issues::service_is_known(&program) {
+        program.matches.clear();
+    }
+    Ok(Ruleset {
+        program: Arc::new(program),
+        source: Arc::from(source),
+        issues: issues.into(),
+    })
 }
 
 fn validate_functions(source: &str, block: &MatchBlock, diagnostics: &mut Vec<Diagnostic>) {

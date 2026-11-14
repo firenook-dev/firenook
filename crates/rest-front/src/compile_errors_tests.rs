@@ -14,67 +14,13 @@ use tower::ServiceExt as _;
 
 const SET: &str = "developer-tools-compile-errors-v1";
 
-/// Where the official parser skips ahead after an error, Firenook stops: its
-/// answer is the official answer's first lines (DESIGN.md, Rules compile
-/// errors).
-const RECOVERY: &str = "the official parser recovers and reports more problems after these first ones; Firenook answers them and stops";
-
 /// Recorded answers Firenook gives otherwise, by reason. The replay asserts
 /// each still differs; whoever fixes one moves it out of this table and the
 /// replay notes it in the ledger.
-const BUG_CANDIDATES: &[(&str, &[&str])] = &[
-    (
-        RECOVERY,
-        &[
-            "braces/service-open-missing",
-            "braces/service-body-word",
-            "braces/match-open-missing",
-            "braces/function-open-missing",
-            "parens/parameters-close-missing",
-            "paths/leading-slash-missing",
-            "paths/wildcard-empty",
-            "paths/missing",
-            "functions/parameter-comma-missing",
-            "functions/return-missing",
-            "functions/two-returns",
-            "functions/if-statement",
-            "let/then-word",
-            "let/in-match",
-            "keywords/fucntion",
-            "keywords/retrun",
-            "keywords/alow",
-            "two/misspelling-and-string",
-        ],
-    ),
-    (
-        "the official emulator compiles this source and answers its warnings; Firenook refuses it",
-        &[
-            "top/service-name-misspelled",
-            "version/one",
-            "conditions/method-unknown",
-        ],
-    ),
-    (
-        "Firenook takes one service block; the official emulator takes a second, and refuses this source for its empty match block",
-        &["top/two-services"],
-    ),
-    (
-        "where `service` has no name the official parser goes on and reports two later tokens; no recording shows how it reads the `{`, so Firenook reports the missing name in its own words",
-        &["top/service-name-missing"],
-    ),
-    (
-        "the official lexer reads the `//` in a match path as a comment; Firenook reads one path and reports its empty segment",
-        &["paths/double-slash"],
-    ),
-    (
-        "Firenook takes `$(…)` in a match path as a literal segment and compiles the source; the official emulator refuses it",
-        &["paths/interpolation"],
-    ),
-    (
-        "the official emulator also reports the first binding as an unused variable, a warning Firenook does not give",
-        &["production/duplicate-let"],
-    ),
-];
+const BUG_CANDIDATES: &[(&str, &[&str])] = &[(
+    "the official emulator compiles rules_version '1' and answers its warning; Firenook serves version 2 only, and no recording shows version 1 of the language, which the official emulator evaluates otherwise (a recursive wildcard matches one or more segments) and compiles otherwise (no let)",
+    &["version/one"],
+)];
 
 #[tokio::test]
 async fn the_official_compile_error_recording_replays_through_the_rest_router() {

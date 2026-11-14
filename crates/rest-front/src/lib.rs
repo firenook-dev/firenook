@@ -722,11 +722,20 @@ async fn project_operation(
         (Method::PUT, "securityRules") => {
             let body = json()?;
             let source = rules_source(&body)?;
-            state
+            let issues = state
                 .rules
                 .install_project(project, source)
                 .map_err(|error| RestError::invalid(compile_error_message(&error)))?;
-            Ok(Json(json!({})))
+            if issues.is_empty() {
+                return Ok(Json(json!({})));
+            }
+            let file = rules_file_name(&body);
+            Ok(Json(json!({
+                "issues": issues
+                    .iter()
+                    .map(|issue| compile_issue(source, file, issue))
+                    .collect::<Vec<_>>(),
+            })))
         }
         (Method::POST, "export") => export_database(&state, project, json()?).await,
         _ => Err(RestError::not_found("unknown emulator project operation")),
@@ -750,6 +759,57 @@ fn compile_error_message(error: &firenook_rules_runtime::LoadError) -> String {
         );
     }
     message
+}
+
+/// A warning of the official compiler's with a reload that compiles, as the
+/// official emulator answers it (developer-tools-compile-errors-v1
+/// top/service-name-misspelled, conditions/method-unknown): the file, the
+/// line and column, and the offsets of its first and last characters,
+/// counted in Unicode scalars as the columns are.
+fn compile_issue(
+    source: &str,
+    file: &str,
+    issue: &firenook_rules_runtime::Diagnostic,
+) -> JsonValue {
+    let start = source[..issue.byte_offset].chars().count();
+    let end = utf8_offset(source, issue.to);
+    let length = source[issue.byte_offset..end].chars().count();
+    json!({
+        "sourcePosition": {
+            "fileName": file,
+            "line": issue.line,
+            "column": issue.column,
+            "currentOffset": start,
+            "endOffset": start + length.max(1) - 1,
+        },
+        "description": issue.message,
+        "severity": "WARNING",
+    })
+}
+
+/// The UTF-8 offset of a UTF-16 one in `source`.
+fn utf8_offset(source: &str, utf16: usize) -> usize {
+    let mut units = 0;
+    for (offset, character) in source.char_indices() {
+        if units >= utf16 {
+            return offset;
+        }
+        units += character.len_utf16();
+    }
+    source.len()
+}
+
+/// The name of the reloaded file, which the official emulator's answer
+/// places its warnings in.
+fn rules_file_name(body: &JsonValue) -> &str {
+    body.get("rules")
+        .and_then(|rules| rules.get("files"))
+        .or_else(|| body.get("files"))
+        .and_then(JsonValue::as_array)
+        .and_then(|files| files.first())
+        .and_then(|file| file.get("name"))
+        .and_then(JsonValue::as_str)
+        .unwrap_or("firestore.rules")
 }
 
 fn rules_source(body: &JsonValue) -> Result<&str, RestError> {

@@ -176,7 +176,12 @@ file is compiled and installed for the database that configures it. A file
 identical to the rules in force is left alone (the console's own save lands
 there), and a file that does not compile leaves the rules in force serving
 requests: the diagnostics are logged and the console shows them beside the
-file.
+file. A file that compiles with warnings (an unknown service or method, a
+parameter nothing reads) is put in force, and each warning is logged as the
+official CLI logs it after a reload (`firestore.rules:2:9 - WARNING Invalid
+service name: cloud.firestor.`). Firenook logs them at start too, where the
+official CLI says nothing: rules of a misspelled service compile and govern
+nothing, so every request is denied, in both.
 
 Storage rules files are watched and reloaded on change the same way, whether
 or not Firestore runs: a `storage: { rules }` file governs every bucket, and

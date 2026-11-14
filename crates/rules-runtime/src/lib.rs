@@ -34,13 +34,13 @@ use firenook_core_store::{
     Value as StoreValue, Write, WritePreview,
 };
 use firenook_rules_engine::{
-    Auth, Diagnostic, DocumentAccess, DocumentAccessError, EvaluationRequest, Resource, Ruleset,
-    Timestamp, Value, compile,
+    Auth, DocumentAccess, DocumentAccessError, EvaluationRequest, Resource, Ruleset, Timestamp,
+    Value, compile,
 };
 use serde_json::Value as JsonValue;
 
 pub use firenook_rules_engine::{
-    AtomicEvaluationResult, EvaluationResult, PRODUCTION_DENIAL, Query as RulesQuery,
+    AtomicEvaluationResult, Diagnostic, EvaluationResult, PRODUCTION_DENIAL, Query as RulesQuery,
     RefusingAllow, RequestOperation,
 };
 
@@ -173,10 +173,16 @@ impl RulesRuntime {
 
     /// Compiles then atomically replaces one project's project-wide ruleset,
     /// the hot-reload route's level, displacing the project's
-    /// database-specific rulesets. A failed compilation leaves every previous
-    /// ruleset untouched.
-    pub fn install_project(&self, project: &str, source: &str) -> Result<(), LoadError> {
+    /// database-specific rulesets, and answers the official compiler's
+    /// warnings for it ([`Ruleset::issues`]). A failed compilation leaves
+    /// every previous ruleset untouched.
+    pub fn install_project(
+        &self,
+        project: &str,
+        source: &str,
+    ) -> Result<Vec<Diagnostic>, LoadError> {
         let rules = InstalledRules::compile(source)?;
+        let issues = rules.rules.issues().to_vec();
         let version = versions::version(&rules, RulesOrigin::Reload);
         {
             let mut state = write_lock(&self.state);
@@ -187,7 +193,7 @@ impl RulesRuntime {
             state.record_project(project, &version);
         }
         self.events.installed(RulesOrigin::Reload);
-        Ok(())
+        Ok(issues)
     }
 
     /// Compiles then atomically replaces the ruleset of one database, which
