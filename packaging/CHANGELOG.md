@@ -1,3 +1,63 @@
+# 0.2.5 — two transactions that find nothing no longer both create, compile errors answered as the official emulator answers them, an Admin SDK's download token kept, and no four-second start on Windows after a crash
+
+- Pin the engine to `6683b3edb53941a8e7fd34b89a45855b9fff0b50`, main after
+  every 0.2.5 pull request merged (the merge of
+  [PR #248](https://github.com/firenook-dev/firenook/pull/248)). CI
+  ([run 43582162294](https://github.com/firenook-dev/firenook/actions/runs/43582162294)),
+  the five-platform packed-install matrix
+  ([run 43582162275](https://github.com/firenook-dev/firenook/actions/runs/43582162275))
+  and the real SDK clients on Android, iOS and the web
+  ([run 43582182279](https://github.com/firenook-dev/firenook/actions/runs/43582182279))
+  passed on it. The engine is built with Rust 1.100.0.
+- **Firestore.** A transaction's queries are checked at commit, not only the
+  documents they returned (#235). Two transactions that each looked for a
+  document, found none and created one both committed, so it existed twice
+  (26 of 30 runs of the reporter's script on 0.2.4; 0 on 0.2.5 and on
+  firebase-tools 15.35.0). The later commit is now ABORTED, and the SDK
+  retries it, whenever another commit changed a query's results, a query that
+  found nothing included. Transactions stay optimistic: the first commit
+  wins, where the official emulator locks and aborts the other write.
+- **Storage.** A download token the Admin SDK names in an object's metadata
+  (`firebaseStorageDownloadTokens`) is the object's token, as the official
+  emulator keeps it: a client's `getDownloadURL` answers it instead of
+  minting another (#221). Objects saved before are read the same way.
+- **Starting after a crash.** A suite killed without stopping leaves its hub
+  locator behind, and the next start asked each address in it one after
+  another, two seconds each. Windows does not refuse a closed port at once,
+  so that start waited four seconds; it now asks them at once, with 200 ms
+  for an address to answer (#181). On Windows in CI, the check of a killed
+  suite's locator took 4.0 s before and passes in well under a second now.
+- **Security Rules.** A reload that does not compile is answered as the
+  official emulator answers it, every problem after the first included: the
+  parser recovers from an error as the official ANTLR parser does (#229).
+  119 of the 120 recorded reloads now match, 25 more than 0.2.4; the last,
+  `rules_version = '1'`, needs version 1 of the language and is #247. Rules
+  that compile with the official compiler's warnings (an unknown service or
+  method, a parameter or let nothing reads) are put in force as officially,
+  so a misspelled service governs nothing, every request is denied, and it is
+  no longer refused at start. Each warning is logged as the official CLI
+  logs it after a reload (`firestore.rules:2:9 - WARNING Invalid service
+  name: cloud.firestor.`), and at start too.
+- **The conformance record.** 6,791 answers recorded from
+  production and the official emulators, in 43 sets, as in 0.2.4. 6,439 are
+  compared exactly (6,414 in 0.2.4), 351 are compared and different on
+  purpose, each with its reason, and 1 is listed, under #247 (26 under #229
+  in 0.2.4).
+- **The release check is counted.** The once-a-day check for a newer
+  release asks firenook.dev, which answers npm's version tags and counts the
+  day's checks by Firenook version and platform, and keeps nothing else: no
+  address, id or project (#240). The npm registry is asked when firenook.dev
+  does not answer. `DO_NOT_TRACK=1` turns the check off, beside CI, the plain
+  output, `FIRENOOK_NO_UPDATE_CHECK=1` and `NO_UPDATE_NOTIFIER=1`.
+- **Releases.** A release's engine is tested once, on main: the release pull
+  request and the release run check that the pinned commit passed CI, the
+  packed installs and the real SDK clients, instead of running them again
+  (#245). The iOS client checks run on two Macs at once. A CI test that could
+  lose a free port to a test beside it starts again on new ports (#234).
+- No data format changed: 0.2.5 opens what 0.2.4 saved, and 0.2.4 opens what
+  0.2.5 saves.
+- Published straight to `latest`, as 0.2.4 was.
+
 # 0.2.4 — all but 26 recorded answers replayed, 18 bugs fixed, and deep Security Rules no longer stop the engine
 
 - Pin the engine to `4be26bedd0ce6124c3267d6936ec6d9b539a2bc9`, main after
