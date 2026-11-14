@@ -152,9 +152,9 @@ pub(crate) fn prepare_commit(
         });
         (before, generation, token)
     };
-    let tokens = match (&before, spec.keep_tokens) {
-        (Some(previous), true) => previous.download_tokens.clone(),
-        _ => token.into_iter().collect(),
+    let (tokens, generated) = match (&before, spec.keep_tokens) {
+        (Some(previous), true) => (previous.download_tokens.clone(), None),
+        _ => (Vec::new(), token),
     };
     let mut object = StoredObject {
         name: spec.name.to_owned(),
@@ -178,6 +178,11 @@ pub(crate) fn prepare_commit(
         data_file: format!("objects/{}", stable_id(&[spec.bucket, spec.name])),
     };
     apply_metadata(&mut object, spec.object_metadata);
+    // A Firebase upload gets a token of its own only when its metadata names
+    // none, as the official emulator makes one only for an object without.
+    if object.download_tokens.is_empty() {
+        object.download_tokens.extend(generated);
+    }
     if let Some(previous) = &before {
         object.time_created.clone_from(&previous.time_created);
     }

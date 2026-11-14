@@ -2748,6 +2748,37 @@ fn apply_metadata(object: &mut StoredObject, request: &JsonValue) {
             }
         }
     }
+    adopt_download_tokens(object);
+}
+
+/// The custom metadata key that names an object's download tokens, comma
+/// separated, as Cloud Storage clients (the Admin SDK's `file.save` among
+/// them) set it.
+const DOWNLOAD_TOKENS_KEY: &str = "firebaseStorageDownloadTokens";
+
+/// Tokens named under [`DOWNLOAD_TOKENS_KEY`] become the object's download
+/// tokens, after the ones it has and without repeating one, and the key
+/// leaves the custom metadata: what the official emulator does each time an
+/// object's metadata is created or updated (`StoredFileMetadata`'s
+/// `setDownloadTokensFromCustomMetadata`). Without it an Admin SDK's own
+/// token stayed custom metadata, and a client's `getDownloadURL` made the
+/// object a new one (#221). An empty value names none and stays.
+pub(crate) fn adopt_download_tokens(object: &mut StoredObject) {
+    if object
+        .custom_metadata
+        .get(DOWNLOAD_TOKENS_KEY)
+        .is_none_or(String::is_empty)
+    {
+        return;
+    }
+    let Some(named) = object.custom_metadata.remove(DOWNLOAD_TOKENS_KEY) else {
+        return;
+    };
+    for token in named.split(',') {
+        if !object.download_tokens.iter().any(|known| known == token) {
+            object.download_tokens.push(token.to_owned());
+        }
+    }
 }
 
 async fn export_directory(state: &StorageState, root: &FilePath) -> Result<usize, StorageError> {
@@ -2860,8 +2891,11 @@ async fn import_object(
         .ok_or_else(|| StorageError("import metadata requires name".to_owned()))?;
     let data_file = format!("objects/{}", stable_id(&[bucket, name]));
     value["dataFile"] = json!(data_file);
-    let object: StoredObject = serde_json::from_value(value)
+    let mut object: StoredObject = serde_json::from_value(value)
         .map_err(|error| StorageError(format!("invalid import metadata fields: {error}")))?;
+    // An export written before #221 may keep the Admin SDK's token as
+    // custom metadata.
+    adopt_download_tokens(&mut object);
     tokio::fs::copy(
         root.join("blobs").join(id),
         state.config.data_dir.join(&object.data_file),
@@ -3090,6 +3124,10 @@ fn validate_config(config: &StorageConfig) -> Result<(), StorageError> {
 fn load_state(path: &FilePath) -> Result<StorageData, StorageError> {
     match std::fs::read(path) {
         Ok(bytes) => serde_json::from_slice(&bytes)
+            .map(|mut data: StorageData| {
+                data.objects.values_mut().for_each(adopt_download_tokens);
+                data
+            })
             .map_err(|error| StorageError(format!("invalid Storage state: {error}"))),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(StorageData::default()),
         Err(error) => Err(StorageError(format!(
@@ -3533,6 +3571,107 @@ mod tests {
         assert_eq!(metadata["cacheControl"], "public,max-age=60");
         assert_eq!(runtime.object_count(), 1);
         assert_eq!(runtime.object_bytes(), bytes.len() as u64);
+
+        runtime.shutdown().await.expect("shutdown");
+        std::fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    /// #221: a token the Admin SDK names in the object's metadata
+    /// (`file.save(…, {metadata: {metadata: {firebaseStorageDownloadTokens}}})`)
+    /// is the object's download token, as the official emulator keeps it
+    /// (firebase-tools 15.35.0): getDownloadURL's read answers it and does not
+    /// mint another, the Admin SDK reads the same one back, and it downloads
+    /// the file. A later metadata update naming more tokens adds them after
+    /// it, once each, and none of them stays custom metadata.
+    #[tokio::test]
+    async fn a_token_the_admin_sdk_names_is_the_objects_download_token() {
+        let (runtime, _dispatches, root) = runtime("named-download-token", None).await;
+        let call = |method: Method, uri: String, body: String, content_type: &'static str| {
+            let application = runtime.application();
+            async move {
+                let response = application
+                    .oneshot(
+                        Request::builder()
+                            .method(method)
+                            .uri(uri)
+                            .header(header::CONTENT_TYPE, content_type)
+                            .body(Body::from(body))
+                            .expect("request"),
+                    )
+                    .await
+                    .expect("response");
+                (
+                    response.status(),
+                    to_bytes(response.into_body(), usize::MAX).await.unwrap(),
+                )
+            }
+        };
+        let parse = |bytes: &[u8]| serde_json::from_slice::<JsonValue>(bytes).expect("JSON");
+        let boundary = "named-token-boundary";
+        let (status, saved) = call(
+            Method::POST,
+            format!("/upload/storage/v1/b/{DEFAULT_BUCKET}/o?uploadType=multipart"),
+            format!(
+                "--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{{\"name\":\"test/with-token\",\"contentType\":\"text/plain\",\"metadata\":{{\"firebaseStorageDownloadTokens\":\"FAKE-TOKEN\",\"owner\":\"admin\"}}}}\r\n--{boundary}\r\nContent-Type: text/plain\r\n\r\nhello bytes\r\n--{boundary}--"
+            ),
+            "multipart/related; boundary=named-token-boundary",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let saved = parse(&saved);
+        assert_eq!(
+            saved["metadata"],
+            json!({ "firebaseStorageDownloadTokens": "FAKE-TOKEN", "owner": "admin" })
+        );
+
+        // getDownloadURL's read: the named token, not a new one.
+        let metadata = format!("/v0/b/{DEFAULT_BUCKET}/o/test%2Fwith-token");
+        let (status, read) = call(Method::GET, metadata.clone(), String::new(), "text/plain").await;
+        assert_eq!(status, StatusCode::OK);
+        let read = parse(&read);
+        assert_eq!(read["downloadTokens"], "FAKE-TOKEN", "{read}");
+        assert_eq!(read["metadata"], json!({ "owner": "admin" }), "{read}");
+
+        // The Admin SDK reads the same token back after it.
+        let admin = format!("/storage/v1/b/{DEFAULT_BUCKET}/o/test%2Fwith-token");
+        let (_, after) = call(Method::GET, admin.clone(), String::new(), "text/plain").await;
+        let after = parse(&after);
+        assert_eq!(
+            after["metadata"]["firebaseStorageDownloadTokens"],
+            "FAKE-TOKEN"
+        );
+        assert_eq!(
+            after["metageneration"], "1",
+            "the read changed nothing: {after}"
+        );
+
+        // It downloads the file.
+        let (status, bytes) = call(
+            Method::GET,
+            format!("{metadata}?alt=media&token=FAKE-TOKEN"),
+            String::new(),
+            "text/plain",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(&bytes[..], b"hello bytes");
+
+        // An update naming more tokens adds them after it, once each.
+        let (status, patched) = call(
+            Method::PATCH,
+            admin,
+            json!({ "metadata": { "firebaseStorageDownloadTokens": "SECOND,FAKE-TOKEN,SECOND" } })
+                .to_string(),
+            "application/json",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            parse(&patched)["metadata"],
+            json!({ "firebaseStorageDownloadTokens": "FAKE-TOKEN,SECOND", "owner": "admin" })
+        );
+        let (_, read) = call(Method::GET, metadata, String::new(), "text/plain").await;
+        assert_eq!(parse(&read)["downloadTokens"], "FAKE-TOKEN,SECOND");
 
         runtime.shutdown().await.expect("shutdown");
         std::fs::remove_dir_all(root).expect("remove test storage");
