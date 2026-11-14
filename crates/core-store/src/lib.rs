@@ -875,6 +875,14 @@ impl TransactionMemoryRegistration {
             transaction.logical_bytes = transaction.logical_bytes.saturating_add(logical_bytes);
         }
     }
+
+    /// Adds bytes the transaction keeps beside its reads, such as a query
+    /// its commit checks again; they are not a read entry.
+    pub fn add_retained(&self, logical_bytes: u64) {
+        if let Some(transaction) = lock(&self.accounting.inner).transactions.get_mut(&self.id) {
+            transaction.logical_bytes = transaction.logical_bytes.saturating_add(logical_bytes);
+        }
+    }
 }
 
 impl Drop for TransactionMemoryRegistration {
