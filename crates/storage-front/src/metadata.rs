@@ -393,10 +393,11 @@ impl MetadataStore {
             .map_err(error)?
         {
             let (key, value) = item.map_err(error)?;
-            data.objects.insert(
-                key.value().to_owned(),
-                serde_json::from_slice(value.value()).map_err(error)?,
-            );
+            let mut object = serde_json::from_slice(value.value()).map_err(error)?;
+            // Saved before #221, an Admin SDK's token may still be custom
+            // metadata: read as the official emulator reads it.
+            super::adopt_download_tokens(&mut object);
+            data.objects.insert(key.value().to_owned(), object);
         }
         for item in transaction
             .open_table(UPLOADS)
