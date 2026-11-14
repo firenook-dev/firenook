@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug)]
 pub(crate) struct Program {
     pub(crate) service: crate::RulesService,
+    /// The service's name as written, and its half-open UTF-8 span.
+    pub(crate) service_name: (String, std::ops::Range<usize>),
     pub(crate) rules_version: u8,
     pub(crate) functions: BTreeMap<String, Function>,
     pub(crate) matches: Vec<MatchBlock>,
@@ -172,7 +174,11 @@ pub(crate) struct Function {
     /// function never sees the caller's bindings (lexical scope).
     pub(crate) scope: Vec<String>,
     pub(crate) parameters: Vec<String>,
+    /// Byte offset of each parameter.
+    pub(crate) parameter_starts: Vec<usize>,
     pub(crate) lets: Vec<(String, Expr)>,
+    /// Byte offset of each let's name.
+    pub(crate) let_starts: Vec<usize>,
     pub(crate) result: Expr,
 }
 
@@ -185,6 +191,8 @@ pub(crate) struct Allow {
     /// parentheses included (an expression's own span stops short of a
     /// closing grouping token). Empty for an `allow read;` with no condition.
     pub(crate) condition_span: std::ops::Range<usize>,
+    /// The methods as written, and the byte offset of each.
+    pub(crate) methods: Vec<(String, usize)>,
     pub(crate) operations: Vec<Operation>,
     pub(crate) condition: Expr,
 }
