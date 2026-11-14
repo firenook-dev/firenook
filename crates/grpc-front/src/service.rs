@@ -450,6 +450,7 @@ impl FirestoreService {
                 snapshot,
                 read_only,
                 reads: BTreeMap::new(),
+                queries: Vec::new(),
                 accounting,
             },
         );
@@ -489,6 +490,21 @@ impl FirestoreService {
             Status::aborted(TRANSACTION_ENDED)
         } else {
             Status::invalid_argument(INVALID_TRANSACTION)
+        }
+    }
+
+    /// Keeps `query` with the read-write transaction `token` names, for its
+    /// commit to check that the query's results did not change.
+    fn record_query(&self, token: &[u8], query: &StructuredQuery) {
+        if token.is_empty() {
+            return;
+        }
+        if let Some(transaction) = self.transaction_states().get_mut(token)
+            && !transaction.read_only
+            && !transaction.queries.contains(query)
+        {
+            transaction.queries.push(query.clone());
+            transaction.accounting.add_retained(QUERY_RETAINED_BYTES);
         }
     }
 
@@ -880,6 +896,11 @@ struct TransactionState {
     snapshot: Snapshot,
     read_only: bool,
     reads: BTreeMap<DocumentKey, Option<Timestamp>>,
+    /// The queries a read-write transaction ran. A document read records
+    /// only what it returned, so a query that matched nothing recorded
+    /// nothing, and a document another commit added to its results went
+    /// unseen (#235): the commit checks each query's results again.
+    queries: Vec<StructuredQuery>,
     accounting: TransactionMemoryRegistration,
 }
 
@@ -1383,11 +1404,25 @@ impl Firestore for FirestoreService {
                         "read-only transaction cannot contain writes",
                     ));
                 }
-                for (key, expected) in transaction.reads {
-                    let actual = current.get(&key).map(|document| document.update_time());
-                    if actual != expected {
+                for (key, expected) in &transaction.reads {
+                    let actual = current.get(key).map(|document| document.update_time());
+                    if actual != *expected {
                         return Err(Status::aborted(format!(
                             "transaction document changed: {key}"
+                        )));
+                    }
+                }
+                let edition = service.query_policy.edition();
+                for query in &transaction.queries {
+                    let run = |snapshot: &Snapshot| {
+                        execute(snapshot, &transaction.database, query, edition)
+                            .map_err(|error| query_status(&error))
+                    };
+                    if let Some(key) =
+                        first_difference(&run(&transaction.snapshot)?, &run(&current)?)
+                    {
+                        return Err(Status::aborted(format!(
+                            "transaction query results changed: {key}"
                         )));
                     }
                 }
@@ -1491,6 +1526,7 @@ impl Firestore for FirestoreService {
                 explain_plan.expect("explain options create a plan"),
             )));
         }
+        self.record_query(&token, &query);
         if explain_options.is_none() {
             let read_time = Some(encode_system_read_time(snapshot.read_time()));
             // Planning, and the scan or sort behind a first result, run on
@@ -2151,6 +2187,30 @@ fn index_status(error: &IndexConfigError) -> Status {
     Status::failed_precondition(error.to_string())
 }
 
+/// What a transaction's memory budget counts for one query it keeps: the
+/// query is small, and its results are counted as document reads.
+const QUERY_RETAINED_BYTES: u64 = 256;
+
+/// The first document whose presence or update time differs between a
+/// query's results then and now, if any does.
+fn first_difference<'a>(
+    then: &'a [QueryDocument],
+    now: &'a [QueryDocument],
+) -> Option<&'a DocumentKey> {
+    let same = |a: &QueryDocument, b: &QueryDocument| {
+        a.key() == b.key() && a.document().update_time() == b.document().update_time()
+    };
+    then.iter()
+        .zip(now)
+        .find(|(a, b)| !same(a, b))
+        .map(|(a, _)| a.key())
+        .or_else(|| {
+            then.get(now.len())
+                .or_else(|| now.get(then.len()))
+                .map(QueryDocument::key)
+        })
+}
+
 fn commit_status(error: CommitError) -> Status {
     match error {
         CommitError::AlreadyExists(key) => {
@@ -2334,6 +2394,7 @@ impl FirestoreService {
         }
         let documents = execute(snapshot, database, query, self.query_policy.edition())
             .map_err(|error| query_status(&error))?;
+        self.record_query(token, query);
         for document in &documents {
             self.record_read(token, document.key(), Some(document.document().as_ref()));
         }

@@ -164,7 +164,10 @@ refuses writes and reads naming another project, ends a runQuery stream without
 edition database with FAILED_PRECONDITION (the official emulator:
 INVALID_ARGUMENT). Its transactions are optimistic: a write that conflicts
 with a read-write transaction succeeds and the transaction's commit is
-ABORTED, where the official emulator holds a lock and aborts the write.
+ABORTED, where the official emulator holds a lock and aborts the write
+(`Transaction lock timeout.`, after about two seconds). A write conflicts
+when it changes a document the transaction read, or changes the results of
+a query the transaction ran, including one that found nothing.
 
 Each configured Firestore rules file is watched while the suite runs and
 reloaded on change, as the official CLI watches the configured rules file

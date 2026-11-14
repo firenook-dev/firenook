@@ -265,6 +265,201 @@ async fn a_missing_document_read_in_a_transaction_is_checked_at_commit() {
     }
 }
 
+/// A query for documents of `collection` tagged `tag`, as a transaction runs
+/// it before inserting one (#235).
+fn tagged(collection: &str, tag: &str, limit: Option<i64>) -> JsonValue {
+    let mut structured = json!({
+        "from":[{"collectionId":collection}],
+        "where":{"fieldFilter":{"field":{"fieldPath":"tag"},"op":"EQUAL","value":{"stringValue":tag}}}
+    });
+    if let Some(limit) = limit {
+        structured["limit"] = json!(limit);
+    }
+    structured
+}
+
+/// A commit creating `collection/id` tagged `tag`, in `transaction` if given.
+fn create(collection: &str, id: &str, tag: &str, transaction: Option<&str>) -> JsonValue {
+    let mut body = json!({"writes":[{
+        "update":{"name":format!("{}/{collection}/{id}", &ROOT[4..]),"fields":{"tag":{"stringValue":tag}}},
+        "currentDocument":{"exists":false}
+    }]});
+    if let Some(transaction) = transaction {
+        body["transaction"] = json!(transaction);
+    }
+    body
+}
+
+/// How many documents `structured` returns in `transaction`.
+async fn found(router: &Router, structured: JsonValue, transaction: &str) -> usize {
+    let (status, results) = request(
+        router,
+        ":runQuery",
+        "POST",
+        json!({"structuredQuery":structured,"transaction":transaction}),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{results}");
+    results
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|result| result.get("document").is_some())
+        .count()
+}
+
+/// #235: two transactions look for a tag, find nothing and each insert a
+/// document with it. The second commit is ABORTED, with a limit or without,
+/// so the tag is not inserted twice: a query in a transaction is checked at
+/// commit, as a document read is.
+#[tokio::test]
+async fn a_query_that_found_nothing_in_a_transaction_is_checked_at_commit() {
+    let (router, _) = seeded().await;
+    for limit in [Some(1), None] {
+        let collection = format!("widgets{}", limit.unwrap_or(0));
+        let first = transaction(&router, false).await;
+        let second = transaction(&router, false).await;
+        for token in [&first, &second] {
+            assert_eq!(
+                found(&router, tagged(&collection, "a", limit), token).await,
+                0
+            );
+        }
+        let commit = |id: &str, token: &str| create(&collection, id, "a", Some(token));
+        let (status, _) = request(&router, ":commit", "POST", commit("one", &first), true).await;
+        assert_eq!(status, StatusCode::OK, "{limit:?}: the first commit");
+        let (status, result) =
+            request(&router, ":commit", "POST", commit("two", &second), true).await;
+        assert_eq!(
+            status,
+            StatusCode::CONFLICT,
+            "{limit:?}: the second commit {result}"
+        );
+        assert_eq!(result["error"]["status"], "ABORTED");
+        assert!(
+            result["error"]["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("transaction query results changed: "),
+            "{result}"
+        );
+        let token = transaction(&router, true).await;
+        assert_eq!(
+            found(&router, tagged(&collection, "a", None), &token).await,
+            1
+        );
+    }
+}
+
+/// #235: a query is held to what it returned. A write outside its results
+/// (another tag, or a document after a limit's last result) commits; one
+/// that changes them (a document before that last result) is ABORTED.
+#[tokio::test]
+async fn a_transaction_query_is_held_to_what_it_returned() {
+    let (router, _) = seeded().await;
+    let token = transaction(&router, false).await;
+    assert_eq!(
+        found(&router, tagged("gadgets", "a", None), &token).await,
+        0
+    );
+    let (status, _) = request(
+        &router,
+        ":commit",
+        "POST",
+        create("gadgets", "other", "b", None),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, result) = request(
+        &router,
+        ":commit",
+        "POST",
+        create("gadgets", "mine", "a", Some(&token)),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "another tag: {result}");
+
+    for (id, expected) in [("z", StatusCode::OK), ("a", StatusCode::CONFLICT)] {
+        let collection = format!("ordered{id}");
+        let (status, _) = request(
+            &router,
+            ":commit",
+            "POST",
+            create(&collection, "m", "a", None),
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let token = transaction(&router, false).await;
+        assert_eq!(
+            found(&router, tagged(&collection, "a", Some(1)), &token).await,
+            1
+        );
+        let (status, _) = request(
+            &router,
+            ":commit",
+            "POST",
+            create(&collection, id, "a", None),
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, result) = request(
+            &router,
+            ":commit",
+            "POST",
+            create(&collection, "x", "b", Some(&token)),
+            true,
+        )
+        .await;
+        assert_eq!(status, expected, "an insert at {id}: {result}");
+    }
+}
+
+/// #235: an aggregation's query in a transaction is checked at commit too.
+#[tokio::test]
+async fn an_aggregation_in_a_transaction_is_checked_at_commit() {
+    let (router, _) = seeded().await;
+    let token = transaction(&router, false).await;
+    let (status, counted) = request(
+        &router,
+        ":runAggregationQuery",
+        "POST",
+        json!({"structuredAggregationQuery":{
+            "structuredQuery":tagged("counted", "a", None),
+            "aggregations":[{"alias":"n","count":{}}]
+        },"transaction":token}),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{counted}");
+    let (status, _) = request(
+        &router,
+        ":commit",
+        "POST",
+        create("counted", "new", "a", None),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, result) = request(
+        &router,
+        ":commit",
+        "POST",
+        create("counted", "mine", "b", Some(&token)),
+        true,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "the counted query changed: {result}"
+    );
+}
+
 #[tokio::test]
 async fn rest_get_masks_and_denials_match_captured_observations() {
     let (router, _) = seeded().await;
