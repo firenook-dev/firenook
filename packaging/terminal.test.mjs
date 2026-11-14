@@ -7,7 +7,7 @@ import { PassThrough, Writable } from 'node:stream';
 import { test } from 'node:test';
 import { capabilities, createInk, interactive, width, wrap } from '../packages/cli/src/terminal.mjs';
 import { EVENT_PREFIX, expectedOpening, functionName, holderName, loadError, runInteractive, shortPath, structured } from '../packages/cli/src/session.mjs';
-import { cacheFile, channelOf, installCommand, newer, pendingUpdate, refreshUpdates, updatesOff } from '../packages/cli/src/updates.mjs';
+import { CHECK, REGISTRY, cacheFile, channelOf, checkUrl, installCommand, newer, pendingUpdate, refreshUpdates, updatesOff } from '../packages/cli/src/updates.mjs';
 
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\]8;;.*?\x1b\\/g;
 const plain = text => text.replace(ANSI, '');
@@ -113,7 +113,28 @@ test('the update check follows the channel, compares versions and names the pack
   for (const value of ['false', 'FALSE', '0', '']) assert.equal(updatesOff({CI: value}), false, `CI=${value}`);
   assert.equal(updatesOff({FIRENOOK_NO_UPDATE_CHECK: '1'}), true);
   assert.equal(updatesOff({FIRENOOK_NO_UPDATE_CHECK: 'false'}), false);
+  assert.equal(updatesOff({DO_NOT_TRACK: '1'}), true);
+  assert.equal(updatesOff({DO_NOT_TRACK: '0'}), false);
   assert.equal(updatesOff({}), false);
+
+  // The check asks firenook.dev, naming the version and the platform and
+  // nothing else, and the npm registry when firenook.dev does not answer
+  // (unreachable, or an error status).
+  assert.equal(checkUrl('0.2.5', 'darwin', 'arm64'), `${CHECK}?v=0.2.5&p=darwin-arm64`);
+  for (const [label, site] of [['answers', 'ok'], ['is unreachable', 'throws'], ['fails', 'error']]) {
+    const cache = {XDG_CACHE_HOME: mkdtempSync(join(tmpdir(), 'firenook-cache-'))};
+    const urls = [];
+    const answering = async url => {
+      urls.push(url);
+      if (url === REGISTRY) return {ok: true, json: async () => ({latest: '0.2.4'})};
+      if (site === 'throws') throw new Error('offline');
+      return site === 'ok' ? {ok: true, json: async () => ({latest: '0.2.5', next: '0.2.5'})} : {ok: false, json: async () => ({})};
+    };
+    const answer = await refreshUpdates({env: cache, fetcher: answering, version: '0.2.5', platform: 'linux', arch: 'x64', now: 1_000});
+    const asked = site === 'ok' ? [checkUrl('0.2.5', 'linux', 'x64')] : [checkUrl('0.2.5', 'linux', 'x64'), REGISTRY];
+    assert.deepEqual(urls, asked, `firenook.dev ${label}`);
+    assert.equal(answer.tags.latest, site === 'ok' ? '0.2.5' : '0.2.4', `firenook.dev ${label}`);
+  }
 
   const env = {XDG_CACHE_HOME: mkdtempSync(join(tmpdir(), 'firenook-cache-'))};
   let asked = 0;

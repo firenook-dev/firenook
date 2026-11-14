@@ -220,7 +220,7 @@ export async function runInteractive(launch, {version, projectId, demo, cwd = pr
   const host = connectHost(value('--host') || '127.0.0.1');
   const update = pendingUpdate(version, cwd, {env, platform});
   // The next start's answer; this one never waits for it.
-  void refreshUpdates({env, platform});
+  void refreshUpdates({env, platform, version});
 
   const model = {
     began: Date.now(),

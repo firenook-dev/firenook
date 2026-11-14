@@ -1,23 +1,35 @@
-// The update check. The npm package (never the engine) asks the npm
-// registry for firenook's version tags at most once a day, in the
-// background, and the answer shows on the next start, so the check never
-// slows one. It follows the channel the installed version is from (`next`
+// The update check. The npm package (never the engine) asks firenook.dev
+// for firenook's version tags at most once a day, in the background, and the
+// answer shows on the next start, so the check never slows one. firenook.dev
+// answers npm's tags and counts the day's checks by the version and platform
+// the request names, and keeps nothing else (firenook.dev/privacy); when it
+// does not answer, the check asks the npm registry. It follows the channel the installed version is from (`next`
 // for a preview, `latest` otherwise), and a preview also hears of a later
 // release on `latest`, which `next` may not name; it writes the command for
 // the project's own package manager. It stays off in CI, in the plain output and
-// with FIRENOOK_NO_UPDATE_CHECK=1 or NO_UPDATE_NOTIFIER=1.
+// with FIRENOOK_NO_UPDATE_CHECK=1, NO_UPDATE_NOTIFIER=1 or DO_NOT_TRACK=1.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { truthy } from './terminal.mjs';
 
+export const CHECK = 'https://firenook.dev/api/version';
 export const REGISTRY = 'https://registry.npmjs.org/-/package/firenook/dist-tags';
 const DAY = 24 * 60 * 60 * 1000;
 
 // Off when any of these is set to something other than empty, 0 or false:
 // CI=false is no CI.
 export function updatesOff(env = process.env) {
-  return ['CI', 'FIRENOOK_NO_UPDATE_CHECK', 'NO_UPDATE_NOTIFIER'].some(name => truthy(env[name]));
+  return ['CI', 'FIRENOOK_NO_UPDATE_CHECK', 'NO_UPDATE_NOTIFIER', 'DO_NOT_TRACK'].some(name => truthy(env[name]));
+}
+
+// What the check asks firenook.dev: the installed version and the platform,
+// nothing else.
+export function checkUrl(version, platform = process.platform, arch = process.arch) {
+  const url = new URL(CHECK);
+  url.searchParams.set('v', version);
+  url.searchParams.set('p', `${platform}-${arch}`);
+  return url.href;
 }
 
 // Where the last answer is kept: the platform's cache directory.
@@ -83,18 +95,21 @@ export function pendingUpdate(installed, directory, {env = process.env, platform
   return found && {...found, command: installCommand(directory, found.tag)};
 }
 
-// Asks the registry again when the last answer is a day old. Never throws,
-// never holds the process open, and writes the answer for the next start.
-export function refreshUpdates({env = process.env, platform = process.platform, now = Date.now(), fetcher = globalThis.fetch} = {}) {
+// Asks again when the last answer is a day old: firenook.dev, then the npm
+// registry if firenook.dev does not answer. Never throws, never holds the
+// process open, and writes the answer for the next start.
+export function refreshUpdates({env = process.env, platform = process.platform, arch = process.arch, version, now = Date.now(), fetcher = globalThis.fetch} = {}) {
   if (updatesOff(env) || typeof fetcher !== 'function') return Promise.resolve(undefined);
   const file = cacheFile(env, platform);
   const cached = readCache(file);
   if (cached && Number.isFinite(cached.checkedAt) && now - cached.checkedAt < DAY) return Promise.resolve(cached);
   return (async () => {
     try {
-      const response = await fetcher(REGISTRY, {signal: AbortSignal.timeout(5000), headers: {accept: 'application/json'}});
-      if (!response.ok) return undefined;
-      const tags = await response.json();
+      const ask = async url => {
+        const response = await fetcher(url, {signal: AbortSignal.timeout(5000), headers: {accept: 'application/json'}});
+        return response.ok ? response.json() : undefined;
+      };
+      const tags = (version && await ask(checkUrl(version, platform, arch)).catch(() => undefined)) || await ask(REGISTRY);
       if (!tags || typeof tags !== 'object') return undefined;
       const answer = {checkedAt: now, tags: Object.fromEntries(Object.entries(tags).filter(([, value]) => typeof value === 'string'))};
       mkdirSync(join(file, '..'), {recursive: true});

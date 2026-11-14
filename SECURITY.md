@@ -26,9 +26,11 @@ Nothing is fetched at run time. Since `0.1.0-next.7` neither firebase-tools
 nor Java is installed or run: Functions, Extensions and Storage rules run in
 Firenook's own runtime. Since `0.2.0-next.3` the console is part of the
 binary, and `firenook setup` downloads nothing. The CLI reaches the network
-in two places only: the update check asks the npm registry for `firenook`'s
-version tags at most once a day (off in CI, in the plain output and with
-`FIRENOOK_NO_UPDATE_CHECK=1` or `NO_UPDATE_NOTIFIER=1`), and an Extension instance that is neither a
+in two places only: the update check asks firenook.dev for `firenook`'s
+version tags at most once a day, naming the installed version and platform
+and nothing else, and the npm registry when firenook.dev does not answer
+(off in CI, in the plain output and with `FIRENOOK_NO_UPDATE_CHECK=1`,
+`NO_UPDATE_NOTIFIER=1` or `DO_NOT_TRACK=1`), and an Extension instance that is neither a
 local path nor vendored is resolved from the Extensions registry with the
 Firebase CLI's stored login or `FIREBASE_TOKEN` (`firenook ext:vendor`
 copies it into the project, and `--offline` or `FIRENOOK_OFFLINE=1` turns
