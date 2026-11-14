@@ -2,9 +2,11 @@ name: Real SDK clients
 
 # The same FlutterFire app against Firenook and firebase-tools on each platform,
 # failing on any difference (conformance/flutter-check). It builds and boots real
-# clients, so it runs weekly, by hand, and on a release pull request, not on every
-# pull request, and it is separate from the release job. A release runs it on the
-# exact commit first: see packaging/PUBLISHING.md.
+# clients, so it runs weekly, by hand, and on a pull request that changes the
+# check or the pinned engine, not on every pull request, and it is separate from
+# the release job. A release runs it on the pinned commit on main first (see
+# packaging/PUBLISHING.md); its pull request, which only adds the release's own
+# fields to that commit, then does not run it again (packaging/pinned-evidence.mjs).
 on:
   schedule:
     - cron: '17 3 * * 1'
@@ -26,8 +28,32 @@ env:
   FLUTTER_VERSION: 3.47.9
 
 jobs:
+  scope:
+    name: Tested at the pinned engine
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      covered: ${{ steps.check.outputs.covered }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(node packaging/pinned-evidence.mjs --workflow sdk-clients.yml)" = covered ]; then
+            echo covered=true >> "$GITHUB_OUTPUT"
+          fi
+
   check:
-    name: ${{ matrix.platform }}
+    name: ${{ matrix.platform }}${{ matrix.kept && ' (kept cache)' || '' }}
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.covered != 'true' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
@@ -39,6 +65,15 @@ jobs:
             flutter: linux/flutter_linux
             archive: tar.xz
           - platform: ios
+            runner: macos-latest
+            flutter: macos/flutter_macos_arm64
+            archive: zip
+          # The kept-cache runs on a second Mac at the same time: each
+          # takes 15-18 minutes, and one after the other they made iOS the
+          # whole check's longest job (40 minutes). The kept-cache run starts
+          # from a fresh install of its own, so it needs nothing from the other.
+          - platform: ios
+            kept: true
             runner: macos-latest
             flutter: macos/flutter_macos_arm64
             archive: zip
@@ -121,15 +156,16 @@ jobs:
           done
           echo "Booted after $SECONDS s"
       - name: Run the same app against Firenook and firebase-tools
+        if: ${{ !matrix.kept }}
         run: node conformance/flutter-check/check.mjs --platform ${{ matrix.platform }} --out "$RUNNER_TEMP/results"
       - name: Run them on a kept cache, as a device moving from firebase-tools to Firenook
-        if: ${{ !cancelled() && matrix.platform != 'web' }}
+        if: ${{ !cancelled() && (matrix.kept || matrix.platform == 'android') }}
         run: node conformance/flutter-check/check.mjs --platform ${{ matrix.platform }} --keep-cache --out "$RUNNER_TEMP/results/kept-cache"
       - name: Keep the results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: sdk-clients-${{ matrix.platform }}
+          name: sdk-clients-${{ matrix.platform }}${{ matrix.kept && '-kept-cache' || '' }}
           path: ${{ runner.temp }}/results
           if-no-files-found: warn
           retention-days: 14

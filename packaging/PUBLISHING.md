@@ -73,21 +73,30 @@ macOS notarization and more platforms remain separate supported-platform work.
 
 ## Subsequent releases
 
-1. Open a conventional release PR updating CLI version, every native optional
-   dependency and both versions in the root `server.json` to the **same exact
-   version**, release notes and, only when
-   intentionally upgrading the engine, the tested engine revision/toolchain.
-   Run all quality and packaging checks. The PR also runs **Real SDK clients**
-   (`sdk-clients.yml`), the real FlutterFire clients on web, iOS and Android
-   against this engine and firebase-tools; it must be green, or its differences
-   explained, on the exact commit before the next step. It is separate from the
-   release job. No package is published from a PR.
+1. Pick the engine: a commit on main that passed **CI** (`ci.yml`),
+   **Installable packages** (`packages.yml`, run on main after each merge
+   that touches the engine) and **Real SDK clients** (`sdk-clients.yml`, the
+   real FlutterFire clients on web, iOS and Android against this engine and
+   firebase-tools; dispatch it on main for that commit). All three must be
+   green on that commit, or their differences explained, before the next
+   step. Then open a conventional release PR pinning it: the CLI version,
+   every native optional dependency and both versions in the root
+   `server.json` set to the **same exact version**, the release notes, and
+   `release.json`'s engine revision and toolchain. When the PR differs from
+   the pinned commit only in those fields (and documentation), its CI,
+   package and SDK-client runs find the pinned commit's green runs on main
+   and link them instead of running the same tests again
+   (`packaging/pinned-evidence.mjs`); anything else in it, or a missing green
+   run, and they run in full. No package is published from a PR.
 2. After review/merge, the release owner creates annotated `npm-vVERSION` at
    that exact main commit. Existing Phase gate tags are not release triggers.
    This runbook does not authorize an agent to create a tag automatically.
 3. Dispatch **Reviewed npm release** (`release-npm.yml`) on main with that tag.
-   It must point exactly to that main commit. The workflow runs full quality
-   gates and all five fresh native builds/packed npm and Bun install smokes.
+   It must point exactly to that main commit. The workflow runs all five
+   fresh native builds, release-mode tests and packed npm and Bun install
+   smokes, and the quality gates: in full, or, when the tag differs from the
+   pinned engine only in the release's own fields, as a check that the
+   pinned commit passed CI on main.
    Leave `latest` off to publish every package to `next`; turn it on only to
    publish the CLI straight to `latest` (see below). A stable version (no
    preview tag, such as `0.2.0`) is dispatched with `latest`; a preview
