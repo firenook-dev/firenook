@@ -49,8 +49,36 @@ defaults:
     shell: bash
 
 jobs:
+  # A release pull request carries the engine its release.json pins, which
+  # passed this workflow on main before the pull request opened: the release
+  # builds everything again before anything is published, so the pull
+  # request does not build it a third time (packaging/pinned-evidence.mjs).
+  scope:
+    name: Tested at the pinned engine
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      covered: ${{ steps.check.outputs.covered }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(node packaging/pinned-evidence.mjs --workflow packages.yml)" = covered ]; then
+            echo covered=true >> "$GITHUB_OUTPUT"
+          fi
+
   packages:
     name: Packed install (${{ matrix.platform }})
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.covered != 'true' }}
     strategy:
       fail-fast: false
       matrix:

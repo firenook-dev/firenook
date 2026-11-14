@@ -18,6 +18,10 @@ jobs:
     name: What the change touches
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # To see whether the engine a release pins passed CI on main.
+      actions: read
     outputs:
       code: ${{ steps.classify.outputs.code }}
     steps:
@@ -33,8 +37,12 @@ jobs:
         # checks run every time; they check the text of every change and the
         # npm package, README included. Markdown inside crates/, console/ and
         # conformance/ counts as code, since fixtures and tests may read it.
+        # A release (its pull request, its merge and its run) skips them too
+        # when it differs from the engine it pins only in the release's own
+        # fields and that engine passed CI on main (packaging/pinned-evidence.mjs).
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           documentation() {
             case "$1" in
@@ -55,6 +63,9 @@ jobs:
                 documentation "$file" || { code=true; echo "code: $file"; break; }
               done <<< "$files"
             fi
+          fi
+          if [ "$code" = true ] && [ "$(node packaging/pinned-evidence.mjs --workflow ci.yml)" = covered ]; then
+            code=false
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "Slow jobs run: $code"
