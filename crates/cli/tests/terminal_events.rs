@@ -46,6 +46,8 @@ impl Drop for Project {
 /// on stderr also apart).
 struct Engine {
     child: Child,
+    /// The ports it listens on, in `launch`'s order of services.
+    ports: [u16; 11],
     events: Arc<Mutex<Vec<Value>>>,
     output: Arc<Mutex<Vec<String>>>,
     errors: Arc<Mutex<Vec<String>>>,
@@ -78,18 +80,18 @@ fn node() -> Option<PathBuf> {
 
 /// Starts the engine with the terminal's events (picking up its saved data
 /// with `resume`) and waits for `ready`.
-fn start(project: &Project, only: &str, resume: bool, ports: [u16; 11]) -> Engine {
-    launch(project, only, resume, true, ports)
+fn start(project: &Project, only: &str, resume: bool) -> Engine {
+    launch(project, only, resume, true)
 }
 
 /// Starts the engine as a pipe or CI runs it, and waits for its ready line.
-fn start_plain(project: &Project, only: &str, ports: [u16; 11]) -> Engine {
-    launch(project, only, false, false, ports)
+fn start_plain(project: &Project, only: &str) -> Engine {
+    launch(project, only, false, false)
 }
 
 /// The engine `child` is, reading both its streams into its records; the
 /// channel says when it is ready.
-fn read(mut child: Child) -> (Engine, mpsc::Receiver<()>) {
+fn read(mut child: Child, ports: [u16; 11]) -> (Engine, mpsc::Receiver<()>) {
     let events = Arc::new(Mutex::new(Vec::new()));
     let output = Arc::new(Mutex::new(Vec::new()));
     let errors = Arc::new(Mutex::new(Vec::new()));
@@ -130,6 +132,7 @@ fn read(mut child: Child) -> (Engine, mpsc::Receiver<()>) {
     }
     let engine = Engine {
         child,
+        ports,
         events,
         output,
         errors,
@@ -137,7 +140,30 @@ fn read(mut child: Child) -> (Engine, mpsc::Receiver<()>) {
     (engine, became_ready)
 }
 
-fn launch(project: &Project, only: &str, resume: bool, events: bool, ports: [u16; 11]) -> Engine {
+/// Starts the engine on free ports and waits until it is ready. A port is
+/// free when `free_ports` reads it and taken again when the engine binds it
+/// if another process (a test running beside this one) took it in between;
+/// the engine then says it cannot bind it, and starts again on new ones.
+fn launch(project: &Project, only: &str, resume: bool, events: bool) -> Engine {
+    for _ in 0..4 {
+        match try_launch(project, only, resume, events, free_ports::<11>()) {
+            Ok(engine) => return engine,
+            Err(printed) if printed.contains("cannot bind ") => {}
+            Err(printed) => panic!("the engine never became ready:\n{printed}"),
+        }
+    }
+    panic!("the engine could not bind free ports four times running");
+}
+
+/// The engine once ready on `ports`, or what it printed when it ended (or
+/// did not become ready in two minutes).
+fn try_launch(
+    project: &Project,
+    only: &str,
+    resume: bool,
+    events: bool,
+    ports: [u16; 11],
+) -> Result<Engine, String> {
     let names = [
         "firestore",
         "auth",
@@ -188,7 +214,7 @@ fn launch(project: &Project, only: &str, resume: bool, events: bool, ports: [u16
         .stderr(Stdio::piped())
         .spawn()
         .expect("engine started");
-    let (mut engine, became_ready) = read(child);
+    let (mut engine, became_ready) = read(child, ports);
     let deadline = Instant::now() + Duration::from_secs(120);
     while became_ready
         .recv_timeout(Duration::from_millis(100))
@@ -197,11 +223,12 @@ fn launch(project: &Project, only: &str, resume: bool, events: bool, ports: [u16
         let ended = engine.child.try_wait().expect("status").is_some();
         if ended || Instant::now() > deadline {
             let _ = engine.child.kill();
+            let _ = engine.child.wait();
             std::thread::sleep(Duration::from_millis(100));
-            panic!("the engine never became ready:\n{}", engine.printed());
+            return Err(engine.printed());
         }
     }
-    engine
+    Ok(engine)
 }
 
 /// Asks for a stop the way the npm CLI does and waits for the exit.
@@ -258,18 +285,32 @@ fn figures(engine: &Engine, id: &str) -> Value {
 }
 
 #[test]
+fn a_port_taken_before_the_engine_binds_it_is_tried_again_on_new_ones() {
+    let project = Project::new("taken");
+    project.write("firebase.json", r#"{"firestore":{}}"#);
+    let taken = TcpListener::bind("127.0.0.1:0").expect("port");
+    let mut ports = free_ports::<11>();
+    ports[5] = taken.local_addr().expect("address").port();
+    let printed = try_launch(&project, "firestore", false, true, ports)
+        .err()
+        .expect("the engine cannot bind a taken hub port");
+    assert!(printed.contains("cannot bind hub at "), "{printed}");
+    stop(start(&project, "firestore", false));
+}
+
+#[test]
 fn one_document_is_one_document() {
     let project = Project::new("count");
     project.write("firebase.json", r#"{"firestore":{}}"#);
-    let ports = free_ports::<11>();
-    let engine = start(&project, "firestore,auth,storage", true, ports);
+    let engine = start(&project, "firestore,auth,storage", true);
+    let ports = engine.ports;
     assert_eq!(
         figures(&engine, "firestore"),
         serde_json::json!([[0, "documents"]])
     );
     write_document(&project.id, ports[0]);
     stop(engine);
-    let engine = start(&project, "firestore,auth,storage", true, ports);
+    let engine = start(&project, "firestore,auth,storage", true);
     assert_eq!(
         figures(&engine, "firestore"),
         serde_json::json!([[1, "document"]]),
@@ -300,7 +341,7 @@ fn a_schedule_that_cannot_run_on_a_clock_is_a_start_up_warning() {
         r#"{"name":"schedules","main":"index.js"}"#,
     );
     project.write("functions/index.js", "");
-    let engine = start(&project, "functions,pubsub", false, free_ports::<11>());
+    let engine = start(&project, "functions,pubsub", false);
     let ready = engine
         .events()
         .into_iter()
@@ -354,8 +395,8 @@ fn a_cloud_tasks_line_once_running_is_a_line_of_the_log() {
         r#"{"name":"tasks","main":"index.js"}"#,
     );
     project.write("functions/index.js", "");
-    let ports = free_ports::<11>();
-    let engine = start(&project, "functions", false, ports);
+    let engine = start(&project, "functions", false);
+    let ports = engine.ports;
     // A task for a queue no function registers: Cloud Tasks warns.
     let status = post(
         ports[9],
@@ -418,8 +459,8 @@ fn said(engine: &Engine, source: &str, text: &str) -> Value {
 fn an_auth_link_once_running_is_a_line_of_the_log() {
     let project = Project::new("auth");
     project.write("firebase.json", r#"{"emulators":{"auth":{}}}"#);
-    let ports = free_ports::<11>();
-    let engine = start(&project, "auth", false, ports);
+    let engine = start(&project, "auth", false);
+    let ports = engine.ports;
     let status = post(
         ports[1],
         "/identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=fake-api-key",
@@ -455,8 +496,8 @@ fn a_storage_rules_failure_once_running_is_a_line_of_the_log() {
         "storage.rules",
         "rules_version = '2';\nservice firebase.storage { match /b/{bucket}/o { match /{path=**} { allow read: if request.auth.token.admin == true; } } }\n",
     );
-    let ports = free_ports::<11>();
-    let engine = start(&project, "storage", false, ports);
+    let engine = start(&project, "storage", false);
+    let ports = engine.ports;
     let mut stream = TcpStream::connect(("127.0.0.1", ports[2])).expect("Storage");
     write!(
         stream,
@@ -488,8 +529,8 @@ fn the_plain_lines_stay_as_they_were() {
         "storage.rules",
         "rules_version = '2';\nservice firebase.storage { match /b/{bucket}/o { match /{path=**} { allow read: if request.auth.token.admin == true; } } }\n",
     );
-    let ports = free_ports::<11>();
-    let engine = start_plain(&project, "auth,storage", ports);
+    let engine = start_plain(&project, "auth,storage");
+    let ports = engine.ports;
     post(
         ports[1],
         "/identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=fake-api-key",
