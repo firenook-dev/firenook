@@ -75,6 +75,14 @@ function assertWorkflowSeparation(workflow) {
   assert.match(workflow, /if: \$\{\{ !inputs.candidate && github.event_name != 'pull_request' && github.event_name != 'push' \}\}\r?\n\s+run: node packaging\/publish-packages.mjs dist --check/);
   assert.doesNotMatch(workflow, /--publish|id-token: write/);
 }
+test('the artifact set is verified whenever the builds ran, though scope was skipped', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/packages.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const verify = workflow.slice(workflow.indexOf('\n  verify:\n'));
+  assert.match(verify, /^\n  verify:\n    needs: packages\n(?:    #.*\n)*    if: \$\{\{ !cancelled\(\) && needs.packages.result == 'success' \}\}\n/);
+  // The builds run on a push and in a release, where scope never runs.
+  assert.match(workflow, /\n  scope:\n[^]*?\n    if: github.event_name == 'pull_request'\n/);
+  assert.match(workflow, /\n  packages:\n[^]*?\n    needs: scope\n    if: \$\{\{ !cancelled\(\) && needs.scope.outputs.covered != 'true' \}\}\n/);
+});
 test('manual candidate workflow preserves the separate release-pinned verification path with LF and CRLF', () => {
   const workflow = readFileSync(new URL('../.github/workflows/packages.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   for (const text of [workflow, workflow.replace(/\n/g, '\r\n')]) {
