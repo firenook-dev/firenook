@@ -149,6 +149,9 @@ jobs:
             test "$(lipo -archs accepted-engine/target/x86_64-apple-darwin/release/firenook)" = x86_64
           fi
           "${cargo[@]}" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-suite-runtime --lib control::tests
+          # A killed suite's locator must not delay the next start: Windows
+          # waits out a connect to a closed loopback port (#181).
+          "${cargo[@]}" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-suite-runtime --lib locator_tests
           # Every Auth unit test in release mode: the filters these replaced
           # (password_tests, tests::oauth) had matched none since a rename.
           "${cargo[@]}" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-auth-front --lib
