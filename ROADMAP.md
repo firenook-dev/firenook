@@ -1959,3 +1959,45 @@ behaviour was the question.
   which answers `firenook --version` with 0.2.4 and its engine. The image is
   public as `0.2.4` and `latest`, and the GitHub release is the repository's
   latest.
+
+## 0.2.5, transactions held to their queries, compile errors as the official emulator words them, an Admin SDK's download token kept, and a quick start on Windows after a crash
+
+- [x] Each issue reproduced before its fix. A transaction's queries are
+  checked at commit, including one that found nothing, so two "find or
+  create" transactions no longer both create (#235, PR #246: the reporter's
+  script made two documents in 26 of 30 runs on 0.2.4, none after, as on
+  the official emulator). The download token the Admin SDK names in
+  `firebaseStorageDownloadTokens` becomes the object's own, as officially
+  (#221, PR #243). A killed suite's locator is settled at once: its origins
+  are asked together, an IP origin with 200 ms to accept (#181, PR #241;
+  on GitHub's Windows runner 4.01 s before, the new tests 0.41 s after).
+- [x] Security Rules compile errors: 25 of the 26 reloads 0.2.4 answered
+  otherwise now answer in the official parser's words, and the official
+  compiler's warnings (an unknown service or method, unused variables) are
+  printed at start-up and on reload (#229, PR #248). The last, a
+  `rules_version = '1'` file, is #247. 0.2.5 records 6,791 answers in 43
+  sets: 6,439 compared exactly, 351 different on purpose, 1 listed (#247).
+- [x] The once-a-day update check asks firenook.dev, which answers npm's
+  tags and counts checks per day by version and platform, with no ID and
+  no address kept; `DO_NOT_TRACK` turns it off with the other switches
+  (#240, PR #244).
+- [x] CI: the `terminal_events` tests take new ports when one is taken
+  before the engine binds it (#234, PR #242). A release pull request that
+  differs from the pinned engine only in the release's own fields links the
+  pin's green runs on main instead of running them again, and the iOS SDK
+  client check runs as two jobs (PR #245).
+- [x] Published as `firenook@0.2.5` with `@firenook/cli-<platform>` ×5
+  (release PR #249, tag `npm-v0.2.5` on f604b62, engine 6683b3e, built with
+  Rust 1.100.0). Release run 43590903577, dispatched with `latest` and
+  approved on 2026-11-14, took its quality gates from the pinned commit's CI
+  run on main, built and tested the five platforms in 17 minutes, and
+  published all six packages: the CLI on `latest`, the native packages on
+  `next`. Two steps a covered run skips were missed (PR #250): its artifact
+  check, run by hand with `publish-packages.mjs --check` before approval,
+  and its GitHub release, made with the job's own commands and the
+  conformance report of CI run 43582162294. Registry integrity equals the
+  release assets for all six, and registry signatures and provenance
+  attestations verify on a fresh install, which answers `firenook --version`
+  with 0.2.5 and its engine. The image is public as `0.2.5` and `latest`,
+  the MCP Registry lists 0.2.5, and the GitHub release is the repository's
+  latest.
