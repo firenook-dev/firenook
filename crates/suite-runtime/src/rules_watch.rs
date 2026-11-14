@@ -33,6 +33,7 @@ use std::time::{Duration, Instant};
 
 use firenook_console_front::FirestoreIndexes;
 use firenook_core_store::DatabaseName;
+use firenook_rules_engine::Diagnostic;
 use firenook_rules_runtime::{LoadError, RulesOrigin, RulesRuntime, source_hash};
 use firenook_storage_front::{RulesScope, StorageRulesHandle, StorageRuntime};
 use firenook_suite_front::{LogInput, LoggingRuntime};
@@ -73,6 +74,10 @@ pub(crate) trait RulesTarget: Send + Sync {
     /// What the file puts in force, as the log lines say: `rules`.
     fn holds(&self) -> &'static str {
         "rules"
+    }
+    /// The compiler's warnings for `source`, a file that was put in force.
+    fn warnings(&self, source: &str) -> Vec<Diagnostic> {
+        rules_warnings(source)
     }
     /// What a file that cannot be put in force did, as the log lines say.
     fn refused(&self) -> &'static str {
@@ -207,6 +212,10 @@ impl RulesTarget for IndexesTarget {
 
     fn holds(&self) -> &'static str {
         "indexes"
+    }
+
+    fn warnings(&self, _: &str) -> Vec<Diagnostic> {
+        Vec::new()
     }
 
     fn refused(&self) -> &'static str {
@@ -484,6 +493,32 @@ fn wait_for_quiet(woken: &mpsc::Receiver<()>, stopped: &AtomicBool) -> bool {
     !stopped.load(Ordering::SeqCst)
 }
 
+/// The warnings of a rules source that compiles: what the official compiler
+/// answers as `issues` beside a successful reload (an unknown service or
+/// method, a parameter nothing reads). Since a service it does not know
+/// compiles and governs nothing, these are how a misspelling shows.
+pub(crate) fn rules_warnings(source: &str) -> Vec<Diagnostic> {
+    firenook_rules_engine::compile(source)
+        .map_or_else(|_| Vec::new(), |ruleset| ruleset.issues().to_vec())
+}
+
+/// One warning as the official CLI prints it after a reload
+/// (`firestore.rules:2:9 - WARNING Invalid service name: cloud.firestor.`),
+/// the file named from the working directory when it is under it.
+pub(crate) fn warning_line(path: &Path, warning: &Diagnostic) -> String {
+    let shown = std::env::current_dir()
+        .ok()
+        .and_then(|directory| path.strip_prefix(directory).ok().map(Path::to_path_buf))
+        .unwrap_or_else(|| path.to_path_buf());
+    format!(
+        "{}:{}:{} - WARNING {}",
+        shown.display(),
+        warning.line,
+        warning.column,
+        warning.message
+    )
+}
+
 /// One pass over one target's file.
 fn check(target: &dyn RulesTarget, report: &Report) {
     let label = target.label();
@@ -515,6 +550,9 @@ fn check(target: &dyn RulesTarget, report: &Report) {
     }
     match target.install(&source) {
         Ok(()) => {
+            for warning in target.warnings(&source) {
+                report(target, Level::Warn, warning_line(target.path(), &warning));
+            }
             report(target, Level::Info, format!("{label} reloaded from {path}"));
             target.set_file_problems(None);
         }
@@ -660,6 +698,37 @@ mod tests {
                 .any(|(level, line)| *level == Level::Info && *line == expected),
             "{:?}",
             fixture.lines()
+        );
+    }
+
+    /// A misspelled service compiles and governs nothing, as officially, so
+    /// its warnings are what shows it: printed as the official CLI prints
+    /// them after a reload, before the line that says it was reloaded.
+    #[test]
+    fn a_reload_prints_the_compilers_warnings() {
+        let fixture = Fixture::new("warnings");
+        let misspelled = rules("true").replace("service cloud.firestore", "service cloud.firestor");
+        fixture.write_until(&misspelled, || {
+            fixture.hash() == Some(source_hash(&misspelled))
+        });
+        let lines = fixture.lines();
+        let warned = lines.iter().position(|(level, line)| {
+            *level == Level::Warn
+                && line.ends_with(
+                    "firestore.rules:2:9 - WARNING Invalid service name: cloud.firestor.",
+                )
+        });
+        let reloaded = lines.iter().position(|(level, line)| {
+            *level == Level::Info && line.contains("rules reloaded from")
+        });
+        assert!(
+            matches!((warned, reloaded), (Some(warned), Some(reloaded)) if warned < reloaded),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|(_, line)| line
+                .ends_with("firestore.rules:5:13 - WARNING Invalid method name: read.")),
+            "{lines:?}"
         );
     }
 

@@ -2129,6 +2129,22 @@ fn firestore_rules(config: &SuiteConfig) -> Result<RulesRuntime, SuiteRuntimeErr
     Ok(runtime)
 }
 
+/// The warnings of a rules file put in force at start, one line each. The
+/// official CLI prints them after a reload only; Firenook prints them at
+/// start too, since a misspelled service, which compiles and governs
+/// nothing, would otherwise deny every request without a word.
+fn print_rules_warnings(service: &str, path: &Path, source: &str) {
+    for warning in rules_watch::rules_warnings(source) {
+        let line = rules_watch::warning_line(path, &warning);
+        terminal::print(
+            "WARN",
+            service,
+            &line,
+            &format!("firenook {service}: {line}"),
+        );
+    }
+}
+
 fn install_firestore_rules(
     runtime: &RulesRuntime,
     project: &str,
@@ -2166,6 +2182,7 @@ fn install_firestore_rules(
                     path.display()
                 ))
             })?;
+        print_rules_warnings("firestore", path, &source);
         if !terminal::enabled() {
             println!(
                 "firenook firestore: database \"{}\" rules {}",
@@ -2245,10 +2262,14 @@ async fn start_storage(
     logging: &LoggingRuntime,
 ) -> Result<StorageRuntime, SuiteRuntimeError> {
     let source = match &config.storage_rules {
-        StorageRulesConfig::Single(path) => RulesSource::Single(RulesFile {
-            name: path.display().to_string(),
-            content: read_rules(path)?,
-        }),
+        StorageRulesConfig::Single(path) => {
+            let content = read_rules(path)?;
+            print_rules_warnings("storage", path, &content);
+            RulesSource::Single(RulesFile {
+                name: path.display().to_string(),
+                content,
+            })
+        }
         StorageRulesConfig::OpenDefault => {
             let message = format!(
                 "no storage rules configured for demo project \"{}\", using a default (open) rules configuration.",
@@ -2278,10 +2299,12 @@ async fn start_storage(
             buckets
                 .iter()
                 .map(|bucket| {
+                    let content = read_rules(&bucket.rules)?;
+                    print_rules_warnings("storage", &bucket.rules, &content);
                     Ok(BucketRules {
                         bucket: bucket.bucket.clone(),
                         name: bucket.rules.display().to_string(),
-                        content: read_rules(&bucket.rules)?,
+                        content,
                     })
                 })
                 .collect::<Result<Vec<_>, SuiteRuntimeError>>()?,
