@@ -62,9 +62,10 @@ export function beyondRelease(changed, read) {
   return undefined;
 }
 
-const git = (...args) => execFileSync('git', args, {encoding: 'utf8'}).trim();
+export const git = (...args) => execFileSync('git', args, {encoding: 'utf8'}).trim();
 
-async function passedOnMain(workflow, sha) {
+/** The pinned commit's successful run of `workflow` on main, or undefined. */
+export async function passedOnMain(workflow, sha) {
   const repository = process.env.GITHUB_REPOSITORY;
   const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
   if (!repository || !token) throw new Error('no repository or token to ask GitHub with');
