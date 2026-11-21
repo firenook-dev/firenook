@@ -2001,3 +2001,36 @@ behaviour was the question.
   with 0.2.5 and its engine. The image is public as `0.2.5` and `latest`,
   the MCP Registry lists 0.2.5, and the GitHub release is the repository's
   latest.
+
+## 0.2.6, doubles written as JSON keep every bit
+
+- [x] Reproduced before the fix: a double written through REST, or through
+  WebChannel as the web SDK writes it, was sometimes stored one unit in the
+  last place off, because `serde_json` was built without `float_roundtrip`
+  and its default float parser is not correctly rounded (#258, PR #259).
+  `-6.394884621840902e-14` was stored as `…903e-14`; on `serde_json`
+  1.0.154 the default parser read 29.6% of a million random full-precision
+  doubles one unit off, and none with `float_roundtrip`. The workspace now
+  builds it with that feature, which every JSON entry point shares. A new
+  recording from the official emulator 1.22.0, `double-round-trip-v1`,
+  writes 762 doubles through REST and the browser SDK and reads them back
+  over REST, gRPC and the browser SDK: the official emulator and 0.2.6
+  return every value's bits, 0.2.5 changed 153 of them on every pair.
+  0.2.6 records 6,797 answers in 44 sets: 6,445 compared exactly, 351
+  different on purpose, 1 listed (#247). A REST write load of 250
+  full-precision doubles a write ran 1.4% slower in a release build.
+- [x] Published as `firenook@0.2.6` with `@firenook/cli-<platform>` ×5
+  (release PR #260, tag `npm-v0.2.6` on b1a2caf, engine 8752f90, built with
+  Rust 1.100.0). Release run 44887606534, dispatched with `latest` and
+  approved on 2026-11-21, took its quality gates from the pinned commit's CI
+  run on main; its linux-x64 build failed once on an Auth console test whose
+  search word turned up inside a random user id, and passed when re-run.
+  It published all six packages: the CLI on `latest`, the native packages
+  on `next`. Registry integrity equals the release assets for all six, and
+  registry signatures and provenance attestations verify on a fresh install,
+  which answers `firenook --version` with 0.2.6 and its engine. The image is
+  public as `0.2.6` and `latest` and the MCP Registry lists 0.2.6. The
+  release's notes job could not find the conformance report: its shallow
+  checkout lacks the pinned commit that `conformance-report-run.mjs` compares
+  the tag with. The GitHub release, now the repository's latest, was made by
+  hand with the job's commands and the report of CI run 44879961341.
