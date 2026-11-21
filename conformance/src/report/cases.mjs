@@ -927,6 +927,49 @@ function documentMap() {
   );
 }
 
+const DOUBLE_PATHS = {
+  'rest-patch': 'REST PATCH',
+  'browser-set': 'browser SDK setDoc (WebChannel)',
+  'rest-get': 'REST GET',
+  'grpc-get': 'gRPC GetDocument',
+  'browser-get': 'browser SDK getDocFromServer',
+};
+
+function doubleRoundTrip() {
+  const dir = 'double-round-trip-v1';
+  const metadata = readJson(`${dir}/java-1.22.0/metadata.json`);
+  const fixture = readJson(`${dir}/java-1.22.0/observations.json`);
+  const items = [];
+  // One answer a write and read pair: every value it read back, compared
+  // bit for bit; the documents are only how the values are split up.
+  const pairs = [...new Set(fixture.observations.map((o) => `${o.write}/${o.read}`))];
+  for (const pair of pairs) {
+    const [write, read] = pair.split('/');
+    const observations = fixture.observations.filter((o) => o.write === write && o.read === read);
+    const bits = observations.flatMap((o) => o.bits);
+    const unchanged = bits.filter((value, index) => value === fixture.values[index]?.bits).length;
+    items.push({
+      id: pair,
+      scenario: `${fixture.values.length} doubles written as JSON numbers and read back`,
+      title: `${DOUBLE_PATHS[write] ?? write}, then ${DOUBLE_PATHS[read] ?? read}`,
+      request: `${DOUBLE_PATHS[write] ?? write} of ${fixture.values.length} doubles, then ${DOUBLE_PATHS[read] ?? read}`,
+      answer: `${unchanged} of ${bits.length} read back with the bits written`,
+    });
+  }
+  declare(dir, 'metadata.values', metadata.values, fixture.values.length);
+  declare(dir, 'metadata pairs', metadata.writes * metadata.reads, items.length);
+  addSet(
+    {
+      id: dir,
+      service: 'firestore',
+      area: 'Doubles written as JSON numbers keep every bit',
+      reference: official('Firestore emulator (Java)', metadata.version),
+      recordedAt: day(metadata.capturedAt),
+    },
+    items,
+  );
+}
+
 function kindlessQuery() {
   const dir = 'kindless-query-v1';
   const fixture = readJson(`${dir}/fixture.json`);
@@ -2015,6 +2058,7 @@ function build() {
   attempt(() => wireSets('webchannel-v8', 'webchannel', 'Browser WebChannel: Listen and Write streams, framing, errors'));
   skip('webchannel-v8', 'firebase-js-sdk-*.json', 'CI evidence about the JS SDK integration tests, not a recording');
   attempt(() => documentMap());
+  attempt(() => doubleRoundTrip());
   attempt(() => kindlessQuery());
   attempt(() => listenResume());
   attempt(() => restReadOptions());
