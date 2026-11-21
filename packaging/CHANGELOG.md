@@ -1,3 +1,34 @@
+# 0.2.6 — doubles written through REST and the web SDK keep every bit
+
+- Pin the engine to `8752f90ab8bcd0aabd0d962fcb0e6b16e44e2cab`, main with
+  the 0.2.6 fix (the merge of [PR #259](https://github.com/firenook-dev/firenook/pull/259)). CI
+  ([run 44879961341](https://github.com/firenook-dev/firenook/actions/runs/44879961341)),
+  the five-platform packed-install matrix
+  ([run 44879961358](https://github.com/firenook-dev/firenook/actions/runs/44879961358))
+  and the real SDK clients on Android, iOS and the web
+  ([run 44879979595](https://github.com/firenook-dev/firenook/actions/runs/44879979595))
+  passed on it. The engine is built with Rust 1.100.0.
+- **Firestore.** A double written through REST, or through WebChannel as
+  the web SDK writes it, is stored with exactly the bits the client sent
+  (#258). Firenook read JSON numbers with a parser that is not correctly
+  rounded, so many full-precision values, such as computed decimals, were
+  stored one unit in the last place off: `-6.394884621840902e-14` was
+  stored as `-6.394884621840903e-14`, and 153 of the 762 doubles recorded
+  in the new `double-round-trip-v1` set changed. An app that compared a
+  number it wrote with what the server read saw a change nobody made. Writes
+  over gRPC (the Admin SDKs) were always exact, as on the official emulator.
+  Values written through REST or WebChannel by an earlier version keep the
+  difference they were stored with; write them again to correct them.
+- **The conformance record.** 6,797 answers recorded from production
+  and the official emulators, in 44 sets (6,791 in 43 in 0.2.5): the new
+  set writes 762 doubles through REST and the web SDK and reads each back
+  three ways. 6,445 are compared exactly (6,439 in 0.2.5), 351 are
+  compared and different on purpose, each with its reason, and 1 is
+  listed, under #247.
+- No data format changed: 0.2.6 opens what 0.2.5 saved, and 0.2.5 opens what
+  0.2.6 saves.
+- Published straight to `latest`, as 0.2.5 was.
+
 # 0.2.5 — two transactions that find nothing no longer both create, compile errors answered as the official emulator answers them, an Admin SDK's download token kept, and no four-second start on Windows after a crash
 
 - Pin the engine to `6683b3edb53941a8e7fd34b89a45855b9fff0b50`, main after
