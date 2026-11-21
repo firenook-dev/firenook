@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "target": "official-java-emulator",
+  "version": "1.22.0",
+  "javaJarSha256": "9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c",
+  "javaVersion": "25.0.1",
+  "capturedAt": "2026-11-21T06:47:26.998Z",
+  "syntheticOnly": true,
+  "values": 762,
+  "documentsPerWrite": 4,
+  "writes": 2,
+  "reads": 3,
+  "nodeVersion": "v24.20.0",
+  "platform": "darwin",
+  "nativeSdk": "@google-cloud/firestore@9.0.0",
+  "browserSdk": "firebase@12.18.0",
+  "observationLevel": "each value's IEEE 754 bits as read back; no envelope comparison"
+}
