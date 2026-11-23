@@ -84,14 +84,16 @@ fn url(function: &str, rest: &str) -> String {
 }
 
 fn pubsub_event(event_id: &str, topic: &str) -> Body {
-    Body::from(
-        json!({
-            "context": {"eventId": event_id, "eventType": "google.pubsub.topic.publish",
-                "resource": {"name": format!("projects/{PROJECT}/topics/{topic}"), "service": "pubsub.googleapis.com"}},
-            "data": {"data": "aGk="}
-        })
-        .to_string(),
-    )
+    Body::from(pubsub_json(event_id, topic))
+}
+
+fn pubsub_json(event_id: &str, topic: &str) -> String {
+    json!({
+        "context": {"eventId": event_id, "eventType": "google.pubsub.topic.publish",
+            "resource": {"name": format!("projects/{PROJECT}/topics/{topic}"), "service": "pubsub.googleapis.com"}},
+        "data": {"data": "aGk="}
+    })
+    .to_string()
 }
 
 fn trigger(key: &str, body: Body) -> Request<Body> {
@@ -639,4 +641,185 @@ fn assert_rounded_end_line(line: &LogEvent, function: &str) {
             .is_none_or(|(_, fraction)| fraction.len() <= 3),
         "{duration}"
     );
+}
+
+// Each call counts the calls of its function running beside it; `peaks`
+// answers the most each function had at once.
+const CAPPED_INDEX: &str = "
+const running = {};
+const peaks = {};
+const hold = async (name) => {
+  running[name] = (running[name] || 0) + 1;
+  peaks[name] = Math.max(peaks[name] || 0, running[name]);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  running[name] -= 1;
+};
+exports.onOrder = () => hold('onOrder');
+exports.capped = async (req, res) => { await hold('capped'); res.send('ok'); };
+exports.uncapped = async (req, res) => { await hold('uncapped'); res.send('ok'); };
+exports.peaks = (req, res) => res.json(peaks);
+exports.onSlow = () => new Promise((resolve) => setTimeout(resolve, 1500));
+";
+
+const CAPPED_MANIFEST: &str = "specVersion: v1alpha1
+endpoints:
+  onOrder:
+    entryPoint: onOrder
+    platform: gcfv1
+    maxInstances: 1
+    eventTrigger:
+      eventType: google.pubsub.topic.publish
+      eventFilters:
+        resource: projects/demo-dispatch/topics/orders
+  capped:
+    entryPoint: capped
+    platform: gcfv2
+    maxInstances: 2
+    concurrency: 3
+    httpsTrigger: {}
+  uncapped:
+    entryPoint: uncapped
+    platform: gcfv2
+    httpsTrigger: {}
+  peaks:
+    entryPoint: peaks
+    platform: gcfv2
+    httpsTrigger: {}
+  onSlow:
+    entryPoint: onSlow
+    platform: gcfv1
+    maxInstances: 1
+    eventTrigger:
+      eventType: google.pubsub.topic.publish
+      eventFilters:
+        resource: projects/demo-dispatch/topics/slow
+";
+
+async fn peaks(harness: &Harness) -> Value {
+    let (_, body) = harness
+        .call_text(
+            Request::get(url("peaks", ""))
+                .body(Body::empty())
+                .expect("a request"),
+        )
+        .await;
+    serde_json::from_str(&body).expect("json")
+}
+
+#[tokio::test]
+async fn a_function_capped_at_one_instance_runs_its_events_one_at_a_time() {
+    // Events that arrive together for a function with `maxInstances: 1`
+    // (one call per instance, as every 1st gen function) run in turn, as
+    // production runs them; none is dropped.
+    let harness = match Harness::start(CAPPED_INDEX, CAPPED_MANIFEST, LogDelivery::Attributed).await
+    {
+        Ok(harness) => harness,
+        Err(reason) => {
+            eprintln!("skipped: {reason}");
+            return;
+        }
+    };
+    let deliveries = (0..5).map(|index| {
+        harness.call_text(trigger(
+            "us-central1-onOrder-0",
+            pubsub_event(&format!("order-{index}"), "orders"),
+        ))
+    });
+    let answers = futures_util::future::join_all(deliveries).await;
+    assert!(answers.iter().all(|(response, _)| response.status() == 200));
+    assert_eq!(peaks(&harness).await["onOrder"], 1);
+    harness.stop().await;
+}
+
+#[tokio::test]
+async fn a_function_runs_at_most_max_instances_times_concurrency_calls_at_once() {
+    // Two instances of three calls each: six of ten calls run at once and
+    // the rest wait. A function that caps nothing runs all ten.
+    let harness = match Harness::start(CAPPED_INDEX, CAPPED_MANIFEST, LogDelivery::Attributed).await
+    {
+        Ok(harness) => harness,
+        Err(reason) => {
+            eprintln!("skipped: {reason}");
+            return;
+        }
+    };
+    let calls = ["capped", "uncapped"].into_iter().flat_map(|function| {
+        (0..10).map(move |_| {
+            Request::get(url(function, ""))
+                .body(Body::empty())
+                .expect("a request")
+        })
+    });
+    let answers = futures_util::future::join_all(calls.map(|call| harness.call_text(call))).await;
+    assert!(
+        answers
+            .iter()
+            .all(|(response, body)| response.status() == 200 && body == "ok")
+    );
+    let peaks = peaks(&harness).await;
+    assert_eq!(
+        (&peaks["capped"], &peaks["uncapped"]),
+        (&json!(6), &json!(10))
+    );
+    harness.stop().await;
+}
+
+#[tokio::test]
+async fn a_call_given_up_while_waiting_for_a_slot_is_logged_and_ended() {
+    // The delivery bridge stops waiting for an answer after its request
+    // timeout. A call still waiting for its function's slot then never
+    // runs: the log says it waited and that it was given up, and its
+    // invocation ends instead of staying in flight.
+    let harness = match Harness::start(CAPPED_INDEX, CAPPED_MANIFEST, LogDelivery::Attributed).await
+    {
+        Ok(harness) => harness,
+        Err(reason) => {
+            eprintln!("skipped: {reason}");
+            return;
+        }
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port");
+    let address = listener.local_addr().expect("an address");
+    let router = harness.runtime.router();
+    tokio::spawn(async move { axum::serve(listener, router).await });
+    let impatient = reqwest::Client::builder()
+        .timeout(Duration::from_millis(300))
+        .build()
+        .expect("a client");
+    let second = async {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        impatient
+            .post(format!(
+                "http://{address}/functions/projects/{PROJECT}/triggers/us-central1-onSlow-0"
+            ))
+            .header("content-type", "application/json")
+            .body(pubsub_json("slow-second", "slow"))
+            .send()
+            .await
+    };
+    let first = harness.call_text(trigger(
+        "us-central1-onSlow-0",
+        pubsub_event("slow-first", "slow"),
+    ));
+    let ((first, _), second) = tokio::join!(first, second);
+    assert_eq!(first.status(), 200);
+    assert!(second.is_err_and(|error| error.is_timeout()));
+    eventually("the given-up call ended", || {
+        harness
+            .monitor
+            .by_event_id("slow-second")
+            .is_some_and(|summary| summary.outcome == Some(InvocationOutcome::NotStarted))
+    })
+    .await;
+    let kinds: Vec<&str> = harness
+        .events()
+        .iter()
+        .filter(|event| event.function.as_deref() == Some("us-central1-onSlow"))
+        .filter_map(|event| event.kind)
+        .filter(|kind| matches!(*kind, "function.waiting" | "function.abandoned"))
+        .collect();
+    assert_eq!(kinds, ["function.waiting", "function.abandoned"]);
+    harness.stop().await;
 }

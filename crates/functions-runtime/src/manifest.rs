@@ -408,11 +408,9 @@ impl<'a> Resolver<'a> {
 }
 
 /// Endpoint options a manifest may declare that the emulator does not apply.
-const DECLARED_OPTIONS: [&str; 10] = [
+const DECLARED_OPTIONS: [&str; 8] = [
     "availableMemoryMb",
     "minInstances",
-    "maxInstances",
-    "concurrency",
     "cpu",
     "serviceAccount",
     "serviceAccountEmail",
@@ -458,6 +456,9 @@ pub struct Conversion {
     /// Per definition id, the options it declares that the emulator does
     /// not apply (as written, unresolved).
     pub declared: BTreeMap<String, Map<String, Value>>,
+    /// Per definition id that sets `maxInstances`, how many of its calls
+    /// production runs at once: that many instances of `concurrency` calls.
+    pub limits: BTreeMap<String, u64>,
 }
 
 /// Converts a `v1alpha1` manifest into emulated definitions for one codebase.
@@ -520,6 +521,7 @@ pub fn convert_manifest(
 ) -> Result<Conversion, ManifestError> {
     let mut not_loaded = Vec::new();
     let mut declared: BTreeMap<String, Map<String, Value>> = BTreeMap::new();
+    let mut limits = BTreeMap::new();
     let spec_version = manifest
         .get("specVersion")
         .and_then(serde_norway::Value::as_str);
@@ -656,6 +658,20 @@ pub fn convert_manifest(
             None | Some(Value::Null) => 60,
             Some(value) => resolver.resolve_int(value)?.as_u64().unwrap_or(60),
         };
+        let limit = match endpoint.get("maxInstances") {
+            None | Some(Value::Null) => None,
+            Some(value) => {
+                let instances = resolver.resolve_int(value)?.as_u64().unwrap_or(0);
+                // A 1st gen instance runs one call at a time; a 2nd gen one
+                // runs 80 unless told otherwise, as the CLI deploys it.
+                let concurrency = match endpoint.get("concurrency") {
+                    None | Some(Value::Null) if platform == "gcfv1" => 1,
+                    None | Some(Value::Null) => 80,
+                    Some(value) => resolver.resolve_int(value)?.as_u64().unwrap_or(80),
+                };
+                Some(instances.saturating_mul(concurrency)).filter(|&limit| limit > 0)
+            }
+        };
         for (group_key, region) in regions {
             let mut definition = Map::new();
             definition.insert(
@@ -706,6 +722,9 @@ pub fn convert_manifest(
                 .collect();
             if !options.is_empty() {
                 declared.insert(format!("{region}-{id}"), options);
+            }
+            if let Some(limit) = limit {
+                limits.insert(format!("{region}-{id}"), limit);
             }
             if trigger
                 && let Some(labels) = definition.get_mut("labels").and_then(Value::as_object_mut)
@@ -764,6 +783,7 @@ pub fn convert_manifest(
         not_loaded,
         params: declared_params(manifest),
         declared,
+        limits,
     })
 }
 
@@ -1157,6 +1177,51 @@ mod tests {
             )
             .expect("converted"),
             conversion.definitions
+        );
+    }
+
+    #[test]
+    fn a_function_that_caps_its_instances_has_a_limit_on_calls_at_once() {
+        let limit = |endpoint: Value| {
+            let values = BTreeMap::from([("MAX".to_owned(), "4".to_owned())]);
+            convert_manifest(
+                &manifest(&endpoint),
+                "demo-p",
+                "demo-p.appspot.com",
+                "default",
+                &values,
+            )
+            .expect("converted")
+            .limits
+            .get("us-central1-fn")
+            .copied()
+        };
+        let v2 = |options: Value| {
+            let mut endpoint = json!({"entryPoint": "fn", "platform": "gcfv2", "httpsTrigger": {}});
+            endpoint
+                .as_object_mut()
+                .unwrap()
+                .extend(options.as_object().unwrap().clone());
+            endpoint
+        };
+        assert_eq!(limit(v2(json!({}))), None);
+        assert_eq!(limit(v2(json!({"concurrency": 1}))), None);
+        assert_eq!(limit(v2(json!({"maxInstances": 2}))), Some(160));
+        assert_eq!(
+            limit(v2(json!({"maxInstances": 2, "concurrency": 1}))),
+            Some(2)
+        );
+        assert_eq!(
+            limit(v2(
+                json!({"maxInstances": "{{ params.MAX }}", "concurrency": 1})
+            )),
+            Some(4)
+        );
+        assert_eq!(
+            limit(
+                json!({"entryPoint": "fn", "platform": "gcfv1", "maxInstances": 3, "httpsTrigger": {}})
+            ),
+            Some(3)
         );
     }
 

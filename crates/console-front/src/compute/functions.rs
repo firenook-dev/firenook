@@ -1776,10 +1776,7 @@ fn param_of(param: &ParamView) -> FunctionParam {
 fn declared_note(name: &str) -> &'static str {
     match name {
         "availableMemoryMb" => "Not limited here: one Node worker serves the whole codebase.",
-        "minInstances" | "maxInstances" => {
-            "Not applied here: one Node worker serves the whole codebase."
-        }
-        "concurrency" => "Not applied here: calls run concurrently in the codebase's worker.",
+        "minInstances" => "Not applied here: one Node worker serves the whole codebase.",
         "cpu" => "Not applied here: the worker uses this machine's CPUs.",
         "serviceAccount" | "serviceAccountEmail" => {
             "Not applied here: functions run with the emulator's demo credentials."
