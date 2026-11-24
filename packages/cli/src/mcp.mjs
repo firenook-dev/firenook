@@ -14,7 +14,7 @@ import { withClient } from './client.mjs';
 import { exportEmulators, findHub, locatorDirectory, locatorPath, readLocator, resolveProject, runningServices, runningSuites, serviceOrigin } from './hub.mjs';
 import { listFunctions, pubsubMessage, runInvoke, summarizeTrigger } from './invoke.mjs';
 import { decodeDocument, encodeFields } from './firestore-values.mjs';
-import { BUCKET, CLIENT, DATABASE, ORDER_BY, OWNER, ToolError, WHERE, boolean, call, encodePath, isObject, optionsFor, postBeacon, projectSource, schema, sortOrder, string, suite, target, trimPath, whereFilter } from './mcp-suite.mjs';
+import { BUCKET, CLIENT, DATABASE, ORDER_BY, OWNER, READ_ONLY, RUNS_FUNCTIONS, ToolError, WHERE, boolean, call, encodePath, isObject, optionsFor, postBeacon, projectSource, schema, sortOrder, string, suite, target, trimPath, whereFilter, writes } from './mcp-suite.mjs';
 import { CONSOLE_TOOLS } from './mcp-console.mjs';
 
 export const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
@@ -41,8 +41,8 @@ function structuredQuery(project, {collection, database = '(default)', where = [
 }
 
 export const TOOLS = [
-  {name:'firenook_status', group:'status', description:'The running Firenook suite: how the project was found, hub locator, hub status, the emulators listing (host and port per service) and the CLI version; with no project, the suites whose locators answer.',
-    inputSchema:schema({}),
+  {name:'firenook_status', group:'status', description:'Show the running Firenook suite: how the project was found, hub locator, hub status, the emulators listing (host and port per service), the console address and the CLI version; with no project, the suites whose locators answer. Use it when another tool cannot reach the suite, or to find a service\'s port.',
+    annotations:READ_ONLY, inputSchema:schema({}),
     async run(_args, context) {
       const source = projectSource(context.options, context.cwd);
       const versions = {version:manifest.version, engineRevision:release.engineRevision, client:CLIENT};
@@ -63,7 +63,7 @@ export const TOOLS = [
         emulators, console:emulators?.ui ? `${serviceOrigin(project, 'ui', emulators)}/console` : null, ...versions};
     }},
   {name:'firestore_get', group:'firestore', description:'Read one Firestore document by path (collection/document[/subcollection/document]); returns its fields as plain JSON or exists:false.',
-    inputSchema:schema({path:string('Document path, e.g. users/alice'), database:DATABASE}, ['path']),
+    annotations:READ_ONLY, inputSchema:schema({path:string('Document path, e.g. users/alice'), database:DATABASE}, ['path']),
     async run({path, database = '(default)'}, context) {
       const {project, origin} = await suite(context, 'firestore');
       const {status, body} = await call(`${origin}/v1/projects/${encodeURIComponent(project.project)}/databases/${encodeURIComponent(database)}/documents/${encodePath(path)}`, {headers:OWNER, allow:[404]});
@@ -71,7 +71,7 @@ export const TOOLS = [
       return {exists:true, ...decodeDocument(body)};
     }},
   {name:'firestore_query', group:'firestore', description:'Run a structured query over one collection, or with collectionGroup over every collection with that id (Firestore runQuery): optional where filters, ordering and limit; returns matching documents as plain JSON.',
-    inputSchema:schema({collection:string('Collection path, e.g. users or users/alice/posts; with collectionGroup a collection id (posts) or a path whose parent bounds it'), database:DATABASE,
+    annotations:READ_ONLY, inputSchema:schema({collection:string('Collection path, e.g. users or users/alice/posts; with collectionGroup a collection id (posts) or a path whose parent bounds it'), database:DATABASE,
       where:WHERE, orderBy:ORDER_BY,
       limit:{type:'integer', description:'Maximum documents; default 50', minimum:1}, collectionGroup:GROUP}, ['collection']),
     async run({collection, database = '(default)', where = [], orderBy = [], limit = 50, collectionGroup = false}, context) {
@@ -82,7 +82,7 @@ export const TOOLS = [
       return {collection:trimPath(collection), ...(collectionGroup ? {collectionGroup:true} : {}), count:documents.length, documents};
     }},
   {name:'firestore_count', group:'firestore', description:'Count the documents of a collection, or with collectionGroup of every collection with that id, that match optional where filters (a COUNT aggregation; no documents are read back).',
-    inputSchema:schema({collection:string('Collection path, or a collection id with collectionGroup'), database:DATABASE, where:WHERE, collectionGroup:GROUP}, ['collection']),
+    annotations:READ_ONLY, inputSchema:schema({collection:string('Collection path, or a collection id with collectionGroup'), database:DATABASE, where:WHERE, collectionGroup:GROUP}, ['collection']),
     async run({collection, database = '(default)', where = [], collectionGroup = false}, context) {
       const {project, origin} = await suite(context, 'firestore');
       const query = structuredQuery(project, {collection, database, where, collectionGroup});
@@ -93,7 +93,7 @@ export const TOOLS = [
       return {collection:trimPath(collection), ...(collectionGroup ? {collectionGroup:true} : {}), count:Number(value)};
     }},
   {name:'firestore_set', group:'firestore', description:'Write a Firestore document from plain JSON: replaces it, or with merge:true updates only the given top-level fields.',
-    inputSchema:schema({path:string('Document path'), data:{type:'object', description:'Fields as plain JSON'}, merge:{type:'boolean', description:'Merge into the existing document'}, database:DATABASE}, ['path', 'data']),
+    annotations:writes({destructive:true}), inputSchema:schema({path:string('Document path'), data:{type:'object', description:'Fields as plain JSON'}, merge:{type:'boolean', description:'Merge into the existing document'}, database:DATABASE}, ['path', 'data']),
     async run({path, data, merge = false, database = '(default)'}, context) {
       const {project, origin} = await suite(context, 'firestore');
       if (trimPath(path).split('/').length % 2) throw new ToolError(`${path} is a collection path; firestore_set needs a document path`);
@@ -103,7 +103,7 @@ export const TOOLS = [
       return {written:true, merge, ...decodeDocument(body)};
     }},
   {name:'firestore_delete', group:'firestore', description:'Delete a document (recursive:true also its subcollections) or a collection (its documents; recursive:true everything beneath) through the emulator delete route.',
-    inputSchema:schema({path:string('Document or collection path'), recursive:{type:'boolean', description:'Also delete nested collections'}, database:DATABASE}, ['path']),
+    annotations:writes({destructive:true, idempotent:true}), inputSchema:schema({path:string('Document or collection path'), recursive:{type:'boolean', description:'Also delete nested collections'}, database:DATABASE}, ['path']),
     async run({path, recursive = false, database = '(default)'}, context) {
       const {project, origin} = await suite(context, 'firestore');
       const mode = recursive ? 'recursive' : 'shallow';
@@ -111,7 +111,7 @@ export const TOOLS = [
       return {path:trimPath(path), mode, deleted:typeof body?.deleted === 'number' ? body.deleted : null};
     }},
   {name:'firestore_list_collections', group:'firestore', description:'List collection ids at the database root or under a document (listCollectionIds).',
-    inputSchema:schema({path:string('Document path; omit for the root collections'), database:DATABASE}),
+    annotations:READ_ONLY, inputSchema:schema({path:string('Document path; omit for the root collections'), database:DATABASE}),
     async run({path, database = '(default)'}, context) {
       const {project, origin} = await suite(context, 'firestore');
       const root = `${origin}/v1/projects/${encodeURIComponent(project.project)}/databases/${encodeURIComponent(database)}/documents`;
@@ -119,7 +119,7 @@ export const TOOLS = [
       return {path:path ? trimPath(path) : null, collectionIds:body.collectionIds ?? []};
     }},
   {name:'auth_list_users', group:'auth', description:'List Auth emulator accounts (accounts:batchGet) with uid, email, phone, display name, claims and provider data.',
-    inputSchema:schema({maxResults:{type:'integer', description:'Page size; default 100', minimum:1}, pageToken:string('Continue a previous listing')}),
+    annotations:READ_ONLY, inputSchema:schema({maxResults:{type:'integer', description:'Page size; default 100', minimum:1}, pageToken:string('Continue a previous listing')}),
     async run({maxResults = 100, pageToken}, context) {
       const {project, origin} = await suite(context, 'auth');
       const query = `maxResults=${maxResults}${pageToken ? `&nextPageToken=${encodeURIComponent(pageToken)}` : ''}`;
@@ -127,8 +127,8 @@ export const TOOLS = [
       const users = (body.users ?? []).map(account);
       return {count:users.length, users, nextPageToken:body.nextPageToken ?? null};
     }},
-  {name:'auth_get_user', group:'auth', description:'Look up one Auth account by uid, email or phone number (accounts:lookup).',
-    inputSchema:schema({uid:string('Account id (localId)'), email:string('Email address'), phoneNumber:string('Phone number in E.164 form')}),
+  {name:'auth_get_user', group:'auth', description:'Look up one Auth emulator account by uid, email or phone number (accounts:lookup; the first of the three given is used) and return its record with claims, providers and MFA, or found:false. To page through every account, use auth_list_users.',
+    annotations:READ_ONLY, inputSchema:schema({uid:string('Account id (localId)'), email:string('Email address'), phoneNumber:string('Phone number in E.164 form')}),
     async run({uid, email, phoneNumber}, context) {
       const {project, origin} = await suite(context, 'auth');
       const request = uid ? {localId:[uid]} : email ? {email:[email]} : phoneNumber ? {phoneNumber:[phoneNumber]} : undefined;
@@ -138,7 +138,7 @@ export const TOOLS = [
       return user ? {found:true, user:account(user)} : {found:false};
     }},
   {name:'auth_create_user', group:'auth', description:'Create an Auth emulator account with a synthetic email/password, phone number or display name (never real credentials).',
-    inputSchema:schema({uid:string('Account id to assign'), email:string('Email'), password:string('Password'), phoneNumber:string('Phone number'), displayName:string('Display name'),
+    annotations:writes(), inputSchema:schema({uid:string('Account id to assign'), email:string('Email'), password:string('Password'), phoneNumber:string('Phone number'), displayName:string('Display name'),
       photoUrl:string('Photo URL'), emailVerified:{type:'boolean', description:'Mark the email verified'}, disabled:{type:'boolean', description:'Create the account disabled'}}),
     async run({uid, email, password, phoneNumber, displayName, photoUrl, emailVerified, disabled}, context) {
       const {project, origin} = await suite(context, 'auth');
@@ -148,29 +148,29 @@ export const TOOLS = [
       const {body} = await call(`${origin}/identitytoolkit.googleapis.com/v1/projects/${encodeURIComponent(project.project)}/accounts`, {method:'POST', headers:OWNER, body:request});
       return {created:true, uid:body.localId, email:body.email ?? null, phoneNumber:body.phoneNumber ?? null, displayName:body.displayName ?? null};
     }},
-  {name:'auth_delete_user', group:'auth', description:'Delete one Auth emulator account by uid (accounts:delete).',
-    inputSchema:schema({uid:string('Account id')}, ['uid']),
+  {name:'auth_delete_user', group:'auth', description:'Delete one Auth emulator account by uid, permanently (accounts:delete); an unknown uid is an error (USER_NOT_FOUND). To block its sign-ins but keep the account, use auth_disable_user; to end its sessions only, auth_revoke_tokens.',
+    annotations:writes({destructive:true, idempotent:true}), inputSchema:schema({uid:string('Account id')}, ['uid']),
     async run({uid}, context) {
       const {project, origin} = await suite(context, 'auth');
       await call(`${origin}/identitytoolkit.googleapis.com/v1/projects/${encodeURIComponent(project.project)}/accounts:delete`, {method:'POST', headers:OWNER, body:{localId:uid}});
       return {uid, deleted:true};
     }},
-  {name:'auth_oob_codes', group:'auth', description:'The pending out-of-band codes (email verification, password reset, sign-in links) the Auth emulator holds instead of sending email.',
-    inputSchema:schema({}),
+  {name:'auth_oob_codes', group:'auth', description:'The pending out-of-band codes (email verification, password reset, sign-in links) the Auth emulator holds instead of sending email. Phone sign-in codes are in auth_verification_codes.',
+    annotations:READ_ONLY, inputSchema:schema({}),
     async run(_args, context) {
       const {project, origin} = await suite(context, 'auth');
       const {body} = await call(`${origin}/emulator/v1/projects/${encodeURIComponent(project.project)}/oobCodes`, {headers:OWNER});
       return {oobCodes:body.oobCodes ?? []};
     }},
-  {name:'auth_verification_codes', group:'auth', description:'The pending phone verification codes the Auth emulator holds instead of sending SMS.',
-    inputSchema:schema({}),
+  {name:'auth_verification_codes', group:'auth', description:'List the pending phone verification codes the Auth emulator holds instead of sending SMS, to finish a phone sign-in in a test. Email verification, password reset and sign-in link codes are in auth_oob_codes.',
+    annotations:READ_ONLY, inputSchema:schema({}),
     async run(_args, context) {
       const {project, origin} = await suite(context, 'auth');
       const {body} = await call(`${origin}/emulator/v1/projects/${encodeURIComponent(project.project)}/verificationCodes`, {headers:OWNER});
       return {verificationCodes:body.verificationCodes ?? []};
     }},
   {name:'storage_list', group:'storage', description:'List Storage objects and folder prefixes under a prefix (one level, like listAll).',
-    inputSchema:schema({bucket:BUCKET, prefix:string('Folder prefix, e.g. uploads/ (a trailing slash is added)'), maxResults:{type:'integer', description:'Page size; default 100', minimum:1}, pageToken:string('Continue a previous listing')}),
+    annotations:READ_ONLY, inputSchema:schema({bucket:BUCKET, prefix:string('Folder prefix, e.g. uploads/ (a trailing slash is added)'), maxResults:{type:'integer', description:'Page size; default 100', minimum:1}, pageToken:string('Continue a previous listing')}),
     async run({bucket, prefix = '', maxResults = 100, pageToken}, context) {
       const {project, origin} = await suite(context, 'storage');
       const name = bucket || `${project.project}.appspot.com`;
@@ -180,7 +180,7 @@ export const TOOLS = [
       return {bucket:name, prefix:folder, prefixes:body.prefixes ?? [], items:body.items ?? [], nextPageToken:body.nextPageToken ?? null};
     }},
   {name:'storage_get_metadata', group:'storage', description:'The metadata of one Storage object (content type, size, timestamps, custom metadata, download tokens) or exists:false.',
-    inputSchema:schema({bucket:BUCKET, path:string('Object path, e.g. uploads/photo.png')}, ['path']),
+    annotations:READ_ONLY, inputSchema:schema({bucket:BUCKET, path:string('Object path, e.g. uploads/photo.png')}, ['path']),
     async run({bucket, path}, context) {
       const {project, origin} = await suite(context, 'storage');
       const name = bucket || `${project.project}.appspot.com`;
@@ -189,14 +189,14 @@ export const TOOLS = [
       return {exists:true, ...body};
     }},
   {name:'functions_list', group:'functions', description:'The functions loaded by the running suite: name, region, generation, trigger kind, event type or schedule, and the HTTPS URL of request/callable functions.',
-    inputSchema:schema({}),
+    annotations:READ_ONLY, inputSchema:schema({}),
     async run(_args, context) {
       const {project, origin} = await suite(context, 'functions');
       const triggers = await listFunctions(origin);
       return {count:triggers.length, functions:triggers.map(trigger => summarizeTrigger(trigger, project.project, origin))};
     }},
-  {name:'functions_invoke', group:'functions', description:'Invoke a loaded function: an HTTPS/callable request with data, or with eventData a background event (Firestore before/after, Storage object, Pub/Sub message, Auth user, schedule, Eventarc custom event, task queue payload) shaped as the official functions shell sends it.',
-    inputSchema:schema({name:string('Function name'), region:string('Region when the name is deployed in several'), data:{description:'Callable payload (sent as {"data": ...})'},
+  {name:'functions_invoke', group:'functions', description:'Invoke a loaded function: an HTTPS/callable request with data, or with eventData a background event (Firestore before/after, Storage object, Pub/Sub message, Auth user, schedule, Eventarc custom event, task queue payload) shaped as the official functions shell sends it. The function\'s own code runs, side effects included; to repeat a recorded call exactly, use functions_replay_call.',
+    annotations:RUNS_FUNCTIONS, inputSchema:schema({name:string('Function name'), region:string('Region when the name is deployed in several'), data:{description:'Callable payload (sent as {"data": ...})'},
       eventData:{description:'Background event payload; its shape depends on the trigger'}, resource:string('Firestore document path or the legacy resource name'),
       params:{type:'object', description:'Wildcard values for the trigger pattern'}, auth:{type:'object', description:'{"uid","token"} or {"admin":true} for first-generation events'},
       eventType:string('Override the CloudEvent type for Eventarc custom events'), method:string('HTTP method for plain HTTPS functions; default POST')}, ['name']),
@@ -207,8 +207,8 @@ export const TOOLS = [
       const {project} = await suite(context);
       return runInvoke(name, optionsFor({options}, project), context.cwd);
     }},
-  {name:'pubsub_publish', group:'pubsub', description:'Publish a message to a Pub/Sub emulator topic: string data as given, other JSON as its text (base64-encoded on the wire), plus attributes.',
-    inputSchema:schema({topic:string('Topic name (or projects/<p>/topics/<name>)'), data:{description:'Message data'}, attributes:{type:'object', description:'String attributes'}, orderingKey:string('Ordering key')}, ['topic']),
+  {name:'pubsub_publish', group:'pubsub', description:'Publish one message to a Pub/Sub emulator topic: string data as given, other JSON as its text (base64-encoded on the wire), plus attributes; the functions subscribed to it run. To read a subscription\'s backlog without consuming it, use pubsub_peek; to run a scheduled function, schedules_run.',
+    annotations:RUNS_FUNCTIONS, inputSchema:schema({topic:string('Topic name (or projects/<p>/topics/<name>)'), data:{description:'Message data'}, attributes:{type:'object', description:'String attributes'}, orderingKey:string('Ordering key')}, ['topic']),
     async run({topic, data, attributes, orderingKey}, context) {
       const {project, origin} = await suite(context, 'pubsub');
       const name = String(topic).split('/').pop();
@@ -216,14 +216,14 @@ export const TOOLS = [
       const {body} = await call(`${origin}/v1/projects/${encodeURIComponent(project.project)}/topics/${encodeURIComponent(name)}:publish`, {method:'POST', body:{messages:[message]}});
       return {topic:name, messageIds:body.messageIds ?? [], message};
     }},
-  {name:'tasks_stats', group:'tasks', description:'Queue statistics of the Cloud Tasks emulator (queueStats).',
-    inputSchema:schema({}),
+  {name:'tasks_stats', group:'tasks', description:'Report each Cloud Tasks queue\'s statistics as the official emulator\'s queueStats does: numberOfTasks, tasksAdded and failedTasks (five-minute counts divided by five), completedLastMin, runningTasks (the dispatch slots, not tasks running), maxRate and maxConcurrent. For the waiting tasks themselves, use tasks_list.',
+    annotations:READ_ONLY, inputSchema:schema({}),
     async run(_args, context) {
       const {origin} = await suite(context, 'tasks');
       return (await call(`${origin}/queueStats`)).body;
     }},
-  {name:'emulators_export', group:'status', description:'Export the running Firestore, Auth and Storage data to a directory outside the project (firenook emulators:export).',
-    inputSchema:schema({path:string('Destination directory'), force:{type:'boolean', description:'Overwrite a non-empty foreign directory'}}, ['path']),
+  {name:'emulators_export', group:'status', description:'Export the running Firestore, Auth and Storage data to a dedicated directory (not the project or current directory, nor an ancestor of either), as firenook emulators:export does, for a later --import. It replaces an earlier export there and refuses any other non-empty directory unless force is true; the running data is untouched (emulators_clear wipes it).',
+    annotations:writes({destructive:true, idempotent:true}), inputSchema:schema({path:string('Destination directory'), force:{type:'boolean', description:'Overwrite a non-empty foreign directory'}}, ['path']),
     async run({path, force = false}, context) {
       const lines = [];
       const log = {log:line => lines.push(line), error:line => lines.push(line)};
@@ -338,10 +338,10 @@ export function createMcpServer(options, cwd = process.cwd(), log = console) {
         const requested = params?.protocolVersion;
         const protocolVersion = PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0];
         return result(id, {protocolVersion, capabilities:{tools:{}}, serverInfo:{name:'firenook', version:manifest.version},
-          instructions:'Tools act on the local Firenook emulator suite only: the project of the folder the server runs in, or, with no firebase.json there and no --project, the one running suite. Firestore values use plain JSON with {"$timestamp"}, {"$ref"}, {"$geo"} and {"$bytes"} sentinels. Tools marked destructive change or delete emulator data. Nothing is sent to any cloud service.'});
+          instructions:'Tools act on the local Firenook emulator suite only: the project of the folder the server runs in, or, with no firebase.json there and no --project, the one running suite. Firestore values use plain JSON with {"$timestamp"}, {"$ref"}, {"$geo"} and {"$bytes"} sentinels. Each tool declares MCP annotations: destructiveHint marks the ones that replace or delete emulator data or run the app\'s functions. Nothing is sent to any cloud service.'});
       }
       case 'ping': return result(id, {});
-      case 'tools/list': return result(id, {tools:tools.map(({name, description, inputSchema}) => ({name, description, inputSchema}))});
+      case 'tools/list': return result(id, {tools:tools.map(({name, description, inputSchema, annotations}) => ({name, description, inputSchema, annotations}))});
       case 'tools/call': {
         if (!isObject(params) || typeof params.name !== 'string') return error(id, -32602, 'tools/call needs params.name');
         const tool = tools.find(candidate => candidate.name === params.name);

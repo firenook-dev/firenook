@@ -87,6 +87,14 @@ can be written again without losing types. Emulator routes are called with the
 owner token the Admin SDK uses, never through Security Rules. Stdout carries
 only JSON-RPC lines; diagnostics go to stderr.
 
+Every tool declares the four MCP annotations, so a client that asks before a
+risky call can tell them apart: `readOnlyHint` on the tools that only read;
+`destructiveHint` on those that can replace or delete data, and on those that
+run the app's functions (an invocation or replay, a published message or
+event, a schedule tick, a task), whose code may do either; `idempotentHint`
+where the same call again changes nothing more; and `openWorldHint: false`
+on all of them, since every tool acts on the local suite only.
+
 The tools marked *console* use the engine's Console API, which the suite
 serves on the Emulator UI port: they need the UI on (the default; a suite
 started with `emulators.ui.enabled: false`, or by `emulators:exec` without

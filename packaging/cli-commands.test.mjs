@@ -1164,6 +1164,22 @@ test('the MCP server negotiates the protocol, lists its tools and validates call
     strict(tool.name, tool.inputSchema);
   }
   for (const name of ['emulators_clear', 'storage_delete']) assert.match(TOOLS.find(tool => tool.name === name).description, /^DESTRUCTIVE: /);
+  // Every tool declares the four MCP annotations, and a new tool has to be
+  // placed in the lists below: what writes, and what can replace or delete
+  // data or runs the app's functions.
+  for (const tool of list.result.tools) {
+    assert.deepEqual(Object.keys(tool.annotations), ['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint'], `${tool.name} declares the MCP annotations`);
+    assert.ok(Object.values(tool.annotations).every(value => typeof value === 'boolean'), `${tool.name}'s annotations are booleans`);
+    assert.equal(tool.annotations.openWorldHint, false, `${tool.name} acts on the local suite only`);
+    if (tool.annotations.readOnlyHint) assert.ok(!tool.annotations.destructiveHint && tool.annotations.idempotentHint, `${tool.name} only reads`);
+  }
+  const hinted = keep => list.result.tools.filter(tool => keep(tool.annotations)).map(tool => tool.name);
+  assert.deepEqual(hinted(hints => !hints.readOnlyHint), ['emulators_export', 'firestore_set', 'firestore_delete', 'auth_create_user', 'auth_delete_user', 'auth_mint_token',
+    'auth_set_claims', 'auth_remove_claims', 'auth_disable_user', 'auth_enable_user', 'auth_revoke_tokens', 'storage_upload', 'storage_delete', 'storage_copy', 'storage_move',
+    'functions_invoke', 'functions_replay_call', 'pubsub_publish', 'tasks_run', 'schedules_run', 'eventarc_publish', 'eventarc_replay_event', 'extensions_reload', 'emulators_clear']);
+  assert.deepEqual(hinted(hints => hints.destructiveHint), ['emulators_export', 'firestore_set', 'firestore_delete', 'auth_delete_user', 'auth_set_claims', 'auth_remove_claims',
+    'auth_revoke_tokens', 'storage_upload', 'storage_delete', 'storage_copy', 'storage_move', 'functions_invoke', 'functions_replay_call', 'pubsub_publish', 'tasks_run',
+    'schedules_run', 'eventarc_publish', 'eventarc_replay_event', 'emulators_clear']);
   assert.equal(TOOLS.length, list.result.tools.length);
   assert.ok(TOOLS.every(tool => tool.group === 'status' || TOOL_GROUPS.includes(tool.group)), 'every tool is in a selectable group');
   const only = createMcpServer({...options, project:'demo-fixture', only:'auth,tasks'}, dir, quiet);
