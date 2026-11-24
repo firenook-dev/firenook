@@ -9,12 +9,12 @@
     "source": "github",
     "subfolder": "packages/cli"
   },
-  "version": "0.2.6",
+  "version": "0.2.7",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "firenook",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"

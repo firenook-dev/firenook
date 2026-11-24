@@ -1,3 +1,34 @@
+# 0.2.7 — every MCP tool says whether it reads, writes or deletes
+
+- Pin the engine to `22f18b336c4e637a9486cc824ba918467426a1d3`, main with
+  the 0.2.7 change (the merge of [PR #263](https://github.com/firenook-dev/firenook/pull/263)). CI
+  ([run 45306126207](https://github.com/firenook-dev/firenook/actions/runs/45306126207)),
+  the five-platform packed-install matrix
+  ([run 45306126199](https://github.com/firenook-dev/firenook/actions/runs/45306126199))
+  and the real SDK clients on Android, iOS and the web
+  ([run 45306160166](https://github.com/firenook-dev/firenook/actions/runs/45306160166))
+  passed on it. The engine's code is the same as in 0.2.6; it is built with
+  Rust 1.100.0.
+- **MCP.** Every `firenook mcp` tool now declares the four MCP annotations,
+  so a client that asks before a risky call can tell the tools apart: 31
+  only read (`readOnlyHint`); 19 can replace or delete data, or exist to run
+  the app's functions (an invocation or replay, a published message or
+  event, a schedule tick, a task), and say so with `destructiveHint`;
+  `idempotentHint` marks the writes that change nothing more when repeated;
+  and `openWorldHint` is `false` on all of them, since every tool acts on the
+  local suite only. 23 descriptions now say when to use the tool and which
+  neighbour to use instead (`auth_delete_user` names `auth_disable_user` and
+  `auth_revoke_tokens`, `rules_get` names `rules_evaluate` and
+  `rules_list_denials`), what a repeat does, and that the tools that run
+  functions run their code, side effects included. No tool, argument or
+  result changed.
+- **The conformance record** is unchanged: 6,797 answers in 44 sets, 6,445
+  compared exactly, 351 compared and different on purpose, and 1 listed,
+  under #247.
+- No data format changed: 0.2.7 opens what 0.2.6 saved, and 0.2.6 opens what
+  0.2.7 saves.
+- Published straight to `latest`, as 0.2.6 was.
+
 # 0.2.6 — doubles written through REST and the web SDK keep every bit
 
 - Pin the engine to `8752f90ab8bcd0aabd0d962fcb0e6b16e44e2cab`, main with
