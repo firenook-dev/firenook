@@ -117,6 +117,18 @@ export function postBeacon(seen, tool) {
     .then(response => response.arrayBuffer()).then(() => undefined, () => undefined);
 }
 
+// The MCP annotations every tool declares. The tools act on the local suite
+// only, so none is open world. A write is destructive when it can replace or
+// delete data, or when running the app's functions is what it is for (their
+// code may do either); idempotent when the same call again changes nothing
+// more.
+const hints = ({readOnly = false, destructive = false, idempotent = false}) => ({readOnlyHint:readOnly, destructiveHint:destructive, idempotentHint:idempotent, openWorldHint:false});
+export const READ_ONLY = hints({readOnly:true, idempotent:true});
+export const writes = ({destructive = false, idempotent = false} = {}) => hints({destructive, idempotent});
+// A tool that runs the app's functions (an invocation, a replay, a message
+// or event they receive).
+export const RUNS_FUNCTIONS = writes({destructive:true});
+
 export const string = description => ({type:'string', description});
 export const integer = (description, minimum = 1, maximum) => ({type:'integer', description, minimum, ...(maximum === undefined ? {} : {maximum})});
 export const boolean = description => ({type:'boolean', description});
