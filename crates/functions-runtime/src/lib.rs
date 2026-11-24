@@ -281,6 +281,11 @@ struct Loaded {
     declared: BTreeMap<String, Map<String, Value>>,
     /// Endpoints the manifest declares that the emulator dropped.
     dropped_endpoints: Vec<NotLoaded>,
+    /// Per function id that sets `maxInstances`, its slots: as many as
+    /// production runs its calls at once. A reload makes new ones, so calls
+    /// on the old code and the new can briefly exceed the cap together, as
+    /// in production during a deploy.
+    slots: BTreeMap<String, Arc<tokio::sync::Semaphore>>,
 }
 
 /// A backend the runtime serves: a user codebase or an Extension instance.
@@ -1454,6 +1459,16 @@ impl RuntimeState {
                 param_env: resolved.environment,
                 declared: conversion.declared,
                 dropped_endpoints: conversion.not_loaded,
+                slots: conversion
+                    .limits
+                    .into_iter()
+                    .map(|(id, limit)| {
+                        let limit = usize::try_from(limit)
+                            .unwrap_or(usize::MAX)
+                            .min(tokio::sync::Semaphore::MAX_PERMITS);
+                        (id, Arc::new(tokio::sync::Semaphore::new(limit)))
+                    })
+                    .collect(),
                 ..base
             },
             Err(error) => Loaded {

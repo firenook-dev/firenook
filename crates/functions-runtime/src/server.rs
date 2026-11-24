@@ -438,6 +438,39 @@ pub(crate) async fn dispatch(
         body_bytes = Bytes::from(decoded);
         headers.insert(header::CONTENT_LENGTH, HeaderValue::from(body_bytes.len()));
     }
+    // A function that caps its instances runs no more calls at once than
+    // production would; the rest wait here, each holding its slot until its
+    // answer ends.
+    let slots = backend.loaded.read().await.slots.get(&function_id).cloned();
+    let function_slot = match slots {
+        Some(slots) => {
+            if let Ok(slot) = Arc::clone(&slots).try_acquire_owned() {
+                Some(slot)
+            } else {
+                state.log.record(attributed(LogEvent::new(
+                    "INFO",
+                    "functions",
+                    format!(
+                        "\"{function_id}\" is running maxInstances × concurrency calls; this one waits for a slot"
+                    ),
+                ))
+                .with_kind("function.waiting"));
+                let mut waiting = Waiting {
+                    log: state.log.clone(),
+                    monitor: monitor.clone(),
+                    token: token.clone(),
+                    function_id: function_id.clone(),
+                    codebase: backend_id.clone(),
+                    since: Instant::now(),
+                    done: false,
+                };
+                let slot = slots.acquire_owned().await.ok();
+                waiting.done = true;
+                slot
+            }
+        }
+        None => None,
+    };
     let origin = match backend.slot.origin_timed(WORKER_READY_TIMEOUT).await {
         Ok((origin, spawned)) => {
             if let Some(took) = spawned {
@@ -651,6 +684,7 @@ pub(crate) async fn dispatch(
         token: token.clone(),
         end: Some(end),
         limit: timeout.map(|limit| limit.saturating_sub(started.elapsed())),
+        function_slot,
     };
     match response.body(Body::from_stream(body)) {
         Ok(response) => respond(response),
@@ -793,6 +827,9 @@ struct RecordedBody {
     end: Option<EndLine>,
     /// What is left of the function's timeout, for a drain.
     limit: Option<Duration>,
+    /// The function's slot, when it caps its instances, held until the
+    /// call ends, a drain included.
+    function_slot: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
 impl Stream for RecordedBody {
@@ -847,6 +884,47 @@ impl Stream for RecordedBody {
     }
 }
 
+/// A call waiting for its function's slot. Dropped before it gets one (the
+/// caller stopped waiting, as the delivery bridge does after its request
+/// timeout), it says so and ends the invocation, which never ran.
+struct Waiting {
+    log: LogSink,
+    monitor: Monitor,
+    token: InvocationToken,
+    function_id: String,
+    codebase: String,
+    since: Instant,
+    done: bool,
+}
+
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        if self.done {
+            return;
+        }
+        let message = format!(
+            "Gave up on \"{}\" after {:.1}s waiting for a slot; the call did not run",
+            self.function_id,
+            self.since.elapsed().as_secs_f64()
+        );
+        self.log.record(
+            LogEvent::new("WARN", "functions", message.clone())
+                .with_kind("function.abandoned")
+                .with_function(self.function_id.clone())
+                .with_execution(self.token.id.to_string())
+                .with_codebase(self.codebase.clone()),
+        );
+        let _ = self.monitor.finish(
+            &self.token,
+            InvocationEnd {
+                outcome: Some(InvocationOutcome::NotStarted),
+                error: Some(message),
+                client_gone: true,
+            },
+        );
+    }
+}
+
 impl Drop for RecordedBody {
     fn drop(&mut self) {
         if self.done {
@@ -863,14 +941,19 @@ impl Drop for RecordedBody {
         let upstream = self.upstream.take();
         let handle = tokio::runtime::Handle::try_current();
         if let (Some(upstream), Ok(handle)) = (upstream, handle) {
-            handle.spawn(drain(
+            let slot = self.function_slot.take();
+            let drained = drain(
                 upstream,
                 self.monitor.clone(),
                 self.token.clone(),
                 end,
                 client_gone,
                 self.limit,
-            ));
+            );
+            handle.spawn(async move {
+                drained.await;
+                drop(slot);
+            });
         } else {
             let _ = self.monitor.finish(
                 &self.token,

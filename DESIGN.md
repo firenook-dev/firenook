@@ -749,7 +749,13 @@ emulator), replayed by `npm run replay:functions:runtime`:
   function of its codebase; the target, signature and service reach it as
   control headers and become `FUNCTION_TARGET` / `FUNCTION_SIGNATURE_TYPE` /
   `K_SERVICE` per invocation (left unset in `--inspect-functions` debug mode,
-  as the official single-process runtime does).
+  as the official single-process runtime does). A function that sets
+  `maxInstances` runs at most `maxInstances` × `concurrency` calls at once
+  (`concurrency` is 1 on gcfv1 and defaults to 80 on gcfv2, as the CLI
+  deploys it), as production does; the rest wait for a slot, saying so in the
+  log. A call whose caller stops waiting first (the delivery bridge after its
+  request timeout) is logged and recorded as not started. The official
+  emulator applies neither option.
 - **Node**: every worker runs on the one `--node` (the npm CLI passes the
   Node running it; the CLI starts on 22, 24 and 26, refuses older ones and
   warns on untested newer ones). The worker uses only Node's standard
