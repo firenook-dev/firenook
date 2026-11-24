@@ -16,6 +16,7 @@
   <a href="https://www.npmjs.com/package/firenook"><img alt="npm" src="https://img.shields.io/npm/v/firenook?label=npm&color=1c53cf"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-1c53cf"></a>
   <img alt="macOS, Linux and Windows" src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-555">
+  <a href="https://glama.ai/mcp/servers/firenook-dev/firenook"><img alt="Glama MCP server score" src="https://glama.ai/mcp/servers/firenook-dev/firenook/badges/score.svg"></a>
 </p>
 
 <p align="center">
