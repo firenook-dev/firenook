@@ -2034,3 +2034,33 @@ behaviour was the question.
   checkout lacks the pinned commit that `conformance-report-run.mjs` compares
   the tag with. The GitHub release, now the repository's latest, was made by
   hand with the job's commands and the report of CI run 44879961341.
+
+## 0.2.7, every MCP tool says whether it reads, writes or deletes
+
+- [x] `tools/list` sent each tool's name, description and input schema only.
+  Every `firenook mcp` tool now declares the four MCP annotations (PR #263):
+  31 only read; 19 are destructive, the ones that replace or delete data and
+  the ones that exist to run the app's functions, whose code may;
+  `idempotentHint` marks the writes a repeat changes nothing more by; and
+  `openWorldHint` is `false` on all of them. 23 descriptions now name the
+  neighbouring tool to use instead and say what a repeat does, each such
+  statement checked against a running suite, and the packaging test pins
+  which tools write and which are destructive. `npx mcp-tdqs lint` (the Tool
+  Definition Quality Score's offline checks) found 55 `missing-annotations`
+  warnings on 0.2.6 and none on 0.2.7. `tools/list` grew from 38.5 to
+  46.0 KB. The engine's code, the console and the conformance record (6,797
+  answers) are unchanged.
+- [x] Published as `firenook@0.2.7` with `@firenook/cli-<platform>` ×5
+  (release PR #264, tag `npm-v0.2.7` on 66fbad1, engine 22f18b3, built with
+  Rust 1.100.0). Release run 45310350032, dispatched with `latest` and
+  approved on 2026-11-24, took its quality gates from the pinned commit's CI
+  run on main. It published all six packages: the CLI on `latest`, the
+  native packages on `next`. Registry integrity equals the release assets
+  for all six, and registry signatures and provenance attestations verify on
+  a fresh install, which answers `firenook --version` with 0.2.7 and its
+  engine and lists 55 tools, each with its annotations. The image is public
+  as `0.2.7` and `latest` for amd64 and arm64, and the MCP Registry lists
+  0.2.7. The release's notes job failed as 0.2.6's did, its shallow checkout
+  lacking the pinned commit; the GitHub release, now the repository's
+  latest, was made by hand with the job's commands and the report of CI run
+  45306126207.
